@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(.venv/Scripts/python agentctl.py:*)",
+      "Bash(.venv/Scripts/python backtest.py:*)",
+      "Bash(.venv/Scripts/python screener.py:*)",
+      "Bash(.venv/Scripts/python test_rules.py:*)",
+      "Bash(python -m py_compile:*)",
+      "Read(//C/Users/Cole/alpaca-tick-averager/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".venv/Scripts/python.exe .claude/hooks/audit_bash.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
