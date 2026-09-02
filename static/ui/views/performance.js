@@ -68,6 +68,8 @@ VIEWS.performance = {
           const r = await POST("/api/reports", { kind: b.dataset.rep });
           toast(`Report ready — <a href="${r.url}" target="_blank">${esc(r.name)}</a>`,
                 "ok", 12000);
+          // opens in a tab with a real title and draws its own charts; the
+          // PDF used to arrive as an attachment and left a blank tab behind
           window.open(r.url, "_blank");
           await loadReports();
         } finally {
@@ -118,6 +120,8 @@ function renderReports() {
          style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         ${esc(r.name)}</a>
       <span class="faint" style="font-size:11px">${(r.size / 1024).toFixed(0)}kB</span>
+      <a class="btn sm" href="/reports/${encodeURIComponent(r.name)}?download=1"
+         title="Save the file instead of opening it">↓</a>
       <button class="btn sm" data-del="${esc(r.name)}">×</button>
     </div>`).join("")
     : `<div class="faint" style="padding:8px 0">No reports yet.</div>`;

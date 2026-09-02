@@ -206,6 +206,27 @@ def load(symbol: str = "", days: Optional[int] = None,
 
 
 # ================================================================== analysis
+def is_bookkeeping(r: dict) -> bool:
+    """A row that records a LEDGER CORRECTION, not a trade.
+
+    The two-way reconciliation writes a close for every journal lot that is no
+    longer in the ledger, so the two agree. Those rows carry inferred=True and
+    no exit price, because no sale happened -- the lot was already gone.
+
+    They must not be counted as trades. A daily report saying "45 lots closed,
+    $0.00 realized" on a day nothing traded is not a rounding problem, it is
+    the report describing its own bookkeeping and calling it business.
+    """
+    if not r.get("inferred"):
+        return False
+    return not float(r.get("exit_price") or 0) and not float(r.get("realized") or 0)
+
+
+def real_trades(rows: list[dict]) -> list[dict]:
+    """Only the rows that represent an actual fill."""
+    return [r for r in rows if not is_bookkeeping(r)]
+
+
 def stats(rows: list[dict]) -> dict:
     """Performance, sliced the ways that actually inform a settings change.
 
@@ -217,8 +238,10 @@ def stats(rows: list[dict]) -> dict:
     (what is still open, and how old).
     """
     closes = [r for r in rows if r.get("event") in ("close", "partial")
-              and not r.get("dry_run")]
-    opens = [r for r in rows if r.get("event") == "open" and not r.get("dry_run")]
+              and not r.get("dry_run") and not is_bookkeeping(r)]
+    opens = [r for r in rows if r.get("event") == "open"
+             and not r.get("dry_run") and not is_bookkeeping(r)]
+    bookkeeping = len([r for r in rows if is_bookkeeping(r)])
 
     realized = sum(float(r.get("realized") or 0) for r in closes)
     holds = [int(r.get("hold_seconds") or 0) for r in closes if r.get("hold_seconds")]
@@ -228,6 +251,9 @@ def stats(rows: list[dict]) -> dict:
     return {
         "opens": len(opens),
         "closes": len(closes),
+        # surfaced rather than hidden: if this is large, the ledger and the
+        # journal were re-synced and the window is not purely trading
+        "bookkeeping_rows": bookkeeping,
         "realized": round(realized, 2),
         "shares_bought": sum(int(r.get("shares") or 0) for r in opens),
         "shares_sold": sum(int(r.get("shares") or 0) for r in closes),

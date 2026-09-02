@@ -227,11 +227,14 @@ def listing(limit: int = 60) -> list[dict]:
     if not REPORT_DIR.exists():
         return []
     out = []
-    for f in sorted(REPORT_DIR.glob("*.pdf"),
-                    key=lambda x: x.stat().st_mtime, reverse=True)[:limit]:
+    files = [p for p in REPORT_DIR.iterdir()
+             if p.is_file() and p.suffix.lower() in (".pdf", ".html")]
+    for f in sorted(files, key=lambda x: x.stat().st_mtime,
+                    reverse=True)[:limit]:
         s = f.stat()
         out.append({
             "name": f.name,
+            "format": f.suffix.lower().lstrip("."),
             "kind": f.name.split("_")[0],
             "size": s.st_size,
             "modified": datetime.fromtimestamp(s.st_mtime).astimezone()

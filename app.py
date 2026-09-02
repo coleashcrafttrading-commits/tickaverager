@@ -470,20 +470,32 @@ def risk():
 # =================================================================== reports
 @app.post("/api/reports")
 def report_make(body: dict = Body(default={})):
-    """Generate a printable PDF. Callable by an agent as well as the UI."""
-    import report
+    """Generate a report. HTML by default; pass format="pdf" for the old one.
+
+    HTML because it opens in a tab with a title, draws charts, and still
+    prints -- the PDF opened as a blank "Untitled" tab because the download
+    route was forcing an attachment.
+    """
     kind = str(body.get("kind") or "daily")
     if kind not in ("daily", "weekly", "inventory", "full"):
         raise HTTPException(400, f"unknown report kind {kind!r}")
+    fmt = str(body.get("format") or "html").lower()
     days = {"daily": 1, "weekly": 7, "inventory": 1, "full": 3650}[kind]
+    days = int(body.get("days") or days)
+    note = str(body.get("note") or "")
     try:
-        path = report.build_report(get_fleet(), kind=kind,
-                                   days=int(body.get("days") or days),
-                                   note=str(body.get("note") or ""))
+        if fmt == "pdf":
+            import report
+            path = report.build_report(get_fleet(), kind=kind, days=days, note=note)
+        else:
+            import htmlreport
+            path = htmlreport.build_operational(get_fleet(), kind=kind,
+                                                days=days, note=note)
     except Exception as e:
         raise HTTPException(500, f"report failed: {e}")
     get_fleet().ev("INFO", f"Report generated: {path.name}")
-    return {"ok": True, "name": path.name, "url": f"/reports/{path.name}"}
+    return {"ok": True, "name": path.name, "url": f"/reports/{path.name}",
+            "format": fmt}
 
 
 @app.get("/api/reports")
@@ -492,15 +504,30 @@ def report_list(limit: int = 60):
     return {"ok": True, "reports": report.listing(limit)}
 
 
+REPORT_TYPES = {".html": "text/html; charset=utf-8",
+                ".pdf": "application/pdf",
+                ".json": "application/json",
+                ".csv": "text/csv"}
+
+
 @app.get("/reports/{name}")
-def report_get(name: str):
-    """Serve a generated report for download or printing."""
+def report_get(name: str, download: int = 0):
+    """Serve a generated report.
+
+    INLINE by default. Passing filename= to FileResponse sets
+    Content-Disposition: attachment, which made Chrome download the file and
+    leave an empty "Untitled" tab behind -- the report looked broken when it
+    was actually sitting in the downloads folder. Add ?download=1 when you
+    genuinely want the file saved rather than shown.
+    """
     import report
     f = (report.REPORT_DIR / name).resolve()
     if not str(f).startswith(str(report.REPORT_DIR.resolve())) or not f.is_file():
         raise HTTPException(404, f"no such report: {name}")
-    return FileResponse(f, media_type="application/pdf", filename=name,
-                        headers=NO_CACHE)
+    media = REPORT_TYPES.get(f.suffix.lower(), "application/octet-stream")
+    if download:
+        return FileResponse(f, media_type=media, filename=name, headers=NO_CACHE)
+    return FileResponse(f, media_type=media, headers=NO_CACHE)
 
 
 @app.delete("/api/reports/{name}")

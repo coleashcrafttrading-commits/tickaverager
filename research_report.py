@@ -901,6 +901,8 @@ def main(argv=None) -> int:
     ap.add_argument("--files", nargs="*", default=None)
     ap.add_argument("--no-cost-scan", action="store_true")
     ap.add_argument("--no-install", action="store_true")
+    ap.add_argument("--format", default="html", choices=["html", "pdf", "both"],
+                    help="html opens in a tab with charts; pdf is the old one")
     a = ap.parse_args(argv)
 
     passes = newest_per_timeframe(load_passes(a.files))
@@ -925,8 +927,16 @@ def main(argv=None) -> int:
             print("  install skipped: %r" % e)
 
     stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M")
-    out = REPORT_DIR / ("strategy_research_%s.pdf" % stamp)
-    build_pdf(passes, winners, out, a.top, abl, val)
+    outs = []
+    if a.format in ("html", "both"):
+        import htmlreport
+        outs.append(htmlreport.build_research(passes, winners, abl, val,
+                                              verdict_of, a.top))
+    if a.format in ("pdf", "both"):
+        p = REPORT_DIR / ("strategy_research_%s.pdf" % stamp)
+        build_pdf(passes, winners, p, a.top, abl, val)
+        outs.append(p)
+    out = outs[0]
 
     print("")
     print("passes: %s" % ", ".join("%s(%dd)" % (p["timeframe"], p["days"])
@@ -945,7 +955,8 @@ def main(argv=None) -> int:
                  format(w["test"]["total_trades"], ","),
                  "beats control" if w["beats_control"] else "BELOW CONTROL"))
     print("")
-    print("written to %s" % out)
+    for o in outs:
+        print("written to %s" % o)
     return 0
 
 
