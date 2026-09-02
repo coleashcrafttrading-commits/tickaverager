@@ -276,7 +276,11 @@ def main() -> int:
     txt = js.read_text(encoding="utf-8")
     cat = txt[txt.index("export const CATALOG = {"):]
     chart = set(re.findall(r"^  ([A-Za-z_]+):\s*\{", cat, re.M))
-    lib = set(I.CATALOG)
+    # TA_CATALOG, not CATALOG: the structure family (fair value gaps, order
+    # blocks, BOS/CHoCH) returns zones and events rather than lines, and is
+    # backtest-only until the chart learns to draw a zone. Comparing against
+    # the whole catalogue would fail for a reason that is not drift.
+    lib = set(I.TA_CATALOG)
     check("nothing the library has is missing from the chart",
           sorted(lib - chart), [])
     check("nothing the chart offers is missing from the library",

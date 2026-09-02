@@ -559,7 +559,6 @@ CATALOG = {
 
 def compute(name: str, bars: list[dict], **params) -> dict[str, list[Num]]:
     """Run one catalogued indicator over bars -> {output name: series}."""
-    _ensure_smc()
     spec = CATALOG.get(name)
     if not spec:
         raise KeyError(f"unknown indicator {name!r}. Known: {', '.join(sorted(CATALOG))}")
@@ -582,25 +581,24 @@ def compute(name: str, bars: list[dict], **params) -> dict[str, list[Num]]:
     return dict(zip(spec["outputs"], res))
 
 
-# The structure/session family lives in smc.py and registers itself into this
-# catalogue on first use. Kept lazy so importing indicators stays cheap and
-# free of cycles -- smc.squeeze needs bollinger and keltner from here.
-_SMC_DONE = False
+# The classic TA set, frozen before the structure family is folded in. The
+# chart mirror in ind.js implements exactly these; the structure indicators
+# return zones and events rather than lines and are backtest-only for now, so
+# the parity check compares against this and not the whole catalogue.
+TA_CATALOG = dict(CATALOG)
 
-
-def _ensure_smc() -> None:
-    global _SMC_DONE
-    if _SMC_DONE:
-        return
-    _SMC_DONE = True
-    try:
-        import smc
-        smc.register()
-    except Exception:                       # never let research code break TA
-        pass
+# smc.py registers the structure/session family into CATALOG. Done EAGERLY at
+# import, not lazily inside compute(): a lazy version mutated the dictionary
+# the first time anything computed, which blew up any caller that happened to
+# be iterating it at the time. Safe to import here because smc only imports
+# this module from inside a function body.
+try:
+    import smc as _smc
+    _smc.register()
+except Exception:                           # never let research code break TA
+    pass
 
 
 def catalog() -> dict:
     """Everything a strategy may name, structure indicators included."""
-    _ensure_smc()
     return CATALOG
