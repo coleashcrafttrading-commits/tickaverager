@@ -6,11 +6,10 @@ import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
   money, money0, sgn, pct, px, dur, go,
 } from "../core.js";
-import { Chart, ema, atr } from "../chart.js";
+import { ChartPanel } from "../chartpanel.js";
 import { STRATEGY_FIELDS, formHTML, formPatch } from "../fields.js";
 
-let chart = null;
-let chartCfg = { tf: "1Min", days: 2 };
+let panel = null;
 
 /* ------------------------------------------------------------------ live */
 function liveNotes(s) {
@@ -45,39 +44,6 @@ function liveNotes(s) {
   return b.join("");
 }
 
-async function loadChart(sym, s) {
-  const host = el("chartHost");
-  if (!host) return;
-  try {
-    const r = await GET(`/api/bars?symbol=${sym}&timeframe=${chartCfg.tf}`
-                      + `&days=${chartCfg.days}`);
-    const bars = r.bars || [];
-    if (!chart) chart = new Chart(host, { height: 360 });
-    const closes = bars.map((b) => b.c);
-    const markers = (s && s.lots || []).slice(0, 14).map((l) => ({
-      price: l.entry_price, color: "var(--accent)", dash: [3, 3],
-    })).concat((s && s.lots || []).slice(0, 14).map((l) => ({
-      price: l.tp_price, color: "var(--up)", dash: [5, 3],
-    })));
-    chart.setData(bars, {
-      overlays: [
-        { name: "EMA20", values: ema(closes, 20), color: "#8b9cb5", width: 1.2 },
-        { name: "EMA50", values: ema(closes, 50), color: "#e8a33d", width: 1.2 },
-      ],
-      markers,
-      keepView: true,
-    });
-    const last = bars[bars.length - 1];
-    const a = atr(bars, 14);
-    const atrNow = a[a.length - 1];
-    el("chartMeta").innerHTML = last
-      ? `${bars.length} bars · ATR(14) ${atrNow ? "$" + atrNow.toFixed(3) : "—"}`
-      : "";
-  } catch (e) {
-    host.innerHTML = `<div class="empty">Chart unavailable — ${esc(e.message)}</div>`;
-  }
-}
-
 function mountLive(sym) {
   el("view").innerHTML = `
     <div id="tkNotes"></div>
@@ -98,15 +64,12 @@ function mountLive(sym) {
           <button class="btn sm danger" id="bFlatten">Flatten</button>
         </div>
       </div>`)}
-    ${card("Chart", `
-      <div class="chart-bar" style="margin-bottom:12px">
-        ${["1Min", "5Min", "15Min", "1Hour", "1Day"].map((t) =>
-          `<button class="btn sm tfb" data-tf="${t}">${t}</button>`).join("")}
-        <span class="faint" style="margin-left:auto" id="chartMeta"></span>
-      </div>
-      <div id="chartHost"></div>
-      <div class="tip">Dashed blue lines are your lot entries, green are their
-        take-profits. Scroll to zoom, drag to pan.</div>`)}
+    ${card("Chart", `<div id="chartHost"></div>
+      <div class="tip"><span style="color:var(--accent)">━━</span> lot entries ·
+        <span style="color:var(--up)">━━</span> resting sells ·
+        <span style="color:var(--warn)">━━</span> targets with no order ·
+        <span style="color:var(--faint)">━━</span> ladder average ·
+        <span style="color:var(--down)">━━</span> next add</div>`)}
     <div class="grid main">
       <div>
         ${card("Ladder", `<div class="stats" id="tkStats"></div>
@@ -117,18 +80,6 @@ function mountLive(sym) {
         ${card("Activity", `<div class="log" id="tkLog"></div>`, "", { flush: true })}
       </div>
     </div>`;
-
-  el("view").querySelectorAll(".tfb").forEach((b) => {
-    b.classList.toggle("on", b.dataset.tf === chartCfg.tf);
-    b.onclick = () => {
-      chartCfg.tf = b.dataset.tf;
-      chartCfg.days = { "1Min": 2, "5Min": 7, "15Min": 20, "1Hour": 60, "1Day": 400 }[b.dataset.tf];
-      el("view").querySelectorAll(".tfb").forEach((x) =>
-        x.classList.toggle("on", x.dataset.tf === chartCfg.tf));
-      if (chart) chart.view = null;
-      loadChart(sym, S.ticker);
-    };
-  });
 
   const A = (fn) => () => act(fn);
   el("bStart").onclick = A(async () => {
@@ -179,7 +130,8 @@ function mountLive(sym) {
     toast(`${sym} flattened: cancelled ${r.cancelled}, sold ${r.sold} sh.`, "ok");
   });
 
-  loadChart(sym, null);
+  panel = new ChartPanel(el("chartHost"), { key: "ticker", symbol: sym });
+  panel.load();
 }
 
 function paintLive() {
@@ -247,7 +199,7 @@ function paintLive() {
       <span class="log-m">${esc(e.msg)}</span></div>`).join("")
     || `<div class="empty">Nothing yet.</div>`;
 
-  if (chart && chart.bars.length) loadChart(s.symbol, s);
+  if (panel && panel.bars.length) panel.setStatus(s);
 }
 
 /* --------------------------------------------------------------- orders */
@@ -398,7 +350,7 @@ VIEWS.ticker = {
   tabs: [["live", "Live"], ["orders", "Orders & positions"], ["settings", "Settings"]],
 
   mount(v) {
-    if (chart) { chart.destroy(); chart = null; }
+    if (panel) { panel.destroy(); panel = null; }
     const tab = v.tab || "live";
     if (tab === "live") mountLive(v.sym);
     else if (tab === "orders") mountOrders(v.sym);
