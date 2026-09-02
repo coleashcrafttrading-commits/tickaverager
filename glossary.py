@@ -211,18 +211,45 @@ SECTIONS: list[tuple[str, str, list[tuple]]] = [
      The control that answers "are we wasting our time". Every strategy is
      compared to simply owning the stock over the same window.""",
      [
-      ("Capital-matched buy and hold",
-       "Buy at the first bar's OPEN and hold to the end -- but sized to the "
-       "strategy's own AVERAGE capital, not to a nominal 100 shares. If a "
-       "strategy holds 300 shares a fifth of the time, its average commitment "
-       "funds a certain number of shares, and that is how many the benchmark "
-       "buys.",
-       "Comparing share-for-share is unfair to a strategy that is flat most of "
-       "the time; comparing return-on-capital flatters one that barely trades. "
-       "Matching average dollars committed is the comparison that cannot be "
-       "gamed from either side. Note the benchmark buys at the OPEN, the same "
-       "fill convention the strategy gets -- buying at the first close would "
-       "hand it a bar of hindsight."),
+      ("The passive twin",
+       "A CONSTANT position, held from the first bar's open to the last bar's "
+       "close, equal to the strategy's own average SIGNED share exposure. "
+       "Signed: average long shares minus average short shares. "
+       "Time-weighted: idle bars count as zero, so a strategy in the market "
+       "12% of the time at 100 shares has a twin of about 12 shares. "
+       "Timing-free: it deliberately does not copy the entry and exit bars.",
+       "Three ways to get this wrong, all of which were made and fixed here. "
+       "Sizing it from CAPITAL makes it always positive, which benchmarks a "
+       "SHORT strategy against a LONG position -- that error credited two "
+       "short-only strategies with the fall of markets they were correctly "
+       "short of. Comparing SHARE-FOR-SHARE is unfair to a strategy that is "
+       "flat most of the time. And a twin that copies the strategy's timing "
+       "would BE the strategy and could only ever show zero edge; discarding "
+       "the timing is the entire point, because what is left is what the "
+       "timing was worth."),
+
+      ("Tilt",
+       "Net exposure divided by gross: +1.0 is a pure long book, -1.0 a pure "
+       "short book, 0 a balanced one.",
+       "A strategy configured to trade 'both' sides with a tilt of +0.6 is a "
+       "long strategy in a costume, and it will inherit whatever the window's "
+       "drift was. Tilt near zero is the profile that cannot be riding drift "
+       "by construction."),
+
+      ("Drift share",
+       "How much of the P/L the passive twin alone accounts for.",
+       "Under 10% means drift cannot explain the result -- which RULES DRIFT "
+       "OUT but does not prove a signal; that is what the five checks are "
+       "for. Over 75% means the trading is adding little over simply holding "
+       "that much exposure."),
+
+      ("Long-leg and short-leg edge",
+       "Each side of a two-sided strategy measured against a twin with its "
+       "OWN sign. The two edges sum exactly to the total edge.",
+       "A short leg that lost money while a passive short would have lost more "
+       "still has positive edge and is worth keeping. A long leg that made "
+       "money in a rising market can have negative edge and is worth deleting. "
+       "Blended together, a net-long tilt in a rising window looks like skill."),
 
       ("Edge over buy and hold",
        "Strategy P/L minus what that capital would have made sitting in the "

@@ -265,6 +265,8 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
             bh_tot = strat_tot = 0.0
             bh_dds, beat = [], 0
             all_pnls = []
+            tilts, drifts = [], []
+            edge_l = edge_s = 0.0
             for sym, bars in data.items():
                 _tr, te = research.split(bars)
                 reps = btcode.run_many(
@@ -287,12 +289,17 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
                     concur.append(s["avg_open_when_in"])
                     maxcon.append(s["max_open"])
                     expo.append(s["exposure_pct"])
-                bh_tot += s["bh_dollars"]
+                bh_tot += s["twin_dollars"]
                 strat_tot += s["total_pl"]
                 if s["total_trades"]:
-                    bh_dds.append(s["bh_drawdown"])
-                if s["total_pl"] > s["bh_dollars"]:
+                    bh_dds.append(s["twin_drawdown"])
+                if s["edge_vs_twin"] > 0:
                     beat += 1
+                tilts.append(s["tilt"])
+                if s["drift_share"] is not None:
+                    drifts.append(s["drift_share"])
+                edge_l += s["edge_long"]
+                edge_s += s["edge_short"]
                 all_pnls += [t["pnl"] for t in r.get("trades", [])]
                 per_sym[sym] = {
                     "trades": s["total_trades"], "win_rate": s["win_rate"],
@@ -300,10 +307,15 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
                     "pf": s["profit_factor"], "largest_loss": s["largest_loss"],
                     "avg_open": s["avg_open_when_in"], "max_open": s["max_open"],
                     "expo": s["exposure_pct"],
-                    "bh_dollars": s["bh_dollars"], "bh_shares": s["bh_shares"],
-                    "bh_drawdown": s["bh_drawdown"],
+                    "bh_dollars": s["twin_dollars"],
+                    "bh_shares": s["twin_shares"],
+                    "bh_drawdown": s["twin_drawdown"],
                     "bh_pct": s["buy_hold_pct"],
-                    "vs_bh": round(s["total_pl"] - s["bh_dollars"], 2),
+                    "vs_bh": s["edge_vs_twin"],
+                    "tilt": s["tilt"],
+                    "drift_share": s["drift_share"],
+                    "edge_long": s["edge_long"], "edge_short": s["edge_short"],
+                    "long_pl": s["long_pl"], "short_pl": s["short_pl"],
                     "avg_capital": s["avg_capital"],
                 }
 
@@ -345,6 +357,10 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
                 "worst_bh_drawdown": round(min(bh_dds), 2) if bh_dds else 0.0,
                 "median_bh_drawdown": round(statistics.median(bh_dds), 2)
                                       if bh_dds else 0.0,
+                "median_tilt": round(statistics.median(tilts), 3) if tilts else 0.0,
+                "median_drift_share": round(statistics.median(drifts), 3)
+                                      if drifts else None,
+                "edge_long": round(edge_l, 2), "edge_short": round(edge_s, 2),
             }
 
             # ---- how concentrated is the profit ----

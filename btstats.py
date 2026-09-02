@@ -230,20 +230,32 @@ def report(trades: list[dict], bars: list[dict], *,
         d = -1.0 if p.get("side") == "short" else 1.0
         open_pl += (last - float(p["entry"])) * float(p["shares"]) * d
 
-    # notional actually put at risk -- the honest denominator for a return
+    # ---- one walk over every lot: capital, and SIGNED share exposure ----
+    # Each lot carries its own share count, so a ladder averaged into 500
+    # shares contributes 500 and not 100. Long and short are accumulated
+    # separately because their difference is the only honest way to benchmark
+    # a two-sided book.
     peak_cap = 0.0
-    if trades or open_positions:
-        by_bar = [0.0] * max(1, n)
-        for t in trades:
-            a = max(0, int(t.get("entry_i", 0)))
-            b = min(n - 1, int(t.get("exit_i", n - 1)))
+    avg_cap = 0.0
+    long_shares = short_shares = 0.0
+    if n and (trades or open_positions):
+        by_bar = [0.0] * n
+        Lg = [0.0] * n
+        Sg = [0.0] * n
+        lots = ([(int(t.get("entry_i", 0)), min(n - 1, int(t.get("exit_i", n - 1))), t)
+                 for t in trades]
+                + [(int(p.get("entry_i", 0)), n - 1, p) for p in open_positions])
+        for a, b, t in lots:
+            a = max(0, a)
+            q = float(t["shares"])
+            tgt = Sg if t.get("side") == "short" else Lg
             for i in range(a, b + 1):
-                by_bar[i] += float(t["entry"]) * float(t["shares"])
-        for p in open_positions:
-            a = max(0, int(p.get("entry_i", 0)))
-            for i in range(a, n):
-                by_bar[i] += float(p["entry"]) * float(p["shares"])
-        peak_cap = max(by_bar) if by_bar else 0.0
+                by_bar[i] += float(t["entry"]) * q
+                tgt[i] += q
+        peak_cap = max(by_bar)
+        avg_cap = sum(by_bar) / n
+        long_shares = sum(Lg) / n            # time-weighted, idle bars count 0
+        short_shares = sum(Sg) / n
 
     # Two different jobs, kept apart on purpose:
     #   the curve STARTS at whatever equity the run started with -- zero by
@@ -266,44 +278,74 @@ def report(trades: list[dict], bars: list[dict], *,
         if a and b:
             span_days = max(0.01, (b - a).total_seconds() / 86400)
 
-    # ---- the passive benchmark ----
-    # Bought at the FIRST BAR'S OPEN, not its close: that is the earliest price
-    # actually obtainable, and it is the same fill convention the strategy is
-    # held to. Using the first close instead quietly hands buy-and-hold a bar
-    # of hindsight.
+    # ==================================================================
+    # THE PASSIVE TWIN -- the benchmark that answers "am I wasting my time"
+    #
+    # A constant position of `twin_shares` held from the first bar's OPEN to
+    # the last bar's close. Three things make it fair where a naive
+    # buy-and-hold is not:
+    #
+    #   SIGNED. twin_shares = average long shares MINUS average short shares.
+    #     Sizing the benchmark from capital instead makes it always positive,
+    #     which benchmarks a SHORT strategy against a LONG position. Two of
+    #     this project's five best strategies are short-only, and that error
+    #     credited them with the fall of a market they were correctly short
+    #     of -- it read as skill when it was the benchmark's sign being wrong.
+    #
+    #   TIME-WEIGHTED. Idle bars count as zero exposure, so a strategy in the
+    #     market 12% of the time at 100 shares has a twin of ~12 shares, not
+    #     100. That is what makes a part-time strategy comparable at all.
+    #
+    #   TIMING-FREE. The twin deliberately does NOT copy the strategy's entry
+    #     and exit bars. A replica that did would BE the strategy (the
+    #     mark-to-market identity) and would show zero edge by construction.
+    #     Discarding the timing is the entire point: what is left is what the
+    #     timing was worth.
+    #
+    # The twin pays no slippage, which biases against the strategy -- the
+    # conservative direction.
+    # ==================================================================
     buy_hold = 0.0
-    bh_dollars = 0.0
-    bh_dd = 0.0
-    bh_shares = 0
+    twin_shares = gross_shares = tilt = 0.0
+    twin_dollars = edge_vs_twin = twin_dd = 0.0
+    drift_share = None
+    edge_long = edge_short = long_pl = short_pl = 0.0
     if n >= 2 and float(bars[0]["o"]):
-        entry = float(bars[0]["o"])
-        buy_hold = round((last / entry - 1) * 100, 2)
-        # sized to the strategy's own AVERAGE capital, so the comparison is
-        # dollars-for-dollars rather than shares-for-shares. A strategy holding
-        # 300 shares half the time is committing more than "100 shares" implies,
-        # and must be benchmarked against that much passive exposure.
-        avg_cap = 0.0
-        if n:
-            by_bar = [0.0] * n
-            for t in trades:
-                a = max(0, int(t.get("entry_i", 0)))
-                b = min(n - 1, int(t.get("exit_i", n - 1)))
-                for i in range(a, b + 1):
-                    by_bar[i] += float(t["entry"]) * float(t["shares"])
-            for pz in open_positions:
-                a = max(0, int(pz.get("entry_i", 0)))
-                for i in range(a, n):
-                    by_bar[i] += float(pz["entry"]) * float(pz["shares"])
-            avg_cap = sum(by_bar) / n
-        bh_shares = int(avg_cap / entry) if entry else 0
-        bh_dollars = round((last - entry) * bh_shares, 2)
-        peak = -1e18
+        first = float(bars[0]["o"])
+        move = last - first
+        buy_hold = round((last / first - 1) * 100, 2)
+
+        twin_shares = long_shares - short_shares
+        gross_shares = long_shares + short_shares
+        tilt = round(twin_shares / gross_shares, 3) if gross_shares else 0.0
+        twin_dollars = round(twin_shares * move, 2)
+        edge_vs_twin = round((net + open_pl) - twin_dollars, 2)
+        if abs(net + open_pl) >= 100.0:
+            drift_share = round(abs(twin_dollars) / abs(net + open_pl), 3)
+
+        # the twin's own drawdown, direction-aware: a negative twin in a
+        # falling market has no drawdown, which is the correct answer
+        pk = -1e18
         worst = 0.0
         for b in bars:
-            c = float(b["c"])
-            peak = max(peak, c)
-            worst = min(worst, (c - peak) * bh_shares)
-        bh_dd = round(worst, 2)
+            e = twin_shares * (float(b["c"]) - first)
+            pk = max(pk, e)
+            worst = min(worst, e - pk)
+        twin_dd = round(worst, 2)
+
+        # ---- the two legs, each against its own twin ----
+        # A side="both" family can be two strategies wearing one name. In a
+        # rising window the long leg collects drift and the short leg pays it,
+        # and the blend can look like skill when it is only a net-long tilt.
+        long_pl = sum(pnl_of(t) for t in trades if t.get("side") != "short")
+        long_pl += sum((last - float(p["entry"])) * float(p["shares"])
+                       for p in open_positions if p.get("side") != "short")
+        short_pl = sum(pnl_of(t) for t in trades if t.get("side") == "short")
+        short_pl += sum((float(p["entry"]) - last) * float(p["shares"])
+                        for p in open_positions if p.get("side") == "short")
+        edge_long = round(long_pl - long_shares * move, 2)
+        edge_short = round(short_pl - (-short_shares * move), 2)
+        long_pl, short_pl = round(long_pl, 2), round(short_pl, 2)
 
     exits: dict[str, int] = {}
     for t in trades:
@@ -365,13 +407,17 @@ def report(trades: list[dict], bars: list[dict], *,
         "span_days": round(span_days, 2),
         "trades_per_day": round(len(trades) / span_days, 2) if span_days else 0.0,
         "buy_hold_pct": buy_hold,
-        # capital-matched passive benchmark: same average dollars at risk,
-        # held the whole window, no trading
-        "bh_shares": bh_shares,
-        "bh_dollars": bh_dollars,
-        "bh_drawdown": bh_dd,
-        "avg_capital": round(avg_cap, 2) if n else 0.0,
-        "vs_buy_hold": round((net + open_pl) - bh_dollars, 2),
+        # ---- the passive twin ----
+        "twin_shares": round(twin_shares, 2),
+        "gross_shares": round(gross_shares, 2),
+        "tilt": tilt,
+        "twin_dollars": twin_dollars,
+        "twin_drawdown": twin_dd,
+        "edge_vs_twin": edge_vs_twin,
+        "drift_share": drift_share,
+        "long_pl": long_pl, "short_pl": short_pl,
+        "edge_long": edge_long, "edge_short": edge_short,
+        "avg_capital": round(avg_cap, 2),
         "exits": exits,
     }
 

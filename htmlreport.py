@@ -772,18 +772,61 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
         if bn:
             edge = bn["edge"]
             won = bn["beat_on"] >= (bn["symbols"] + 1) // 2 and edge > 0
-            B.append("<h4>Against buy and hold</h4>")
-            B.append('<div class="note %s"><b>%s buy-and-hold by %s in total, '
-                     'and on %d of %d symbols.</b> The benchmark is '
-                     '<b>capital-matched</b>: it buys as many shares as the '
-                     'strategy\'s own AVERAGE capital would fund and holds them '
-                     'for the whole window. A strategy that holds 300 shares a '
-                     'fifth of the time is therefore compared against that much '
-                     'passive exposure, not against a nominal 100 shares.</div>'
+            tilt = bn.get("median_tilt", 0.0)
+            ds = bn.get("median_drift_share")
+            shape = ("a net-LONG book" if tilt > 0.25 else
+                     "a net-SHORT book" if tilt < -0.25 else
+                     "a genuinely two-sided book")
+            B.append("<h4>Against buy and hold &mdash; the passive twin</h4>")
+            B.append('<div class="note %s"><b>%s the passive twin by %s in '
+                     'total, and on %d of %d symbols.</b> The twin holds a '
+                     'CONSTANT position equal to the strategy\'s own average '
+                     'SIGNED share exposure, from the first bar to the last, '
+                     'with no timing at all. Signed, so a short strategy is '
+                     'measured against a short twin; time-weighted, so idle '
+                     'bars count as no exposure; and timing-free, because a '
+                     'twin that copied the entry and exit bars would BE the '
+                     'strategy and could only ever show zero edge. '
+                     'Median tilt %+.2f &mdash; %s.</div>'
                      % ("good" if won else "bad",
                         "Beats" if edge > 0 else "LOSES to", signed(edge),
-                        bn["beat_on"], bn["symbols"]))
-            B.append(table(["", "Strategy", "Buy and hold", "Difference"], [
+                        bn["beat_on"], bn["symbols"], tilt, shape))
+            if ds is not None and ds < 0.10:
+                B.append('<div class="note good"><b>Drift cannot explain this '
+                         'result.</b> The book held only %.1f net shares on the '
+                         'median symbol, so passive exposure accounts for under '
+                         '10%% of the P/L. That rules drift OUT; it does not on '
+                         'its own prove a signal &mdash; that is what the five '
+                         'checks above are for.</div>'
+                         % abs(bn.get("median_tilt", 0) * 100))
+            elif ds is not None and ds > 0.75:
+                B.append('<div class="note bad"><b>Most of this is drift.</b> '
+                         'The passive twin accounts for %.0f%% of the P/L on '
+                         'the median symbol. The trading is adding little over '
+                         'simply holding that much exposure.</div>' % (ds * 100))
+            if bn.get("edge_long") or bn.get("edge_short"):
+                B.append(table(["Leg", "P/L", "Its own twin would have made",
+                                "Edge"], [
+                    ["Long leg",
+                     '<span class="%s">%s</span>'
+                     % (cls(sum(d.get("long_pl", 0) for d in (ps or {}).values())),
+                        signed(sum(d.get("long_pl", 0) for d in (ps or {}).values()))),
+                     "", '<b class="%s">%s</b>' % (cls(bn["edge_long"]),
+                                                   signed(bn["edge_long"]))],
+                    ["Short leg",
+                     '<span class="%s">%s</span>'
+                     % (cls(sum(d.get("short_pl", 0) for d in (ps or {}).values())),
+                        signed(sum(d.get("short_pl", 0) for d in (ps or {}).values()))),
+                     "", '<b class="%s">%s</b>' % (cls(bn["edge_short"]),
+                                                   signed(bn["edge_short"]))],
+                ]))
+                B.append('<p class="sub">Each leg is charged a twin with its '
+                         'OWN sign. A short leg that lost money while a passive '
+                         'short would have lost more still has positive edge; a '
+                         'long leg that made money in a rising market can have '
+                         'negative edge. The two edges sum exactly to the total.'
+                         '</p>')
+            B.append(table(["", "Strategy", "Passive twin", "Difference"], [
                 ["Total P/L across all symbols",
                  '<b class="%s">%s</b>' % (cls(bn["strategy_total"]),
                                            signed(bn["strategy_total"])),
@@ -810,13 +853,13 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
                          'symbol MINUS what capital-matched buy-and-hold made '
                          'on the same symbol. Bars above the line are where the '
                          'strategy actually added something; bars below are '
-                         'where owning the stock and doing nothing would have '
-                         'done better.</p></div>'
+                         'where holding that exposure passively, with no '
+                         'timing, would have done better.</p></div>'
                          % svg_bars(bars_l, [ps[s2].get("vs_bh") for s2 in bars_l],
                                     height=190, label="edge over buy and hold",
                                     fmt=lambda v: signed(v, 0)))
-                B.append(table(["Symbol", "Strategy", "Buy &amp; hold",
-                                "Edge", "Tape moved", "B&amp;H shares",
+                B.append(table(["Symbol", "Strategy", "Passive twin",
+                                "Edge", "Tape moved", "Twin shares",
                                 "Strategy DD", "B&amp;H DD"],
                                [[esc(sym),
                                  '<span class="%s">%s</span>'
@@ -828,7 +871,7 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
                                                            signed(d.get("vs_bh"))),
                                  '<span class="%s">%+.1f%%</span>'
                                  % (cls(d.get("bh_pct")), d.get("bh_pct") or 0),
-                                 str(d.get("bh_shares") or 0),
+                                 "%+.0f" % (d.get("bh_shares") or 0),
                                  '<span class="down">%s</span>' % signed(d["max_dd"]),
                                  '<span class="down">%s</span>'
                                  % signed(d.get("bh_drawdown"))]
