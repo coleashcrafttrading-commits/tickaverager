@@ -212,6 +212,97 @@ def cost_sensitivity(winners: list[dict], passes: list[dict],
                      num(scan.get("4.0", {}).get("median_score"))))
 
 
+
+def _fmt_params(p: dict) -> str:
+    """A readable dict literal, sorted so a diff between two winners is legible."""
+    items = ",\n".join("    %r: %r" % (k, v) for k, v in sorted(p.items()))
+    return "{\n%s,\n}" % items
+
+
+def install_winners(winners: list[dict]) -> list[str]:
+    """Save each winner as a runnable coded strategy.
+
+    The point of a research pass is not a PDF. Each winner is written to
+    strategies/code/ with its tested parameters baked into PARAMS and the
+    evidence in the docstring, so it appears in the Backtest page's Code
+    dropdown and can be re-run, edited or handed to a ticker without anyone
+    retyping a number out of a report.
+
+    Nothing is armed and nothing is applied to a live ticker. This writes
+    files.
+    """
+    import btcode
+    import research
+
+    fam_by_name = {f["name"]: f for f in research.FAMILIES}
+    saved = []
+    for i, w in enumerate(winners, 1):
+        fam = fam_by_name.get(w["family"])
+        if not fam:
+            continue
+        te, tr = w["test"], w["train"]
+        scan = w.get("cost_scan") or {}
+        slug = "found-%d-%s" % (i, research._slugish(w["family"]))
+
+        head = '''"""
+%s  --  found by the research pass on %s
+
+%s
+
+WHAT THE BACKTEST SAID (out of sample, on data never used to choose anything)
+    score (P/L per $ drawdown, median symbol)   %s
+    in-sample score, for comparison             %s
+    decay out of sample                         %s
+    profitable on                               %d of %d symbols
+    trades                                      %s
+    summed P/L at 100 shares                    %s
+    control (random entry) had to be beaten at  %s
+    beats that control                          %s
+%s
+HOW TO READ THAT
+    This was chosen on the FIRST 60%% of the history and measured on the last
+    40%%, which chose nothing. It is one out-of-sample window on eight symbols.
+    That is enough to take an idea seriously and not enough to trust it. Run
+    it disarmed on paper and compare what it actually does with what this says
+    it should do before it is allowed near real size.
+"""
+''' % (
+            w["family"],
+            datetime.now().astimezone().strftime("%Y-%m-%d"),
+            fam.get("note", ""),
+            num(te["median_score"]), num(tr["median_score"]),
+            "n/a" if w.get("decay") is None else "%.2f" % w["decay"],
+            te["symbols_profitable"], te["symbols_scored"],
+            format(te["total_trades"], ","),
+            signed(te["sum_pl"]),
+            num(w.get("control_bar")),
+            "yes" if w.get("beats_control") else "NO -- treat as unproven",
+            ("    at 2x the assumed slippage             %s\n"
+             % num((scan.get("2.0") or {}).get("median_score"))) if scan else "",
+        )
+
+        body = research.build(fam)
+        # Bake the tested parameters in as an explicit override AFTER the
+        # dict rather than by rewriting the lines inside it. Editing the
+        # literal by regex silently failed on any line with a trailing
+        # comment and left the tested values AHEAD of the defaults, where
+        # the defaults won -- which would have shipped five strategies
+        # whose settings were not the ones that were measured. A plain
+        # update that happens last cannot do that, and you can read it.
+        override = ("\n\n# --- the settings this was actually measured with, "
+                    "written by the research pass ---\n"
+                    "PARAMS.update(%s)\n" % _fmt_params(w["params"]))
+        src = head + body + override
+        try:
+            compile(src, "<check>", "exec")
+        except SyntaxError as e:
+            print("  could not install %s: %s" % (slug, e))
+            continue
+        btcode.save(slug, src)
+        saved.append(slug)
+    return saved
+
+
 # ==================================================================== render
 def build_pdf(passes: list[dict], winners: list[dict], out: Path,
               top: int = 5) -> Path:
@@ -550,6 +641,7 @@ def main(argv=None) -> int:
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--files", nargs="*", default=None)
     ap.add_argument("--no-cost-scan", action="store_true")
+    ap.add_argument("--no-install", action="store_true")
     a = ap.parse_args(argv)
 
     passes = newest_per_timeframe(load_passes(a.files))
@@ -563,6 +655,14 @@ def main(argv=None) -> int:
             cost_sensitivity(winners, passes)
         except Exception as e:
             print("  cost scan skipped: %r" % e)
+
+    installed = []
+    if winners and not a.no_install:
+        try:
+            installed = install_winners(winners)
+            print("installed as coded strategies: %s" % ", ".join(installed))
+        except Exception as e:
+            print("  install skipped: %r" % e)
 
     stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M")
     out = REPORT_DIR / ("strategy_research_%s.pdf" % stamp)

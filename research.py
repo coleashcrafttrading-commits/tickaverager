@@ -1386,3 +1386,9 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _slugish(name: str) -> str:
+    keep = "-_"
+    return "".join(c for c in str(name).strip().lower().replace(" ", "-")
+                   if c.isalnum() or c in keep)[:40]
