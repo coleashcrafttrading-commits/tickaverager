@@ -14,6 +14,7 @@ import { Chart } from "../chart.js";
 
 let poll = null;
 let sortKey = "total_pl";
+let STRATS = [];
 
 const PRESETS = {
   "Take profit": { take_profit: "0.05,0.10,0.20,0.30,0.40,0.50" },
@@ -71,6 +72,11 @@ VIEWS.backtest = {
               <label class="f"><span>Label</span>
                 <input id="btLabel" placeholder="optional"></label>
             </div>
+            <label class="f"><span>Strategy</span>
+              <select id="btStrat"><option value="">The live ladder</option></select></label>
+            <div class="hint" id="btStratNote">The ladder replays the engine's own
+              decision functions. A named strategy replays its indicator rules
+              instead, one position at a time.</div>
             <label class="f"><span>Sweep — one <code>param=a,b,c</code> per line</span>
               <textarea id="btSweep" rows="4"
                 placeholder="take_profit=0.05,0.10,0.20,0.40&#10;add_distance=0.10,0.20"></textarea></label>
@@ -111,6 +117,16 @@ VIEWS.backtest = {
     });
     el("btSweep").addEventListener("input", updateCount);
     el("btRun").onclick = () => act(runIt);
+    el("btStrat").onchange = () => {
+      const v = el("btStrat").value;
+      const s = (STRATS || []).find((x) => x.slug === v);
+      el("btStratNote").innerHTML = s
+        ? `${esc(s.note || s.name)}${s.indicators && s.indicators.length
+            ? ` <span class="faint">(${s.indicators.join(", ")})</span>` : ""}`
+        : `The ladder replays the engine's own decision functions. A named
+           strategy replays its indicator rules instead, one position at a time.`;
+    };
+    loadStrategies();
     loadJobs();
   },
 
@@ -128,12 +144,24 @@ function updateCount() {
     : "Leave empty to test the ticker's current settings once.";
 }
 
+async function loadStrategies() {
+  try {
+    const r = await GET("/api/strategies");
+    STRATS = r.strategies || [];
+    const sel = el("btStrat");
+    if (!sel) return;
+    sel.innerHTML = `<option value="">The live ladder</option>`
+      + STRATS.map((s) => `<option value="${s.slug}">${esc(s.name)}</option>`).join("");
+  } catch (e) { /* the ladder still works without them */ }
+}
+
 async function runIt() {
   const spec = {
     symbol: el("btSym").value.trim().toUpperCase(),
     timeframe: el("btTf").value,
     days: Number(el("btDays").value) || 30,
     label: el("btLabel").value.trim(),
+    strategy: el("btStrat") ? el("btStrat").value : "",
     sweep: parseSweep(el("btSweep").value),
   };
   if (!spec.symbol) { toast("A symbol is required.", "err"); return; }
@@ -176,8 +204,10 @@ function renderJob(j) {
     (b[sortKey] ?? 0) - (a[sortKey] ?? 0));
   const pKeys = [...new Set(rows.flatMap((r) => Object.keys(r.params || {})))];
 
+  const isStrat = !!j.strategy;
   const head = [...pKeys, "Total P/L", "Realized", "Open", "Trades", "$/trade",
-                "Peak cap", "Max DD", "Ret/cap", "$/$1 DD", "Fill%", "Max lots"];
+                ...(isStrat ? ["Win%"] : []),
+                "Peak cap", "Max DD", "Ret/cap", "$/$1 DD"];
   const body = rows.slice(0, 200).map((r, i) => `<tr${i === 0 && !running
       ? ' style="background:rgba(53,201,139,.07)"' : ""}>
     ${pKeys.map((k) => `<td style="text-align:left"><b>${esc(r.params[k])}</b></td>`).join("")}
@@ -186,12 +216,12 @@ function renderJob(j) {
     <td class="num">${sgn(r.open_pl, 0)}</td>
     <td class="num">${r.closed}</td>
     <td class="num">$${Number(r.avg_per_trade).toFixed(2)}</td>
+    ${isStrat ? `<td class="num faint">${r.win_rate == null ? "—"
+      : Number(r.win_rate).toFixed(0)}</td>` : ""}
     <td class="num">${money0(r.peak_capital)}</td>
     <td class="num down">${money0(r.max_dd)}</td>
     <td class="num">${Number(r.roc).toFixed(1)}%</td>
-    <td class="num">${Number(r.per_dd).toFixed(2)}</td>
-    <td class="num faint">${Number(r.fill_rate).toFixed(0)}</td>
-    <td class="num faint">${r.max_lots}</td></tr>`);
+    <td class="num">${Number(r.per_dd).toFixed(2)}</td></tr>`);
 
   const pctDone = j.total ? Math.round(100 * j.done / j.total) : 0;
   host.innerHTML = card(

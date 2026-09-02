@@ -450,6 +450,48 @@ def risk():
     }
 
 
+# ================================================================ strategies
+@app.get("/api/strategies")
+def strategies():
+    import strategy
+    strategy.install_builtins()
+    import indicators
+    return {"ok": True, "strategies": strategy.listing(),
+            "indicators": {k: {"params": v["params"], "outputs": v["outputs"],
+                               "inputs": v["inputs"]}
+                           for k, v in indicators.CATALOG.items()}}
+
+
+@app.get("/api/strategies/{slug}")
+def strategy_get(slug: str):
+    import strategy
+    try:
+        return {"ok": True, "slug": slug, "spec": strategy.load(slug)}
+    except strategy.StrategyError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/strategies")
+def strategy_save(spec: dict = Body(...)):
+    """Validate and store a strategy. Validation errors say how to fix them."""
+    import strategy
+    try:
+        p = strategy.save(spec)
+    except strategy.StrategyError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "slug": p.stem}
+
+
+@app.post("/api/strategies/validate")
+def strategy_validate(spec: dict = Body(...)):
+    import strategy
+    try:
+        strategy.validate(spec)
+    except strategy.StrategyError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True}
+
+
 # =================================================================== backtest
 @app.post("/api/backtest")
 def backtest_submit(spec: dict = Body(...)):

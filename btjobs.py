@@ -93,6 +93,7 @@ def submit(fleet: Any, spec: dict) -> dict:
         "timeframe": spec.get("timeframe", "1Min"),
         "days": spec.get("days", 30),
         "label": spec.get("label", ""),
+        "strategy": spec.get("strategy") or "",
     }
     with _LOCK:
         JOBS[jid] = job
@@ -136,11 +137,34 @@ def _run(fleet: Any, job: dict, combos: list[dict]) -> None:
         base.update(spec.get("config") or {})
         base["symbol"] = sym
 
+        strat = spec.get("strategy")          # a slug or an inline document
+        if isinstance(strat, str) and strat:
+            import strategy as SM
+            strat = SM.load(strat)
+
         for combo in combos:
             cfg = dict(base)
             cfg.update(combo)
             try:
-                r = backtest.run(bars, cfg, sym)
+                if strat:
+                    # sweeping a strategy tunes its target/stop rather than the
+                    # ladder's, so the combo is folded into the document
+                    doc = dict(strat)
+                    for k, v in combo.items():
+                        if k.startswith("target."):
+                            doc["target"] = dict(doc.get("target") or {},
+                                                 **{k.split(".", 1)[1]: v})
+                        elif k.startswith("stop."):
+                            doc["stop"] = dict(doc.get("stop") or {},
+                                               **{k.split(".", 1)[1]: v})
+                        elif k.startswith("ind."):
+                            _, iname, pname = k.split(".", 2)
+                            inds = dict(doc.get("indicators") or {})
+                            inds[iname] = dict(inds.get(iname, {}), **{pname: v})
+                            doc["indicators"] = inds
+                    r = backtest.run_strategy(bars, doc, cfg)
+                else:
+                    r = backtest.run(bars, cfg, sym)
             except Exception as e:                # one bad combo must not kill the job
                 r = {"error": repr(e), "total_pl": 0, "realized": 0,
                      "closed_lots": 0, "open_at_end": 0, "peak_capital": 0,
@@ -163,6 +187,8 @@ def _run(fleet: Any, job: dict, combos: list[dict]) -> None:
                 "max_lots": r.get("max_lots_held", 0),
                 "avg_per_trade": round(r.get("realized", 0) / r["closed_lots"], 2)
                                  if r.get("closed_lots") else 0,
+                "win_rate": r.get("win_rate"),
+                "exits": r.get("exits"),
                 "error": r.get("error", ""),
             })
             job["done"] += 1
@@ -190,6 +216,7 @@ def status(jid: str, limit: int = 250) -> dict:
         "bars": j.get("bars"), "first": j.get("first"), "last": j.get("last"),
         "drift": j.get("drift"),
         "results": j["results"][:limit],
+        "strategy": j.get("strategy", ""),
         "created": j["created"],
     }
 
