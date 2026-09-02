@@ -1,0 +1,276 @@
+{
+ "source": "research_tf5min_2026-09-01_2356.json",
+ "timeframe": "5Min",
+ "rows": [
+  {
+   "family": "Stochastic cross in the extreme",
+   "params": {
+    "k_n": 14,
+    "lo": 10,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.6526,
+    "mean_score": 0.7066,
+    "worst_score": -0.3794,
+    "best_score": 1.8631,
+    "symbols_scored": 8,
+    "symbols_profitable": 7,
+    "consistency": 0.875,
+    "total_trades": 1462,
+    "sum_pl": 33738.6
+   },
+   "exec_only": {
+    "median_score": 0.2381,
+    "mean_score": 0.3604,
+    "worst_score": -0.3109,
+    "best_score": 1.1077,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 1349,
+    "sum_pl": 3088.5
+   },
+   "no_adds": {
+    "median_score": 0.4061,
+    "mean_score": 0.7038,
+    "worst_score": -0.7825,
+    "best_score": 2.7757,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 843,
+    "sum_pl": 16533.9
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "RSI divergence",
+   "params": {
+    "rsi_n": 7,
+    "left": 3,
+    "tp_atr": 3.0,
+    "st_atr": 2.0,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.5703,
+    "mean_score": 0.7072,
+    "worst_score": -0.6993,
+    "best_score": 2.7312,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 491,
+    "sum_pl": 3616.15
+   },
+   "exec_only": {
+    "median_score": -0.1184,
+    "mean_score": 0.1429,
+    "worst_score": -0.9431,
+    "best_score": 2.2028,
+    "symbols_scored": 8,
+    "symbols_profitable": 3,
+    "consistency": 0.375,
+    "total_trades": 1104,
+    "sum_pl": -11624.36
+   },
+   "no_adds": {
+    "median_score": 0.5703,
+    "mean_score": 0.7072,
+    "worst_score": -0.6993,
+    "best_score": 2.7312,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 491,
+    "sum_pl": 3616.15
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Premium/discount with structure",
+   "params": {
+    "pd_n": 50,
+    "edge": 20,
+    "tp_atr": 4.0,
+    "st_atr": 1.5,
+    "side": "short"
+   },
+   "full": {
+    "median_score": 0.5587,
+    "mean_score": 0.5978,
+    "worst_score": -0.6412,
+    "best_score": 1.9767,
+    "symbols_scored": 6,
+    "symbols_profitable": 5,
+    "consistency": 0.833,
+    "total_trades": 185,
+    "sum_pl": 1702.43
+   },
+   "exec_only": {
+    "median_score": -0.0525,
+    "mean_score": -0.0592,
+    "worst_score": -0.9965,
+    "best_score": 1.369,
+    "symbols_scored": 8,
+    "symbols_profitable": 4,
+    "consistency": 0.5,
+    "total_trades": 759,
+    "sum_pl": -8729.84
+   },
+   "no_adds": {
+    "median_score": 0.5587,
+    "mean_score": 0.5978,
+    "worst_score": -0.6412,
+    "best_score": 1.9767,
+    "symbols_scored": 6,
+    "symbols_profitable": 5,
+    "consistency": 0.833,
+    "total_trades": 185,
+    "sum_pl": 1702.43
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Opening range breakout",
+   "params": {
+    "or_min": 15,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.4195,
+    "mean_score": 1.1605,
+    "worst_score": 0.0657,
+    "best_score": 3.6604,
+    "symbols_scored": 8,
+    "symbols_profitable": 8,
+    "consistency": 1.0,
+    "total_trades": 1089,
+    "sum_pl": 24202.37
+   },
+   "exec_only": {
+    "median_score": 0.1741,
+    "mean_score": 0.5773,
+    "worst_score": -0.3979,
+    "best_score": 1.9374,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1720,
+    "sum_pl": 15552.94
+   },
+   "no_adds": {
+    "median_score": 0.59,
+    "mean_score": 0.6216,
+    "worst_score": -0.1671,
+    "best_score": 2.0848,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 494,
+    "sum_pl": 8528.82
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "MFI extreme",
+   "params": {
+    "mfi_n": 21,
+    "lo": 30,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.4134,
+    "mean_score": 0.8712,
+    "worst_score": -0.1418,
+    "best_score": 2.7828,
+    "symbols_scored": 8,
+    "symbols_profitable": 7,
+    "consistency": 0.875,
+    "total_trades": 1479,
+    "sum_pl": 20263.34
+   },
+   "exec_only": {
+    "median_score": 0.2381,
+    "mean_score": 0.3604,
+    "worst_score": -0.3109,
+    "best_score": 1.1077,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 1349,
+    "sum_pl": 3088.5
+   },
+   "no_adds": {
+    "median_score": 0.0252,
+    "mean_score": 0.5863,
+    "worst_score": -0.281,
+    "best_score": 2.0938,
+    "symbols_scored": 8,
+    "symbols_profitable": 4,
+    "consistency": 0.5,
+    "total_trades": 849,
+    "sum_pl": 8131.99
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Hull MA slope",
+   "params": {
+    "hma_n": 20,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.3858,
+    "mean_score": 0.8012,
+    "worst_score": -0.19,
+    "best_score": 3.361,
+    "symbols_scored": 8,
+    "symbols_profitable": 7,
+    "consistency": 0.875,
+    "total_trades": 1446,
+    "sum_pl": 22063.26
+   },
+   "exec_only": {
+    "median_score": 0.2381,
+    "mean_score": 0.3604,
+    "worst_score": -0.3109,
+    "best_score": 1.1077,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 1349,
+    "sum_pl": 3088.5
+   },
+   "no_adds": {
+    "median_score": 0.9818,
+    "mean_score": 0.8451,
+    "worst_score": -0.7593,
+    "best_score": 2.5363,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 813,
+    "sum_pl": 15075.83
+   },
+   "verdict": "signal carries it"
+  }
+ ]
+}
