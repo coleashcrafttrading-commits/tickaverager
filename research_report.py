@@ -50,11 +50,16 @@ def num(n, dp=3):
 
 
 def load_passes(paths: Optional[list[str]] = None) -> list[dict]:
-    files = paths or sorted(glob.glob(str(RESEARCH_DIR / "*.json")))
+    # research_*.json only: the ablation and validation files live in the same
+    # directory and carry a "timeframe" too, so a bare *.json glob picked them
+    # up as passes and then fell over looking for fields they never had
+    files = paths or sorted(glob.glob(str(RESEARCH_DIR / "research_*.json")))
     out = []
     for f in files:
         try:
             d = json.loads(Path(f).read_text(encoding="utf-8"))
+            if "selected" not in d or "days" not in d:
+                continue                       # not a research pass
             d["_file"] = Path(f).name
             out.append(d)
         except Exception as e:
@@ -78,7 +83,13 @@ def newest_per_timeframe(passes: list[dict]) -> list[dict]:
     """
     best: dict[str, dict] = {}
     for p in passes:
-        tf = p.get("timeframe", "?")
+        # keyed on the bar size AND the grid set, so the with-adds and no-adds
+        # passes on the same timeframe are kept as separate runs. Collapsing
+        # them would throw away the comparison between them, which is the most
+        # informative thing either of them produced.
+        tf = "%s%s" % (p.get("timeframe", "?"),
+                       "" if "adds" in (p.get("grids") or []) else " (no adds)")
+        p["_label"] = tf
         cur = best.get(tf)
         if cur is None:
             best[tf] = p
@@ -89,7 +100,7 @@ def newest_per_timeframe(passes: list[dict]) -> list[dict]:
             best[tf] = p
     for p in best.values():
         p["_has_controls"] = has_controls(p)
-    return sorted(best.values(), key=lambda p: p.get("timeframe", ""))
+    return sorted(best.values(), key=lambda p: p.get("_label", ""))
 
 
 def controls_of(p: dict) -> list[dict]:
@@ -122,7 +133,8 @@ def control_bar(p: dict) -> Optional[float]:
 
 
 def pooled_ranking(passes: list[dict], top: int,
-                   abl: Optional[dict] = None) -> list[dict]:
+                   abl: Optional[dict] = None,
+                   val: Optional[dict] = None) -> list[dict]:
     """Rank across every timeframe, tagging each candidate with its pass.
 
     Sorted by, in order: does the ablation say the signal is real, how many
@@ -139,7 +151,8 @@ def pooled_ranking(passes: list[dict], top: int,
         for c in real_candidates(p):
             c = dict(c)
             fam = c["family"]
-            c["timeframe"] = p.get("timeframe")
+            c["timeframe"] = p.get("_label") or p.get("timeframe")
+            c["bar_size"] = p.get("timeframe")
             c["days"] = p.get("days")
             c["control_bar"] = bar
             c["beats_control"] = (
@@ -151,13 +164,24 @@ def pooled_ranking(passes: list[dict], top: int,
             c["signal_is_real"] = bool(
                 a and (str(a.get("verdict", "")).startswith("signal carries")
                        or str(a.get("verdict", "")).startswith("BETTER without")))
+            v = (val or {}).get(fam)
+            c["earlier_score"] = (v or {}).get("earlier")
+            c["held_earlier"] = bool(
+                v and v.get("earlier") is not None and v["earlier"] > 0
+                and (v.get("consistency") or 0) >= 0.6)
             # one row per family: its best timeframe represents it
             cur = seen_best.get(fam)
             if cur is None or (c["test"]["median_score"] or 0) > (
                     cur["test"]["median_score"] or 0):
                 seen_best[fam] = c
     rows = list(seen_best.values())
+    # Order of evidence, strongest first. Surviving a window the search never
+    # saw outranks everything else: it is the only check that asks whether the
+    # thing works in a DIFFERENT market, and eleven of thirteen candidates
+    # failed it. A high score on the window it was measured on is the weakest
+    # evidence here, so it breaks ties and nothing more.
     rows.sort(key=lambda c: (not c["beats_control"],
+                             not c["held_earlier"],
                              not c["signal_is_real"],
                              -c["n_timeframes"],
                              -(c["test"]["median_score"] or 0)))
@@ -201,12 +225,18 @@ def cross_timeframe(passes: list[dict]) -> dict[str, dict]:
     """
     out: dict[str, dict] = {}
     for p in passes:
+        # counted by BAR SIZE, not by run: the with-adds and no-adds passes on
+        # the same bars are the same market, so counting them as two would
+        # inflate "independent agreement" with a run that is not independent
         tf = p.get("timeframe", "?")
         for c in p.get("ranked", []):
             fam = c.get("family", "")
             if fam.startswith("CONTROL"):
                 continue
-            out.setdefault(fam, {})[tf] = c["test"]["median_score"]
+            prev = out.setdefault(fam, {}).get(tf)
+            sc = c["test"]["median_score"]
+            if prev is None or (sc or 0) > (prev or 0):
+                out[fam][tf] = sc
     return out
 
 
@@ -844,7 +874,7 @@ def main(argv=None) -> int:
         print("No research JSON found in %s" % RESEARCH_DIR)
         return 1
     abl, val = load_side_studies()
-    winners = pooled_ranking(passes, a.top, abl)
+    winners = pooled_ranking(passes, a.top, abl, val)
     if winners and not a.no_cost_scan:
         print("Cost sensitivity check:")
         try:

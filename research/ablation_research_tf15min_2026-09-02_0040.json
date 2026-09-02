@@ -1,0 +1,324 @@
+{
+ "source": "research_tf15min_2026-09-02_0040.json",
+ "timeframe": "15Min",
+ "rows": [
+  {
+   "family": "VWAP trend",
+   "params": {
+    "ema_n": 50,
+    "tp_atr": 2.5,
+    "st_atr": 3.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.8223,
+    "mean_score": 0.9876,
+    "worst_score": -0.8815,
+    "best_score": 2.7498,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 1681,
+    "sum_pl": 34519.93
+   },
+   "exec_only": {
+    "median_score": 0.5167,
+    "mean_score": 0.5315,
+    "worst_score": -0.2047,
+    "best_score": 1.7159,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1573,
+    "sum_pl": 16437.44
+   },
+   "no_adds": {
+    "median_score": 0.1345,
+    "mean_score": 0.3512,
+    "worst_score": -0.9183,
+    "best_score": 2.6476,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 854,
+    "sum_pl": 8677.47
+   },
+   "verdict": "NEEDS the adds"
+  },
+  {
+   "family": "SuperTrend flip",
+   "params": {
+    "st_n": 10,
+    "st_m": 4.0,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.6553,
+    "mean_score": 0.6534,
+    "worst_score": -0.7002,
+    "best_score": 3.0049,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 975,
+    "sum_pl": 44249.55
+   },
+   "exec_only": {
+    "median_score": 0.1893,
+    "mean_score": 0.52,
+    "worst_score": -0.4808,
+    "best_score": 2.9146,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1413,
+    "sum_pl": -88.39
+   },
+   "no_adds": {
+    "median_score": -0.3292,
+    "mean_score": 0.6711,
+    "worst_score": -0.7017,
+    "best_score": 5.4916,
+    "symbols_scored": 7,
+    "symbols_profitable": 3,
+    "consistency": 0.429,
+    "total_trades": 420,
+    "sum_pl": -327.09
+   },
+   "verdict": "NEEDS the adds"
+  },
+  {
+   "family": "Hull MA slope",
+   "params": {
+    "hma_n": 50,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.3122,
+    "mean_score": 0.3541,
+    "worst_score": -0.9255,
+    "best_score": 1.9009,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 1404,
+    "sum_pl": -10349.7
+   },
+   "exec_only": {
+    "median_score": 0.1893,
+    "mean_score": 0.52,
+    "worst_score": -0.4808,
+    "best_score": 2.9146,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1413,
+    "sum_pl": -88.39
+   },
+   "no_adds": {
+    "median_score": -0.3251,
+    "mean_score": 0.1765,
+    "worst_score": -0.8224,
+    "best_score": 2.2065,
+    "symbols_scored": 8,
+    "symbols_profitable": 3,
+    "consistency": 0.375,
+    "total_trades": 602,
+    "sum_pl": -25791.92
+   },
+   "verdict": "NEEDS the adds"
+  },
+  {
+   "family": "Break of structure continuation",
+   "params": {
+    "left": 3,
+    "right": 10,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 2,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.2993,
+    "mean_score": 0.3183,
+    "worst_score": -0.8534,
+    "best_score": 1.6076,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 653,
+    "sum_pl": -21270.44
+   },
+   "exec_only": {
+    "median_score": -0.0753,
+    "mean_score": 0.1362,
+    "worst_score": -0.6569,
+    "best_score": 1.5416,
+    "symbols_scored": 8,
+    "symbols_profitable": 2,
+    "consistency": 0.25,
+    "total_trades": 1032,
+    "sum_pl": -21143.1
+   },
+   "no_adds": {
+    "median_score": -0.2721,
+    "mean_score": -0.0372,
+    "worst_score": -0.8495,
+    "best_score": 0.7177,
+    "symbols_scored": 7,
+    "symbols_profitable": 3,
+    "consistency": 0.429,
+    "total_trades": 398,
+    "sum_pl": -10717.99
+   },
+   "verdict": "NEEDS the adds"
+  },
+  {
+   "family": "TRIX zero cross",
+   "params": {
+    "trix_n": 15,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.2321,
+    "mean_score": 0.1192,
+    "worst_score": -0.397,
+    "best_score": 0.3685,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 998,
+    "sum_pl": 9361.87
+   },
+   "exec_only": {
+    "median_score": 0.1893,
+    "mean_score": 0.52,
+    "worst_score": -0.4808,
+    "best_score": 2.9146,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1413,
+    "sum_pl": -88.39
+   },
+   "no_adds": {
+    "median_score": -0.205,
+    "mean_score": 0.1077,
+    "worst_score": -0.9589,
+    "best_score": 2.5689,
+    "symbols_scored": 7,
+    "symbols_profitable": 3,
+    "consistency": 0.429,
+    "total_trades": 409,
+    "sum_pl": -8512.29
+   },
+   "verdict": "EXECUTION, not signal"
+  },
+  {
+   "family": "Three-bar momentum",
+   "params": {
+    "n": 4,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 2,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.2065,
+    "mean_score": 0.2178,
+    "worst_score": -0.751,
+    "best_score": 1.5958,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1204,
+    "sum_pl": -38004.39
+   },
+   "exec_only": {
+    "median_score": -0.0258,
+    "mean_score": 0.3369,
+    "worst_score": -0.4777,
+    "best_score": 2.8622,
+    "symbols_scored": 8,
+    "symbols_profitable": 4,
+    "consistency": 0.5,
+    "total_trades": 1159,
+    "sum_pl": -7577.28
+   },
+   "no_adds": {
+    "median_score": 0.1221,
+    "mean_score": 0.0909,
+    "worst_score": -0.8741,
+    "best_score": 1.1751,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 664,
+    "sum_pl": -11563.19
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "CCI extreme",
+   "params": {
+    "cci_n": 40,
+    "lvl": 200,
+    "tp_atr": 1.5,
+    "st_atr": 5.0,
+    "max_adds": 2,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.0253,
+    "mean_score": 0.1597,
+    "worst_score": -0.5836,
+    "best_score": 2.0924,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 830,
+    "sum_pl": -303.45
+   },
+   "exec_only": {
+    "median_score": -0.3068,
+    "mean_score": 0.0173,
+    "worst_score": -0.6342,
+    "best_score": 1.1028,
+    "symbols_scored": 8,
+    "symbols_profitable": 3,
+    "consistency": 0.375,
+    "total_trades": 1247,
+    "sum_pl": -15505.0
+   },
+   "no_adds": {
+    "median_score": -0.3752,
+    "mean_score": 0.16,
+    "worst_score": -0.5556,
+    "best_score": 1.8323,
+    "symbols_scored": 7,
+    "symbols_profitable": 3,
+    "consistency": 0.429,
+    "total_trades": 537,
+    "sum_pl": -2868.27
+   },
+   "verdict": "NEEDS the adds"
+  }
+ ]
+}
