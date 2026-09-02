@@ -415,3 +415,52 @@ canvas.chart { display: block; width: 100%; }
 .chart-readout .ro-v { color: var(--text); }
 .chart-readout .up   { color: var(--up); }
 .chart-readout .down { color: var(--down); }
+
+/* ---- backtest: mode selector, result tabs, progress, code editor -------- */
+.seg { display: inline-flex; border: 1px solid var(--hairline); border-radius: 8px;
+       overflow: hidden; }
+.seg-b {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: var(--faint); font: inherit; font-size: 12.5px; padding: 7px 16px;
+  border-right: 1px solid var(--hairline);
+}
+.seg-b:last-child { border-right: 0; }
+.seg-b:hover { color: var(--text); }
+.seg-b.on { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+
+.tabs2 { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+.t2 {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: var(--faint); font: inherit; font-size: 12.5px; padding: 6px 12px;
+  border-radius: 6px;
+}
+.t2:hover { color: var(--text); background: var(--hairline); }
+.t2.on { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+
+.bar { height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; }
+.bar-f { height: 100%; background: var(--accent); transition: width .25s ease; }
+
+textarea.code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px; line-height: 1.55; white-space: pre; overflow-wrap: normal;
+  overflow-x: auto; tab-size: 4;
+}
+pre.err {
+  margin: 0; padding: 10px 12px; border-radius: 7px;
+  background: var(--surface); border: 1px solid var(--hairline);
+  font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px;
+  line-height: 1.5; white-space: pre-wrap; overflow: auto; max-height: 260px;
+  color: var(--text);
+}
+tr.on > td { background: var(--accent-dim); }
+
+/* ---- results graph ------------------------------------------------------ */
+.eqc { position: relative; }
+.eqc canvas { display: block; width: 100%; cursor: crosshair; }
+.eqc-ro {
+  position: absolute; top: 2px; left: 4px; display: flex; gap: 7px;
+  align-items: baseline; font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px; pointer-events: none; white-space: nowrap;
+}
+.eqc-ro .up { color: var(--up); }
+.eqc-ro .down { color: var(--down); }

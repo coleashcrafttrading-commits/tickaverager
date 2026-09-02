@@ -56,7 +56,8 @@ def pnl_of(t: dict) -> float:
 
 
 def equity_curve(trades: list[dict], bars: list[dict],
-                 starting_equity: float = 0.0) -> dict:
+                 starting_equity: float = 0.0,
+                 notional: float = 0.0) -> dict:
     """Equity, drawdown and exposure, sampled once per bar.
 
     Realized P/L is booked on the bar a trade EXITS, and open positions are
@@ -107,7 +108,11 @@ def equity_curve(trades: list[dict], bars: list[dict],
         dd[i] = round(drop, 2)
         if drop < max_dd:
             max_dd = drop
-            max_dd_pct = (drop / peak * 100) if peak else 0.0
+            # as a percentage of the CAPITAL AT RISK, not of the curve's own
+            # peak. With no starting equity the curve begins at zero, and a
+            # percentage of a peak near zero is a number in the thousands.
+            base = abs(starting_equity) or abs(notional) or abs(peak) or 1.0
+            max_dd_pct = drop / base * 100
 
     return {
         "equity": eq,
@@ -232,9 +237,18 @@ def report(trades: list[dict], bars: list[dict], *,
                 by_bar[i] += float(p["entry"]) * float(p["shares"])
         peak_cap = max(by_bar) if by_bar else 0.0
 
-    base_equity = starting_equity or peak_cap
-    curve = equity_curve(trades, bars, starting_equity=base_equity)
-    sharpe, sortino = _sharpe(curve["equity"], curve["t"], base_equity)
+    # Two different jobs, kept apart on purpose:
+    #   the curve STARTS at whatever equity the run started with -- zero by
+    #     default, which makes it a cumulative P/L curve, the thing a results
+    #     chart is actually asking about;
+    #   the return and risk ratios DIVIDE BY the capital the run put at risk,
+    #     because a curve that begins at zero has no denominator of its own.
+    # Conflating them started the curve at peak capital and put an axis on the
+    # chart that had nothing to do with the P/L it was drawing.
+    denom = starting_equity or peak_cap
+    curve = equity_curve(trades, bars, starting_equity=starting_equity,
+                         notional=peak_cap)
+    sharpe, sortino = _sharpe(curve["equity"], curve["t"], denom)
     win_streak, loss_streak = _streaks(pnls)
 
     holds = [int(t.get("exit_i", 0)) - int(t.get("entry_i", 0)) for t in trades]
@@ -294,6 +308,7 @@ def report(trades: list[dict], bars: list[dict], *,
         "peak_capital": round(peak_cap, 2),
         "return_on_peak_capital_pct":
             round(100 * (net + open_pl) / peak_cap, 3) if peak_cap else 0.0,
+        "starting_equity": round(starting_equity, 2),
         "exposure_pct": curve["exposure_pct"],
         "sharpe": sharpe,
         "sortino": sortino,

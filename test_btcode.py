@@ -240,6 +240,17 @@ def main() -> int:
     check("ends up", rep["summary"]["net_profit"], 200.0)
     check("but the drawdown is recorded", rep["summary"]["max_drawdown"], -300.0)
     check("curve marks the trough", min(rep["curve"]["equity"]), 700.0)
+    check("and it started where we said", rep["curve"]["equity"][0], 1000.0)
+
+    print("\n17b. With no starting equity the curve IS cumulative P/L")
+    # starting it at peak capital put an axis on the results chart that had
+    # nothing to do with the P/L being drawn
+    rep = btstats.report(trades, bars)
+    check("starts at zero", rep["curve"]["equity"][0], 0.0)
+    check("ends at the net", rep["curve"]["equity"][-1], 200.0)
+    check("trough is the drawdown, not a balance", min(rep["curve"]["equity"]), -300.0)
+    check("drawdown % is against capital at risk, not a near-zero peak",
+          abs(rep["summary"]["max_drawdown_pct"]) < 100, True)
 
     print("\n18. A no-stop strategy is called out, not congratulated")
     trades = [{"entry_i": i, "exit_i": i + 1, "entry": 10.0, "exit": 10.1,
