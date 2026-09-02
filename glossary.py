@@ -207,6 +207,51 @@ SECTIONS: list[tuple[str, str, list[tuple]]] = [
        "that error does not compound across independent runs."),
       ]),
 
+    ("Against buy and hold", """
+     The control that answers "are we wasting our time". Every strategy is
+     compared to simply owning the stock over the same window.""",
+     [
+      ("Capital-matched buy and hold",
+       "Buy at the first bar's OPEN and hold to the end -- but sized to the "
+       "strategy's own AVERAGE capital, not to a nominal 100 shares. If a "
+       "strategy holds 300 shares a fifth of the time, its average commitment "
+       "funds a certain number of shares, and that is how many the benchmark "
+       "buys.",
+       "Comparing share-for-share is unfair to a strategy that is flat most of "
+       "the time; comparing return-on-capital flatters one that barely trades. "
+       "Matching average dollars committed is the comparison that cannot be "
+       "gamed from either side. Note the benchmark buys at the OPEN, the same "
+       "fill convention the strategy gets -- buying at the first close would "
+       "hand it a bar of hindsight."),
+
+      ("Edge over buy and hold",
+       "Strategy P/L minus what that capital would have made sitting in the "
+       "stock. Positive means the trading added something.",
+       "A big positive edge in a FALLING market mostly means the strategy "
+       "avoided losses rather than generated gains -- still valuable, but a "
+       "different claim. Read it beside the 'tape moved' column."),
+
+      ("Beat on N of 8 symbols",
+       "How many symbols the strategy out-earned passive holding on.",
+       "A large total edge driven by one symbol is not the same as beating it "
+       "broadly. Four of eight is a coin flip dressed as a result."),
+
+      ("Drift warning",
+       "Flagged when the tape rose more than 5% on a symbol and the strategy "
+       "still failed to beat holding it.",
+       "This is the exact failure the owner asked about: a strategy that looks "
+       "profitable on a stock that simply went up. On those names the trading "
+       "was work for nothing."),
+
+      ("Profit concentration",
+       "What share of net profit comes from the best one and best three "
+       "trades, and what is left after removing them.",
+       "THE most important robustness check here. Above about 40% from three "
+       "trades the result is fragile. If removing the best three turns the "
+       "strategy NEGATIVE, it does not have an edge -- it had a few lucky "
+       "days, and the next window is not obliged to provide three more."),
+      ]),
+
     ("How the testing worked", """
      The mechanics, so the numbers can be trusted or argued with.""",
      [

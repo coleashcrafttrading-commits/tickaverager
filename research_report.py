@@ -262,6 +262,9 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
             dds, per_sym = [], {}
             n_trades = 0
             streaks, holds, concur, maxcon, expo = [], [], [], [], []
+            bh_tot = strat_tot = 0.0
+            bh_dds, beat = [], 0
+            all_pnls = []
             for sym, bars in data.items():
                 _tr, te = research.split(bars)
                 reps = btcode.run_many(
@@ -284,12 +287,24 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
                     concur.append(s["avg_open_when_in"])
                     maxcon.append(s["max_open"])
                     expo.append(s["exposure_pct"])
+                bh_tot += s["bh_dollars"]
+                strat_tot += s["total_pl"]
+                if s["total_trades"]:
+                    bh_dds.append(s["bh_drawdown"])
+                if s["total_pl"] > s["bh_dollars"]:
+                    beat += 1
+                all_pnls += [t["pnl"] for t in r.get("trades", [])]
                 per_sym[sym] = {
                     "trades": s["total_trades"], "win_rate": s["win_rate"],
                     "total_pl": s["total_pl"], "max_dd": s["max_drawdown"],
                     "pf": s["profit_factor"], "largest_loss": s["largest_loss"],
                     "avg_open": s["avg_open_when_in"], "max_open": s["max_open"],
                     "expo": s["exposure_pct"],
+                    "bh_dollars": s["bh_dollars"], "bh_shares": s["bh_shares"],
+                    "bh_drawdown": s["bh_drawdown"],
+                    "bh_pct": s["buy_hold_pct"],
+                    "vs_bh": round(s["total_pl"] - s["bh_dollars"], 2),
+                    "avg_capital": s["avg_capital"],
                 }
 
             gw, gl = sum(wins), -sum(losses)
@@ -315,6 +330,43 @@ def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
                 "exposure_pct": round(statistics.fmean(expo), 1) if expo else 0.0,
                 "per_symbol": per_sym,
             }
+
+            # ---- the passive benchmark, capital-matched ----
+            # Sized to the strategy's own AVERAGE capital, so a strategy that
+            # holds 300 shares a fifth of the time is compared against that
+            # much passive exposure and not against a nominal 100 shares. This
+            # is the number that answers "is this just riding the tape".
+            n_sym = len(per_sym)
+            w["bench"] = {
+                "strategy_total": round(strat_tot, 2),
+                "buy_hold_total": round(bh_tot, 2),
+                "edge": round(strat_tot - bh_tot, 2),
+                "beat_on": beat, "symbols": n_sym,
+                "worst_bh_drawdown": round(min(bh_dds), 2) if bh_dds else 0.0,
+                "median_bh_drawdown": round(statistics.median(bh_dds), 2)
+                                      if bh_dds else 0.0,
+            }
+
+            # ---- how concentrated is the profit ----
+            # A result carried by three trades out of sixty is a different
+            # proposition from one earned steadily, even at identical totals.
+            # Removing the best few and seeing what is left is the cheapest
+            # honesty check there is.
+            srt = sorted(all_pnls, key=lambda x: -x)
+            net = sum(all_pnls)
+            w["concentration"] = {
+                "net": round(net, 2),
+                "top1_pct": round(100 * srt[0] / net, 1) if srt and net else None,
+                "top3_pct": round(100 * sum(srt[:3]) / net, 1) if srt and net else None,
+                "net_ex_top3": round(net - sum(srt[:3]), 2) if srt else 0.0,
+                "median_trade": round(statistics.median(all_pnls), 2)
+                                if all_pnls else 0.0,
+            }
+            bn, cn = w["bench"], w["concentration"]
+            print("    %-30s vs B&H %s on %d/%d symbols | top3 = %s%% of net"
+                  % (w["family"][:30], signed(bn["edge"]), bn["beat_on"],
+                     bn["symbols"],
+                     "n/a" if cn["top3_pct"] is None else "%.0f" % cn["top3_pct"]))
             r_ = w["risk"]
             print("    %-32s win %.1f%%  PF %s  largest loss %s  avg %.1f lots"
                   % (w["family"][:32], r_["win_rate"],

@@ -767,6 +767,113 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
                                  "%.0f%%" % (d["expo"] or 0)]
                                 for sym, d in ps.items()]))
 
+        # ---------------------------------------------- buy and hold
+        bn = w.get("bench")
+        if bn:
+            edge = bn["edge"]
+            won = bn["beat_on"] >= (bn["symbols"] + 1) // 2 and edge > 0
+            B.append("<h4>Against buy and hold</h4>")
+            B.append('<div class="note %s"><b>%s buy-and-hold by %s in total, '
+                     'and on %d of %d symbols.</b> The benchmark is '
+                     '<b>capital-matched</b>: it buys as many shares as the '
+                     'strategy\'s own AVERAGE capital would fund and holds them '
+                     'for the whole window. A strategy that holds 300 shares a '
+                     'fifth of the time is therefore compared against that much '
+                     'passive exposure, not against a nominal 100 shares.</div>'
+                     % ("good" if won else "bad",
+                        "Beats" if edge > 0 else "LOSES to", signed(edge),
+                        bn["beat_on"], bn["symbols"]))
+            B.append(table(["", "Strategy", "Buy and hold", "Difference"], [
+                ["Total P/L across all symbols",
+                 '<b class="%s">%s</b>' % (cls(bn["strategy_total"]),
+                                           signed(bn["strategy_total"])),
+                 '<span class="%s">%s</span>' % (cls(bn["buy_hold_total"]),
+                                                 signed(bn["buy_hold_total"])),
+                 '<b class="%s">%s</b>' % (cls(edge), signed(edge))],
+                ["Worst drawdown",
+                 '<span class="down">%s</span>' % signed(rk["worst_drawdown"]
+                                                         if rk else 0),
+                 '<span class="down">%s</span>' % signed(bn["worst_bh_drawdown"]),
+                 '<span class="%s">%s</span>'
+                 % (cls((bn["worst_bh_drawdown"]) - (rk["worst_drawdown"] if rk else 0)),
+                    signed((rk["worst_drawdown"] if rk else 0)
+                           - bn["worst_bh_drawdown"]))],
+                ["Median symbol drawdown",
+                 '<span class="down">%s</span>' % signed(rk["median_drawdown"]
+                                                         if rk else 0),
+                 '<span class="down">%s</span>' % signed(bn["median_bh_drawdown"]),
+                 ""],
+            ]))
+            if ps:
+                bars_l = list(ps)
+                B.append('<div class="card">%s<p class="sub">Strategy P/L per '
+                         'symbol MINUS what capital-matched buy-and-hold made '
+                         'on the same symbol. Bars above the line are where the '
+                         'strategy actually added something; bars below are '
+                         'where owning the stock and doing nothing would have '
+                         'done better.</p></div>'
+                         % svg_bars(bars_l, [ps[s2].get("vs_bh") for s2 in bars_l],
+                                    height=190, label="edge over buy and hold",
+                                    fmt=lambda v: signed(v, 0)))
+                B.append(table(["Symbol", "Strategy", "Buy &amp; hold",
+                                "Edge", "Tape moved", "B&amp;H shares",
+                                "Strategy DD", "B&amp;H DD"],
+                               [[esc(sym),
+                                 '<span class="%s">%s</span>'
+                                 % (cls(d["total_pl"]), signed(d["total_pl"])),
+                                 '<span class="%s">%s</span>'
+                                 % (cls(d.get("bh_dollars")),
+                                    signed(d.get("bh_dollars"))),
+                                 '<b class="%s">%s</b>' % (cls(d.get("vs_bh")),
+                                                           signed(d.get("vs_bh"))),
+                                 '<span class="%s">%+.1f%%</span>'
+                                 % (cls(d.get("bh_pct")), d.get("bh_pct") or 0),
+                                 str(d.get("bh_shares") or 0),
+                                 '<span class="down">%s</span>' % signed(d["max_dd"]),
+                                 '<span class="down">%s</span>'
+                                 % signed(d.get("bh_drawdown"))]
+                                for sym, d in ps.items()]))
+                drift = [s2 for s2, d in ps.items()
+                         if (d.get("bh_pct") or 0) > 5 and (d.get("vs_bh") or 0) < 0]
+                if drift:
+                    B.append('<div class="note warn"><b>Drift warning.</b> On '
+                             '%s the tape rose more than 5%% and the strategy '
+                             'still failed to beat simply holding it. On those '
+                             'names it was doing work for nothing.</div>'
+                             % esc(", ".join(drift)))
+
+        # ---------------------------------------------- concentration
+        cn = w.get("concentration")
+        if cn and cn.get("top3_pct") is not None:
+            heavy = cn["top3_pct"] > 40
+            B.append("<h4>Is the profit concentrated?</h4>")
+            B.append(table(["", "Value", ""], [
+                ["Net profit, all symbols", signed(cn["net"]), ""],
+                ["Best single trade as a share of net",
+                 '<b class="%s">%.1f%%</b>' % ("warn" if (cn["top1_pct"] or 0) > 20
+                                               else "", cn["top1_pct"] or 0), ""],
+                ["Best three trades as a share of net",
+                 '<b class="%s">%.1f%%</b>' % ("warn" if heavy else "",
+                                               cn["top3_pct"]), ""],
+                ["Net with the best three removed",
+                 '<b class="%s">%s</b>' % (cls(cn["net_ex_top3"]),
+                                           signed(cn["net_ex_top3"])),
+                 '<span class="sub">still profitable?</span>'],
+                ["Median trade",
+                 '<span class="%s">%s</span>' % (cls(cn["median_trade"]),
+                                                 signed(cn["median_trade"])),
+                 '<span class="sub">the typical trade, not the average</span>'],
+            ]))
+            if heavy:
+                B.append('<div class="note warn">%.0f%% of the profit comes '
+                         'from three trades. That is a real result but a '
+                         'fragile one &mdash; miss those three and %s. Size '
+                         'accordingly, and do not assume the next window '
+                         'contains its own three.</div>'
+                         % (cn["top3_pct"],
+                            "it still makes %s" % signed(cn["net_ex_top3"])
+                            if cn["net_ex_top3"] > 0 else "it loses money"))
+
     # ---------------------------------------------------------- everything
     B.append("<h2>Every family, and what happened to it</h2>")
     B.append('<p class="sub">The rejections are the most useful part of this '

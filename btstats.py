@@ -266,9 +266,44 @@ def report(trades: list[dict], bars: list[dict], *,
         if a and b:
             span_days = max(0.01, (b - a).total_seconds() / 86400)
 
+    # ---- the passive benchmark ----
+    # Bought at the FIRST BAR'S OPEN, not its close: that is the earliest price
+    # actually obtainable, and it is the same fill convention the strategy is
+    # held to. Using the first close instead quietly hands buy-and-hold a bar
+    # of hindsight.
     buy_hold = 0.0
-    if n >= 2 and float(bars[0]["c"]):
-        buy_hold = round((last / float(bars[0]["c"]) - 1) * 100, 2)
+    bh_dollars = 0.0
+    bh_dd = 0.0
+    bh_shares = 0
+    if n >= 2 and float(bars[0]["o"]):
+        entry = float(bars[0]["o"])
+        buy_hold = round((last / entry - 1) * 100, 2)
+        # sized to the strategy's own AVERAGE capital, so the comparison is
+        # dollars-for-dollars rather than shares-for-shares. A strategy holding
+        # 300 shares half the time is committing more than "100 shares" implies,
+        # and must be benchmarked against that much passive exposure.
+        avg_cap = 0.0
+        if n:
+            by_bar = [0.0] * n
+            for t in trades:
+                a = max(0, int(t.get("entry_i", 0)))
+                b = min(n - 1, int(t.get("exit_i", n - 1)))
+                for i in range(a, b + 1):
+                    by_bar[i] += float(t["entry"]) * float(t["shares"])
+            for pz in open_positions:
+                a = max(0, int(pz.get("entry_i", 0)))
+                for i in range(a, n):
+                    by_bar[i] += float(pz["entry"]) * float(pz["shares"])
+            avg_cap = sum(by_bar) / n
+        bh_shares = int(avg_cap / entry) if entry else 0
+        bh_dollars = round((last - entry) * bh_shares, 2)
+        peak = -1e18
+        worst = 0.0
+        for b in bars:
+            c = float(b["c"])
+            peak = max(peak, c)
+            worst = min(worst, (c - peak) * bh_shares)
+        bh_dd = round(worst, 2)
 
     exits: dict[str, int] = {}
     for t in trades:
@@ -330,6 +365,13 @@ def report(trades: list[dict], bars: list[dict], *,
         "span_days": round(span_days, 2),
         "trades_per_day": round(len(trades) / span_days, 2) if span_days else 0.0,
         "buy_hold_pct": buy_hold,
+        # capital-matched passive benchmark: same average dollars at risk,
+        # held the whole window, no trading
+        "bh_shares": bh_shares,
+        "bh_dollars": bh_dollars,
+        "bh_drawdown": bh_dd,
+        "avg_capital": round(avg_cap, 2) if n else 0.0,
+        "vs_buy_hold": round((net + open_pl) - bh_dollars, 2),
         "exits": exits,
     }
 
