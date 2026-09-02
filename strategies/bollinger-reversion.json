@@ -1,0 +1,35 @@
+{
+  "name": "Bollinger reversion",
+  "note": "Buys a close below the lower band, exits at the middle band. Classic mean reversion; wants a range, suffers in a trend.",
+  "indicators": {
+    "bb": {
+      "kind": "bollinger",
+      "period": 20,
+      "mult": 2.0
+    },
+    "vol": {
+      "kind": "atr",
+      "period": 14
+    }
+  },
+  "entry": {
+    "lt": [
+      "close",
+      "bb.lower"
+    ]
+  },
+  "exit": {
+    "gte": [
+      "close",
+      "bb.mid"
+    ]
+  },
+  "target": {
+    "atr_mult": 2.0,
+    "indicator": "vol.atr"
+  },
+  "stop": {
+    "atr_mult": 2.0,
+    "indicator": "vol.atr"
+  }
+}

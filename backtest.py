@@ -238,6 +238,127 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
     }
 
 
+def run_strategy(bars: list[dict], spec: dict, opts: dict | None = None) -> dict:
+    """Replay a declarative strategy (strategy.py) over bars.
+
+    Same honesty rules as the ladder replay:
+
+    * A signal is read on a bar's CLOSE and can only be acted on from the NEXT
+      bar. Deciding and filling on the same bar is the classic way a backtest
+      invents money that was never available.
+    * A stop and a target hit inside the same bar resolve as the STOP. Bars
+      hide their own path, so the pessimistic reading is the honest one.
+    * Exits pay a slippage allowance; entries fill at the next open.
+    """
+    import strategy as SM
+
+    o = dict(opts or {})
+    shares = int(o.get("shares_per_lot", 100))
+    max_pos = int(o.get("max_positions", 1))
+    slip = float(o.get("slippage", 0.01))
+    one_per_bar = bool(o.get("one_entry_per_bar", True))
+
+    st = SM.Strategy(spec)
+    st.prepare(bars)
+    warm = st.warmup()
+
+    open_pos: list[dict] = []
+    realized = 0.0
+    wins = losses = 0
+    closed = 0
+    holds: list[float] = []
+    peak_cap = 0.0
+    deployed = 0.0
+    max_dd = 0.0
+    exits = {"target": 0, "stop": 0, "signal": 0, "end": 0}
+    pending = False
+
+    for i, bar in enumerate(bars):
+        o_, h, l, c = (float(bar["o"]), float(bar["h"]),
+                       float(bar["l"]), float(bar["c"]))
+
+        # ---- 1. fill anything decided on the previous close ----
+        if pending and len(open_pos) < max_pos:
+            entry = o_
+            pos = {"entry": entry, "shares": shares, "i": i,
+                   "target": st.level("target", entry, i),
+                   "stop": st.level("stop", entry, i)}
+            open_pos.append(pos)
+            deployed += entry * shares
+            pending = False
+        elif pending:
+            pending = False
+
+        # ---- 2. exits ----
+        for pos in list(open_pos):
+            why = None
+            price = None
+            # stop first: within one bar the path is unknowable, so assume the
+            # worse of the two
+            if pos["stop"] and l <= pos["stop"]:
+                why, price = "stop", pos["stop"] - slip
+            elif pos["target"] and h >= pos["target"]:
+                why, price = "target", pos["target"] - slip
+            elif st.test(st.exit, i, pos):
+                why, price = "signal", c - slip
+            if why:
+                pnl = (price - pos["entry"]) * pos["shares"]
+                realized += pnl
+                closed += 1
+                wins += pnl > 0
+                losses += pnl <= 0
+                holds.append(i - pos["i"])
+                exits[why] += 1
+                open_pos.remove(pos)
+
+        # ---- 3. mark to market ----
+        if open_pos:
+            cost = sum(p["entry"] * p["shares"] for p in open_pos)
+            peak_cap = max(peak_cap, cost)
+            unreal = sum((c - p["entry"]) * p["shares"] for p in open_pos)
+            max_dd = min(max_dd, unreal)
+
+        # ---- 4. decide on THIS close, fill next bar ----
+        if i < warm or i == len(bars) - 1:
+            continue
+        if len(open_pos) >= max_pos:
+            continue
+        if one_per_bar and pending:
+            continue
+        if st.test(st.entry, i):
+            pending = True
+
+    last = float(bars[-1]["c"]) if bars else 0.0
+    end_unreal = sum((last - p["entry"]) * p["shares"] for p in open_pos)
+    exits["end"] = len(open_pos)
+    span = _span_days(bars)
+
+    return {
+        "strategy": st.name,
+        "bars": len(bars),
+        "span_days": span,
+        "realized": round(realized, 2),
+        "unrealized_at_end": round(end_unreal, 2),
+        "total_pl": round(realized + end_unreal, 2),
+        "closed_lots": closed,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(100 * wins / closed, 1) if closed else 0.0,
+        "open_at_end": len(open_pos),
+        "peak_capital": round(peak_cap, 2),
+        "capital_deployed": round(deployed, 2),
+        "max_open_drawdown": round(max_dd, 2),
+        "avg_hold_bars": round(sum(holds) / len(holds), 1) if holds else 0.0,
+        "exits": exits,
+        "trades_per_day": round(closed / span, 2) if span else 0.0,
+        "return_on_peak_capital_pct":
+            round(100 * (realized + end_unreal) / peak_cap, 3) if peak_cap else 0.0,
+        "fill_rate_pct": 100.0,
+        "max_lots_held": max_pos,
+        "hit_max_lots": False,
+    }
+
+
 def _bar_gap(a: Any, b: Any) -> float:
     try:
         ta = datetime.fromisoformat(str(a).replace("Z", "+00:00"))

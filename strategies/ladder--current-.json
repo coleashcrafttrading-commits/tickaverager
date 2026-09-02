@@ -1,0 +1,17 @@
+{
+  "name": "Ladder (current)",
+  "note": "What the live engine does: buy a red bar, add every fixed distance below the last fill, exit each lot at its own target.",
+  "indicators": {},
+  "entry": {
+    "lt": [
+      "close",
+      "open"
+    ]
+  },
+  "exit": {
+    "target_reached": true
+  },
+  "target": {
+    "points": 0.1
+  }
+}

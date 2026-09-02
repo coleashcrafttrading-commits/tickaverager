@@ -1,0 +1,57 @@
+{
+  "name": "MACD cross with ADX",
+  "note": "Only takes MACD crosses while ADX says a trend is actually present, which is what stops it firing constantly in chop.",
+  "indicators": {
+    "m": {
+      "kind": "macd",
+      "fast": 12,
+      "slow": 26,
+      "signal": 9
+    },
+    "dx": {
+      "kind": "adx",
+      "period": 14
+    },
+    "vol": {
+      "kind": "atr",
+      "period": 14
+    }
+  },
+  "entry": {
+    "all": [
+      {
+        "cross_above": [
+          "m.macd",
+          "m.signal"
+        ]
+      },
+      {
+        "gt": [
+          "dx.adx",
+          22
+        ]
+      }
+    ]
+  },
+  "exit": {
+    "any": [
+      {
+        "cross_below": [
+          "m.macd",
+          "m.signal"
+        ]
+      },
+      {
+        "target_reached": true
+      }
+    ]
+  },
+  "target": {
+    "atr_mult": 2.0,
+    "indicator": "vol.atr"
+  },
+  "stop": {
+    "atr_mult": 1.5,
+    "indicator": "vol.atr"
+  }
+}

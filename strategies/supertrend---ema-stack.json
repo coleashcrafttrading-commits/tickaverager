@@ -1,0 +1,62 @@
+{
+  "name": "SuperTrend + EMA stack",
+  "note": "The filter currently live on the ladder, written as a standalone strategy so it can finally be backtested.",
+  "indicators": {
+    "st": {
+      "kind": "supertrend",
+      "period": 10,
+      "mult": 3.0
+    },
+    "slow": {
+      "kind": "ema",
+      "period": 50
+    },
+    "vol": {
+      "kind": "atr",
+      "period": 14
+    }
+  },
+  "entry": {
+    "all": [
+      {
+        "eq": [
+          "st.dir",
+          1
+        ]
+      },
+      {
+        "gt": [
+          "close",
+          "slow.ema"
+        ]
+      },
+      {
+        "lt": [
+          "close",
+          "open"
+        ]
+      }
+    ]
+  },
+  "exit": {
+    "any": [
+      {
+        "eq": [
+          "st.dir",
+          -1
+        ]
+      },
+      {
+        "target_reached": true
+      }
+    ]
+  },
+  "target": {
+    "atr_mult": 1.5,
+    "indicator": "vol.atr"
+  },
+  "stop": {
+    "atr_mult": 2.0,
+    "indicator": "vol.atr"
+  }
+}

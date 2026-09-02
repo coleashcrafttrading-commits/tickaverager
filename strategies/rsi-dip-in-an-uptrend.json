@@ -1,0 +1,55 @@
+{
+  "name": "RSI dip in an uptrend",
+  "note": "Only buys weakness while price is above its slow average, so it does not average into a downtrend -- the failure mode the plain ladder has no answer for.",
+  "indicators": {
+    "rsi": {
+      "kind": "rsi",
+      "period": 14
+    },
+    "slow": {
+      "kind": "ema",
+      "period": 50
+    },
+    "vol": {
+      "kind": "atr",
+      "period": 14
+    }
+  },
+  "entry": {
+    "all": [
+      {
+        "lt": [
+          "rsi.rsi",
+          32
+        ]
+      },
+      {
+        "gt": [
+          "close",
+          "slow.ema"
+        ]
+      }
+    ]
+  },
+  "exit": {
+    "any": [
+      {
+        "gt": [
+          "rsi.rsi",
+          68
+        ]
+      },
+      {
+        "target_reached": true
+      }
+    ]
+  },
+  "target": {
+    "atr_mult": 1.5,
+    "indicator": "vol.atr"
+  },
+  "stop": {
+    "atr_mult": 2.5,
+    "indicator": "vol.atr"
+  }
+}
