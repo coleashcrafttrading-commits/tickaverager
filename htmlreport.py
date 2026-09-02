@@ -195,6 +195,7 @@ h1{font-size:27px;margin:0 0 4px;letter-spacing:-.02em}
 h2{font-size:19px;margin:38px 0 10px;padding-bottom:7px;
    border-bottom:1px solid var(--line);letter-spacing:-.01em}
 h3{font-size:15px;margin:24px 0 8px;color:var(--accent)}
+h4{font-size:13px;margin:20px 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
 .sub{color:var(--dim);font-size:13px;margin:0 0 8px}
 p{margin:0 0 11px}
 .lead{font-size:15px}
@@ -512,6 +513,20 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
                  % (len(winners), "y" if len(winners) == 1 else "ies",
                     len(full)))
 
+    pfs = [(w["family"], (w.get("risk") or {}).get("profit_factor"))
+           for w in winners if w.get("risk")]
+    thin = [n for n, v in pfs if v is not None and v < 1.15]
+    if thin:
+        B.append('<div class="note bad"><b>Read the profit factors before the '
+                 'scores.</b> %d of these %s a profit factor under 1.15 &mdash; '
+                 'gross profit barely exceeds gross loss. The headline score '
+                 'measures profit against DRAWDOWN, so a strategy can score '
+                 'well by risking little while having almost no edge per '
+                 'trade. %s. At that margin the whole result sits inside the '
+                 'cost assumption.</div>'
+                 % (len(thin), "have" if len(thin) > 1 else "has",
+                    esc(", ".join(thin))))
+
     # a chart of the field
     names = [w["family"][:16] for w in winners]
     scores = [w["test"]["median_score"] for w in winners]
@@ -522,6 +537,20 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
                  'can sit on the same axis.</p></div>'
                  % (len(names), svg_bars(names, scores, height=200,
                                          label="out-of-sample score")))
+    pfv = [(w.get("risk") or {}).get("profit_factor") for w in winners]
+    if any(v is not None for v in pfv):
+        # plotted against 1.0, not zero: for a profit factor, one is the line
+        # between making money and losing it, and a bar chart anchored at zero
+        # makes 1.03 and 1.36 look like the same healthy green column
+        B.append('<div class="card"><h3>Profit factor, minus the 1.0 '
+                 'break-even line</h3>%s<p class="sub">Gross profit &divide; '
+                 'gross loss. Anything at or below the line loses money. This '
+                 'is plotted as the DISTANCE from 1.0 because a chart anchored '
+                 'at zero makes 1.03 and 1.36 look equally healthy, and they '
+                 'are not remotely.</p></div>'
+                 % svg_bars(names, [None if v is None else v - 1.0 for v in pfv],
+                            height=185, label="profit factor above break-even",
+                            fmt=lambda v: "%.2f" % (v + 1.0)))
 
     # ---------------------------------------------------------- the method
     B.append("<h2>How these were chosen &mdash; read this first</h2>")
@@ -658,6 +687,85 @@ def build_research(passes: list, winners: list, abl: dict, val: dict,
                              '<span class="%s">%s</span>'
                              % (cls(d["median_score"]), num(d["median_score"]))])
         B.append(table(["", "Value"], rows))
+
+        rk = w.get("risk")
+        if rk:
+            B.append("<h4>Trade statistics and risk</h4>")
+            B.append(table(["", "Value", ""], [
+                ["Percent profitable",
+                 '<b>%.1f%%</b>' % rk["win_rate"],
+                 '<span class="sub">%s winners, %s losers, %s trades</span>'
+                 % (format(rk["winners"], ","), format(rk["losers"], ","),
+                    format(rk["trades"], ","))],
+                ["Gross profit",
+                 '<span class="up">%s</span>' % signed(rk["gross_profit"]),
+                 '<span class="sub">everything the winners made</span>'],
+                ["Gross loss",
+                 '<span class="down">%s</span>' % money(-abs(rk["gross_loss"])),
+                 '<span class="sub">everything the losers cost</span>'],
+                ["Profit factor",
+                 '<b>%s</b>' % ("&mdash;" if rk["profit_factor"] is None
+                                else "%.2f" % rk["profit_factor"]),
+                 '<span class="sub">gross profit &divide; gross loss. Below 1.0 '
+                 'loses money</span>'],
+                ["Average winning trade",
+                 '<span class="up">%s</span>' % signed(rk["avg_win"]), ""],
+                ["Average losing trade",
+                 '<span class="down">%s</span>' % signed(rk["avg_loss"]), ""],
+                ["Win / loss size ratio",
+                 "&mdash;" if rk["win_loss_ratio"] is None
+                 else "%.2f" % rk["win_loss_ratio"],
+                 '<span class="sub">above 1.0 means winners are bigger than '
+                 'losers</span>'],
+                ["Largest winning trade",
+                 '<span class="up">%s</span>' % signed(rk["largest_win"]), ""],
+                ["Largest losing trade",
+                 '<b class="down">%s</b>' % signed(rk["largest_loss"]),
+                 '<span class="sub">the worst single trade on any symbol, not '
+                 'an average</span>'],
+                ["Expectancy per trade",
+                 '<span class="%s">%s</span>' % (cls(rk["expectancy"]),
+                                                 signed(rk["expectancy"])),
+                 '<span class="sub">what one trade is worth on average</span>'],
+                ["Worst drawdown, any symbol",
+                 '<b class="down">%s</b>' % signed(rk["worst_drawdown"]),
+                 '<span class="sub">what you would have had to sit '
+                 'through</span>'],
+                ["Median symbol drawdown",
+                 '<span class="down">%s</span>' % signed(rk["median_drawdown"]),
+                 '<span class="sub">the typical case rather than the worst '
+                 'one</span>'],
+                ["Longest losing streak",
+                 "%d trades" % rk["max_consecutive_losses"],
+                 '<span class="sub">consecutive losers, on the worst '
+                 'symbol</span>'],
+                ["Average lots open at once",
+                 '<b>%.2f</b>' % rk["avg_open_lots"],
+                 '<span class="sub">measured only while a position is held</span>'],
+                ["Most lots open at once", str(rk["max_open_lots"]),
+                 '<span class="sub">drives the worst-case capital</span>'],
+                ["Time in the market", "%.1f%%" % rk["exposure_pct"],
+                 '<span class="sub">of all bars</span>'],
+                ["Average bars in a trade", "%.1f" % rk["avg_bars_in_trade"], ""],
+            ]))
+
+            ps = rk.get("per_symbol") or {}
+            if ps:
+                B.append(table(["Symbol", "Trades", "Win %", "Total P/L",
+                                "Max DD", "PF", "Largest loss", "Avg lots",
+                                "Time in"],
+                               [[esc(sym),
+                                 format(d["trades"], ","),
+                                 "%.0f%%" % (d["win_rate"] or 0),
+                                 '<span class="%s">%s</span>'
+                                 % (cls(d["total_pl"]), signed(d["total_pl"])),
+                                 '<span class="down">%s</span>' % signed(d["max_dd"]),
+                                 "&mdash;" if d["pf"] is None else "%.2f" % d["pf"],
+                                 '<span class="down">%s</span>'
+                                 % signed(d["largest_loss"]),
+                                 "%.1f" % (d["avg_open"] or 0),
+                                 "%.0f%%" % (d["expo"] or 0)]
+                                for sym, d in ps.items()]))
 
     # ---------------------------------------------------------- everything
     B.append("<h2>Every family, and what happened to it</h2>")

@@ -215,6 +215,114 @@ def pooled_ranking(passes: list[dict], top: int,
 
 
 
+def deep_metrics(winners: list[dict], passes: list[dict]) -> None:
+    """Re-run each winner out of sample and collect the full risk picture.
+
+    The research pass stores slim summaries, because keeping every metric for
+    154,000 backtests is a lot of numbers nobody reads. For the handful that
+    survive it is worth the extra minute: win rate, the size of the average
+    winner against the average loser, the largest single loss, how many lots
+    are open at once, the worst losing streak.
+
+    Aggregation rules, because they are not obvious:
+      * COUNTS and SUMS pool across symbols -- 8 symbols traded is 8 symbols
+        of experience and the pooled win rate is the honest one.
+      * LARGEST LOSS is the worst across all symbols, never an average. You
+        do not experience the average of your worst days.
+      * DRAWDOWN is reported as the worst symbol AND the median symbol. The
+        median is what to expect; the worst is what to survive.
+
+    Mutates each winner in place, adding {"risk": {...}}.
+    """
+    import btcode
+    import research
+
+    by_pass: dict[str, list[dict]] = {}
+    for w in winners:
+        by_pass.setdefault(w["timeframe"], []).append(w)
+
+    for label, group in by_pass.items():
+        p = next((x for x in passes
+                  if (x.get("_label") or x.get("timeframe")) == label), None)
+        if not p:
+            continue
+        tf = p.get("timeframe")
+        syms = list((p.get("meta") or {}))
+        print("  deep metrics for %d strateg%s on %s..."
+              % (len(group), "y" if len(group) == 1 else "ies", label))
+        data = research.fetch(syms, tf, p.get("days", 90))
+        fam_by_name = {f["name"]: f for f in research.FAMILIES}
+
+        for w in group:
+            fam = fam_by_name.get(w["family"])
+            if not fam:
+                continue
+            code = research.build(fam)
+            wins, losses = [], []
+            dds, per_sym = [], {}
+            n_trades = 0
+            streaks, holds, concur, maxcon, expo = [], [], [], [], []
+            for sym, bars in data.items():
+                _tr, te = research.split(bars)
+                reps = btcode.run_many(
+                    te, [{"id": "0", "code": code, "params": w["params"]}],
+                    opts={"slippage": research.slippage_for(bars),
+                          "fee_per_share": 0.0, "max_positions": 8,
+                          "bar_size": tf}, timeout=1200)
+                r = reps[0]
+                if not r.get("ok"):
+                    continue
+                s = r["summary"]
+                pnls = [t["pnl"] for t in r.get("trades", [])]
+                wins += [x for x in pnls if x > 0]
+                losses += [x for x in pnls if x <= 0]
+                n_trades += s["total_trades"]
+                if s["total_trades"]:
+                    dds.append(s["max_drawdown"])
+                    streaks.append(s["max_consecutive_losses"])
+                    holds.append(s["avg_bars_in_trade"])
+                    concur.append(s["avg_open_when_in"])
+                    maxcon.append(s["max_open"])
+                    expo.append(s["exposure_pct"])
+                per_sym[sym] = {
+                    "trades": s["total_trades"], "win_rate": s["win_rate"],
+                    "total_pl": s["total_pl"], "max_dd": s["max_drawdown"],
+                    "pf": s["profit_factor"], "largest_loss": s["largest_loss"],
+                    "avg_open": s["avg_open_when_in"], "max_open": s["max_open"],
+                    "expo": s["exposure_pct"],
+                }
+
+            gw, gl = sum(wins), -sum(losses)
+            w["risk"] = {
+                "trades": n_trades,
+                "winners": len(wins), "losers": len(losses),
+                "win_rate": round(100 * len(wins) / n_trades, 1) if n_trades else 0.0,
+                "gross_profit": round(gw, 2), "gross_loss": round(gl, 2),
+                "profit_factor": round(gw / gl, 3) if gl else None,
+                "avg_win": round(gw / len(wins), 2) if wins else 0.0,
+                "avg_loss": round(-gl / len(losses), 2) if losses else 0.0,
+                "win_loss_ratio": round((gw / len(wins)) / (gl / len(losses)), 2)
+                                  if wins and losses else None,
+                "largest_win": round(max(wins), 2) if wins else 0.0,
+                "largest_loss": round(min(losses), 2) if losses else 0.0,
+                "expectancy": round((gw - gl) / n_trades, 2) if n_trades else 0.0,
+                "worst_drawdown": round(min(dds), 2) if dds else 0.0,
+                "median_drawdown": round(statistics.median(dds), 2) if dds else 0.0,
+                "max_consecutive_losses": max(streaks) if streaks else 0,
+                "avg_bars_in_trade": round(statistics.fmean(holds), 1) if holds else 0.0,
+                "avg_open_lots": round(statistics.fmean(concur), 2) if concur else 0.0,
+                "max_open_lots": max(maxcon) if maxcon else 0,
+                "exposure_pct": round(statistics.fmean(expo), 1) if expo else 0.0,
+                "per_symbol": per_sym,
+            }
+            r_ = w["risk"]
+            print("    %-32s win %.1f%%  PF %s  largest loss %s  avg %.1f lots"
+                  % (w["family"][:32], r_["win_rate"],
+                     "n/a" if r_["profit_factor"] is None
+                     else "%.2f" % r_["profit_factor"],
+                     signed(r_["largest_loss"]), r_["avg_open_lots"]))
+
+
 def cross_timeframe(passes: list[dict]) -> dict[str, dict]:
     """Which families survived on more than one bar size.
 
@@ -901,6 +1009,7 @@ def main(argv=None) -> int:
     ap.add_argument("--files", nargs="*", default=None)
     ap.add_argument("--no-cost-scan", action="store_true")
     ap.add_argument("--no-install", action="store_true")
+    ap.add_argument("--no-deep", action="store_true")
     ap.add_argument("--format", default="html", choices=["html", "pdf", "both"],
                     help="html opens in a tab with charts; pdf is the old one")
     a = ap.parse_args(argv)
@@ -917,6 +1026,13 @@ def main(argv=None) -> int:
             cost_sensitivity(winners, passes)
         except Exception as e:
             print("  cost scan skipped: %r" % e)
+
+    if winners and not a.no_deep:
+        print("Deep risk metrics:")
+        try:
+            deep_metrics(winners, passes)
+        except Exception as e:
+            print("  deep metrics skipped: %r" % e)
 
     installed = []
     if winners and not a.no_install:

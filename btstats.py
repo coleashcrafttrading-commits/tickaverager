@@ -114,12 +114,20 @@ def equity_curve(trades: list[dict], bars: list[dict],
             base = abs(starting_equity) or abs(notional) or abs(peak) or 1.0
             max_dd_pct = drop / base * 100
 
+    live = [x for x in exposed if x]
     return {
         "equity": eq,
         "drawdown": dd,
         "t": [b["t"] for b in bars],
         "close": [float(b["c"]) for b in bars],
         "exposure_pct": round(100 * sum(1 for x in exposed if x) / n, 1),
+        # How many lots are open at once. Averaged over the bars where ANY
+        # position is held, not over every bar -- averaging over an idle
+        # weekend reports "0.3 lots" for a strategy that always runs four, and
+        # the number people actually want is "when it is on, how big is it".
+        "avg_open_when_in": round(sum(live) / len(live), 2) if live else 0.0,
+        "avg_open_overall": round(sum(exposed) / n, 2),
+        "max_open": max(exposed) if exposed else 0,
         "max_drawdown": round(max_dd, 2),
         "max_drawdown_pct": round(max_dd_pct, 2),
         "final_equity": round(eq[-1], 2),
@@ -310,6 +318,9 @@ def report(trades: list[dict], bars: list[dict], *,
             round(100 * (net + open_pl) / peak_cap, 3) if peak_cap else 0.0,
         "starting_equity": round(starting_equity, 2),
         "exposure_pct": curve["exposure_pct"],
+        "avg_open_when_in": curve["avg_open_when_in"],
+        "avg_open_overall": curve["avg_open_overall"],
+        "max_open": curve["max_open"],
         "sharpe": sharpe,
         "sortino": sortino,
 
