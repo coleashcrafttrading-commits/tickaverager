@@ -121,20 +121,45 @@ def control_bar(p: dict) -> Optional[float]:
     return max(scores) if scores else None
 
 
-def pooled_ranking(passes: list[dict], top: int) -> list[dict]:
-    """Rank across every timeframe, tagging each candidate with its pass."""
+def pooled_ranking(passes: list[dict], top: int,
+                   abl: Optional[dict] = None) -> list[dict]:
+    """Rank across every timeframe, tagging each candidate with its pass.
+
+    Sorted by, in order: does the ablation say the signal is real, how many
+    timeframes it survived on, then the out-of-sample score. Score alone would
+    put a one-window position-management artifact above a signal that cleared
+    the whole search twice, and that is the wrong way round.
+    """
+    abl = abl or {}
+    xtf = cross_timeframe(passes)
     rows = []
+    seen_best: dict[str, dict] = {}
     for p in passes:
         bar = control_bar(p)
         for c in real_candidates(p):
             c = dict(c)
+            fam = c["family"]
             c["timeframe"] = p.get("timeframe")
             c["days"] = p.get("days")
             c["control_bar"] = bar
             c["beats_control"] = (
                 bar is None or (c["test"]["median_score"] or 0) > bar)
-            rows.append(c)
+            c["timeframes"] = xtf.get(fam, {})
+            c["n_timeframes"] = len(c["timeframes"])
+            a = abl.get(fam)
+            c["ablation"] = a.get("verdict") if a else None
+            c["signal_is_real"] = bool(
+                a and (str(a.get("verdict", "")).startswith("signal carries")
+                       or str(a.get("verdict", "")).startswith("BETTER without")))
+            # one row per family: its best timeframe represents it
+            cur = seen_best.get(fam)
+            if cur is None or (c["test"]["median_score"] or 0) > (
+                    cur["test"]["median_score"] or 0):
+                seen_best[fam] = c
+    rows = list(seen_best.values())
     rows.sort(key=lambda c: (not c["beats_control"],
+                             not c["signal_is_real"],
+                             -c["n_timeframes"],
                              -(c["test"]["median_score"] or 0)))
     if rows:
         return rows[:top]
@@ -162,6 +187,27 @@ def pooled_ranking(passes: list[dict], top: int) -> list[dict]:
     near.sort(key=lambda c: -(c["test"]["median_score"] or 0))
     return near[:top]
 
+
+
+def cross_timeframe(passes: list[dict]) -> dict[str, dict]:
+    """Which families survived on more than one bar size.
+
+    Independent agreement across timeframes is the hardest thing in this whole
+    exercise to get by luck. A family selected separately on 5-minute and
+    15-minute bars, on different windows, has cleared the search twice --
+    which is worth more than any single score, because the multiple-comparison
+    problem does not compound across independent runs the way it does within
+    one.
+    """
+    out: dict[str, dict] = {}
+    for p in passes:
+        tf = p.get("timeframe", "?")
+        for c in p.get("ranked", []):
+            fam = c.get("family", "")
+            if fam.startswith("CONTROL"):
+                continue
+            out.setdefault(fam, {})[tf] = c["test"]["median_score"]
+    return out
 
 
 def cost_sensitivity(winners: list[dict], passes: list[dict],
@@ -385,6 +431,14 @@ def verdict_of(w: dict, abl: dict, val: dict) -> tuple[str, list[str]]:
     else:
         failed.append("does not survive double the assumed cost")
 
+    n = w.get("n_timeframes", 0)
+    if n >= 2:
+        passed.append("survived on %d timeframes independently (%s)"
+                      % (n, ", ".join("%s %s" % (k, num(v))
+                                      for k, v in sorted(w["timeframes"].items()))))
+    else:
+        failed.append("survived on only one timeframe")
+
     a = abl.get(w["family"])
     if a is None:
         failed.append("signal not isolated from the execution")
@@ -394,7 +448,7 @@ def verdict_of(w: dict, abl: dict, val: dict) -> tuple[str, list[str]]:
             passed.append("the signal, not the position management")
         else:
             failed.append("ablation says: %s" % vd)
-    return ("%d of 4 checks" % len(passed)), passed + ["NOT: " + f for f in failed]
+    return ("%d of 5 checks" % len(passed)), passed + ["NOT: " + f for f in failed]
 
 
 # ==================================================================== render
@@ -789,7 +843,8 @@ def main(argv=None) -> int:
     if not passes:
         print("No research JSON found in %s" % RESEARCH_DIR)
         return 1
-    winners = pooled_ranking(passes, a.top)
+    abl, val = load_side_studies()
+    winners = pooled_ranking(passes, a.top, abl)
     if winners and not a.no_cost_scan:
         print("Cost sensitivity check:")
         try:
@@ -807,7 +862,6 @@ def main(argv=None) -> int:
 
     stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M")
     out = REPORT_DIR / ("strategy_research_%s.pdf" % stamp)
-    abl, val = load_side_studies()
     build_pdf(passes, winners, out, a.top, abl, val)
 
     print("")
