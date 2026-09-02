@@ -16,6 +16,36 @@ export const STRATEGY_FIELDS = [
       hint: "Caps <i>adds</i>, not losses. shares × price × max lots is your worst case." },
   ]},
 
+  { legend: "Position sizing", fields: [
+    { k: "size_mode", t: "sel", label: "Size each lot by",
+      opts: [["fixed", "a fixed share count"], ["dollars", "a dollar amount"],
+             ["atr_risk", "risk per lot (ATR)"]],
+      hint: "A fixed share count means a $12 stock and a $500 one carry wildly "
+          + "different risk for the same 'lot'. <b>Dollars</b> makes every lot the "
+          + "same size; <b>ATR risk</b> makes every lot the same <i>risk</i>, which "
+          + "is the only sizing that means the same thing across symbols." },
+    { k: "lot_dollars", t: "num", label: "Dollars per lot", step: 100, min: 10 },
+    { k: "risk_dollars", t: "num", label: "Risk per lot ($)", step: 10, min: 1,
+      hint: "ATR mode: shares = risk ÷ (ATR × stop multiple)." },
+    { k: "atr_stop_mult", t: "num", label: "ATR stop multiple", step: 0.1, min: 0.1 },
+    { k: "atr_period", t: "num", label: "ATR period", step: 1, min: 2 },
+    { k: "min_shares", t: "num", label: "Min shares", step: 1, min: 1 },
+    { k: "max_shares", t: "num", label: "Max shares", step: 1, min: 1 },
+  ]},
+
+  { legend: "Strategy control", fields: [
+    { k: "strategy", t: "txt", label: "Strategy slug",
+      hint: "Leave blank to run the ladder. A slug from the Backtest page hands "
+          + "decisions to that strategy document." },
+    { k: "strategy_entries", t: "bool", label: "Strategy decides entries",
+      hint: "Replaces <b>both</b> the first-entry rule and the add rule. "
+          + "<code>max_lots</code> and every portfolio guard still apply." },
+    { k: "strategy_exits", t: "bool", label: "Strategy decides exits",
+      hint: "An indicator exit <b>overrides the take-profit</b>: the resting order "
+          + "is cancelled and the lot is sold now. A target is a guess about where "
+          + "to leave; an indicator is a reason to." },
+  ]},
+
   { legend: "Entry", fields: [
     { k: "first_entry", t: "sel", label: "First entry",
       opts: [["red_bar", "on a red bar close"], ["immediate", "immediately"]] },

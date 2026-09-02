@@ -134,6 +134,25 @@ TICKER_DEFAULTS: dict[str, Any] = {
     "allow_extended_hours": False,
 
     # --- per-ladder operational ---
+    # --- position sizing ---
+    # fixed   : shares_per_lot, as it has always been
+    # dollars : lot_dollars / price, so a $12 stock and a $500 one risk the same
+    # atr_risk: risk_dollars / (ATR * atr_stop_mult) -- equal risk per lot,
+    #           which is the only sizing that means the same thing across symbols
+    "size_mode":         "fixed",
+    "lot_dollars":       1500.0,
+    "risk_dollars":      100.0,
+    "atr_stop_mult":     2.0,
+    "atr_period":        14,
+    "min_shares":        1,
+    "max_shares":        100000,
+
+    # --- strategy-driven decisions (both default OFF: the ladder is unchanged
+    # until you deliberately hand a decision over to a strategy document) ---
+    "strategy":          "",      # slug from strategies/, "" = the ladder
+    "strategy_entries":  False,   # let the strategy decide when to open
+    "strategy_exits":    False,   # let the strategy decide when to close
+
     "auto_reconcile":    True,         # make the ledger follow Alpaca instead of halting
     "dry_run":           True,         # arm from the dashboard to transmit
     "autostart":         False,        # start THIS engine when the app boots
@@ -364,6 +383,10 @@ class Engine:
         self._orphan_since: dict[str, float] = {}
         self._reconcile_times: list[float] = []
         self._warn_at: dict[str, float] = {}       # key -> last time it was said
+        self._strat = None                         # compiled Strategy, cached
+        self._strat_slug = ""
+        self._strat_bars: list = []
+        self._strat_at = 0.0
         self._reconcile_streak = 0
         self._reconcile_last = 0.0
         self._entry_backoff_until = 0.0
@@ -793,6 +816,22 @@ class Engine:
         for key in [k for k in self._warn_at if k.startswith("tpwait-")]:
             if key[7:] not in live_ids:
                 self._warn_at.pop(key, None)
+
+        # ---- 4e. strategy exits ----
+        # An indicator-driven exit OVERRIDES the resting take-profit: the
+        # take-profit is cancelled and the lot is sold now. That is the whole
+        # point of handing exits to a strategy -- a target is a guess about
+        # where to leave, an indicator is a reason to.
+        if self.cfg.get("strategy_exits") and not self.cfg["dry_run"]:
+            for lot in list(self.ledger.open_lots):
+                if lot.shares <= 0:
+                    continue
+                if not self._strategy_says_exit(lot):
+                    continue
+                self.ev("ORDER", f"Strategy exit on lot {lot.id}: closing "
+                                 f"{lot.shares} sh now, overriding the "
+                                 f"${lot.tp_price:.2f} target.")
+                self._close_lot_now(lot, f"strategy {self._strat_slug} exit")
 
         # ---- 5. daily loss limit ----
         dll = float(self.cfg.get("daily_loss_limit") or 0)
@@ -1682,6 +1721,16 @@ class Engine:
         o, c = float(bar["o"]), float(bar["c"])
         red = c < o
 
+        # A strategy in charge of entries replaces BOTH the first-entry rule and
+        # the add rule -- it decides, on its own conditions, whether to open
+        # another lot. max_lots and every portfolio guard still apply above this.
+        want = self._strategy_says_enter()
+        if want is not None:
+            if want:
+                self._submit_entry(f"strategy {self._strat_slug}: entry conditions met "
+                                   f"on close ${c:.2f}")
+            return
+
         if not self.ledger.open_lots:
             if self.cfg["first_entry"] == "immediate" or red:
                 self._submit_entry(f"open on {'red bar' if red else 'immediate mode'} close ${c:.2f}")
@@ -1689,6 +1738,185 @@ class Engine:
 
         if self._add_trigger_met(c):
             self._submit_entry(self._add_reason(c))
+
+    def _close_lot_now(self, lot: "Lot", why: str) -> bool:
+        """Cancel a lot's resting sell and sell it at the market instead.
+
+        Used by strategy exits. The cancel has to land before the sell or Alpaca
+        rejects it -- the shares are still held by the resting order.
+        """
+        b = self.broker
+        if not b:
+            return False
+        try:
+            if lot.tp_client_id:
+                o = next((x for x in self.open_orders
+                          if x.get("client_order_id") == lot.tp_client_id), None)
+                if o:
+                    b.cancel(o["id"])
+                    time.sleep(0.6)          # let the cancel free the shares
+                lot.tp_client_id = ""
+                lot.tp_order_id = ""
+            coid = f"xs-{lot.id}-{int(time.time()) % 100000}"
+            if self.is_extended():
+                # extended hours will not take a market order; cross the spread
+                bid = float(self.quote.get("bp") or 0) or self.last_price
+                px = _round_cent(max(0.01, bid - 0.02))
+                o = b.sell_limit_gtc(self.symbol, lot.shares, px, coid,
+                                     extended_hours=True)
+            else:
+                o = b.submit(symbol=self.symbol, qty=str(lot.shares), side="sell",
+                             type="market", time_in_force="day", client_order_id=coid)
+            self.ev("TP", f"Strategy exit order sent for lot {lot.id} ({why}).")
+            try:
+                journal.record_event(self.symbol, "strategy_exit", lot_id=lot.id,
+                                     shares=lot.shares, why=why,
+                                     order=o.get("id", ""))
+            except Exception:
+                pass
+            return True
+        except AlpacaError as e:
+            self.flag(f"xs-{lot.id}",
+                      f"Strategy exit for lot {lot.id} was rejected: {str(e)[:120]}. "
+                      f"Its take-profit will be re-placed on the next tick.")
+            return False
+
+    def _lot_shares(self) -> int:
+        """How many shares the next lot should be.
+
+        Fixed share counts mean a $12 stock and a $500 one carry wildly
+        different risk for the same 'lot'. Dollar and ATR sizing make a lot mean
+        the same thing whatever the symbol.
+        """
+        mode = self.cfg.get("size_mode", "fixed")
+        lo = max(1, int(self.cfg.get("min_shares", 1)))
+        hi = max(lo, int(self.cfg.get("max_shares", 100000)))
+        price = self.last_price or 0.0
+
+        if mode == "fixed" or price <= 0:
+            n = int(self.cfg["shares_per_lot"])
+        elif mode == "dollars":
+            n = int(float(self.cfg.get("lot_dollars", 1500)) / price)
+        elif mode == "atr_risk":
+            a = self._atr_now()
+            stop = a * float(self.cfg.get("atr_stop_mult", 2.0)) if a else 0.0
+            if stop <= 0:
+                # no ATR yet: fall back rather than guess a size
+                self.flag("size", f"{self.symbol}: ATR not available yet, sizing "
+                                  f"this lot at shares_per_lot instead.")
+                n = int(self.cfg["shares_per_lot"])
+            else:
+                self.unflag("size")
+                n = int(float(self.cfg.get("risk_dollars", 100)) / stop)
+        else:
+            n = int(self.cfg["shares_per_lot"])
+        return max(lo, min(hi, max(1, n)))
+
+    def _atr_now(self) -> float:
+        """ATR over a real bar window, cached. The fleet snapshot is too short."""
+        bars = self._indicator_bars()
+        if len(bars) < int(self.cfg.get("atr_period", 14)) + 2:
+            return 0.0
+        try:
+            import indicators
+            series = indicators.atr([float(b["h"]) for b in bars],
+                                    [float(b["l"]) for b in bars],
+                                    [float(b["c"]) for b in bars],
+                                    int(self.cfg.get("atr_period", 14)))
+            v = series[-1] if series else None
+            return float(v) if v else 0.0
+        except Exception:
+            return 0.0
+
+    def _indicator_bars(self) -> list:
+        """A window long enough to compute indicators on, refreshed per bar.
+
+        Deliberately NOT the fleet snapshot, which keeps about five bars -- just
+        enough to spot a completed bar and nowhere near enough for an EMA(50).
+        """
+        tf = self.cfg.get("bar_size", "1Min")
+        span = {"1Min": 5, "5Min": 12, "15Min": 25,
+                "1Hour": 90, "1Day": 500}.get(tf, 7)
+        period = BAR_SECONDS.get(tf, 60)
+        if self._strat_bars and time.time() - self._strat_at < max(20, period / 2):
+            return self._strat_bars
+        try:
+            import btjobs
+            self._strat_bars = btjobs.CACHE.get(self.fleet.broker, self.symbol,
+                                                tf, span, max_age=period)
+            self._strat_at = time.time()
+        except Exception as e:
+            LOG.warning("%s indicator bars: %s", self.symbol, e)
+        return self._strat_bars
+
+    # ------------------------------------------------------------ strategy
+    def strategy(self):
+        """The compiled strategy document, or None when running the ladder."""
+        slug = str(self.cfg.get("strategy") or "")
+        if not slug:
+            self._strat, self._strat_slug = None, ""
+            return None
+        if self._strat is not None and self._strat_slug == slug:
+            return self._strat
+        try:
+            import strategy as SM
+            self._strat = SM.Strategy(SM.load(slug))
+            self._strat_slug = slug
+            self.unflag("strategy")
+        except Exception as e:
+            self._strat, self._strat_slug = None, ""
+            self.flag("strategy", f"{self.symbol}: strategy {slug!r} could not be "
+                                  f"loaded ({e}). Falling back to the ladder.")
+        return self._strat
+
+    def _strategy_ready(self):
+        """(strategy, bars) with indicators computed, or (None, []) if not usable."""
+        st = self.strategy()
+        if st is None:
+            return None, []
+        bars = self._indicator_bars()
+        if len(bars) < st.warmup() + 2:
+            return None, []
+        try:
+            st.prepare(bars)
+        except Exception as e:
+            self.flag("strategy", f"{self.symbol}: strategy failed to prepare ({e}).")
+            return None, []
+        return st, bars
+
+    def _strategy_says_enter(self) -> Optional[bool]:
+        """True/False from the strategy, or None when it is not in charge."""
+        if not self.cfg.get("strategy_entries"):
+            return None
+        st, bars = self._strategy_ready()
+        if st is None:
+            return None
+        # the LAST bar in the window may still be forming; judge the one before
+        i = len(bars) - 2
+        if i < 0:
+            return None
+        try:
+            return bool(st.test(st.entry, i))
+        except Exception as e:
+            self.flag("strategy", f"{self.symbol}: entry rule failed ({e}).")
+            return None
+
+    def _strategy_says_exit(self, lot: "Lot") -> bool:
+        """Does the strategy want this lot closed now?"""
+        if not self.cfg.get("strategy_exits"):
+            return False
+        st, bars = self._strategy_ready()
+        if st is None:
+            return False
+        i = len(bars) - 2
+        if i < 0:
+            return False
+        ctx = {"target": lot.tp_price, "stop": None}
+        try:
+            return bool(st.test(st.exit, i, ctx))
+        except Exception as e:
+            self.flag("strategy", f"{self.symbol}: exit rule failed ({e}).")
+            return False
 
     def _add_trigger_met(self, close: float) -> bool:
         mode = self.cfg["add_mode"]
@@ -1745,7 +1973,7 @@ class Engine:
         if (self.ledger.shares > 0 or (self.broker_qty or 0) > 0) and str(self.cfg.get("side_mode") or "auto") == "short":
             self.ev("WARN", "short bias, waiting until flat -- will not short over longs")
             return
-        shares = int(self.cfg["shares_per_lot"])
+        shares = self._lot_shares()
         lot_id = self.ledger.next_lot_id()
         self.ledger.save()
         coid = f"en-{lot_id}"
@@ -2202,6 +2430,12 @@ class Engine:
             "autostart": bool(self.cfg.get("autostart")),
             "auto_reconcile": bool(self.cfg.get("auto_reconcile", True)),
             "exit_mode": self.cfg.get("exit_mode", "limit"),
+            "strategy": self.cfg.get("strategy", ""),
+            "strategy_entries": bool(self.cfg.get("strategy_entries")),
+            "strategy_exits": bool(self.cfg.get("strategy_exits")),
+            "size_mode": self.cfg.get("size_mode", "fixed"),
+            "next_lot_shares": self._lot_shares(),
+            "atr": round(self._atr_now(), 4),
             "trail_amount": float(self.cfg.get("trail_amount", 0.05)),
             "trail_use_broker_stop": bool(self.cfg.get("trail_use_broker_stop", True)),
             "trend_filter": bool(self.cfg.get("trend_filter", True)),
