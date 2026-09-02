@@ -40,7 +40,20 @@
       "dry_run": false,
       "autostart": false,
       "notes": "",
-      "created": ""
+      "created": "",
+      "exit_mode": "limit",
+      "trail_amount": 0.05,
+      "trail_exit_offset": 0.02,
+      "trail_use_broker_stop": true,
+      "trend_filter": true,
+      "trend_flat_blocks_entries": true,
+      "side_mode": "auto",
+      "ema_4h_period": 50,
+      "st_1h_atr": 10,
+      "st_1h_mult": 3.0,
+      "st_1m_atr": 10,
+      "st_1m_mult": 2.0,
+      "auto_reconcile": true
     },
     "MSTX": {
       "symbol": "MSTX",
@@ -72,7 +85,58 @@
       "dry_run": false,
       "autostart": false,
       "notes": "",
-      "created": "2026-08-24T17:03:32-05:00"
+      "created": "2026-08-24T17:03:32-05:00",
+      "exit_mode": "limit",
+      "trail_amount": 0.05,
+      "trail_exit_offset": 0.02,
+      "trail_use_broker_stop": true,
+      "trend_filter": true,
+      "trend_flat_blocks_entries": true,
+      "side_mode": "auto",
+      "ema_4h_period": 50,
+      "st_1h_atr": 10,
+      "st_1h_mult": 3.0,
+      "st_1m_atr": 10,
+      "st_1m_mult": 2.0,
+      "auto_reconcile": true
+    }
+  },
+  "agents": {
+    "risk-watchdog": {
+      "enabled": false,
+      "mode": "interval",
+      "interval_minutes": 30,
+      "market_hours_only": true,
+      "time": "10:00",
+      "weekday": 0,
+      "weekdays_only": true
+    },
+    "performance-analyst": {
+      "enabled": false,
+      "mode": "daily",
+      "time": "16:30",
+      "weekdays_only": true,
+      "interval_minutes": 60,
+      "market_hours_only": false,
+      "weekday": 0
+    },
+    "ticker-scout": {
+      "enabled": false,
+      "mode": "weekly",
+      "time": "18:00",
+      "weekday": 6,
+      "weekdays_only": false,
+      "interval_minutes": 60,
+      "market_hours_only": false
+    },
+    "strategy-tuner": {
+      "enabled": false,
+      "mode": "weekly",
+      "time": "10:00",
+      "weekday": 5,
+      "weekdays_only": false,
+      "interval_minutes": 60,
+      "market_hours_only": false
     }
   }
 }
