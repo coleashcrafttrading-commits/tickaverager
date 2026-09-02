@@ -34,7 +34,12 @@ from typing import Any, Iterable, Optional
 
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = ROOT / "state"
-JOURNAL_PATH = STATE_DIR / "journal.jsonl"
+
+# Tests set TICKAVERAGER_JOURNAL to a scratch file. Without this the offline
+# suites wrote TEST-0001 lots straight into the production history -- 24 of
+# them, which then showed up as open inventory in the health check.
+JOURNAL_PATH = Path(os.environ.get("TICKAVERAGER_JOURNAL",
+                                   str(STATE_DIR / "journal.jsonl")))
 
 _LOCK = threading.Lock()
 
@@ -116,6 +121,36 @@ def record_close(engine: Any, lot: Any, shares: int, price: float,
         "cfg_hash":    cfg_hash(cfg),
         "cfg":         cfg_snapshot(cfg),
     })
+
+
+def record_lot_delta(symbol: str, gone: list, added: list, why: str,
+                     cfg: dict) -> dict:
+    """Journal the lots a rebuild removed and the lots it created.
+
+    Without this the journal silently leaks: a rebuild swaps the whole lot list
+    and the departed lots are never marked closed, so they stay "open" in the
+    history forever. 72 rebuilds left 44 phantom lots and $63k of imaginary
+    inventory, which fed the health check, the performance tab and every agent.
+
+    The P/L on a discarded lot is genuinely unknown -- the shares may have sold,
+    or may just have been re-identified under a different lot id. It is booked
+    at 0 and flagged `inferred`, never mixed in with real fills.
+    """
+    snap, h = cfg_snapshot(cfg), cfg_hash(cfg)
+    for l in gone:
+        append({"event": "close", "symbol": symbol, "lot_id": l.id,
+                "shares": int(l.shares), "entry_price": round(float(l.entry_price), 4),
+                "exit_price": 0.0, "realized": 0.0, "hold_seconds": 0,
+                "inferred": True, "dry_run": False, "why": f"ladder rebuilt: {why}",
+                "cfg_hash": h, "cfg": snap})
+    for i, l in enumerate(added, 1):
+        append({"event": "open", "symbol": symbol, "lot_id": l.id,
+                "shares": int(l.shares), "entry_price": round(float(l.entry_price), 4),
+                "tp_price": round(float(l.tp_price), 4),
+                "cost": round(l.shares * float(l.entry_price), 2),
+                "rung": i, "inferred": True, "dry_run": False,
+                "why": f"ladder rebuilt: {why}", "cfg_hash": h, "cfg": snap})
+    return {"closed": len(gone), "opened": len(added)}
 
 
 def record_event(symbol: str, event: str, **kw) -> None:
@@ -462,7 +497,12 @@ def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str]) -> dict:
     """
     live = set(open_lot_ids)
     rows = load(symbol=symbol)
-    stale = [x for x in open_inventory(rows) if x["lot_id"] not in live]
+    inv = open_inventory(rows)
+    stale = [x for x in inv if x["lot_id"] not in live]
+    # the ledger is the truth for what is open, so a lot it holds that the
+    # journal has never seen is just as wrong as a phantom
+    seen = {x["lot_id"] for x in inv}
+    missing = [lid for lid in live if lid not in seen]
     for x in stale:
         append({"event": "close", "symbol": symbol, "lot_id": x["lot_id"],
                 "shares": x["shares"], "entry_price": x["entry_price"],
@@ -470,8 +510,58 @@ def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str]) -> dict:
                 "inferred": True, "dry_run": False,
                 "why": "not in the ledger and no sell on record -- closed by an "
                        "adopt, a flatten or a manual sale. P/L unknown."})
+    # Read the real shares and price off the ledger. Recording these as zero
+    # makes the row invisible to open_inventory, which silently leaves the two
+    # still disagreeing -- the exact failure this function exists to catch.
+    led_path = STATE_DIR / f"lots_{symbol}.json"
+    led_lots = {}
+    try:
+        led_lots = {l["id"]: l for l in
+                    json.loads(led_path.read_text()).get("open_lots", [])}
+    except Exception:
+        pass
+    for lid in missing:
+        l = led_lots.get(lid, {})
+        sh = int(l.get("shares") or 0)
+        px = float(l.get("entry_price") or 0)
+        append({"event": "open", "symbol": symbol, "lot_id": lid, "shares": sh,
+                "entry_price": round(px, 4),
+                "tp_price": round(float(l.get("tp_price") or 0), 4),
+                "cost": round(sh * px, 2), "rung": 0,
+                "entry_time": l.get("entry_time", ""),
+                "inferred": True, "dry_run": False,
+                "why": "in the ledger but absent from the journal -- "
+                       "recorded so the two agree"})
     return {"ok": True, "symbol": symbol, "inferred_closes": len(stale),
+            "missing_from_journal": missing,
             "lot_ids": [x["lot_id"] for x in stale]}
+
+
+def purge_symbol(symbol: str) -> dict:
+    """Physically remove every row for a symbol. For test pollution only.
+
+    The journal is append-only by design, so this is the one deliberate
+    exception -- rows for a symbol that never traded are not history, they are
+    contamination, and leaving them in corrupts every aggregate.
+    """
+    if not JOURNAL_PATH.exists():
+        return {"ok": True, "removed": 0}
+    kept, removed = [], 0
+    for line in JOURNAL_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            if json.loads(line).get("symbol") == symbol:
+                removed += 1
+                continue
+        except json.JSONDecodeError:
+            pass
+        kept.append(line)
+    with _LOCK:
+        tmp = JOURNAL_PATH.with_suffix(".tmp")
+        tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+        os.replace(tmp, JOURNAL_PATH)
+    return {"ok": True, "removed": removed, "symbol": symbol}
 
 
 def _replay_rungs(entries: dict, exits: list) -> dict:

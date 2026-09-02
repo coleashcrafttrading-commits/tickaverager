@@ -14,6 +14,13 @@ from __future__ import annotations
 
 import sys
 
+import os
+import tempfile
+
+# never touch the real trade history from a test
+os.environ["TICKAVERAGER_JOURNAL"] = os.path.join(
+    tempfile.gettempdir(), "tickaverager_test_journal.jsonl")
+
 import engine
 from engine import Engine, Ledger, Lot
 from test_reconcile import FakeFleet, check  # reuse the harness

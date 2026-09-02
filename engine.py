@@ -907,8 +907,22 @@ class Engine:
             self.ev("WARN", "Cannot rebuild the ladder yet -- no usable order history.")
             return False
         self.cancel_all_tps()
+
+        # The journal has to see the swap. Anything dropped here without a
+        # close row stays open in the history for ever; that is what put 44
+        # phantom lots and $63k of imaginary inventory into the analysis.
+        before = {l.id: l for l in self.ledger.open_lots}
+        after = {l.id: l for l in rebuilt}
+        gone = [l for i, l in before.items() if i not in after]
+        added = [l for i, l in after.items() if i not in before]
+
         self.ledger.open_lots = rebuilt
         self.ledger.save()
+        if gone or added:
+            try:
+                journal.record_lot_delta(self.symbol, gone, added, why, self.cfg)
+            except Exception as e:
+                LOG.warning("journal rebuild delta %s: %s", self.symbol, e)
         if rebuilt:
             lo = min(l.entry_price for l in rebuilt)
             hi = max(l.entry_price for l in rebuilt)
@@ -920,7 +934,8 @@ class Engine:
         try:
             journal.record_event(self.symbol, "ladder_rebuilt", why=why,
                                  lots=len(rebuilt),
-                                 shares=sum(l.shares for l in rebuilt))
+                                 shares=sum(l.shares for l in rebuilt),
+                                 dropped=len(gone), created=len(added))
         except Exception:
             pass
         return True
