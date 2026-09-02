@@ -62,12 +62,33 @@ def load_passes(paths: Optional[list[str]] = None) -> list[dict]:
     return out
 
 
+def has_controls(p: dict) -> bool:
+    return any(c.get("family", "").startswith("CONTROL")
+               for c in p.get("selected", []))
+
+
 def newest_per_timeframe(passes: list[dict]) -> list[dict]:
+    """One pass per timeframe: the newest that INCLUDES the controls.
+
+    A pass without the random-entry control cannot be checked against the null,
+    and a strategy score with nothing to compare it to is a number, not a
+    finding. So a control-bearing pass always beats a newer one without them;
+    a control-less pass is used only if there is no alternative, and is marked
+    so the report can say the comparison is missing.
+    """
     best: dict[str, dict] = {}
     for p in passes:
         tf = p.get("timeframe", "?")
-        if tf not in best or p.get("when", "") > best[tf].get("when", ""):
+        cur = best.get(tf)
+        if cur is None:
             best[tf] = p
+            continue
+        better = ((has_controls(p), p.get("when", ""))
+                  > (has_controls(cur), cur.get("when", "")))
+        if better:
+            best[tf] = p
+    for p in best.values():
+        p["_has_controls"] = has_controls(p)
     return sorted(best.values(), key=lambda p: p.get("timeframe", ""))
 
 
@@ -567,9 +588,22 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
                           "%d/%d" % (te.get("symbols_profitable", 0),
                                      te.get("symbols_scored", 0)),
                           format(te.get("total_trades", 0), ",")])
-    F.append(tbl(["Bars", "Control", "In sample", "Out of sample",
-                  "Symbols +", "Trades"], crows,
-                 [0.6, 2.4, 1.0, 1.1, 0.8, 0.9]))
+    if crows:
+        F.append(tbl(["Bars", "Control", "In sample", "Out of sample",
+                      "Symbols +", "Trades"], crows,
+                     [0.6, 2.4, 1.0, 1.1, 0.8, 0.9]))
+    else:
+        F.append(Paragraph(
+            "<font color='%s'><b>No control ran in these passes.</b> Every "
+            "score above is therefore uncompared: there is no measurement of "
+            "what an uninformed entry would have scored on the same bars, so "
+            "none of it should be acted on.</font>" % RED, S["BODY"]))
+    missing = [p.get("timeframe") for p in passes if not p.get("_has_controls")]
+    if missing and crows:
+        F.append(Paragraph(
+            "No control ran on the %s pass, so its candidates have no null to "
+            "clear and are shown uncompared." % ", ".join(str(m) for m in missing),
+            S["NOTE"]))
 
     # ---------------------------------------------------------- survival
     F.append(Paragraph("Every family, and what happened to it", S["H2"]))
