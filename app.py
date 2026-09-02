@@ -79,6 +79,23 @@ def index():
     return FileResponse(ROOT / "static" / "index.html", headers=NO_CACHE)
 
 
+@app.get("/ui/{path:path}")
+def ui_asset(path: str):
+    """Serve the dashboard's css/js modules.
+
+    Hand-rolled rather than StaticFiles so the same no-cache headers apply. A
+    cached stale bundle looks exactly like the bot being broken, and that has
+    already cost an evening once.
+    """
+    f = (ROOT / "static" / "ui" / path).resolve()
+    root = (ROOT / "static" / "ui").resolve()
+    if not str(f).startswith(str(root)) or not f.is_file():
+        raise HTTPException(404, f"no such asset: {path}")
+    kind = {".css": "text/css", ".js": "application/javascript",
+            ".map": "application/json"}.get(f.suffix, "text/plain")
+    return FileResponse(f, media_type=kind, headers=NO_CACHE)
+
+
 def _engine(sym: str):
     try:
         return get_fleet().engine(sym)
@@ -333,6 +350,167 @@ def agent_run(job_id: str, body: dict = Body(default={})):
 @app.get("/api/agents/{job_id}/runs")
 def agent_runs(job_id: str, limit: int = 20):
     return {"ok": True, "runs": scheduler.read_runs(job_id, limit)}
+
+
+# ======================================================================= risk
+@app.get("/api/risk")
+def risk():
+    """Exposure and volatility per ladder, plus what a move against you costs.
+
+    ATR is the honest unit for this strategy: a $0.10 target on a symbol that
+    ranges $0.02 a minute is a different trade from the same target on one that
+    ranges $0.15, and dollar settings alone hide that completely.
+    """
+    import trend
+    f = get_fleet()
+    g = f.gcfg
+    p = f.portfolio()
+    out = []
+    for sym in f.symbols():
+        e = f.engines[sym]
+        c, led = e.cfg, e.ledger
+        price = e.last_price or 0.0
+        # The fleet's snapshot only keeps ~5 bars per symbol -- enough to spot a
+        # completed bar, nowhere near enough for ATR(14). Pull a real window,
+        # through the backtest cache so opening this page repeatedly does not
+        # hammer Alpaca.
+        import btjobs
+        a = 0.0
+        try:
+            tf = c.get("bar_size", "1Min")
+            # generous windows: a weekend or a market holiday can leave a
+            # 1.5-day request with literally zero bars
+            span = {"1Min": 5, "5Min": 12, "15Min": 25,
+                    "1Hour": 90, "1Day": 500}.get(tf, 7)
+            bars = btjobs.CACHE.get(f.broker, sym, tf, span, max_age=300)
+            bars = bars[-150:]
+            if len(bars) >= 16:
+                # trend.atr returns the WHOLE series, not a single value
+                series = trend.atr([float(b["h"]) for b in bars],
+                                   [float(b["l"]) for b in bars],
+                                   [float(b["c"]) for b in bars], 14)
+                a = float(series[-1]) if series else 0.0
+        except Exception:
+            a = 0.0
+        spl = int(c["shares_per_lot"])
+        maxlots = int(c["max_lots"])
+        tp = float(c["take_profit"])
+        add = float(c["add_distance"])
+        held = led.shares
+        cost = sum(l.cost for l in led.open_lots)
+        full = spl * maxlots * price
+        # how far price must fall for the ladder to fill every rung
+        depth = add * maxlots if c.get("add_mode") == "points" else 0.0
+        out.append({
+            "symbol": sym,
+            "price": round(price, 4),
+            "atr": round(a, 4),
+            "atr_pct": round(100 * a / price, 3) if price else 0.0,
+            "take_profit": tp,
+            "add_distance": add,
+            "tp_in_atr": round(tp / a, 2) if a else None,
+            "add_in_atr": round(add / a, 2) if a else None,
+            "shares_per_lot": spl,
+            "max_lots": maxlots,
+            "lots_open": len(led.open_lots),
+            "shares_held": held,
+            "cost_basis": round(cost, 2),
+            "max_exposure": round(full, 2),
+            "used_pct": round(100 * len(led.open_lots) / maxlots, 1) if maxlots else 0.0,
+            "unrealized": round(float(e.position.get("unrealized_pl") or 0), 2)
+                          if e.position else 0.0,
+            "ladder_depth": round(depth, 2),
+            "ladder_depth_pct": round(100 * depth / price, 2) if price else 0.0,
+            "armed": not bool(c.get("dry_run")),
+            "running": e.running,
+            "exit_mode": c.get("exit_mode", "limit"),
+            # a fall of one ATR against everything currently held
+            "loss_1atr": round(-a * held, 2),
+            "loss_full_ladder": round(-(depth / 2) * spl * maxlots, 2) if depth else 0.0,
+        })
+
+    deployed = p["deployed"]
+    equity = p["account_value"] or 1
+    return {
+        "ok": True,
+        "account": {
+            "equity": p["account_value"], "cash": p["cash"],
+            "buying_power": p["buying_power"], "deployed": deployed,
+            "deployed_pct": round(100 * deployed / equity, 1),
+            "open_pl": p["open_pl"], "made_today": p["made_today"],
+        },
+        "limits": {
+            "max_total_exposure": g.get("max_total_exposure") or 0,
+            "reserve_cash": g.get("reserve_cash") or 0,
+            "account_daily_loss_limit": g.get("account_daily_loss_limit") or 0,
+            "max_running_tickers": g.get("max_running_tickers") or 0,
+        },
+        "tickers": out,
+        "worst_case": round(sum(t["max_exposure"] for t in out), 2),
+    }
+
+
+# =================================================================== backtest
+@app.post("/api/backtest")
+def backtest_submit(spec: dict = Body(...)):
+    """Queue a backtest or a parameter sweep.
+
+    spec: {symbol, timeframe, days, config:{...}, sweep:{param:[values]}, label}
+    Returns a job id straight away -- a sweep can take minutes and the HTTP
+    call must not sit on it.
+    """
+    import btjobs
+    if not spec.get("symbol"):
+        raise HTTPException(400, "A symbol is required.")
+    try:
+        return btjobs.submit(get_fleet(), spec)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/backtest/jobs")
+def backtest_jobs(limit: int = 15):
+    import btjobs
+    return {"ok": True, "jobs": btjobs.recent(limit), "cache": btjobs.CACHE.stats()}
+
+
+@app.get("/api/backtest/{job_id}")
+def backtest_status(job_id: str, limit: int = 250):
+    import btjobs
+    try:
+        return btjobs.status(job_id, limit)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
+# ======================================================================= bars
+@app.get("/api/bars")
+def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
+         limit: int = 1500):
+    """OHLCV for the dashboard chart.
+
+    The same Alpaca bars the engine decides on, so the candles on screen are
+    not a third-party widget showing something subtly different. Split-adjusted
+    because a reverse split otherwise draws a cliff that never happened.
+    """
+    from datetime import datetime, timedelta, timezone
+    f = get_fleet()
+    if not f.broker:
+        raise HTTPException(503, "Broker not connected.")
+    sym = symbol.upper()
+    start = (datetime.now(timezone.utc)
+             - timedelta(days=max(0.05, days))).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        rows = f.broker.bars_range(sym, timeframe, start, adjustment="split")
+    except Exception as e:
+        raise HTTPException(502, f"bars for {sym}: {e}")
+    rows = rows[-limit:]
+    return {
+        "ok": True, "symbol": sym, "timeframe": timeframe, "count": len(rows),
+        "bars": [{"t": b["t"], "o": float(b["o"]), "h": float(b["h"]),
+                  "l": float(b["l"]), "c": float(b["c"]),
+                  "v": float(b.get("v") or 0)} for b in rows],
+    }
 
 
 # ===================================================================== lookup

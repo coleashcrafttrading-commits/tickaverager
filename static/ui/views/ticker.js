@@ -1,0 +1,416 @@
+/* ============================================================================
+   Ticker detail -- Live (chart + ladder), Orders & positions, Settings.
+   ========================================================================= */
+"use strict";
+import {
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
+  money, money0, sgn, pct, px, dur, go,
+} from "../core.js";
+import { Chart, ema, atr } from "../chart.js";
+import { STRATEGY_FIELDS, formHTML, formPatch } from "../fields.js";
+
+let chart = null;
+let chartCfg = { tf: "1Min", days: 2 };
+
+/* ------------------------------------------------------------------ live */
+function liveNotes(s) {
+  const b = [];
+  if (s.halted) b.push(`<div class="note bad"><b>Halted</b> — ${esc(s.halt_reason)}.
+    ${s.symbol} will not trade until this is cleared.</div>`);
+  if (!s.in_sync && !s.dry_run) b.push(`<div class="note warn"><b>Out of sync</b> —
+    Alpaca holds <b>${s.broker_qty}</b> shares, the ladder tracks <b>${s.shares}</b>.
+    Auto-correction handles this within 25 seconds.</div>`);
+  if (s.reconcile && s.reconcile.uncovered > 0) {
+    b.push(`<div class="note bad"><b>${s.reconcile.uncovered} shares have no resting
+      sell.</b> They will not exit on their own.</div>`);
+  }
+  for (const a of (s.attention || [])) {
+    b.push(`<div class="note warn">${esc(a)}</div>`);
+  }
+  if (s.running && !s.halted && s.block_reason) {
+    b.push(`<div class="note info">Not looking for entries:
+      <b>${esc(s.block_reason)}</b>.</div>`);
+  }
+  if (s.reconciles_this_hour) {
+    b.push(`<div class="note warn">Position auto-corrected
+      <b>${s.reconciles_this_hour}×</b> in the last hour. It keeps trading and keeps
+      correcting, but repeated drift means something upstream is wrong.</div>`);
+  }
+  if (!s.dry_run && !s.halted) {
+    b.push(`<div class="note bad"><b>Armed</b> — orders transmit to
+      ${s.paper ? "the paper" : "the LIVE"} account. Max exposure
+      <b>${money(s.max_exposure)}</b> (${s.config.max_lots} × ${s.config.shares_per_lot}
+      sh). There is <b>no stop loss</b>.</div>`);
+  }
+  return b.join("");
+}
+
+async function loadChart(sym, s) {
+  const host = el("chartHost");
+  if (!host) return;
+  try {
+    const r = await GET(`/api/bars?symbol=${sym}&timeframe=${chartCfg.tf}`
+                      + `&days=${chartCfg.days}`);
+    const bars = r.bars || [];
+    if (!chart) chart = new Chart(host, { height: 360 });
+    const closes = bars.map((b) => b.c);
+    const markers = (s && s.lots || []).slice(0, 14).map((l) => ({
+      price: l.entry_price, color: "var(--accent)", dash: [3, 3],
+    })).concat((s && s.lots || []).slice(0, 14).map((l) => ({
+      price: l.tp_price, color: "var(--up)", dash: [5, 3],
+    })));
+    chart.setData(bars, {
+      overlays: [
+        { name: "EMA20", values: ema(closes, 20), color: "#8b9cb5", width: 1.2 },
+        { name: "EMA50", values: ema(closes, 50), color: "#e8a33d", width: 1.2 },
+      ],
+      markers,
+      keepView: true,
+    });
+    const last = bars[bars.length - 1];
+    const a = atr(bars, 14);
+    const atrNow = a[a.length - 1];
+    el("chartMeta").innerHTML = last
+      ? `${bars.length} bars · ATR(14) ${atrNow ? "$" + atrNow.toFixed(3) : "—"}`
+      : "";
+  } catch (e) {
+    host.innerHTML = `<div class="empty">Chart unavailable — ${esc(e.message)}</div>`;
+  }
+}
+
+function mountLive(sym) {
+  el("view").innerHTML = `
+    <div id="tkNotes"></div>
+    ${card("", `
+      <div style="display:flex;align-items:baseline;gap:18px;flex-wrap:wrap">
+        <div><div class="stat-k">Last</div>
+          <div class="stat-v num" id="tkPx">—</div></div>
+        <div><div class="stat-k">Spread</div>
+          <div class="stat-s num" id="tkSpread" style="font-size:13px;margin-top:8px">—</div></div>
+        <div class="spacer" style="flex:1"></div>
+        <div class="row-btns" id="tkCtl">
+          <button class="btn sm good" id="bStart">Start</button>
+          <button class="btn sm" id="bStop">Stop</button>
+          <button class="btn sm danger" id="bArm">Arm</button>
+          <button class="btn sm" id="bDisarm">Disarm</button>
+          <button class="btn sm" id="bRecover">Re-cover lots</button>
+          <button class="btn sm" id="bClear">Clear halt</button>
+          <button class="btn sm danger" id="bFlatten">Flatten</button>
+        </div>
+      </div>`)}
+    ${card("Chart", `
+      <div class="chart-bar" style="margin-bottom:12px">
+        ${["1Min", "5Min", "15Min", "1Hour", "1Day"].map((t) =>
+          `<button class="btn sm tfb" data-tf="${t}">${t}</button>`).join("")}
+        <span class="faint" style="margin-left:auto" id="chartMeta"></span>
+      </div>
+      <div id="chartHost"></div>
+      <div class="tip">Dashed blue lines are your lot entries, green are their
+        take-profits. Scroll to zoom, drag to pan.</div>`)}
+    <div class="grid main">
+      <div>
+        ${card("Ladder", `<div class="stats" id="tkStats"></div>
+          <div style="margin-top:18px" id="tkLots"></div>`, "", {})}
+      </div>
+      <div>
+        ${card("Money", `<div class="stats" id="tkMoney"></div>`)}
+        ${card("Activity", `<div class="log" id="tkLog"></div>`, "", { flush: true })}
+      </div>
+    </div>`;
+
+  el("view").querySelectorAll(".tfb").forEach((b) => {
+    b.classList.toggle("on", b.dataset.tf === chartCfg.tf);
+    b.onclick = () => {
+      chartCfg.tf = b.dataset.tf;
+      chartCfg.days = { "1Min": 2, "5Min": 7, "15Min": 20, "1Hour": 60, "1Day": 400 }[b.dataset.tf];
+      el("view").querySelectorAll(".tfb").forEach((x) =>
+        x.classList.toggle("on", x.dataset.tf === chartCfg.tf));
+      if (chart) chart.view = null;
+      loadChart(sym, S.ticker);
+    };
+  });
+
+  const A = (fn) => () => act(fn);
+  el("bStart").onclick = A(async () => {
+    await POST(`/api/ticker/${sym}/start`); toast(`${sym} started.`, "ok"); });
+  el("bStop").onclick = A(async () => {
+    await POST(`/api/ticker/${sym}/stop`); toast(`${sym} stopped.`, "ok"); });
+  el("bDisarm").onclick = A(async () => {
+    await POST(`/api/ticker/${sym}/arm`, { live: false });
+    toast(`${sym} back to dry run.`, "ok"); });
+  el("bClear").onclick = A(async () => {
+    await POST(`/api/ticker/${sym}/clear_halt`); toast(`${sym} halt cleared.`, "ok"); });
+  el("bRecover").onclick = A(async () => {
+    const r = await POST(`/api/ticker/${sym}/ensure_tps`);
+    if (r.failed) toast(`Placed ${r.placed}, but <b>${r.failed} could not be covered</b>. `
+      + `Usually an old sell is still cancelling and holding the shares.`, "err", 9000);
+    else toast(`${sym}: re-covered ${r.placed || 0} lot(s).`, "ok");
+  });
+  el("bArm").onclick = A(async () => {
+    const s = S.ticker; if (!s) return;
+    const c = s.config;
+    const per = (c.shares_per_lot || 0) * (s.last_price || 0);
+    if (!await ask({
+      title: `Arm ${sym}?`, danger: true, ok: "Arm", requireWord: "ARM",
+      body: `<table style="width:100%"><tbody>
+        <tr><td style="border:0;padding:3px 0">Account</td>
+            <td style="border:0;padding:3px 0;text-align:right">${esc(s.account.number)}
+            ${s.paper ? "(paper)" : "<b class='down'>LIVE MONEY</b>"}</td></tr>
+        <tr><td style="border:0;padding:3px 0">Each lot</td>
+            <td style="border:0;padding:3px 0;text-align:right">${c.shares_per_lot} sh ≈ ${money(per)}</td></tr>
+        <tr><td style="border:0;padding:3px 0">Cap</td>
+            <td style="border:0;padding:3px 0;text-align:right">${c.max_lots} lots ≈ ${money(s.max_exposure)}</td></tr>
+        <tr><td style="border:0;padding:3px 0">Take profit</td>
+            <td style="border:0;padding:3px 0;text-align:right">$${c.take_profit}/share</td></tr>
+        </tbody></table><br><b class="down">There is no stop loss.</b> Only ${sym} is affected.`,
+    })) return;
+    await POST(`/api/ticker/${sym}/arm`, { live: true, confirm: "ARM" });
+    toast(`${sym} is ARMED — orders now transmit.`, "err", 8000);
+  });
+  el("bFlatten").onclick = A(async () => {
+    const s = S.ticker;
+    if (!await ask({
+      title: `Flatten ${sym}?`, danger: true, ok: "Flatten", requireWord: "FLATTEN",
+      body: `Cancels every resting take-profit on ${sym} and <b>market-sells all
+        ${s ? s.alpaca.qty : "?"} shares</b> at whatever the book gives.<br><br>
+        Other tickers are untouched.`,
+    })) return;
+    const r = await POST(`/api/ticker/${sym}/flatten`, { confirm: "FLATTEN" });
+    toast(`${sym} flattened: cancelled ${r.cancelled}, sold ${r.sold} sh.`, "ok");
+  });
+
+  loadChart(sym, null);
+}
+
+function paintLive() {
+  const s = S.ticker;
+  if (!s || !el("tkStats")) return;
+  const A = s.alpaca, c = s.config, P = s.pnl;
+
+  el("tkNotes").innerHTML = liveNotes(s);
+  el("tkPx").textContent = s.last_price ? "$" + s.last_price.toFixed(2) : "—";
+  el("tkSpread").textContent = (s.bid && s.ask)
+    ? `${s.bid.toFixed(2)} / ${s.ask.toFixed(2)} (${((s.ask - s.bid)).toFixed(3)})`
+    : "no quote";
+
+  el("bStart").disabled = s.running;
+  el("bStop").disabled = !s.running;
+  el("bArm").disabled = !s.dry_run;
+  el("bDisarm").disabled = s.dry_run;
+  el("bClear").disabled = !s.halted;
+
+  const bar = s.last_bar;
+  el("tkStats").innerHTML =
+    stat("Lots", `${s.lot_count}<span class="faint" style="font-size:15px">/${c.max_lots}</span>`,
+         `${s.shares} shares`)
+    + stat("Ladder avg", px(s.avg_price, 4), s.in_sync ? "in sync" : `Alpaca: ${s.broker_qty}`)
+    + stat("Next add", px(s.next_add_at))
+    + stat("Open P/L", sgn(s.unrealized))
+    + stat("Closed", s.closed_count, `today ${money0(s.realized_today)}`)
+    + stat("Last bar", bar
+        ? `<span class="${bar.color === "red" ? "down" : bar.color === "green" ? "up" : "faint"}">${bar.color}</span>`
+        : "—", s.last_tick_at ? `tick ${s.last_tick_at}` : "");
+
+  const byCoid = Object.fromEntries((A.orders || []).map((o) => [o.coid, o]));
+  el("tkLots").innerHTML = tableHTML(
+    ["Lot", "Shares", "Entry", "Target", "To go", "P/L", "Resting"],
+    (s.lots || []).map((l) => {
+      const pl = (s.last_price - l.entry_price) * l.shares;
+      const to = l.tp_price - s.last_price;
+      const o = byCoid[l.tp_client_id];
+      const sell = o
+        ? `<span class="up">${o.remaining} @ ${px(o.limit)}</span>`
+        : l.armed ? `<span class="warn">trailing from ${px(l.peak)}</span>`
+        : s.dry_run ? `<span class="faint">dry run</span>`
+        : `<span class="down">none</span>`;
+      return `<tr>
+        <td class="mono faint" style="text-align:left">${esc(l.id)}</td>
+        <td class="num">${l.shares}</td>
+        <td class="num">${px(l.entry_price, 4)}</td>
+        <td class="num">${px(l.tp_price)}</td>
+        <td class="num ${to <= 0 ? "up" : "faint"}">${to <= 0 ? "at target" : "$" + to.toFixed(2)}</td>
+        <td class="num">${sgn(pl)}</td>
+        <td style="text-align:right">${sell}</td></tr>`;
+    }), `Flat — no open lots on ${s.symbol}.`);
+
+  el("tkMoney").innerHTML =
+    stat("Position", money(A.market_value), `${A.qty} sh`)
+    + stat("Cost", money(A.cost_basis))
+    + stat("Open P/L", sgn(A.unrealized_pl),
+           A.unrealized_plpc ? `${A.unrealized_plpc.toFixed(2)}% since entry` : "")
+    + stat("Today", sgn(P.realized_ladder), "this ladder's own lots")
+    + stat("All time", sgn(s.realized_all), `${s.closed_count} lots closed`);
+
+  el("tkLog").innerHTML = (s.events || []).slice(0, 60).map((e) => `
+    <div class="log-row"><span class="log-t">${esc(e.t)}</span>
+      <span class="log-l lv-${esc(e.level)}">${esc(e.level)}</span>
+      <span class="log-m">${esc(e.msg)}</span></div>`).join("")
+    || `<div class="empty">Nothing yet.</div>`;
+
+  if (chart && chart.bars.length) loadChart(s.symbol, s);
+}
+
+/* --------------------------------------------------------------- orders */
+function mountOrders(sym) {
+  el("view").innerHTML = `
+    ${card("Position at Alpaca", `<div class="stats" id="poStats"></div>
+      <div id="poRec" style="margin-top:16px"></div>`)}
+    ${card("Working orders", `<div id="poOrders"></div>`, "", { flush: true })}
+    ${card("Order history", `<div id="poHist"></div>`,
+      `<button class="btn sm" id="poReload">Reload</button>`, { flush: true })}`;
+  el("poReload").onclick = () => loadHistory(sym);
+  loadHistory(sym);
+}
+
+async function loadHistory(sym) {
+  const b = el("poHist");
+  if (!b) return;
+  b.innerHTML = `<div class="empty">Loading…</div>`;
+  try {
+    const rows = await GET(`/api/ticker/${sym}/orders?status=all&limit=100`);
+    b.innerHTML = tableHTML(
+      ["Time", "Order", "Side", "Type", "Qty", "Filled", "Avg fill", "Limit", "Status"],
+      rows.map((o) => `<tr>
+        <td class="faint">${esc((o.submitted_at || "").slice(11, 19))}</td>
+        <td class="mono faint" style="text-align:left">${esc(o.client_order_id || "")}</td>
+        <td class="${o.side === "sell" ? "up" : ""}">${esc((o.side || "").toUpperCase())}</td>
+        <td class="faint">${esc(o.type || "")}</td>
+        <td class="num">${Number(o.qty || 0)}</td>
+        <td class="num">${Number(o.filled_qty || 0)}</td>
+        <td class="num">${o.filled_avg_price ? "$" + Number(o.filled_avg_price).toFixed(4) : "—"}</td>
+        <td class="num">${o.limit_price ? "$" + Number(o.limit_price).toFixed(2) : "—"}</td>
+        <td class="${o.status === "filled" ? "up" : "faint"}">${esc(o.status || "")}</td>
+      </tr>`), "No orders on record.");
+  } catch (e) {
+    b.innerHTML = `<div class="empty down">${esc(e.message)}</div>`;
+  }
+}
+
+function paintOrders() {
+  const s = S.ticker;
+  if (!s || !el("poStats")) return;
+  const A = s.alpaca, R = s.reconcile;
+  el("poStats").innerHTML =
+    stat("Shares held", A.qty)
+    + stat("Avg entry", px(A.avg_entry_price, 4))
+    + stat("Cost basis", money(A.cost_basis))
+    + stat("Market value", money(A.market_value))
+    + stat("Open P/L", sgn(A.unrealized_pl))
+    + stat("Covered", `${R.covered_shares}`,
+           R.uncovered ? `<span class="down">${R.uncovered} uncovered</span>` : "all covered");
+
+  el("poRec").innerHTML = `<div class="note ${R.in_sync ? "info" : "bad"}">
+    <b>${R.in_sync ? "In sync" : "Out of sync"}</b> — Alpaca holds
+    <b>${R.alpaca_shares}</b> sh, the ladder tracks <b>${R.ledger_shares}</b> sh.
+    Covered by resting sells: <b>${R.covered_shares}</b>${R.uncovered
+      ? ` · <span class="down">uncovered ${R.uncovered}</span>` : ""}.</div>`;
+
+  el("poOrders").innerHTML = tableHTML(
+    ["Order", "Side", "Qty", "Filled", "Working", "Limit", "Ext", "Status"],
+    (A.orders || []).map((o) => `<tr>
+      <td class="mono faint" style="text-align:left">${esc(o.coid)}</td>
+      <td class="${o.side === "sell" ? "up" : ""}">${o.side.toUpperCase()}</td>
+      <td class="num">${o.qty}</td><td class="num">${o.filled || 0}</td>
+      <td class="num"><b>${o.remaining}</b></td>
+      <td class="num">${px(o.limit)}</td>
+      <td class="${o.extended_hours ? "up" : "down"}">${o.extended_hours ? "yes" : "no"}</td>
+      <td class="faint">${esc(o.status)}</td></tr>`),
+    "No working orders at Alpaca.");
+}
+
+/* -------------------------------------------------------------- settings */
+function mountSettings() {
+  const s = S.ticker;
+  if (!s) { el("view").innerHTML = `<div class="empty">Loading…</div>`; return; }
+  const sym = s.symbol;
+  el("view").innerHTML = `
+    <div class="grid main">
+      <div>${card(`${sym} strategy`, `<form id="tform">${formHTML(s.config)}
+        <button type="submit" class="btn primary" style="width:100%">Save ${sym}</button>
+        <div class="tip" id="tsaveMsg"></div></form>`,
+        "independent of every other ticker")}</div>
+      <div>
+        ${card("What this ladder does", `<div class="stats" id="tsSum"></div>
+          <div class="tip" id="tsNote"></div>`)}
+        ${card("Remove", `<div class="tip" style="margin-top:0">Removing a ticker
+          deletes its settings. Its ledger is kept and <b>nothing at Alpaca is
+          cancelled or sold</b>.</div>
+          <button class="btn danger" id="bRemove" style="margin-top:12px">
+            Remove ${sym}</button>`)}
+      </div>
+    </div>`;
+
+  const f = el("tform");
+  f.addEventListener("input", () => { S.touched = true; });
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await act(async () => {
+      await POST(`/api/ticker/${sym}/config`, formPatch(f));
+      S.touched = false;
+      toast(`${sym} settings saved.`, "ok");
+      el("tsaveMsg").innerHTML = `<span class="up">Saved — live on the next tick.</span>`;
+      setTimeout(() => { const m = el("tsaveMsg"); if (m) m.textContent = ""; }, 4000);
+    });
+  });
+  el("bRemove").onclick = () => act(async () => {
+    if (!await ask({
+      title: `Remove ${sym}?`, danger: true, ok: "Remove", requireWord: sym,
+      body: `${sym} stops being managed. Its ledger stays on disk and any position or
+             resting order at Alpaca is <b>left exactly as it is</b>.`,
+    })) return;
+    try { await DEL(`/api/ticker/${sym}`); }
+    catch (err) {
+      if (!await ask({ title: "Still holding stock", danger: true,
+        ok: "Remove anyway", requireWord: "FORCE", body: esc(err.message) })) return;
+      await DEL(`/api/ticker/${sym}?force=true`);
+    }
+    toast(`${sym} removed.`, "ok");
+    go({ kind: "overview" });
+  });
+}
+
+function paintSettings() {
+  const s = S.ticker;
+  if (!s || !el("tsSum")) return;
+  const c = s.config;
+  const per = (c.shares_per_lot || 0) * (s.last_price || 0);
+  el("tsSum").innerHTML =
+    stat("Per lot", money(per), `${c.shares_per_lot} sh @ ${px(s.last_price)}`)
+    + stat("Max exposure", money(s.max_exposure), `${c.max_lots} lots`)
+    + stat("Take profit", "$" + Number(c.take_profit).toFixed(2), "per share, per lot")
+    + stat("Win per lot", money(c.take_profit * c.shares_per_lot), "before fees");
+  el("tsNote").innerHTML =
+    `Adds ${c.add_mode === "points" ? `every <b>$${Number(c.add_distance).toFixed(2)}</b> below the last fill`
+      : c.add_mode === "percent" ? `every <b>${c.add_percent}%</b> below the last fill`
+      : "on <b>any close below the ladder average</b>"}, on ${c.bar_size} closes, up to
+     <b>${c.max_lots}</b> lots. Exit mode: <b>${esc(c.exit_mode || "limit")}</b>${
+       c.exit_mode === "trail" ? ` (arms at target, trails $${c.trail_amount})` : ""}.
+     The cap stops <i>adds</i>, not losses — there is no stop loss.`;
+}
+
+/* ------------------------------------------------------------------ view */
+VIEWS.ticker = {
+  title: (ov, v) => v.sym,
+  sub: (ov, v) => {
+    const t = (ov?.tickers || []).find((x) => x.symbol === v.sym);
+    return t ? `${t.state} · ${t.lot_count}/${t.max_lots} lots · ${t.shares} shares` : "";
+  },
+  tabs: [["live", "Live"], ["orders", "Orders & positions"], ["settings", "Settings"]],
+
+  mount(v) {
+    if (chart) { chart.destroy(); chart = null; }
+    const tab = v.tab || "live";
+    if (tab === "live") mountLive(v.sym);
+    else if (tab === "orders") mountOrders(v.sym);
+    else mountSettings();
+  },
+  paint(v) {
+    const tab = v.tab || "live";
+    if (tab === "live") paintLive();
+    else if (tab === "orders") paintOrders();
+    else {
+      if (!el("tform") && S.ticker) mountSettings();
+      if (!S.touched) paintSettings();
+    }
+  },
+};

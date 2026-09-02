@@ -363,6 +363,7 @@ class Engine:
         self._mismatch_snap = 0.0        # which snapshot the last strike came from
         self._orphan_since: dict[str, float] = {}
         self._reconcile_times: list[float] = []
+        self._warn_at: dict[str, float] = {}       # key -> last time it was said
         self._reconcile_streak = 0
         self._reconcile_last = 0.0
         self._entry_backoff_until = 0.0
@@ -781,6 +782,17 @@ class Engine:
             self.ensure_tps()
             return
         self.unflag("overcover")
+
+        # ---- 4d. clear flags whose lot is gone ----
+        # A per-lot warning outlives its lot otherwise, so the dashboard keeps
+        # complaining about something that closed hours ago.
+        live_ids = {l.id for l in self.ledger.open_lots}
+        for key in [k for k in self.attention if k.startswith("tp-")]:
+            if key[3:] not in live_ids:
+                self.unflag(key)
+        for key in [k for k in self._warn_at if k.startswith("tpwait-")]:
+            if key[7:] not in live_ids:
+                self._warn_at.pop(key, None)
 
         # ---- 5. daily loss limit ----
         dll = float(self.cfg.get("daily_loss_limit") or 0)
@@ -1228,6 +1240,13 @@ class Engine:
                         continue                           # id is burnt -- take a new one
                 elif "insufficient" in body or "qty" in body:
                     # shares are still held by an order that is cancelling
+                    # every 2s tick retried this and wrote a line, 30 a minute,
+                    # burying anything that mattered. Say it once a minute.
+                    _k = f"tpwait-{lot.id}"
+                    _now = time.time()
+                    if _now - self._warn_at.get(_k, 0) < 60:
+                        return False
+                    self._warn_at[_k] = _now
                     self.ev("WARN", f"Cannot rest a TP for lot {lot.id} yet: {e.body[:120]}. "
                                     f"Shares are still held by a cancelling order; "
                                     f"will retry on the next tick.")
@@ -2124,7 +2143,11 @@ class Engine:
         # shares Alpaca holds that no resting sell is covering. In trail mode
         # nothing rests by design, so every share reads as "uncovered" unless
         # the figure is told what mode it is in.
-        covered = sum(o["remaining"] for o in alpaca["orders"] if o["side"] == "sell")
+        # An order in pending_cancel is on its way out and will never fill, so
+        # counting it as cover reports "uncovered: 0" while shares genuinely
+        # have no exit. That is exactly what hid 100 naked RAM shares.
+        covered = sum(o["remaining"] for o in alpaca["orders"]
+                      if o["side"] == "sell" and o["status"] != "pending_cancel")
         if self.trailing():
             covered = alpaca["qty"]
 
@@ -2258,7 +2281,9 @@ class Engine:
                 else sum((px - l.entry_price) * l.shares for l in led.open_lots) if px
                 else 0.0)
         covered = sum(max(0, int(float(o.get("qty") or 0)) - int(float(o.get("filled_qty") or 0)))
-                      for o in self.open_orders if o.get("side") == "sell")
+                      for o in self.open_orders
+                      if o.get("side") == "sell"
+                      and o.get("status") != "pending_cancel")
         held = int(float(p["qty"])) if p else 0
 
         if self.halted:
