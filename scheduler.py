@@ -189,6 +189,44 @@ JOBS: dict[str, dict] = {
             "Three good candidates beat fifteen ranked ones. If nothing is worth "
             "adding, say exactly that and stop."),
     },
+    "backtest-researcher": {
+        "label": "Backtest researcher",
+        "agent": "backtest-runner",
+        "blurb": "Writes and tests coded strategies against real history, banks "
+                 "what survives. Never touches a live ticker.",
+        "risk": "read-only",
+        "default": {"enabled": False, "mode": "daily", "time": "18:30",
+                    "weekdays_only": True, "interval_minutes": 60,
+                    "market_hours_only": False, "weekday": 1},
+        "prompt": (
+            "Research session. You are testing ideas, not changing anything live. "
+            "Follow .claude/agents/backtest-runner.md and the Research and Risk "
+            "sections of CLAUDE.md.\n\n"
+            "1. Establish the BASELINE first, every time. The live ladder on each "
+            "configured ticker:\n"
+            "     .venv/Scripts/python agentctl.py backtest <SYM> --days 30 "
+            "--detail --actor backtest-researcher\n"
+            "   Record its total_pl. Nothing you write is interesting unless it "
+            "beats that number on the same bars.\n\n"
+            "2. Test ONE idea properly rather than six badly. Write it as a coded "
+            "strategy in a .py file, sweep the two or three parameters that "
+            "actually matter, and run it over the SAME symbol, timeframe and "
+            "window as the baseline. Different bars are not a comparison.\n\n"
+            "3. Judge on total_pl and max_drawdown together, then profit_factor. "
+            "Ignore win rate entirely -- it is the easiest number to fake and this "
+            "system fakes it by construction.\n\n"
+            "4. Bank every result you take seriously, win or lose:\n"
+            "     .venv/Scripts/python agentctl.py risk-record <job> <profile> "
+            "--strategy <name> --actor backtest-researcher\n"
+            "   A negative result that is banked is worth more than a positive one "
+            "that is not, because it stops the same idea being retried in a month.\n\n"
+            "5. Save anything worth keeping: agentctl code-save <file> --name <slug>.\n\n"
+            "Report what you tested, what the baseline was, and whether you beat "
+            "it. If you did not beat it, say so plainly and stop -- do not go "
+            "looking for a window where the idea works. NEVER arm a ticker, never "
+            "change a live setting; that is the fleet manager's job and it needs "
+            "your evidence first."),
+    },
     "strategy-tuner": {
         "label": "Strategy tuner",
         "agent": "strategy-tuner",
@@ -204,14 +242,21 @@ JOBS: dict[str, dict] = {
             "For each configured ticker, in this order:\n"
             "  .venv/Scripts/python agentctl.py stats --symbol <SYM> --days 30 --actor strategy-tuner\n"
             "  .venv/Scripts/python agentctl.py inventory --symbol <SYM> --actor strategy-tuner\n"
-            "  .venv/Scripts/python backtest.py <SYM> --days 30 --sweep take_profit=0.05,0.10,0.20,0.40\n"
-            "  .venv/Scripts/python backtest.py <SYM> --days 30 --sweep add_distance=0.05,0.10,0.20\n\n"
-            "Decide on TOTAL P/L, never realized alone -- realized rewards a setting "
-            "that banks winners while accumulating losers it never closes. Check "
-            "max_open_drawdown alongside: more profit with triple the drawdown is not "
-            "better. Check fill_rate_pct: a passive peg backtests as fewer better "
-            "trades and behaves in reality as an idle ladder. If hit_max_lots is true "
-            "you are comparing caps, not the parameter you swept.\n\n"
+            "  .venv/Scripts/python agentctl.py backtest <SYM> --days 30 "
+            "--sweep take_profit=0.05,0.10,0.20,0.40 --detail --actor strategy-tuner\n"
+            "  .venv/Scripts/python agentctl.py backtest <SYM> --days 30 "
+            "--sweep add_distance=0.05,0.10,0.20 --actor strategy-tuner\n\n"
+            "Decide on total_pl, never net_profit alone -- net_profit counts only "
+            "closed trades and this ladder never closes a loser, so it reads as a "
+            "100% win rate whatever the account is doing. total_pl = net_profit + "
+            "open_pl is what the account actually shows. Check max_drawdown "
+            "alongside: more profit with triple the drawdown is not better. A null "
+            "profit_factor means nothing lost in that window -- a fact about the "
+            "window, not an edge. If max_lots_held equals the cap you are comparing "
+            "caps, not the parameter you swept.\n\n"
+            "Then BANK the run so the next review can see the evidence:\n"
+            "  .venv/Scripts/python agentctl.py risk-record <job-id> <profile-slug> "
+            "--strategy <what-you-tested> --actor strategy-tuner\n\n"
             "Change at most ONE parameter per ticker, with "
             "`agentctl set <SYM> <k>=<v> --actor strategy-tuner`, and state what you "
             "expect it to do so the next review can check you. Changing take_profit "

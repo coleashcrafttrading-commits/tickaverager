@@ -381,6 +381,151 @@ def cmd_unfreeze(a) -> int:
     return _out({"ok": True, "was_frozen": existed})
 
 
+# ================================================================= backtest
+def _wait_job(jid: str, timeout: float = 900) -> dict:
+    """Block until a backtest job finishes. Agents want the answer, not a job id."""
+    import time as _t
+    t0 = _t.time()
+    while _t.time() - t0 < timeout:
+        j = _http("GET", f"/api/backtest/{jid}")
+        if j.get("state") in ("done", "error"):
+            return j
+        _t.sleep(1.0)
+    raise SystemExit(_fail(f"backtest {jid} did not finish within {timeout}s"))
+
+
+def cmd_backtest(a) -> int:
+    """Run any backtest and wait for the answer.
+
+    Three modes, one command:
+        agentctl backtest RAM --days 20
+        agentctl backtest RAM --strategy rsi-dip-in-an-uptrend
+        agentctl backtest RAM --code my-strategy.py --sweep p.rsi_period=7,14,21
+    """
+    spec = {
+        "symbol": a.symbol.upper(),
+        "timeframe": a.timeframe,
+        "days": a.days,
+        "label": a.label or "",
+        "sweep": _sweep(a.sweep or []),
+    }
+    if a.code:
+        src = Path(a.code)
+        if src.exists():
+            spec["code"] = src.read_text(encoding="utf-8")
+        else:
+            spec["code_slug"] = a.code       # a saved coded strategy by slug
+        spec["mode"] = "code"
+    elif a.strategy:
+        spec["strategy"] = a.strategy
+        spec["mode"] = "strategy"
+    else:
+        spec["mode"] = "ladder"
+    if a.config:
+        spec["config"] = _kvs(a.config)
+
+    job = _http("POST", "/api/backtest", spec)
+    j = _wait_job(job["id"], a.timeout)
+    if j["state"] == "error":
+        return _out({"ok": False, "error": j["error"]})
+
+    out = {"ok": True, "id": j["id"], "symbol": j["symbol"],
+           "timeframe": j["timeframe"], "bars": j.get("bars"),
+           "from": j.get("from"), "to": j.get("to"),
+           "tape_drift_pct": j.get("drift"), "seconds": j["seconds"],
+           "combinations": len(j["results"]),
+           "results": j["results"][:a.top]}
+    if a.detail:
+        d = _http("GET", f"/api/backtest/{j['id']}/detail?row=0")["report"]
+        out["best"] = {"params": d.get("_params"), "summary": d["summary"],
+                       "trades": d["trades"][:a.trades] if a.trades else []}
+    return _out(out)
+
+
+def cmd_bt_detail(a) -> int:
+    d = _http("GET", f"/api/backtest/{a.job}/detail?row={a.row}")["report"]
+    return _out({"ok": True, "params": d.get("_params"),
+                 "summary": d["summary"],
+                 "trades": d["trades"][:a.trades] if a.trades else [],
+                 "logs": d.get("logs", [])[:60]})
+
+
+def cmd_code_list(a) -> int:
+    return _out(_http("GET", "/api/code"))
+
+
+def cmd_code_save(a) -> int:
+    src = Path(a.file)
+    if not src.exists():
+        raise SystemExit(_fail(f"no such file: {a.file}"))
+    return _out(_http("POST", "/api/code",
+                      {"slug": a.name or src.stem,
+                       "code": src.read_text(encoding="utf-8")}))
+
+
+# ===================================================================== risk
+def cmd_risk_profiles(a) -> int:
+    r = _http("GET", "/api/risk/profiles")
+    if a.full:
+        return _out(r)
+    return _out({"ok": True, "profiles": [
+        {"slug": p["slug"], "name": p["name"], "preset": p.get("preset"),
+         "note": p.get("note", ""), "values": p["values"]}
+        for p in r["profiles"]]})
+
+
+def cmd_risk_save(a) -> int:
+    return _out(_http("POST", "/api/risk/profiles",
+                      {"name": a.name, "slug": a.slug or "",
+                       "note": a.note or "", "values": _kvs(a.set or [])}))
+
+
+def cmd_risk_bank(a) -> int:
+    q = f"?limit={a.limit}"
+    if a.symbol:
+        q += f"&symbol={a.symbol.upper()}"
+    r = _http("GET", "/api/risk/bank" + q)
+    if a.board:
+        return _out({"ok": True, "leaderboard": r["leaderboard"]})
+    return _out(r)
+
+
+def cmd_risk_record(a) -> int:
+    """Bank a finished backtest against a risk profile.
+
+    This is how an agent turns a run into evidence. The bank is append-only, so
+    a result recorded here cannot be quietly revised later.
+    """
+    profs = _http("GET", "/api/risk/profiles")["profiles"]
+    prof = next((p for p in profs if p["slug"] == a.profile), None)
+    if not prof:
+        raise SystemExit(_fail(
+            f"no risk profile {a.profile!r}. Have: "
+            f"{', '.join(p['slug'] for p in profs)}"))
+    d = _http("GET", f"/api/backtest/{a.job}/detail?row={a.row}")["report"]
+    j = _http("GET", f"/api/backtest/{a.job}")
+    return _out(_http("POST", "/api/risk/bank", {
+        "profile": prof,
+        "result": {"summary": d["summary"], "_params": d.get("_params", {})},
+        "strategy": a.strategy or j.get("strategy") or j.get("mode", ""),
+        "symbol": j["symbol"], "timeframe": j["timeframe"], "days": j["days"],
+        "mode": j.get("mode", ""), "job": a.job,
+        "actor": a.actor, "note": a.note or ""}))
+
+
+def _sweep(pairs: list) -> dict:
+    """['take_profit=0.1,0.2', 'p.n=7,14'] -> {'take_profit':[.1,.2], 'p.n':[7,14]}"""
+    out = {}
+    for p in pairs:
+        if "=" not in p:
+            raise SystemExit(_fail(f"--sweep expects key=a,b,c, got {p!r}"))
+        k, v = p.split("=", 1)
+        vals = [_coerce(x.strip()) for x in v.split(",") if x.strip()]
+        if vals:
+            out[k.strip()] = vals
+    return out
+
+
 def cmd_journal_backfill(a) -> int:
     """Rebuild journal history for a symbol from Alpaca's order record."""
     sys.path.insert(0, str(ROOT))
@@ -473,6 +618,74 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("unfreeze", help="lift the freeze (needs --confirm UNFREEZE)", parents=[common])
     s.add_argument("--confirm", default="")
     s.set_defaults(fn=cmd_unfreeze)
+
+    # ---- research: agents drive the backtester from here ----
+    s = sub.add_parser("backtest", help="run any backtest and wait for the answer",
+                       parents=[common])
+    s.add_argument("symbol")
+    s.add_argument("--timeframe", default="1Min")
+    s.add_argument("--days", type=float, default=30)
+    s.add_argument("--strategy", default="", help="a saved strategy slug")
+    s.add_argument("--code", default="",
+                   help="a .py file, or the slug of a saved coded strategy")
+    s.add_argument("--sweep", action="append",
+                   help="key=a,b,c -- repeatable. Mixes freely: take_profit, "
+                        "target.points, stop.atr_mult, ind.rsi.period, p.oversold")
+    s.add_argument("--config", action="append", help="key=value run settings")
+    s.add_argument("--label", default="")
+    s.add_argument("--top", type=int, default=20, help="rows to return")
+    s.add_argument("--detail", action="store_true",
+                   help="also return the winner's full summary")
+    s.add_argument("--trades", type=int, default=0,
+                   help="include this many trades from the winner")
+    s.add_argument("--timeout", type=float, default=900)
+    s.set_defaults(fn=cmd_backtest)
+
+    s = sub.add_parser("bt-detail", help="full report for one row of a job",
+                       parents=[common])
+    s.add_argument("job")
+    s.add_argument("--row", type=int, default=0)
+    s.add_argument("--trades", type=int, default=0)
+    s.set_defaults(fn=cmd_bt_detail)
+
+    sub.add_parser("code-list", help="saved coded strategies",
+                   parents=[common]).set_defaults(fn=cmd_code_list)
+
+    s = sub.add_parser("code-save", help="save a .py file as a coded strategy",
+                       parents=[common])
+    s.add_argument("file")
+    s.add_argument("--name", default="")
+    s.set_defaults(fn=cmd_code_save)
+
+    s = sub.add_parser("risk-profiles", help="risk profiles and presets",
+                       parents=[common])
+    s.add_argument("--full", action="store_true", help="include the field schema")
+    s.set_defaults(fn=cmd_risk_profiles)
+
+    s = sub.add_parser("risk-save", help="create or update a risk profile",
+                       parents=[common])
+    s.add_argument("name")
+    s.add_argument("--slug", default="")
+    s.add_argument("--note", default="")
+    s.add_argument("--set", action="append", help="field=value -- repeatable")
+    s.set_defaults(fn=cmd_risk_save)
+
+    s = sub.add_parser("risk-bank", help="tested risk profiles and what happened",
+                       parents=[common])
+    s.add_argument("--limit", type=int, default=50)
+    s.add_argument("--symbol", default="")
+    s.add_argument("--board", action="store_true", help="leaderboard only")
+    s.set_defaults(fn=cmd_risk_bank)
+
+    s = sub.add_parser("risk-record",
+                       help="bank a finished backtest against a risk profile",
+                       parents=[common])
+    s.add_argument("job")
+    s.add_argument("profile")
+    s.add_argument("--row", type=int, default=0)
+    s.add_argument("--strategy", default="")
+    s.add_argument("--note", default="")
+    s.set_defaults(fn=cmd_risk_record)
 
     s = add("backfill", cmd_journal_backfill, "rebuild journal from Alpaca order history")
     s.add_argument("--limit", type=int, default=500)

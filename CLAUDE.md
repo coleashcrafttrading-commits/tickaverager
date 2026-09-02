@@ -65,19 +65,105 @@ everything it does lands in `state/audit.jsonl`.
 
 Always pass `--actor <your agent name>` so the audit log says who did what.
 
+## Research: the backtester
+
+Everything is reachable from `agentctl`, which waits for the answer rather than
+handing back a job id.
+
+```bash
+# the live ladder, sweeping a setting
+.venv/Scripts/python agentctl.py backtest RAM --days 20 \
+    --sweep take_profit=0.10,0.20,0.30 --detail
+
+# a saved indicator strategy
+.venv/Scripts/python agentctl.py backtest RAM --strategy rsi-dip-in-an-uptrend
+
+# real Python -- a file, or the slug of something already saved
+.venv/Scripts/python agentctl.py backtest RAM --code mine.py \
+    --sweep p.stop_atr=1.0,1.5,2.5 --sweep p.target_atr=1.5,3.0
+.venv/Scripts/python agentctl.py code-save mine.py --name ema-pullback
+```
+
+A sweep may mix every kind of parameter in one run:
+
+| prefix | goes to |
+|---|---|
+| `take_profit` | a ladder / run setting |
+| `target.points` | a strategy document's target |
+| `stop.atr_mult` | its stop |
+| `ind.rsi.period` | an indicator inside the document |
+| `p.oversold` | a `PARAMS` value in coded strategy source |
+
+**Writing a coded strategy.** Define `on_bar(ctx, i)`; `init(ctx)` and `PARAMS`
+are optional. `ctx` gives you `o h l c v t` series, `ctx.indicator(name, **kw)`
+for any of the 26, `ctx.p` for parameters, `enter_long` / `enter_short` /
+`exit` / `modify`, and `ctx.log()`. The runner enforces the honesty rules and
+they cannot be bypassed:
+
+- **Look-ahead raises.** `ctx.c[i+1]` throws, and so does a slice or negative
+  index that reaches forward. Do not try to work around it — if you need a
+  value from the future, the strategy is wrong, not the harness.
+- A signal on bar `i` fills at bar `i+1`'s **open**.
+- A bar touching both stop and target resolves as the **stop**.
+- Slippage and fees are charged on every fill.
+
+Code runs in a separate process with **no Alpaca or Anthropic credentials** and
+a hard timeout. It cannot reach the broker, and it should not try.
+
+## Reading a backtest
+
+**`total_pl`, never `net_profit` alone.** They are different numbers and the
+difference is the whole story. The live ladder over 20 days of RAM:
+
+```
+net_profit  +$2,190     73 closed trades, 100% winners
+open_pl     -$2,577     19 lots it never closed
+total_pl      -$387     what the account would actually show
+```
+
+A 100% win rate is what a strategy with **no stop loss** always looks like:
+losers are simply never closed. The report says so in `caveat` when it sees it.
+
+- `profit_factor` is `null`, not infinity, when nothing lost. That is a fact
+  about the window, not an edge.
+- `sortino` is `null` below 3 down days.
+- `sharpe` is daily. Do not recompute it per bar.
+- If `max_lots_held` equals the cap, the cap bound the result and you are
+  comparing caps, not the parameter you swept.
+
+A backtest on 20 days of one symbol is a hypothesis, not a finding. Say which
+one you have.
+
+## Risk profiles and the bank
+
+A strategy says *when* to trade; a risk profile says *how much it may cost*.
+They are separate objects because the same strategy at two profiles is two
+different bets.
+
+```bash
+.venv/Scripts/python agentctl.py risk-profiles
+.venv/Scripts/python agentctl.py risk-save "ATR 0.25pct" --slug atr-quarter \
+    --set size_mode=atr_risk --set risk_dollars=125 --set stop_mode=atr
+.venv/Scripts/python agentctl.py risk-record <job-id> atr-quarter --strategy ema-pullback
+.venv/Scripts/python agentctl.py risk-bank --board
+```
+
+`risk-record` is how a run becomes evidence. The bank
+(`state/risk_bank.jsonl`) is **append-only** — a finding that can be edited
+afterwards is not evidence. The leaderboard ranks by **P/L per dollar of
+drawdown**, never by profit: ranking risk by profit just selects for whichever
+profile took the most risk. Anything under 10 trades is excluded, not ranked.
+
 ## Before changing a strategy setting
 
 Do not tune from intuition. The order is always:
 
 1. `agentctl stats` — what actually happened, from the journal.
-2. `backtest.py <SYM> --sweep <param>=<a,b,c>` — what would have happened.
-3. Read **total P/L**, not realized. Realized alone rewards a setting that
-   banks winners while quietly accumulating losers it never closes.
-4. Apply one change at a time and say what you expect it to do, so the next
+2. `agentctl backtest` — what would have happened.
+3. Read **total P/L**, not realized.
+4. `agentctl risk-record` it, so the next review can see the evidence.
+5. Apply one change at a time and say what you expect it to do, so the next
    review can check whether you were right.
-
-A backtest on 20 days of one symbol is a hypothesis, not a finding. Say which
-one you have.
 
 ## Reporting
 
