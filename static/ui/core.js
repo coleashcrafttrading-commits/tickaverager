@@ -65,13 +65,33 @@ export const tableHTML = (heads, rows, emptyMsg = "Nothing here.") => `
     </tbody></table></div>`;
 
 /* ---------------------------------------------------------------- api */
+/* A request that never answers is worse than one that fails: the poll loop
+   awaits it for ever and the page sits on "connecting..." with no error and
+   no retry. That is exactly what a server restart looks like from here -- the
+   socket is accepted and then nothing comes back -- so every request gets a
+   deadline and a hang is turned into an ordinary failure the caller retries. */
+const TIMEOUT_MS = { GET: 12000, POST: 240000, DELETE: 30000 };
+
 async function req(method, path, body) {
-  const r = await fetch(path, {
-    method,
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(),
+                       TIMEOUT_MS[method] || 30000);
+  let r;
+  try {
+    r = await fetch(path, {
+      method,
+      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+      signal: ctl.signal,
+    });
+  } catch (e) {
+    throw new Error(e.name === "AbortError"
+      ? `${method} ${path} did not answer in time`
+      : (e.message || String(e)));
+  } finally {
+    clearTimeout(t);
+  }
   const txt = await r.text();
   if (!r.ok) {
     let m = txt;

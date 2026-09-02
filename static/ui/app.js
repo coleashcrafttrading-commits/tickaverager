@@ -129,7 +129,18 @@ window.__render = render;
 /* ------------------------------------------------------------------ poll */
 async function tick() {
   try { S.ov = await GET("/api/overview"); }
-  catch (e) { return; }                     // server restarting; next tick catches up
+  catch (e) {
+    // The server is restarting. Returning here without re-arming the timer is
+    // what left the page stuck on "connecting..." for ever after every
+    // restart -- one failed poll killed the loop and nothing ever retried.
+    S.pollFails = (S.pollFails || 0) + 1;
+    el("railFoot").innerHTML =
+      `<span class="warn">●</span> <span>reconnecting… (${S.pollFails})</span>`;
+    clearTimeout(S.timer);
+    S.timer = setTimeout(tick, Math.min(5000, 700 * S.pollFails));
+    return;
+  }
+  S.pollFails = 0;
 
   if (S.view.kind === "ticker") {
     if (!S.ov.tickers.some((t) => t.symbol === S.view.sym)) {

@@ -244,6 +244,165 @@ export function hma(c, period = 20) {
 /* --------------------------------------------------------------- catalog
    What the chart's indicator picker offers. `panel` means it cannot share the
    price axis (RSI is 0-100; drawing it over price is meaningless). */
+/* ---- the rest of the set, mirroring indicators.py line for line ---------- */
+
+export function wma(v, period) {
+  v = F(v);
+  const out = new Array(v.length).fill(null);
+  const denom = period * (period + 1) / 2;
+  for (let i = period - 1; i < v.length; i++) {
+    let s = 0;
+    for (let k = 0; k < period; k++) s += v[i - period + 1 + k] * (k + 1);
+    out[i] = s / denom;
+  }
+  return out;
+}
+
+export function stddev(v, period) {
+  v = F(v);
+  const out = new Array(v.length).fill(null);
+  for (let i = period - 1; i < v.length; i++) {
+    const w = v.slice(i + 1 - period, i + 1);
+    const m = w.reduce((a, b) => a + b, 0) / period;
+    out[i] = Math.sqrt(w.reduce((a, x) => a + (x - m) ** 2, 0) / period);
+  }
+  return out;
+}
+
+export function cci(h, l, c, period = 20) {
+  h = F(h); l = F(l); c = F(c);
+  const tp = c.map((x, i) => (h[i] + l[i] + x) / 3);
+  const out = new Array(c.length).fill(null);
+  for (let i = period - 1; i < c.length; i++) {
+    const w = tp.slice(i + 1 - period, i + 1);
+    const m = w.reduce((a, b) => a + b, 0) / period;
+    // MEAN absolute deviation, not sigma -- that is what makes 0.015 put
+    // most readings inside +-100
+    const md = w.reduce((a, x) => a + Math.abs(x - m), 0) / period;
+    out[i] = md ? (tp[i] - m) / (0.015 * md) : 0;
+  }
+  return out;
+}
+
+export function williamsR(h, l, c, period = 14) {
+  h = F(h); l = F(l); c = F(c);
+  const out = new Array(c.length).fill(null);
+  for (let i = period - 1; i < c.length; i++) {
+    const hh = Math.max(...h.slice(i + 1 - period, i + 1));
+    const ll = Math.min(...l.slice(i + 1 - period, i + 1));
+    out[i] = hh - ll ? -100 * (hh - c[i]) / (hh - ll) : -50;
+  }
+  return out;
+}
+
+export function roc(c, period = 12) {
+  c = F(c);
+  const out = new Array(c.length).fill(null);
+  for (let i = period; i < c.length; i++) {
+    if (c[i - period]) out[i] = (c[i] - c[i - period]) / c[i - period] * 100;
+  }
+  return out;
+}
+
+export function momentum(c, period = 10) {
+  c = F(c);
+  const out = new Array(c.length).fill(null);
+  for (let i = period; i < c.length; i++) out[i] = c[i] - c[i - period];
+  return out;
+}
+
+export function obv(c, v) {
+  c = F(c); v = F(v);
+  const out = new Array(c.length).fill(null);
+  if (!c.length) return out;
+  let run = 0;
+  out[0] = 0;
+  for (let i = 1; i < c.length; i++) {
+    if (c[i] > c[i - 1]) run += v[i];
+    else if (c[i] < c[i - 1]) run -= v[i];
+    out[i] = run;
+  }
+  return out;
+}
+
+export function mfi(h, l, c, v, period = 14) {
+  h = F(h); l = F(l); c = F(c); v = F(v);
+  const tp = c.map((x, i) => (h[i] + l[i] + x) / 3);
+  const out = new Array(c.length).fill(null);
+  for (let i = period; i < c.length; i++) {
+    let pos = 0, neg = 0;
+    for (let k = i - period + 1; k <= i; k++) {
+      const flow = tp[k] * v[k];
+      if (tp[k] > tp[k - 1]) pos += flow;
+      else if (tp[k] < tp[k - 1]) neg += flow;
+    }
+    out[i] = neg === 0 ? 100 : 100 - 100 / (1 + pos / neg);
+  }
+  return out;
+}
+
+export function cmf(h, l, c, v, period = 20) {
+  h = F(h); l = F(l); c = F(c); v = F(v);
+  const mfv = c.map((x, i) => {
+    const rng = h[i] - l[i];
+    return (rng ? ((x - l[i]) - (h[i] - x)) / rng : 0) * v[i];
+  });
+  const out = new Array(c.length).fill(null);
+  for (let i = period - 1; i < c.length; i++) {
+    const vs = v.slice(i + 1 - period, i + 1).reduce((a, b) => a + b, 0);
+    out[i] = vs ? mfv.slice(i + 1 - period, i + 1).reduce((a, b) => a + b, 0) / vs : 0;
+  }
+  return out;
+}
+
+export function trix(c, period = 15) {
+  const e1 = ema(F(c), period);
+  const e2 = ema(e1.filter((x) => x != null), period);
+  const off1 = e1.length - e2.length;
+  const e3 = ema(e2.filter((x) => x != null), period);
+  const off2 = off1 + (e2.length - e3.length);
+  const out = new Array(e1.length).fill(null);
+  for (let i = 1; i < e3.length; i++) {
+    if (e3[i - 1]) out[off2 + i] = (e3[i] - e3[i - 1]) / e3[i - 1] * 100;
+  }
+  return out;
+}
+
+export function aroon(h, l, period = 25) {
+  h = F(h); l = F(l);
+  const up = new Array(h.length).fill(null);
+  const dn = new Array(h.length).fill(null);
+  for (let i = period; i < h.length; i++) {
+    const wh = h.slice(i - period, i + 1);
+    const wl = l.slice(i - period, i + 1);
+    const sinceH = period - wh.indexOf(Math.max(...wh));
+    const sinceL = period - wl.indexOf(Math.min(...wl));
+    up[i] = (period - sinceH) / period * 100;
+    dn[i] = (period - sinceL) / period * 100;
+  }
+  return { up, down: dn };
+}
+
+export function ichimoku(h, l, conversion = 9, base = 26, spanB = 52) {
+  h = F(h); l = F(l);
+  const mid = (period, i) => {
+    if (i + 1 < period) return null;
+    return (Math.max(...h.slice(i + 1 - period, i + 1))
+          + Math.min(...l.slice(i + 1 - period, i + 1))) / 2;
+  };
+  const n = h.length;
+  const tenkan = [], kijun = [], a = [], b = [];
+  for (let i = 0; i < n; i++) {
+    const t = mid(conversion, i), k = mid(base, i);
+    tenkan.push(t); kijun.push(k);
+    a.push(t == null || k == null ? null : (t + k) / 2);
+    b.push(mid(spanB, i));
+  }
+  // NOT displaced forward: shifting a span puts a value on a bar it could not
+  // have been known on, which is the look-ahead this whole file avoids
+  return { tenkan, kijun, spanA: a, spanB: b };
+}
+
 export const CATALOG = {
   ema:        { label: "EMA", params: { period: 20 }, panel: false,
                 run: (b, p) => ({ EMA: ema(b.c, p.period) }) },
@@ -273,6 +432,31 @@ export const CATALOG = {
                 run: (b, p) => adx(b.h, b.l, b.c, p.period) },
   atr:        { label: "ATR", params: { period: 14 }, panel: true,
                 run: (b, p) => ({ ATR: atr(b.h, b.l, b.c, p.period) }) },
+  wma:        { label: "WMA", params: { period: 20 }, panel: false,
+                run: (b, p) => ({ WMA: wma(b.c, p.period) }) },
+  ichimoku:   { label: "Ichimoku", params: { conversion: 9, base: 26, spanB: 52 },
+                panel: false,
+                run: (b, p) => ichimoku(b.h, b.l, p.conversion, p.base, p.spanB) },
+  cci:        { label: "CCI", params: { period: 20 }, panel: true,
+                run: (b, p) => ({ CCI: cci(b.h, b.l, b.c, p.period) }) },
+  williams_r: { label: "Williams %R", params: { period: 14 }, panel: true,
+                run: (b, p) => ({ "%R": williamsR(b.h, b.l, b.c, p.period) }) },
+  mfi:        { label: "MFI", params: { period: 14 }, panel: true,
+                run: (b, p) => ({ MFI: mfi(b.h, b.l, b.c, b.v, p.period) }) },
+  cmf:        { label: "Chaikin MF", params: { period: 20 }, panel: true,
+                run: (b, p) => ({ CMF: cmf(b.h, b.l, b.c, b.v, p.period) }) },
+  obv:        { label: "OBV", params: {}, panel: true,
+                run: (b) => ({ OBV: obv(b.c, b.v) }) },
+  roc:        { label: "Rate of change", params: { period: 12 }, panel: true,
+                run: (b, p) => ({ ROC: roc(b.c, p.period) }) },
+  momentum:   { label: "Momentum", params: { period: 10 }, panel: true,
+                run: (b, p) => ({ MOM: momentum(b.c, p.period) }) },
+  trix:       { label: "TRIX", params: { period: 15 }, panel: true,
+                run: (b, p) => ({ TRIX: trix(b.c, p.period) }) },
+  aroon:      { label: "Aroon", params: { period: 25 }, panel: true,
+                run: (b, p) => aroon(b.h, b.l, p.period) },
+  stddev:     { label: "Std deviation", params: { period: 20 }, panel: true,
+                run: (b, p) => ({ SD: stddev(b.c, p.period) }) },
 };
 
 export function cols(bars) {
