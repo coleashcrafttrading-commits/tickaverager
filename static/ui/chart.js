@@ -516,12 +516,15 @@ export function orderLines(status) {
   if (!status) return [];
   const out = [];
   const resting = new Set();
+  // a short ladder's exits are BUYs -- reading only sells would draw no
+  // resting line at all and make a covered short look naked
+  const xside = status.side === "short" ? "buy" : "sell";
   for (const o of (status.alpaca?.orders || [])) {
-    if (o.side !== "sell" || !o.limit) continue;
+    if (o.side !== xside || !o.limit) continue;
     resting.add(o.coid);
     out.push({
       price: o.limit, color: css("--up", "#35c98b"), dash: null, width: 1.6,
-      label: `SELL ${o.remaining} @ ${o.limit.toFixed(2)}`,
+      label: `${xside.toUpperCase()} ${o.remaining} @ ${o.limit.toFixed(2)}`,
     });
   }
   for (const l of (status.lots || [])) {
