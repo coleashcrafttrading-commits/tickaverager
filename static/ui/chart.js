@@ -74,8 +74,15 @@ export class Chart {
       lo = Math.min(lo, b.l); hi = Math.max(hi, b.h);
       vmax = Math.max(vmax, b.v || 0);
     }
+    // Markers must never dominate the scale. A ladder holding lots well above
+    // the current price would otherwise stretch the range so far that the
+    // candles collapse into a strip along the bottom -- which is exactly what
+    // it did. Allow a marker to widen the view by at most 15%, and pin the
+    // rest to the edge so they are still visible without wrecking the scale.
+    const barLo = lo, barHi = hi, barRange = (hi - lo) || 0.05;
+    const room = barRange * 0.15;
     for (const m of this.markers) {
-      if (m.price >= lo * 0.9 && m.price <= hi * 1.1) {
+      if (m.price >= barLo - room && m.price <= barHi + room) {
         lo = Math.min(lo, m.price); hi = Math.max(hi, m.price);
       }
     }
@@ -143,8 +150,10 @@ export class Chart {
     }
 
     /* ---- markers (lot entries / targets) ---- */
+    let offAbove = 0, offBelow = 0;
     for (const m of this.markers) {
-      if (m.price < lo || m.price > hi) continue;
+      if (m.price > hi) { offAbove++; continue; }
+      if (m.price < lo) { offBelow++; continue; }
       const y = Math.round(S.y(m.price)) + 0.5;
       g.strokeStyle = m.color || C.accent; g.lineWidth = 1;
       g.setLineDash(m.dash || [4, 4]);
@@ -158,6 +167,14 @@ export class Chart {
         g.fillStyle = m.color || C.accent;
         g.fillText(m.label, plotW - 8, y);
       }
+    }
+
+    /* off-scale markers: say they exist rather than silently dropping them */
+    if (offAbove || offBelow) {
+      g.font = "10px system-ui"; g.textAlign = "left";
+      g.fillStyle = C.text;
+      if (offAbove) g.fillText(`${offAbove} target(s) above`, 8, this.padT + 11);
+      if (offBelow) g.fillText(`${offBelow} lot(s) below`, 8, h - this.padB - this.volH - 6);
     }
 
     /* ---- candles ---- */
