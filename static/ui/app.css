@@ -380,3 +380,24 @@ canvas.chart { display: block; width: 100%; }
   border-radius: 5px; height: 13px;
 }
 @keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+
+/* ---- strategy builder: the rule tree ------------------------------------ */
+.rule-g {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 9px 10px 4px;
+  margin-bottom: 9px;
+  background: var(--panel-2, transparent);
+}
+.rule-g .rule-g { margin-left: 14px; }
+.rule-h { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.rule-c {
+  display: flex; gap: 7px; align-items: center; flex-wrap: wrap;
+  padding: 5px 0 5px 14px; margin-bottom: 4px;
+  border-left: 2px solid var(--hairline);
+}
+.rule-c select, .rule-c input { margin: 0; }
+.opnd { display: inline-flex; gap: 5px; align-items: center; }
+.opnd select[data-otype] { font-size: 11px; opacity: .65; }
+.opnd select[data-otype]:hover { opacity: 1; }

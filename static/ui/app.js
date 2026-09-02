@@ -11,6 +11,7 @@ import "./views/overview.js";
 import "./views/ticker.js";
 import "./views/backtest.js";
 import "./views/performance.js";
+import "./views/strategies.js";
 import "./views/risk.js";
 import "./views/agents.js";
 import "./views/add.js";
@@ -56,6 +57,7 @@ function paintRail() {
         <span style="color:var(--accent)">Add a ticker</span></div>`
     + `<div class="nav-label">Research</div>`
     + item("performance", "Performance", "◧")
+    + item("strategies", "Strategies", "◇")
     + item("backtest", "Backtest", "◫")
     + item("risk", "Risk", "◎")
     + `<div class="nav-label">System</div>`
