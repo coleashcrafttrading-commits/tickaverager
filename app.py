@@ -450,6 +450,52 @@ def risk():
     }
 
 
+# =================================================================== reports
+@app.post("/api/reports")
+def report_make(body: dict = Body(default={})):
+    """Generate a printable PDF. Callable by an agent as well as the UI."""
+    import report
+    kind = str(body.get("kind") or "daily")
+    if kind not in ("daily", "weekly", "inventory", "full"):
+        raise HTTPException(400, f"unknown report kind {kind!r}")
+    days = {"daily": 1, "weekly": 7, "inventory": 1, "full": 3650}[kind]
+    try:
+        path = report.build_report(get_fleet(), kind=kind,
+                                   days=int(body.get("days") or days),
+                                   note=str(body.get("note") or ""))
+    except Exception as e:
+        raise HTTPException(500, f"report failed: {e}")
+    get_fleet().ev("INFO", f"Report generated: {path.name}")
+    return {"ok": True, "name": path.name, "url": f"/reports/{path.name}"}
+
+
+@app.get("/api/reports")
+def report_list(limit: int = 60):
+    import report
+    return {"ok": True, "reports": report.listing(limit)}
+
+
+@app.get("/reports/{name}")
+def report_get(name: str):
+    """Serve a generated report for download or printing."""
+    import report
+    f = (report.REPORT_DIR / name).resolve()
+    if not str(f).startswith(str(report.REPORT_DIR.resolve())) or not f.is_file():
+        raise HTTPException(404, f"no such report: {name}")
+    return FileResponse(f, media_type="application/pdf", filename=name,
+                        headers=NO_CACHE)
+
+
+@app.delete("/api/reports/{name}")
+def report_delete(name: str):
+    import report
+    f = (report.REPORT_DIR / name).resolve()
+    if not str(f).startswith(str(report.REPORT_DIR.resolve())) or not f.is_file():
+        raise HTTPException(404, f"no such report: {name}")
+    f.unlink()
+    return {"ok": True, "deleted": name}
+
+
 # ================================================================ strategies
 @app.get("/api/strategies")
 def strategies():

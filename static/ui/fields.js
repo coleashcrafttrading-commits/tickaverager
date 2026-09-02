@@ -83,6 +83,18 @@ export const STRATEGY_FIELDS = [
           + "is allowed. <b>Not yet validated by any backtest</b> — the backtester "
           + "does not model it." },
     { k: "trend_flat_blocks_entries", t: "bool", label: "Block entries when flat" },
+    { k: "side_mode", t: "sel", label: "Direction",
+      opts: [["auto", "long only (follows a long bias)"],
+             ["long", "long only, long bias required"],
+             ["short", "short only, short bias required"],
+             ["both", "either side — follow the bias"]],
+      hint: "<b>auto</b> is what every existing ticker runs: longs only, and it "
+          + "waits out a short bias rather than fading it. <b>both</b> lets the "
+          + "ladder open shorts when the stack turns down — rungs go <i>up</i>, "
+          + "targets go <i>down</i>, exits BUY back. A ladder never mixes sides "
+          + "and never flips while a position is open. Shorting needs margin and "
+          + "an available borrow, and a short ladder with no stop has "
+          + "<b>unbounded</b> risk, unlike a long one." },
     { k: "ema_4h_period", t: "num", label: "4h EMA period", step: 1, min: 5 },
     { k: "st_1h_atr", t: "num", label: "1h SuperTrend ATR", step: 1, min: 2 },
     { k: "st_1h_mult", t: "num", label: "1h SuperTrend mult", step: 0.1, min: 0.5 },

@@ -9,14 +9,23 @@ A multi-ticker DCA ladder trading real orders on an Alpaca **paper** account
 (PA3ILNUY5E4F). One `Engine` per symbol, all supervised by `fleet.py`. Owner:
 Glenn.
 
-Long-only while a long ledger exists (never open shorts over longs). Buys dips
-when the in-engine SuperTrend+EMA stack agrees (4h close vs EMA50 regime, 1h
+Long or short, never both at once. Buys dips (or sells rips) when the in-engine
+SuperTrend+EMA stack agrees (4h close vs EMA50 regime, 1h
 SuperTrend daily bias, 1m SuperTrend must agree — LuxAlgo-style stack, not a
 LuxAlgo API). `exit_mode=trail` arms at take-profit then trails; with
 `trail_use_broker_stop` a GTC Alpaca `trailing_stop` is rested at arm so a
 process death still exits. In-process trail is backup if that order is missing.
 **There is no stop loss on unarmed lots.** A sustained downtrend still strands
-capital. Short adds are stubbed until flat (`short bias, waiting until flat`).
+capital.
+
+`side_mode` decides direction: `auto` (default, and what every live ticker
+runs) is long-only and waits out a short bias; `long`/`short` force one side;
+`both` follows the stack either way. A short ladder is the long one mirrored --
+rungs above the last fill, targets below entry, exits that BUY back. A ledger
+never mixes sides and never flips while a position is open, and `Ledger.shares`
+is a MAGNITUDE: only `Ledger.signed_shares` may be compared against
+`broker_qty`. Shorting needs margin and a borrow, and a short ladder with no
+stop has unbounded risk where a long one does not.
 
 ## Ground truth, in order
 

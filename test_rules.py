@@ -47,6 +47,11 @@ class FakeEngine:
 
 # reuse the real implementations so the test can't drift from the engine
 from engine import Engine                                   # noqa: E402
+FakeEngine._dir = staticmethod(Engine._dir)
+FakeEngine.next_side = Engine.next_side
+FakeEngine.broker_side = Engine.broker_side
+FakeEngine.broker_qty = 0
+FakeEngine.trend = {}
 FakeEngine._add_trigger_met = Engine._add_trigger_met
 FakeEngine._book_tp_progress = Engine._book_tp_progress
 FakeEngine._rung_price = Engine._rung_price

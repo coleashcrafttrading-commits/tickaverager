@@ -127,6 +127,11 @@ class Alpaca:
         return self.submit(symbol=symbol, qty=str(qty), side="buy", type="market",
                            time_in_force="day", client_order_id=client_order_id)
 
+    def sell_market(self, symbol: str, qty: int, client_order_id: str) -> dict:
+        """Market SELL. Opens a short when flat; flattens a long when not."""
+        return self.submit(symbol=symbol, qty=str(qty), side="sell", type="market",
+                           time_in_force="day", client_order_id=client_order_id)
+
     def buy_limit(self, symbol: str, qty: int, limit_price: float, client_order_id: str,
                   extended_hours: bool = False) -> dict:
         return self.submit(symbol=symbol, qty=str(qty), side="buy", type="limit",
