@@ -1,0 +1,615 @@
+{
+ "source": "research_tf5min_2026-09-01_2356.json",
+ "timeframe": "5Min",
+ "original_days": 120,
+ "fetched_days": 360,
+ "earlier_from": "2025-09-08T08:00:00Z",
+ "earlier_to": "2026-05-05T17:10:00Z",
+ "control_bar": -0.2573,
+ "rows": [
+  {
+   "family": "Stochastic cross in the extreme",
+   "params": {
+    "k_n": 14,
+    "lo": 10,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "reported_oos": 0.6526,
+   "earlier": -0.3483,
+   "consistency": 0.375,
+   "symbols": 8,
+   "trades": 7320,
+   "sum_pl": -16424.51,
+   "per_symbol": {
+    "SPY": {
+     "score": 0.10300517695843794,
+     "total_pl": 1118.8,
+     "trades": 1117
+    },
+    "QQQ": {
+     "score": -0.36518997481727355,
+     "total_pl": -4695.62,
+     "trades": 1171
+    },
+    "NVDA": {
+     "score": 0.9804329575745349,
+     "total_pl": 5734.17,
+     "trades": 980
+    },
+    "TSLA": {
+     "score": -0.40360571948213336,
+     "total_pl": -8561.45,
+     "trades": 971
+    },
+    "AMD": {
+     "score": -0.4105832751853641,
+     "total_pl": -10320.84,
+     "trades": 885
+    },
+    "AAPL": {
+     "score": 1.2272137223480541,
+     "total_pl": 6854.05,
+     "trades": 835
+    },
+    "RAM": {
+     "score": -0.4102795100092429,
+     "total_pl": -701.34,
+     "trades": 247
+    },
+    "MSTX": {
+     "score": -0.3313148926052152,
+     "total_pl": -5852.28,
+     "trades": 1114
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "RSI divergence",
+   "params": {
+    "rsi_n": 7,
+    "left": 3,
+    "tp_atr": 3.0,
+    "st_atr": 2.0,
+    "side": "both"
+   },
+   "reported_oos": 0.5703,
+   "earlier": -0.4857,
+   "consistency": 0.375,
+   "symbols": 8,
+   "trades": 2419,
+   "sum_pl": -15014.84,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.8156517533947485,
+     "total_pl": -3407.01,
+     "trades": 371
+    },
+    "QQQ": {
+     "score": -0.5483697447840696,
+     "total_pl": -2721.91,
+     "trades": 374
+    },
+    "NVDA": {
+     "score": 0.11900368675718243,
+     "total_pl": 334.73,
+     "trades": 326
+    },
+    "TSLA": {
+     "score": -0.5907951879398992,
+     "total_pl": -4734.16,
+     "trades": 314
+    },
+    "AMD": {
+     "score": -0.4229533705961251,
+     "total_pl": -1772.2,
+     "trades": 340
+    },
+    "AAPL": {
+     "score": -0.8005216050009133,
+     "total_pl": -3944.25,
+     "trades": 343
+    },
+    "RAM": {
+     "score": 0.2558059251820236,
+     "total_pl": 81.51,
+     "trades": 70
+    },
+    "MSTX": {
+     "score": 0.24094401295720513,
+     "total_pl": 1148.45,
+     "trades": 281
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Premium/discount with structure",
+   "params": {
+    "pd_n": 50,
+    "edge": 20,
+    "tp_atr": 4.0,
+    "st_atr": 1.5,
+    "side": "short"
+   },
+   "reported_oos": 0.5587,
+   "earlier": -0.2575,
+   "consistency": 0.429,
+   "symbols": 7,
+   "trades": 870,
+   "sum_pl": 427.17,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.6160164053994059,
+     "total_pl": -1165.54,
+     "trades": 134
+    },
+    "QQQ": {
+     "score": 0.44751910327571437,
+     "total_pl": 663.55,
+     "trades": 141
+    },
+    "NVDA": {
+     "score": -0.4261551349265363,
+     "total_pl": -452.76,
+     "trades": 105
+    },
+    "TSLA": {
+     "score": -0.6464943994812409,
+     "total_pl": -2113.61,
+     "trades": 107
+    },
+    "AMD": {
+     "score": 2.4877486969289975,
+     "total_pl": 3574.87,
+     "trades": 104
+    },
+    "AAPL": {
+     "score": 0.3838516158804353,
+     "total_pl": 515.72,
+     "trades": 120
+    },
+    "RAM": {
+     "score": null,
+     "total_pl": 67.18,
+     "trades": 17
+    },
+    "MSTX": {
+     "score": -0.25752592310488687,
+     "total_pl": -595.06,
+     "trades": 142
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Opening range breakout",
+   "params": {
+    "or_min": 15,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "reported_oos": 0.4195,
+   "earlier": -0.527,
+   "consistency": 0.125,
+   "symbols": 8,
+   "trades": 5503,
+   "sum_pl": -99488.06,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.21205403107247683,
+     "total_pl": -2069.87,
+     "trades": 772
+    },
+    "QQQ": {
+     "score": -0.9057750339987781,
+     "total_pl": -17703.21,
+     "trades": 763
+    },
+    "NVDA": {
+     "score": 0.1611863692907447,
+     "total_pl": 822.8,
+     "trades": 719
+    },
+    "TSLA": {
+     "score": -0.496956219632044,
+     "total_pl": -15741.62,
+     "trades": 705
+    },
+    "AMD": {
+     "score": -0.5570114245273481,
+     "total_pl": -18731.96,
+     "trades": 767
+    },
+    "AAPL": {
+     "score": -0.42773402376799663,
+     "total_pl": -3948.37,
+     "trades": 805
+    },
+    "RAM": {
+     "score": -0.8219130294776671,
+     "total_pl": -1837.74,
+     "trades": 158
+    },
+    "MSTX": {
+     "score": -0.9090672929025966,
+     "total_pl": -40278.09,
+     "trades": 814
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "MFI extreme",
+   "params": {
+    "mfi_n": 21,
+    "lo": 30,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "reported_oos": 0.4134,
+   "earlier": -0.0126,
+   "consistency": 0.5,
+   "symbols": 8,
+   "trades": 7128,
+   "sum_pl": -25695.13,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.6296146182583874,
+     "total_pl": -9072.01,
+     "trades": 1040
+    },
+    "QQQ": {
+     "score": -0.810124039777991,
+     "total_pl": -11857.98,
+     "trades": 1081
+    },
+    "NVDA": {
+     "score": -0.07141151794168239,
+     "total_pl": -613.17,
+     "trades": 930
+    },
+    "TSLA": {
+     "score": 0.6246462023516376,
+     "total_pl": 11815.92,
+     "trades": 993
+    },
+    "AMD": {
+     "score": -0.837452472374641,
+     "total_pl": -17853.8,
+     "trades": 993
+    },
+    "AAPL": {
+     "score": 0.12914941209004702,
+     "total_pl": 737.89,
+     "trades": 867
+    },
+    "RAM": {
+     "score": 0.29229457487309646,
+     "total_pl": 442.23,
+     "trades": 215
+    },
+    "MSTX": {
+     "score": 0.04620441520931067,
+     "total_pl": 705.79,
+     "trades": 1009
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Hull MA slope",
+   "params": {
+    "hma_n": 20,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "reported_oos": 0.3858,
+   "earlier": -0.5349,
+   "consistency": 0.25,
+   "symbols": 8,
+   "trades": 7475,
+   "sum_pl": -63507.59,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.5967521538307831,
+     "total_pl": -7764.76,
+     "trades": 1086
+    },
+    "QQQ": {
+     "score": -0.8124958491067277,
+     "total_pl": -14680.5,
+     "trades": 1111
+    },
+    "NVDA": {
+     "score": -0.4729591203448084,
+     "total_pl": -4420.03,
+     "trades": 1011
+    },
+    "TSLA": {
+     "score": 1.3124962141055603,
+     "total_pl": 19717.46,
+     "trades": 1004
+    },
+    "AMD": {
+     "score": -0.7859525084074347,
+     "total_pl": -29907.56,
+     "trades": 1051
+    },
+    "AAPL": {
+     "score": 1.1583435608785815,
+     "total_pl": 6021.51,
+     "trades": 884
+    },
+    "RAM": {
+     "score": -0.4510325685620432,
+     "total_pl": -1062.75,
+     "trades": 228
+    },
+    "MSTX": {
+     "score": -0.7549352292099332,
+     "total_pl": -31410.96,
+     "trades": 1100
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Order block retest",
+   "params": {
+    "min_size": 0.05,
+    "max_age": 120,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "reported_oos": 0.3389,
+   "earlier": -0.3981,
+   "consistency": 0.375,
+   "symbols": 8,
+   "trades": 7168,
+   "sum_pl": -85866.18,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.3171780428830915,
+     "total_pl": -3490.63,
+     "trades": 1115
+    },
+    "QQQ": {
+     "score": 0.6303165396479055,
+     "total_pl": 4818.48,
+     "trades": 1149
+    },
+    "NVDA": {
+     "score": 0.012675535575698116,
+     "total_pl": 138.5,
+     "trades": 909
+    },
+    "TSLA": {
+     "score": -0.8637424273695202,
+     "total_pl": -39130.08,
+     "trades": 893
+    },
+    "AMD": {
+     "score": -0.5154230716008091,
+     "total_pl": -17506.19,
+     "trades": 963
+    },
+    "AAPL": {
+     "score": 0.2740848847964615,
+     "total_pl": 1712.74,
+     "trades": 834
+    },
+    "RAM": {
+     "score": -0.4790552979513079,
+     "total_pl": -973.22,
+     "trades": 226
+    },
+    "MSTX": {
+     "score": -0.8652933887004598,
+     "total_pl": -31435.78,
+     "trades": 1079
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Keltner fade",
+   "params": {
+    "kc_n": 34,
+    "kc_m": 2.0,
+    "tp_atr": 4.0,
+    "st_atr": 1.5,
+    "side": "short"
+   },
+   "reported_oos": 0.2657,
+   "earlier": 0.0944,
+   "consistency": 0.625,
+   "symbols": 8,
+   "trades": 3470,
+   "sum_pl": -431.84,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.5564540160510725,
+     "total_pl": -2203.48,
+     "trades": 550
+    },
+    "QQQ": {
+     "score": -0.9099803270722657,
+     "total_pl": -8090.08,
+     "trades": 521
+    },
+    "NVDA": {
+     "score": 0.1849887455486125,
+     "total_pl": 440.51,
+     "trades": 442
+    },
+    "TSLA": {
+     "score": 2.5756568401246667,
+     "total_pl": 9801.25,
+     "trades": 438
+    },
+    "AMD": {
+     "score": -0.8893461500380971,
+     "total_pl": -10329.8,
+     "trades": 509
+    },
+    "AAPL": {
+     "score": 0.0038333776695519315,
+     "total_pl": 11.24,
+     "trades": 441
+    },
+    "RAM": {
+     "score": 1.6182898833296644,
+     "total_pl": 514.6,
+     "trades": 99
+    },
+    "MSTX": {
+     "score": 3.568098865649942,
+     "total_pl": 9423.92,
+     "trades": 470
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "CONTROL: random entry",
+   "params": {
+    "every": 30,
+    "seed": 3,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "reported_oos": -0.1341,
+   "earlier": -0.2573,
+   "consistency": 0.25,
+   "symbols": 8,
+   "trades": 8257,
+   "sum_pl": -57852.91,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.05456647678287984,
+     "total_pl": -677.23,
+     "trades": 1239
+    },
+    "QQQ": {
+     "score": -0.731510169304965,
+     "total_pl": -14354.98,
+     "trades": 1273
+    },
+    "NVDA": {
+     "score": -0.5788810235275973,
+     "total_pl": -10621.94,
+     "trades": 1161
+    },
+    "TSLA": {
+     "score": -0.6010143224923454,
+     "total_pl": -27129.48,
+     "trades": 1079
+    },
+    "AMD": {
+     "score": 0.01101798624037186,
+     "total_pl": 214.28,
+     "trades": 1087
+    },
+    "AAPL": {
+     "score": -0.26153440678990514,
+     "total_pl": -2639.57,
+     "trades": 967
+    },
+    "RAM": {
+     "score": 0.937323560870404,
+     "total_pl": 2138.26,
+     "trades": 272
+    },
+    "MSTX": {
+     "score": -0.2530307070732724,
+     "total_pl": -4782.25,
+     "trades": 1179
+    }
+   },
+   "is_control": true
+  },
+  {
+   "family": "CONTROL: always long",
+   "params": {
+    "every": 30,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 0.75,
+    "side": "both"
+   },
+   "reported_oos": -0.0217,
+   "earlier": -0.4546,
+   "consistency": 0.125,
+   "symbols": 8,
+   "trades": 8313,
+   "sum_pl": -83244.09,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.4301714352073626,
+     "total_pl": -7408.52,
+     "trades": 1279
+    },
+    "QQQ": {
+     "score": -0.5772103938261459,
+     "total_pl": -11166.77,
+     "trades": 1280
+    },
+    "NVDA": {
+     "score": -0.40110781758087805,
+     "total_pl": -3905.29,
+     "trades": 1114
+    },
+    "TSLA": {
+     "score": -0.47904521520101,
+     "total_pl": -15659.83,
+     "trades": 1059
+    },
+    "AMD": {
+     "score": -0.05449491688791976,
+     "total_pl": -1614.71,
+     "trades": 1092
+    },
+    "AAPL": {
+     "score": 0.7483519382467891,
+     "total_pl": 5219.65,
+     "trades": 1010
+    },
+    "RAM": {
+     "score": -0.709484034414428,
+     "total_pl": -2262.8,
+     "trades": 286
+    },
+    "MSTX": {
+     "score": -0.8113695596006759,
+     "total_pl": -46445.82,
+     "trades": 1193
+    }
+   },
+   "is_control": true
+  }
+ ],
+ "held_up": [
+  "Keltner fade"
+ ]
+}

@@ -20,6 +20,19 @@ the signal is worthless and what was found is a position-management artifact
 -- one that works by refusing to take losses until the wide stop finally
 catches up, which is a familiar shape and not a good one.
 
+THIS IS DIAGNOSTIC, NOT A PERFORMANCE CLAIM
+-------------------------------------------
+The "no-adds" column is the SELECTED parameters with one switch flipped, and
+it is measured on the test window. That is a legitimate way to ask "is the
+signal doing anything", and an illegitimate way to pick a strategy: the number
+was produced with knowledge of the window it is scored on.
+
+The difference is not theoretical. Hull MA slope reads +0.982 here with adds
+switched off. Re-running the whole search honestly with the adds grid removed
+-- choosing on train, reporting on test -- gives +0.258 for the same family.
+The first number is what you get by looking at the answer; the second is what
+you get by doing it properly. Only the second is a result.
+
     .venv/Scripts/python ablate.py
 """
 from __future__ import annotations
