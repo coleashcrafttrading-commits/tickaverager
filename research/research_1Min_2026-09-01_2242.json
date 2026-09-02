@@ -1,0 +1,66 @@
+{
+ "when": "2026-09-01T22:42:55-05:00",
+ "timeframe": "1Min",
+ "days": 12,
+ "grids": [
+  "core"
+ ],
+ "meta": {
+  "SPY": {
+   "bars": 6870,
+   "train_bars": 4122,
+   "test_bars": 2748,
+   "slippage": 0.1531,
+   "train_from": "2026-08-21T08:00:00Z",
+   "train_to": "2026-08-27T19:21:00Z",
+   "test_from": "2026-08-27T19:22:00Z",
+   "test_to": "2026-09-01T23:59:00Z",
+   "first": 763.4,
+   "last": 761.93
+  },
+  "NVDA": {
+   "bars": 7607,
+   "train_bars": 4564,
+   "test_bars": 3043,
+   "slippage": 0.0437,
+   "train_from": "2026-08-21T08:00:00Z",
+   "train_to": "2026-08-27T20:51:00Z",
+   "test_from": "2026-08-27T20:52:00Z",
+   "test_to": "2026-09-01T23:59:00Z",
+   "first": 217.46,
+   "last": 217.5
+  },
+  "RAM": {
+   "bars": 7065,
+   "train_bars": 4239,
+   "test_bars": 2826,
+   "slippage": 0.01,
+   "train_from": "2026-08-21T08:00:00Z",
+   "train_to": "2026-08-27T18:59:00Z",
+   "test_from": "2026-08-27T19:00:00Z",
+   "test_to": "2026-09-01T23:58:00Z",
+   "first": 13.74,
+   "last": 11.81
+  }
+ },
+ "families": {
+  "EMA cross": "Fast EMA crossing a slow one. The oldest trend rule there is; included as a floor -- anything that cannot beat this is not worth its complexity."
+ },
+ "n_backtests": 324,
+ "seconds": 4.9,
+ "selected": [
+  {
+   "family": "EMA cross",
+   "selected": false,
+   "why": "no variation cleared the training gate: enough trades on enough symbols, and profitable on most of them"
+  }
+ ],
+ "ranked": [],
+ "rejected": [
+  {
+   "family": "EMA cross",
+   "selected": false,
+   "why": "no variation cleared the training gate: enough trades on enough symbols, and profitable on most of them"
+  }
+ ]
+}

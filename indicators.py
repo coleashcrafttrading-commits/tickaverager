@@ -559,6 +559,7 @@ CATALOG = {
 
 def compute(name: str, bars: list[dict], **params) -> dict[str, list[Num]]:
     """Run one catalogued indicator over bars -> {output name: series}."""
+    _ensure_smc()
     spec = CATALOG.get(name)
     if not spec:
         raise KeyError(f"unknown indicator {name!r}. Known: {', '.join(sorted(CATALOG))}")
@@ -568,6 +569,9 @@ def compute(name: str, bars: list[dict], **params) -> dict[str, list[Num]]:
         "low": [float(b["l"]) for b in bars],
         "close": [float(b["c"]) for b in bars],
         "volume": [float(b.get("v") or 0) for b in bars],
+        # session-aware indicators (VWAP bands, the opening range) need to know
+        # which day each bar belongs to; nothing else looks at this
+        "stamps": [b.get("t") for b in bars],
     }
     args = [cols[i] for i in spec["inputs"]]
     kw = dict(spec["params"])
@@ -576,3 +580,27 @@ def compute(name: str, bars: list[dict], **params) -> dict[str, list[Num]]:
     if not isinstance(res, tuple):
         res = (res,)
     return dict(zip(spec["outputs"], res))
+
+
+# The structure/session family lives in smc.py and registers itself into this
+# catalogue on first use. Kept lazy so importing indicators stays cheap and
+# free of cycles -- smc.squeeze needs bollinger and keltner from here.
+_SMC_DONE = False
+
+
+def _ensure_smc() -> None:
+    global _SMC_DONE
+    if _SMC_DONE:
+        return
+    _SMC_DONE = True
+    try:
+        import smc
+        smc.register()
+    except Exception:                       # never let research code break TA
+        pass
+
+
+def catalog() -> dict:
+    """Everything a strategy may name, structure indicators included."""
+    _ensure_smc()
+    return CATALOG

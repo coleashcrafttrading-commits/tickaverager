@@ -109,6 +109,9 @@ sys.path.insert(0, ROOT_PATH)
 import indicators as I
 
 
+_MEMO = {}          # (indicator, params) -> series, valid for one bar set
+
+
 class LookAhead(Exception):
     """Raised when strategy code reads a bar it could not have seen yet."""
 
@@ -195,11 +198,22 @@ class Ctx:
 
     # ---------------- indicators ----------------
     def indicator(self, name, **params):
-        """A full aligned series, with None where it has not formed."""
-        if name not in I.CATALOG:
+        """A full aligned series, with None where it has not formed.
+
+        Memoised across every run in the same batch. A sweep of 12 variations
+        that all use atr(14) computed it 12 times; on a 100-strategy research
+        pass that was most of the wall clock.
+        """
+        cat = I.catalog() if hasattr(I, "catalog") else I.CATALOG
+        if name not in cat:
             raise KeyError("unknown indicator %r. Available: %s"
-                           % (name, ", ".join(sorted(I.CATALOG))))
-        out = I.compute(name, self.bars, **params)
+                           % (name, ", ".join(sorted(cat))))
+        key = (name, tuple(sorted(params.items())))
+        if key in _MEMO:
+            out = _MEMO[key]
+        else:
+            out = I.compute(name, self.bars, **params)
+            _MEMO[key] = out
         keys = list(out)
         vals = out[keys[0]]
         first = next((k for k, x in enumerate(vals) if x is not None), 0)
@@ -308,10 +322,22 @@ class Ctx:
 def main():
     job = json.load(sys.stdin)
     bars = job["bars"]
-    opts = job["opts"]
-    code = job["code"]
+    runs = job.get("runs")
+    if runs is None:
+        runs = [{"id": "0", "code": job["code"], "params": job.get("params") or {},
+                 "opts": job["opts"]}]
+    out = []
+    for r in runs:
+        out.append(dict(one(bars, r["code"], r.get("params") or {},
+                            r.get("opts") or job.get("opts") or {}),
+                        id=r.get("id", "")))
+    return out[0] if job.get("runs") is None else {"ok": True, "runs": out}
 
+
+def one(bars, code, params_over, opts):
     ns = {"__name__": "strategy"}
+    opts = dict({"slippage": 0.01, "fee_per_share": 0.0, "max_positions": 1},
+                **(opts or {}))
     try:
         exec(compile(code, "<strategy>", "exec"), ns)
     except Exception:
@@ -325,7 +351,7 @@ def main():
                          "is required; init(ctx) and PARAMS are optional."}
 
     params = dict(ns.get("PARAMS") or {})
-    params.update(job.get("params") or {})
+    params.update(params_over or {})
 
     ctx = Ctx(bars, params, opts)
     try:
@@ -337,7 +363,6 @@ def main():
                 "error": traceback.format_exc(limit=6)}
 
     slip = float(opts["slippage"])
-    fee = float(opts["fee_per_share"])
 
     try:
         for i in range(len(bars)):
@@ -485,6 +510,87 @@ def run_code(bars: list[dict], code: str, *,
     rep["stdout"] = res["stdout"]
     rep["params"] = res.get("params", {})
     return rep
+
+
+def run_many(bars: list[dict], runs: list[dict], *,
+             opts: Optional[dict] = None,
+             slim: bool = False,
+             timeout: int = 900) -> list[dict]:
+    """Run many strategies over ONE set of bars in ONE child process.
+
+    `runs` is [{"id":..., "code":..., "params":{...}}]. Returns a list of
+    btstats reports in the same order, each carrying its id.
+
+    This exists because a research pass is thousands of runs and the two costs
+    that dominate are process startup and recomputing the same indicators. One
+    child amortises the first; the memo inside it kills the second. A
+    100-strategy sweep went from tens of minutes to under one.
+    """
+    import btstats
+
+    o = {"slippage": 0.01, "fee_per_share": 0.0, "max_positions": 1,
+         "bar_size": "1Min", "starting_equity": 0.0}
+    o.update(opts or {})
+    if not bars:
+        return [{"ok": False, "id": r.get("id", ""), "stage": "input",
+                 "error": "no bars"} for r in runs]
+
+    job = json.dumps({"bars": bars, "opts": o,
+                      "runs": [{"id": str(r.get("id", i)), "code": r["code"],
+                                "params": r.get("params") or {},
+                                "opts": r.get("opts") or o}
+                               for i, r in enumerate(runs)]})
+
+    with tempfile.TemporaryDirectory(prefix="btcode-") as tmp:
+        runner = Path(tmp) / "_runner.py"
+        runner.write_text(_child_source(), encoding="utf-8")
+        env = {"PATH": os.environ.get("PATH", ""),
+               "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+               "PYTHONIOENCODING": "utf-8",
+               "PYTHONDONTWRITEBYTECODE": "1"}
+        try:
+            p = subprocess.run([sys.executable, "-I", str(runner)],
+                               input=job, capture_output=True, text=True,
+                               timeout=timeout, cwd=tmp, env=env,
+                               encoding="utf-8", errors="replace")
+        except subprocess.TimeoutExpired:
+            return [{"ok": False, "id": str(r.get("id", i)), "timeout": True,
+                     "error": f"the batch exceeded {timeout}s"}
+                    for i, r in enumerate(runs)]
+
+    out = p.stdout or ""
+    marker = chr(0) + "RESULT" + chr(0)
+    if marker not in out:
+        err = (p.stderr or out or "no result")[:2000]
+        return [{"ok": False, "id": str(r.get("id", i)), "error": err}
+                for i, r in enumerate(runs)]
+    _, _, raw = out.partition(marker)
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return [{"ok": False, "id": str(r.get("id", i)), "error": f"unreadable: {e}"}
+                for i, r in enumerate(runs)]
+
+    reports = []
+    for r in payload.get("runs", []):
+        if not r.get("ok"):
+            reports.append(r)
+            continue
+        rep = btstats.report(r["trades"], bars, bar_size=o["bar_size"],
+                             starting_equity=float(o["starting_equity"]),
+                             open_positions=r.get("open_positions"))
+        if slim:
+            # A research pass is hundreds of strategies over tens of thousands
+            # of bars. Keeping every equity curve is hundreds of megabytes of
+            # numbers nobody reads; the summary is the thing.
+            rep = {"summary": rep["summary"]}
+        rep["ok"] = True
+        rep["id"] = r.get("id", "")
+        rep["params"] = r.get("params", {})
+        if not slim:
+            rep["logs"] = r.get("logs", [])
+        reports.append(rep)
+    return reports
 
 
 # ==================================================================== files
