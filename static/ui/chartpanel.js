@@ -77,15 +77,17 @@ export class ChartPanel {
         <button class="btn sm" data-act="fit" title="Reset zoom and autoscale">Fit</button>
         <button class="btn sm" data-act="ind">Indicators</button>
         <button class="btn sm" data-act="cfg">⚙</button>
+        <span class="chart-readout" data-readout></span>
         <span class="faint" style="margin-left:auto;font-size:11.5px" data-meta></span>
       </div>
       <div data-pop style="display:none;margin-bottom:12px"></div>
       <div data-price></div>
       <div data-panes></div>
       <div class="tip" style="margin-top:8px">
-        Drag to pan · drag the <b>price axis</b> to stretch vertically · drag the
-        <b>time axis</b> to stretch horizontally · wheel to zoom · shift+wheel for
-        price · double-click to fit.
+        Drag anywhere on the chart to move it freely · drag the <b>price axis</b>
+        (right) or <b>time axis</b> (bottom) to stretch that scale · wheel to zoom
+        time, shift+wheel for price · double-click or <b>Fit</b> to reset and
+        re-enable autoscale.
       </div>`;
 
     this.$bar = this.host.querySelector(".chart-bar");
@@ -93,8 +95,10 @@ export class ChartPanel {
     this.$price = this.host.querySelector("[data-price]");
     this.$panes = this.host.querySelector("[data-panes]");
     this.$meta = this.host.querySelector("[data-meta]");
+    this.$readout = this.host.querySelector("[data-readout]");
 
-    this.chart = new Chart(this.$price, this.opts);
+    // the OHLC readout lands in the toolbar, not on top of the candles
+    this.chart = new Chart(this.$price, { ...this.opts, readout: this.$readout });
 
     this.$bar.querySelectorAll(".tfb").forEach((b) => {
       b.onclick = () => {

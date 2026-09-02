@@ -182,6 +182,17 @@ export class Chart {
     this._S = S;
     const { seg, lo, hi, plotH, plotW, volH } = S;
 
+    // Everything from here to restore() is clipped to the plot rectangle.
+    // Without this a panned-down price scale draws candles straight through
+    // the time axis and over its labels, which looked like the chart could be
+    // dragged out of its own box.
+    const clip = () => {
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, plotW, h - this.padB);
+      g.clip();
+    };
+
     /* ---- grid + price axis ---- */
     g.font = "10.5px ui-monospace, monospace";
     g.textBaseline = "middle";
@@ -204,6 +215,8 @@ export class Chart {
       g.fillStyle = C.warn; g.font = "9px system-ui"; g.textAlign = "left";
       g.fillText("locked", plotW + 9, h - this.padB - 8);
     }
+
+    clip();
 
     /* ---- volume ---- */
     if (volH) {
@@ -331,6 +344,7 @@ export class Chart {
       g.fillText(lbl, S.x(i), h - 8);
     }
     g.strokeStyle = C.grid; g.beginPath();
+    g.restore();                       // end of the clipped plot region
     g.moveTo(0, h - this.padB + 0.5); g.lineTo(plotW, h - this.padB + 0.5); g.stroke();
 
     /* ---- crosshair ---- */
@@ -353,25 +367,44 @@ export class Chart {
         g.fillText(p.toFixed(2), plotW + 9, this._mouseY);
       }
       g.setLineDash([]);
-      this._tooltip(b, x);
-    } else this.tt.hidden = true;
+      this._readout(b);
+    } else this._readout(null);
   }
 
-  _tooltip(b, x) {
+  /* The OHLC readout is NOT drawn on the chart. A panel floating over the
+     candles covers the one thing the cursor is pointing at; every serious
+     charting package puts this in a legend row instead. The panel supplies a
+     destination through opt.readout. */
+  _readout(b) {
+    const dest = this.opt.readout;
+    if (this.tt) this.tt.hidden = true;
+    if (!dest) return;
+    if (!b) {
+      dest.innerHTML = this._lastLegend || "";
+      return;
+    }
     const d = new Date(b.t);
     const chg = b.o ? ((b.c - b.o) / b.o) * 100 : 0;
     const cls = b.c >= b.o ? "up" : "down";
-    this.tt.innerHTML =
-      `<div style="color:var(--faint);margin-bottom:3px">${d.toLocaleString()}</div>` +
-      `O ${b.o.toFixed(2)}&nbsp; H ${b.h.toFixed(2)}<br>` +
-      `L ${b.l.toFixed(2)}&nbsp; C <b class="${cls}">${b.c.toFixed(2)}</b> ` +
+    const n = (v) => v.toFixed(v < 10 ? 4 : 2);
+    dest.innerHTML =
+      `<span class="ro-t">${d.toLocaleString([], {
+        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>` +
+      `<span class="ro-k">O</span><span class="ro-v">${n(b.o)}</span>` +
+      `<span class="ro-k">H</span><span class="ro-v">${n(b.h)}</span>` +
+      `<span class="ro-k">L</span><span class="ro-v">${n(b.l)}</span>` +
+      `<span class="ro-k">C</span><span class="ro-v ${cls}">${n(b.c)}</span>` +
       `<span class="${cls}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</span>` +
-      (b.v ? `<br><span style="color:var(--faint)">vol ${b.v.toLocaleString()}</span>` : "");
-    this.tt.hidden = false;
-    const w = this.host.clientWidth;
-    const tw = this.tt.offsetWidth || 160;
-    this.tt.style.left = Math.min(w - tw - 8, Math.max(4, x + 16)) + "px";
-    this.tt.style.top = "14px";
+      (b.v ? `<span class="ro-k">V</span><span class="ro-v">${
+        b.v.toLocaleString()}</span>` : "");
+  }
+
+  /* What the readout shows when the cursor is not on the chart. */
+  setLegend(html) {
+    this._lastLegend = html || "";
+    if (this.opt.readout && this.hover == null) {
+      this.opt.readout.innerHTML = this._lastLegend;
+    }
   }
 
   /* ----------------------------------------------------------- helpers */
@@ -431,9 +464,18 @@ export class Chart {
           const anchor = b;
           this.view = [anchor - next, anchor];
         } else {
+          // Dragging the PLOT moves the canvas, it never reshapes it. Aspect
+          // ratio belongs to the axes and the wheel; a drag here should feel
+          // like sliding a sheet of paper. Vertical movement therefore locks
+          // the price scale on the way past -- autoscale would otherwise snap
+          // the drag straight back and the chart would feel nailed down.
           this.view = this._drag.view.slice();
           this._panX(-(dx / plotW));
-          if (!this.autoScale && this._drag.range) {
+          if (Math.abs(dy) > 2) {
+            if (this.autoScale) {
+              this._lockPrice();
+              this._drag.range = this.priceRange.slice();
+            }
             const [lo, hi] = this._drag.range;
             const shift = (dy / (r.height - this.padB - this.padT)) * (hi - lo);
             this.priceRange = [lo + shift, hi + shift];
@@ -449,7 +491,7 @@ export class Chart {
     });
 
     cv.addEventListener("mouseleave", () => {
-      this.hover = null; this._mouseY = null; this.draw();
+      this.hover = null; this._mouseY = null; this.draw(); this._readout(null);
     });
 
     cv.addEventListener("mousedown", (e) => {

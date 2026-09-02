@@ -401,3 +401,17 @@ canvas.chart { display: block; width: 100%; }
 .opnd { display: inline-flex; gap: 5px; align-items: center; }
 .opnd select[data-otype] { font-size: 11px; opacity: .65; }
 .opnd select[data-otype]:hover { opacity: 1; }
+
+
+/* ---- chart legend readout: OHLC in the toolbar, never over the candles ---- */
+.chart-readout {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  margin-left: 12px; min-height: 16px;
+  font-family: var(--mono, ui-monospace, monospace); font-size: 11px;
+  white-space: nowrap; overflow: hidden;
+}
+.chart-readout .ro-t { color: var(--faint); margin-right: 5px; }
+.chart-readout .ro-k { color: var(--faint); }
+.chart-readout .ro-v { color: var(--text); }
+.chart-readout .up   { color: var(--up); }
+.chart-readout .down { color: var(--down); }
