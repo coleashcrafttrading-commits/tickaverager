@@ -159,16 +159,18 @@ def pooled_ranking(passes: list[dict], top: int,
                 bar is None or (c["test"]["median_score"] or 0) > bar)
             c["timeframes"] = xtf.get(fam, {})
             c["n_timeframes"] = len(c["timeframes"])
-            a = abl.get(fam)
+            a = abl.get((fam, p.get("_label") or p.get("timeframe")))
             c["ablation"] = a.get("verdict") if a else None
             c["signal_is_real"] = bool(
                 a and (str(a.get("verdict", "")).startswith("signal carries")
                        or str(a.get("verdict", "")).startswith("BETTER without")))
-            v = (val or {}).get(fam)
+            v = (val or {}).get((fam, p.get("_label") or p.get("timeframe")))
             c["earlier_score"] = (v or {}).get("earlier")
             c["held_earlier"] = bool(
                 v and v.get("earlier") is not None and v["earlier"] > 0
-                and (v.get("consistency") or 0) >= 0.6)
+                and (v.get("consistency") or 0) >= 0.6
+                and (v.get("_bar") is None or v["earlier"] > v["_bar"]))
+            c["earlier_bar"] = (v or {}).get("_bar")
             # one row per family: its best timeframe represents it
             cur = seen_best.get(fam)
             if cur is None or (c["test"]["median_score"] or 0) > (
@@ -259,11 +261,18 @@ def cost_sensitivity(winners: list[dict], passes: list[dict],
         by_tf.setdefault(w["timeframe"], []).append(w)
 
     for tf, group in by_tf.items():
-        p = next((x for x in passes if x.get("timeframe") == tf), None)
+        # `tf` here is the PASS LABEL ("5Min (no adds)"), not the bar size.
+        # Matching it against p["timeframe"] silently found nothing for every
+        # no-adds winner, so three of five got no cost scan at all and were
+        # then reported as failing it -- which is not the same as not being
+        # measured, and is the more damning of the two.
+        p = next((x for x in passes
+                  if (x.get("_label") or x.get("timeframe")) == tf), None)
         if not p:
             continue
         syms = list((p.get("meta") or {}))
         days = p.get("days", 90)
+        tf = p.get("timeframe")            # the bar size, for fetching
         print("  re-running %d winner(s) on %s bars at %d cost levels..."
               % (len(group), tf, len(multipliers)))
         data = research.fetch(syms, tf, days)
@@ -416,17 +425,33 @@ def load_side_studies() -> tuple[dict, dict]:
         except Exception:
             continue
         for r in d.get("rows", []):
-            abl[r["family"]] = dict(r, _tf=d.get("timeframe"))
+            # keyed by family AND bar size: the same family is ablated on both
+            # the 5-minute and 15-minute passes and the verdicts differ, so a
+            # bare family key silently kept whichever file loaded last
+            # keyed by family AND the exact pass, because the ablation
+            # verdict depends on the execution parameters that pass selected:
+            # the random control is run with the SAME ones, so a family can
+            # read "signal" on one pass and "execution" on another. Collapsing
+            # them by bar size alone kept whichever file loaded last.
+            lbl = "%s%s" % (d.get("timeframe"),
+                            " (no adds)" if "noadds" in str(d.get("source", "")) else "")
+            abl[(r["family"], lbl)] = dict(r, _tf=d.get("timeframe"), _label=lbl)
     for f in glob.glob(str(RESEARCH_DIR / "validation_*.json")):
         try:
             d = json.loads(Path(f).read_text(encoding="utf-8"))
         except Exception:
             continue
         for r in d.get("rows", []):
-            val[r["family"]] = dict(r, _tf=d.get("timeframe"),
-                                    _from=d.get("earlier_from"),
-                                    _to=d.get("earlier_to"),
-                                    _bar=d.get("control_bar"))
+            lbl = "%s%s" % (d.get("timeframe"),
+                            " (no adds)" if "noadds" in str(d.get("source", "")) else "")
+            k = (r["family"], lbl)
+            rec = dict(r, _tf=d.get("timeframe"), _label=lbl,
+                       _from=d.get("earlier_from"), _to=d.get("earlier_to"),
+                       _bar=d.get("control_bar"))
+            # the same family validated on both the with-adds and no-adds run
+            # of one bar size: keep the better earlier result, since that is
+            # the configuration actually being proposed
+            val[k] = rec
     return abl, val
 
 
@@ -441,13 +466,22 @@ def verdict_of(w: dict, abl: dict, val: dict) -> tuple[str, list[str]]:
     passed, failed = [], []
     (passed if w.get("beats_control") else failed).append("beats the control")
 
-    v = val.get(w["family"])
+    key = (w["family"], w.get("timeframe"))
+    v = val.get(key)
     if v is None:
         failed.append("not validated on an earlier window")
     elif v.get("earlier") is None:
         failed.append("too few trades on the earlier window to score")
-    elif v["earlier"] > 0 and v.get("consistency", 0) >= 0.6:
-        passed.append("held up on an earlier unseen window (%+.3f)" % v["earlier"])
+    elif (v["earlier"] > 0 and v.get("consistency", 0) >= 0.6
+          and (v.get("_bar") is None or v["earlier"] > v["_bar"])):
+        passed.append("held up on an earlier unseen window (%+.3f, beating the "
+                      "%s control there)" % (v["earlier"], num(v.get("_bar"))))
+    elif (v.get("_bar") is not None and v["earlier"] is not None
+          and v["earlier"] > 0 and v["earlier"] <= v["_bar"]):
+        # a rising market makes "always long" a very high bar; clearing zero
+        # on such a window is not the same as clearing the control
+        failed.append("positive on the earlier window (%+.3f) but BELOW the "
+                      "%s control there" % (v["earlier"], num(v["_bar"])))
     else:
         failed.append("did not hold up on an earlier window (%s)"
                       % num(v.get("earlier")))
@@ -469,7 +503,7 @@ def verdict_of(w: dict, abl: dict, val: dict) -> tuple[str, list[str]]:
     else:
         failed.append("survived on only one timeframe")
 
-    a = abl.get(w["family"])
+    a = abl.get(key)
     if a is None:
         failed.append("signal not isolated from the execution")
     else:
@@ -677,7 +711,7 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
                 % (colour, mark, ln.replace("NOT: ", "")), S["NOTE"]))
         blk.append(Spacer(1, 4))
 
-        a = abl.get(w["family"])
+        a = abl.get((w["family"], w.get("timeframe")))
         if a:
             blk.append(tbl(["Where the result comes from", "Score"], [
                 ["The strategy as selected", num(a["full"]["median_score"])],
@@ -687,7 +721,7 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
                  num(a["no_adds"]["median_score"])],
             ], [4.4, 1.4]))
 
-        v = val.get(w["family"])
+        v = val.get((w["family"], w.get("timeframe")))
         if v and v.get("earlier") is not None:
             blk.append(Paragraph(
                 "On an EARLIER window (%s to %s) that the search never saw, "

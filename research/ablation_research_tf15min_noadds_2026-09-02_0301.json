@@ -1,0 +1,138 @@
+{
+ "source": "research_tf15min_noadds_2026-09-02_0301.json",
+ "timeframe": "15Min",
+ "rows": [
+  {
+   "family": "VWAP z-score reversion",
+   "params": {
+    "z": 2.0,
+    "tp_atr": 2.0,
+    "st_atr": 3.0,
+    "side": "short"
+   },
+   "full": {
+    "median_score": 0.6292,
+    "mean_score": 0.5451,
+    "worst_score": -0.555,
+    "best_score": 1.3789,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 653,
+    "sum_pl": 1472.17
+   },
+   "exec_only": {
+    "median_score": 0.1011,
+    "mean_score": 0.8366,
+    "worst_score": -0.6599,
+    "best_score": 4.372,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 545,
+    "sum_pl": 5296.27
+   },
+   "no_adds": {
+    "median_score": 0.6292,
+    "mean_score": 0.5451,
+    "worst_score": -0.555,
+    "best_score": 1.3789,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 653,
+    "sum_pl": 1472.17
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Opening range breakout",
+   "params": {
+    "or_min": 15,
+    "tp_atr": 4.0,
+    "st_atr": 2.0,
+    "trail_atr": 1.0,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.4117,
+    "mean_score": 0.5579,
+    "worst_score": -0.8971,
+    "best_score": 2.7702,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 884,
+    "sum_pl": 12903.32
+   },
+   "exec_only": {
+    "median_score": 0.3901,
+    "mean_score": 0.988,
+    "worst_score": -0.633,
+    "best_score": 3.864,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 978,
+    "sum_pl": 13441.47
+   },
+   "no_adds": {
+    "median_score": 0.4117,
+    "mean_score": 0.5579,
+    "worst_score": -0.8971,
+    "best_score": 2.7702,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 884,
+    "sum_pl": 12903.32
+   },
+   "verdict": "EXECUTION, not signal"
+  },
+  {
+   "family": "Williams %R reversal",
+   "params": {
+    "wr_n": 7,
+    "lo": -70,
+    "tp_atr": 4.0,
+    "st_atr": 2.0,
+    "trail_atr": 1.0,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.3294,
+    "mean_score": 0.8379,
+    "worst_score": -0.9642,
+    "best_score": 4.5301,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 2199,
+    "sum_pl": 26679.29
+   },
+   "exec_only": {
+    "median_score": 0.3901,
+    "mean_score": 0.988,
+    "worst_score": -0.633,
+    "best_score": 3.864,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 978,
+    "sum_pl": 13441.47
+   },
+   "no_adds": {
+    "median_score": 0.3294,
+    "mean_score": 0.8379,
+    "worst_score": -0.9642,
+    "best_score": 4.5301,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 2199,
+    "sum_pl": 26679.29
+   },
+   "verdict": "EXECUTION, not signal"
+  }
+ ]
+}

@@ -1,0 +1,310 @@
+{
+ "source": "research_tf15min_noadds_2026-09-02_0301.json",
+ "timeframe": "15Min",
+ "original_days": 250,
+ "fetched_days": 500,
+ "earlier_from": "2025-04-21T08:00:00Z",
+ "earlier_to": "2025-12-24T09:15:00Z",
+ "control_bar": 0.9353,
+ "rows": [
+  {
+   "family": "VWAP z-score reversion",
+   "params": {
+    "z": 2.0,
+    "tp_atr": 2.0,
+    "st_atr": 3.0,
+    "side": "short"
+   },
+   "reported_oos": 0.6281,
+   "earlier": 1.9394,
+   "consistency": 1.0,
+   "symbols": 8,
+   "trades": 1533,
+   "sum_pl": 40040.66,
+   "per_symbol": {
+    "SPY": {
+     "score": 2.245988319936312,
+     "total_pl": 3780.47,
+     "trades": 214
+    },
+    "QQQ": {
+     "score": 0.839892744995537,
+     "total_pl": 2361.77,
+     "trades": 199
+    },
+    "NVDA": {
+     "score": 0.7357786257307088,
+     "total_pl": 1507.89,
+     "trades": 200
+    },
+    "TSLA": {
+     "score": 2.1017138379126923,
+     "total_pl": 7831.28,
+     "trades": 203
+    },
+    "AMD": {
+     "score": 0.9441985105253341,
+     "total_pl": 2632.01,
+     "trades": 222
+    },
+    "AAPL": {
+     "score": 1.7770362386926806,
+     "total_pl": 3858.23,
+     "trades": 249
+    },
+    "RAM": {
+     "score": 2.8598171214630286,
+     "total_pl": 794.4,
+     "trades": 29
+    },
+    "MSTX": {
+     "score": 3.0125842539870775,
+     "total_pl": 17274.61,
+     "trades": 217
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Opening range breakout",
+   "params": {
+    "or_min": 15,
+    "tp_atr": 4.0,
+    "st_atr": 2.0,
+    "trail_atr": 1.0,
+    "side": "both"
+   },
+   "reported_oos": 0.412,
+   "earlier": 0.6133,
+   "consistency": 0.75,
+   "symbols": 8,
+   "trades": 2317,
+   "sum_pl": 6999.59,
+   "per_symbol": {
+    "SPY": {
+     "score": 0.3583029233668846,
+     "total_pl": 1518.95,
+     "trades": 340
+    },
+    "QQQ": {
+     "score": 0.8682582547588045,
+     "total_pl": 3427.38,
+     "trades": 330
+    },
+    "NVDA": {
+     "score": 2.4747346791047393,
+     "total_pl": 4239.27,
+     "trades": 286
+    },
+    "TSLA": {
+     "score": 0.8989803747114876,
+     "total_pl": 5577.49,
+     "trades": 314
+    },
+    "AMD": {
+     "score": 0.3025316727968854,
+     "total_pl": 1406.5,
+     "trades": 321
+    },
+    "AAPL": {
+     "score": -0.9826691454962897,
+     "total_pl": -9223.48,
+     "trades": 344
+    },
+    "RAM": {
+     "score": 0.9438309366807023,
+     "total_pl": 237.6,
+     "trades": 37
+    },
+    "MSTX": {
+     "score": -0.007429433096163384,
+     "total_pl": -184.12,
+     "trades": 345
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Williams %R reversal",
+   "params": {
+    "wr_n": 7,
+    "lo": -70,
+    "tp_atr": 4.0,
+    "st_atr": 2.0,
+    "trail_atr": 1.0,
+    "side": "both"
+   },
+   "reported_oos": 0.3384,
+   "earlier": -0.336,
+   "consistency": 0.25,
+   "symbols": 8,
+   "trades": 5304,
+   "sum_pl": -24519.5,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.559209470756266,
+     "total_pl": -3729.34,
+     "trades": 786
+    },
+    "QQQ": {
+     "score": 0.14625904573824944,
+     "total_pl": 761.35,
+     "trades": 753
+    },
+    "NVDA": {
+     "score": -0.1914816906574524,
+     "total_pl": -918.8,
+     "trades": 690
+    },
+    "TSLA": {
+     "score": -0.27800773868442363,
+     "total_pl": -5437.52,
+     "trades": 697
+    },
+    "AMD": {
+     "score": -0.6041119441373052,
+     "total_pl": -7069.91,
+     "trades": 744
+    },
+    "AAPL": {
+     "score": -0.3940419519448218,
+     "total_pl": -2024.69,
+     "trades": 744
+    },
+    "RAM": {
+     "score": 3.694625884048831,
+     "total_pl": 1640.34,
+     "trades": 101
+    },
+    "MSTX": {
+     "score": -0.5990713188433276,
+     "total_pl": -7740.93,
+     "trades": 789
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "CONTROL: random entry",
+   "params": {
+    "every": 30,
+    "seed": 5,
+    "tp_atr": 4.0,
+    "st_atr": 2.0,
+    "trail_atr": 1.0,
+    "side": "both"
+   },
+   "reported_oos": -0.226,
+   "earlier": 0.0082,
+   "consistency": 0.5,
+   "symbols": 8,
+   "trades": 2413,
+   "sum_pl": -7687.78,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.14408324136843764,
+     "total_pl": -456.96,
+     "trades": 343
+    },
+    "QQQ": {
+     "score": -0.09632158535882251,
+     "total_pl": -467.78,
+     "trades": 344
+    },
+    "NVDA": {
+     "score": 0.11266180937490064,
+     "total_pl": 389.82,
+     "trades": 330
+    },
+    "TSLA": {
+     "score": -0.8686353401260836,
+     "total_pl": -13482.48,
+     "trades": 338
+    },
+    "AMD": {
+     "score": 3.2036926050050147,
+     "total_pl": 5238.55,
+     "trades": 337
+    },
+    "AAPL": {
+     "score": -0.9099651009437705,
+     "total_pl": -6630.67,
+     "trades": 329
+    },
+    "RAM": {
+     "score": 0.4750893495353824,
+     "total_pl": 132.93,
+     "trades": 49
+    },
+    "MSTX": {
+     "score": 0.6386618483196941,
+     "total_pl": 7588.81,
+     "trades": 343
+    }
+   },
+   "is_control": true
+  },
+  {
+   "family": "CONTROL: always long",
+   "params": {
+    "every": 60,
+    "tp_atr": 4.0,
+    "st_atr": 2.0,
+    "trail_atr": 1.0,
+    "side": "both"
+   },
+   "reported_oos": 0.0088,
+   "earlier": 0.9353,
+   "consistency": 0.875,
+   "symbols": 8,
+   "trades": 1300,
+   "sum_pl": 16164.52,
+   "per_symbol": {
+    "SPY": {
+     "score": 1.7665142625935666,
+     "total_pl": 2182.97,
+     "trades": 182
+    },
+    "QQQ": {
+     "score": 1.0326731042106214,
+     "total_pl": 1943.15,
+     "trades": 183
+    },
+    "NVDA": {
+     "score": 0.8379280203062751,
+     "total_pl": 996.95,
+     "trades": 182
+    },
+    "TSLA": {
+     "score": 1.3727503358355524,
+     "total_pl": 6325.51,
+     "trades": 182
+    },
+    "AMD": {
+     "score": 1.4390204368322237,
+     "total_pl": 3196.05,
+     "trades": 182
+    },
+    "AAPL": {
+     "score": 0.21786509201463247,
+     "total_pl": 310.29,
+     "trades": 182
+    },
+    "RAM": {
+     "score": -0.979234014574544,
+     "total_pl": -893.6,
+     "trades": 25
+    },
+    "MSTX": {
+     "score": 0.20757338891783914,
+     "total_pl": 2103.2,
+     "trades": 182
+    }
+   },
+   "is_control": true
+  }
+ ],
+ "held_up": [
+  "VWAP z-score reversion"
+ ]
+}
