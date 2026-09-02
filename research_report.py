@@ -324,9 +324,85 @@ HOW TO READ THAT
     return saved
 
 
+
+def load_side_studies() -> tuple[dict, dict]:
+    """The ablation and validation results, keyed by family name.
+
+    Both are separate scripts producing separate files, so the report works
+    whether or not they were run -- it simply says less when they are missing
+    rather than pretending the checks happened.
+    """
+    abl: dict[str, dict] = {}
+    val: dict[str, dict] = {}
+    for f in glob.glob(str(RESEARCH_DIR / "ablation_*.json")):
+        try:
+            d = json.loads(Path(f).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for r in d.get("rows", []):
+            abl[r["family"]] = dict(r, _tf=d.get("timeframe"))
+    for f in glob.glob(str(RESEARCH_DIR / "validation_*.json")):
+        try:
+            d = json.loads(Path(f).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for r in d.get("rows", []):
+            val[r["family"]] = dict(r, _tf=d.get("timeframe"),
+                                    _from=d.get("earlier_from"),
+                                    _to=d.get("earlier_to"),
+                                    _bar=d.get("control_bar"))
+    return abl, val
+
+
+def verdict_of(w: dict, abl: dict, val: dict) -> tuple[str, list[str]]:
+    """How many independent checks did this actually clear?
+
+    Four things, each capable of killing a result on its own: beating the
+    coin-flip control, holding up on a window the search never saw, surviving
+    a doubling of the cost assumption, and having a signal that does something
+    once the position management is stripped away.
+    """
+    passed, failed = [], []
+    (passed if w.get("beats_control") else failed).append("beats the control")
+
+    v = val.get(w["family"])
+    if v is None:
+        failed.append("not validated on an earlier window")
+    elif v.get("earlier") is None:
+        failed.append("too few trades on the earlier window to score")
+    elif v["earlier"] > 0 and v.get("consistency", 0) >= 0.6:
+        passed.append("held up on an earlier unseen window (%+.3f)" % v["earlier"])
+    else:
+        failed.append("did not hold up on an earlier window (%s)"
+                      % num(v.get("earlier")))
+
+    scan = w.get("cost_scan") or {}
+    dbl = (scan.get("2.0") or {}).get("median_score")
+    if not scan:
+        failed.append("cost sensitivity not measured")
+    elif dbl is not None and dbl > 0:
+        passed.append("survives double the assumed cost")
+    else:
+        failed.append("does not survive double the assumed cost")
+
+    a = abl.get(w["family"])
+    if a is None:
+        failed.append("signal not isolated from the execution")
+    else:
+        vd = str(a.get("verdict", ""))
+        if vd.startswith("signal carries") or vd.startswith("BETTER without"):
+            passed.append("the signal, not the position management")
+        else:
+            failed.append("ablation says: %s" % vd)
+    return ("%d of 4 checks" % len(passed)), passed + ["NOT: " + f for f in failed]
+
+
 # ==================================================================== render
 def build_pdf(passes: list[dict], winners: list[dict], out: Path,
-              top: int = 5) -> Path:
+              top: int = 5, abl: Optional[dict] = None,
+              val: Optional[dict] = None) -> Path:
+    abl = abl or {}
+    val = val or {}
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -506,6 +582,37 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
                    "<font color='%s'><b>Does NOT beat the random-entry "
                    "control</b> — treat as unproven</font>" % RED)
         blk.append(Paragraph(verdict, S["BODY"]))
+
+        headline, lines = verdict_of(w, abl, val)
+        blk.append(Paragraph("<b>%s passed.</b>" % headline, S["BODY"]))
+        for ln in lines:
+            colour = RED if ln.startswith("NOT: ") else GRN
+            mark = "&#10007;" if ln.startswith("NOT: ") else "&#10003;"
+            blk.append(Paragraph(
+                "<font color='%s'>%s</font>&nbsp; %s"
+                % (colour, mark, ln.replace("NOT: ", "")), S["NOTE"]))
+        blk.append(Spacer(1, 4))
+
+        a = abl.get(w["family"])
+        if a:
+            blk.append(tbl(["Where the result comes from", "Score"], [
+                ["The strategy as selected", num(a["full"]["median_score"])],
+                ["Random entry, SAME execution parameters",
+                 num(a["exec_only"]["median_score"])],
+                ["The same signal with averaging-down switched off",
+                 num(a["no_adds"]["median_score"])],
+            ], [4.4, 1.4]))
+
+        v = val.get(w["family"])
+        if v and v.get("earlier") is not None:
+            blk.append(Paragraph(
+                "On an EARLIER window (%s to %s) that the search never saw, "
+                "with the same parameters and no re-tuning, it scored "
+                "<b>%s</b> on %d of %d symbols."
+                % (str(v.get("_from"))[:10], str(v.get("_to"))[:10],
+                   num(v["earlier"]),
+                   int(round((v.get("consistency") or 0) * (v.get("symbols") or 0))),
+                   v.get("symbols") or 0), S["NOTE"]))
 
         rows = [
             ["Out-of-sample score (P/L per $ drawdown, median symbol)",
@@ -700,7 +807,8 @@ def main(argv=None) -> int:
 
     stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M")
     out = REPORT_DIR / ("strategy_research_%s.pdf" % stamp)
-    build_pdf(passes, winners, out, a.top)
+    abl, val = load_side_studies()
+    build_pdf(passes, winners, out, a.top, abl, val)
 
     print("")
     print("passes: %s" % ", ".join("%s(%dd)" % (p["timeframe"], p["days"])
@@ -710,6 +818,8 @@ def main(argv=None) -> int:
     if not winners:
         print("NOTHING SURVIVED out of sample. That is the finding.")
     for i, w in enumerate(winners, 1):
+        hl, _ = verdict_of(w, abl, val)
+        print("   [%s]" % hl)
         print("%d. %-34s %-6s OOS %+.3f  IS %+.3f  %d/%d symbols  %s  %s"
               % (i, w["family"][:34], w["timeframe"],
                  w["test"]["median_score"], w["train"]["median_score"],

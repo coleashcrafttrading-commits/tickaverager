@@ -179,7 +179,7 @@
     "total_trades": 494,
     "sum_pl": 8528.82
    },
-   "verdict": "signal carries it"
+   "verdict": "BETTER without adds (+0.590)"
   },
   {
    "family": "MFI extreme",
@@ -225,7 +225,7 @@
     "total_trades": 849,
     "sum_pl": 8131.99
    },
-   "verdict": "signal carries it"
+   "verdict": "NEEDS the adds"
   },
   {
    "family": "Hull MA slope",
@@ -269,6 +269,96 @@
     "consistency": 0.75,
     "total_trades": 813,
     "sum_pl": 15075.83
+   },
+   "verdict": "BETTER without adds (+0.982)"
+  },
+  {
+   "family": "Order block retest",
+   "params": {
+    "min_size": 0.05,
+    "max_age": 120,
+    "tp_atr": 2.5,
+    "st_atr": 5.0,
+    "max_adds": 4,
+    "add_atr": 1.5,
+    "side": "both"
+   },
+   "full": {
+    "median_score": 0.3389,
+    "mean_score": 0.4678,
+    "worst_score": -0.1857,
+    "best_score": 1.926,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 1396,
+    "sum_pl": 12928.75
+   },
+   "exec_only": {
+    "median_score": 0.2381,
+    "mean_score": 0.3604,
+    "worst_score": -0.3109,
+    "best_score": 1.1077,
+    "symbols_scored": 8,
+    "symbols_profitable": 6,
+    "consistency": 0.75,
+    "total_trades": 1349,
+    "sum_pl": 3088.5
+   },
+   "no_adds": {
+    "median_score": -0.009,
+    "mean_score": -0.0364,
+    "worst_score": -0.8414,
+    "best_score": 1.1741,
+    "symbols_scored": 8,
+    "symbols_profitable": 4,
+    "consistency": 0.5,
+    "total_trades": 779,
+    "sum_pl": -589.93
+   },
+   "verdict": "EXECUTION, not signal"
+  },
+  {
+   "family": "Keltner fade",
+   "params": {
+    "kc_n": 34,
+    "kc_m": 2.0,
+    "tp_atr": 4.0,
+    "st_atr": 1.5,
+    "side": "short"
+   },
+   "full": {
+    "median_score": 0.2657,
+    "mean_score": 0.5694,
+    "worst_score": -0.3272,
+    "best_score": 3.0804,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 724,
+    "sum_pl": 3689.82
+   },
+   "exec_only": {
+    "median_score": -0.0525,
+    "mean_score": -0.0592,
+    "worst_score": -0.9965,
+    "best_score": 1.369,
+    "symbols_scored": 8,
+    "symbols_profitable": 4,
+    "consistency": 0.5,
+    "total_trades": 759,
+    "sum_pl": -8729.84
+   },
+   "no_adds": {
+    "median_score": 0.2657,
+    "mean_score": 0.5694,
+    "worst_score": -0.3272,
+    "best_score": 3.0804,
+    "symbols_scored": 8,
+    "symbols_profitable": 5,
+    "consistency": 0.625,
+    "total_trades": 724,
+    "sum_pl": 3689.82
    },
    "verdict": "signal carries it"
   }
