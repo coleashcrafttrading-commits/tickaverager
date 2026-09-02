@@ -115,7 +115,101 @@ def pooled_ranking(passes: list[dict], top: int) -> list[dict]:
             rows.append(c)
     rows.sort(key=lambda c: (not c["beats_control"],
                              -(c["test"]["median_score"] or 0)))
-    return rows[:top]
+    if rows:
+        return rows[:top]
+
+    # Nothing cleared the gates. Rather than print an empty page, show the
+    # ones that came CLOSEST, flagged as not qualifying -- seeing how far
+    # short they fell is more useful than seeing nothing, and it is the
+    # difference between "we found nothing" and "we did not look".
+    near = []
+    for p in passes:
+        bar = control_bar(p)
+        for c in p.get("rejected", []):
+            if c.get("family", "").startswith("CONTROL"):
+                continue
+            if not c.get("selected") or not (c.get("test") or {}).get("median_score"):
+                continue
+            c = dict(c)
+            c["timeframe"] = p.get("timeframe")
+            c["days"] = p.get("days")
+            c["control_bar"] = bar
+            c["beats_control"] = (
+                bar is None or (c["test"]["median_score"] or 0) > bar)
+            c["did_not_qualify"] = True
+            near.append(c)
+    near.sort(key=lambda c: -(c["test"]["median_score"] or 0))
+    return near[:top]
+
+
+
+def cost_sensitivity(winners: list[dict], passes: list[dict],
+                     multipliers=(0.5, 1.0, 2.0, 4.0)) -> None:
+    """Re-run each winner out of sample at several cost assumptions.
+
+    The slippage model is an estimate, and a strategy taking thousands of small
+    trades is far more sensitive to it than one taking dozens. A result that
+    only exists at the assumed cost is not a strategy, it is a statement about
+    the assumption -- so this puts the number next to it and lets you see.
+
+    Mutates each winner in place, adding {"cost_scan": {mult: score}}.
+    """
+    import btcode
+    import research
+
+    by_tf: dict[str, list[dict]] = {}
+    for w in winners:
+        by_tf.setdefault(w["timeframe"], []).append(w)
+
+    for tf, group in by_tf.items():
+        p = next((x for x in passes if x.get("timeframe") == tf), None)
+        if not p:
+            continue
+        syms = list((p.get("meta") or {}))
+        days = p.get("days", 90)
+        print("  re-running %d winner(s) on %s bars at %d cost levels..."
+              % (len(group), tf, len(multipliers)))
+        data = research.fetch(syms, tf, days)
+        fam_by_name = {f["name"]: f for f in research.FAMILIES}
+
+        for w in group:
+            fam = fam_by_name.get(w["family"])
+            if not fam:
+                continue
+            code = research.build(fam)
+            scan: dict[str, Any] = {}
+            for m in multipliers:
+                per = {}
+                for sym, bars in data.items():
+                    _tr, te = research.split(bars)
+                    slip = round(research.slippage_for(bars) * m, 5)
+                    reps = btcode.run_many(
+                        te, [{"id": "0", "code": code, "params": w["params"]}],
+                        opts={"slippage": slip, "fee_per_share": 0.0,
+                              "max_positions": 8, "bar_size": tf},
+                        slim=True)
+                    r = reps[0]
+                    if not r.get("ok"):
+                        per[sym] = {"score": None, "total_pl": 0.0, "trades": 0}
+                        continue
+                    sm = r["summary"]
+                    per[sym] = {"score": research.score_one(sm),
+                                "total_pl": sm["total_pl"],
+                                "trades": sm["total_trades"]}
+                agg = research.aggregate(per)
+                scan[str(m)] = {"median_score": agg["median_score"],
+                                "consistency": agg["consistency"],
+                                "sum_pl": agg["sum_pl"],
+                                "symbols_scored": agg["symbols_scored"]}
+            w["cost_scan"] = scan
+            base = scan.get("1.0", {}).get("median_score")
+            dbl = scan.get("2.0", {}).get("median_score")
+            w["survives_double_cost"] = bool(
+                dbl is not None and dbl > 0)
+            print("    %-34s cost x1 %s   x2 %s   x4 %s"
+                  % (w["family"][:34],
+                     num(base), num(dbl),
+                     num(scan.get("4.0", {}).get("median_score"))))
 
 
 # ==================================================================== render
@@ -198,6 +292,15 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
             "is nothing: there is no top five here worth trading, and picking "
             "the five least-bad would be inventing a recommendation the data "
             "does not support.", S["BODY"]))
+    elif all(w.get("did_not_qualify") for w in winners):
+        F.append(Paragraph(
+            "<b>Nothing qualified.</b> No strategy family was profitable out "
+            "of sample on a majority of symbols after costs. The five shown "
+            "below are the ones that came CLOSEST, and each is marked with "
+            "the gate it failed. None of them is a recommendation. The honest "
+            "reading of this pass is that the edge is not in this search "
+            "space, and the useful output is the rejection list -- it stops "
+            "these ideas being tried again.", S["BODY"]))
     else:
         beat = [w for w in winners if w["beats_control"]]
         F.append(Paragraph(
@@ -280,6 +383,12 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
         if note:
             blk.append(Paragraph(note, S["NOTE"]))
 
+        if w.get("did_not_qualify"):
+            blk.append(Paragraph(
+                "<font color='%s'><b>DID NOT QUALIFY.</b> %s. Shown because it "
+                "came closest, not because it is recommended.</font>"
+                % (RED, (w.get("rejected") or "failed a gate").rstrip(".")),
+                S["BODY"]))
         verdict = ("<font color='%s'><b>Beats the random-entry control</b></font>"
                    % GRN) if w["beats_control"] else (
                    "<font color='%s'><b>Does NOT beat the random-entry "
@@ -309,6 +418,27 @@ def build_pdf(passes: list[dict], winners: list[dict], out: Path,
                        if k not in ("shares",))
         blk.append(Paragraph("<b>Settings:</b> <font size=7.5>%s</font>" % ps,
                              S["NOTE"]))
+
+        scan = w.get("cost_scan")
+        if scan:
+            srows = []
+            for m in ("0.5", "1.0", "2.0", "4.0"):
+                d = scan.get(m)
+                if not d:
+                    continue
+                srows.append([
+                    ("%sx assumed cost" % m) + (" (as reported)" if m == "1.0" else ""),
+                    num(d["median_score"]),
+                    "%d%%" % int((d["consistency"] or 0) * 100),
+                    signed(d["sum_pl"])])
+            blk.append(Paragraph("Cost sensitivity, out of sample:", S["NOTE"]))
+            blk.append(tbl(["Slippage", "Score", "Symbols +", "Summed P/L"],
+                           srows, [2.2, 1.1, 0.9, 1.3]))
+            if not w.get("survives_double_cost", True):
+                blk.append(Paragraph(
+                    "<font color='%s'><b>Does not survive a doubling of the "
+                    "cost assumption.</b> Most of this result is the slippage "
+                    "estimate, not the signal.</font>" % RED, S["NOTE"]))
 
         per = w.get("per_symbol_test") or {}
         prows = []
@@ -419,6 +549,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--files", nargs="*", default=None)
+    ap.add_argument("--no-cost-scan", action="store_true")
     a = ap.parse_args(argv)
 
     passes = newest_per_timeframe(load_passes(a.files))
@@ -426,6 +557,12 @@ def main(argv=None) -> int:
         print("No research JSON found in %s" % RESEARCH_DIR)
         return 1
     winners = pooled_ranking(passes, a.top)
+    if winners and not a.no_cost_scan:
+        print("Cost sensitivity check:")
+        try:
+            cost_sensitivity(winners, passes)
+        except Exception as e:
+            print("  cost scan skipped: %r" % e)
 
     stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M")
     out = REPORT_DIR / ("strategy_research_%s.pdf" % stamp)
