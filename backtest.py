@@ -77,8 +77,12 @@ class SimEngine:
 
 
 # the real rules, not a copy of them
-for _m in ("_add_trigger_met", "_rung_price", "_entry_limit_price", "_add_reason"):
+for _m in ("_add_trigger_met", "_rung_price", "_entry_limit_price", "_add_reason",
+           "next_side", "broker_side"):
     setattr(SimEngine, _m, getattr(Engine, _m))
+SimEngine._dir = staticmethod(Engine._dir)
+SimEngine.broker_qty = 0          # the sim never holds a broker position
+SimEngine.trend = {}
 
 
 def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
@@ -118,6 +122,12 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
     holds: list[float] = []
     depth_hist: dict[int, int] = {}
     pending: Optional[dict] = None            # decided last bar, fills on this one
+    # Every round trip is recorded so this replay produces the SAME report
+    # object as a strategy or a coded run. Three backtesters that measure
+    # themselves three different ways cannot be compared, and comparing them is
+    # the entire point of having them.
+    trades: list[dict] = []
+    entry_bar: dict[str, int] = {}
 
     for i, bar in enumerate(bars):
         o, h, l, c = (float(bar["o"]), float(bar["h"]),
@@ -135,6 +145,7 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
                           entry_price=fill, entry_time=str(ts),
                           tp_price=_round_cent(fill + tp_amt))
                 led.open_lots.append(lot)
+                entry_bar[lot.id] = i
                 deployed_total += fill * shares_per_lot
                 depth = len(led.open_lots)
                 max_lots_held = max(max_lots_held, depth)
@@ -151,6 +162,12 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
                     realized += pnl
                     closed += 1
                     holds.append(_bar_gap(lot.entry_time, ts))
+                    trades.append({
+                        "entry_i": entry_bar.get(lot.id, i), "entry_t": lot.entry_time,
+                        "entry": round(lot.entry_price, 4), "shares": lot.shares,
+                        "side": "long", "exit_i": i, "exit_t": str(ts),
+                        "exit": round(lot.tp_price, 4), "why": "target",
+                        "tag": lot.id})
                     led.open_lots.remove(lot)
                 continue
 
@@ -175,6 +192,11 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
                 realized += pnl
                 closed += 1
                 holds.append(_bar_gap(lot.entry_time, ts))
+                trades.append({
+                    "entry_i": entry_bar.get(lot.id, i), "entry_t": lot.entry_time,
+                    "entry": round(lot.entry_price, 4), "shares": lot.shares,
+                    "side": "long", "exit_i": i, "exit_t": str(ts),
+                    "exit": round(fill, 4), "why": "trail", "tag": lot.id})
                 led.open_lots.remove(lot)
                 peaks.pop(lot.id, None)
 
@@ -207,7 +229,13 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM") -> dict:
         end_unreal = sum((last_close - x.entry_price) * x.shares for x in led.open_lots)
 
     span_days = _span_days(bars)
+    open_positions = [{"entry_i": entry_bar.get(x.id, 0), "entry_t": x.entry_time,
+                       "entry": round(x.entry_price, 4), "shares": x.shares,
+                       "side": "long", "tag": x.id}
+                      for x in led.open_lots]
     return {
+        "trades": trades,
+        "open_positions": open_positions,
         "symbol": symbol,
         "bars": len(bars),
         "span_days": span_days,
@@ -272,6 +300,7 @@ def run_strategy(bars: list[dict], spec: dict, opts: dict | None = None) -> dict
     max_dd = 0.0
     exits = {"target": 0, "stop": 0, "signal": 0, "end": 0}
     pending = False
+    trades: list[dict] = []
 
     for i, bar in enumerate(bars):
         o_, h, l, c = (float(bar["o"]), float(bar["h"]),
@@ -281,6 +310,7 @@ def run_strategy(bars: list[dict], spec: dict, opts: dict | None = None) -> dict
         if pending and len(open_pos) < max_pos:
             entry = o_
             pos = {"entry": entry, "shares": shares, "i": i,
+                   "entry_t": bars[i]["t"],
                    "target": st.level("target", entry, i),
                    "stop": st.level("stop", entry, i)}
             open_pos.append(pos)
@@ -309,6 +339,11 @@ def run_strategy(bars: list[dict], spec: dict, opts: dict | None = None) -> dict
                 losses += pnl <= 0
                 holds.append(i - pos["i"])
                 exits[why] += 1
+                trades.append({
+                    "entry_i": pos["i"], "entry_t": pos["entry_t"],
+                    "entry": round(pos["entry"], 4), "shares": pos["shares"],
+                    "side": "long", "exit_i": i, "exit_t": bars[i]["t"],
+                    "exit": round(price, 4), "why": why})
                 open_pos.remove(pos)
 
         # ---- 3. mark to market ----
@@ -334,6 +369,11 @@ def run_strategy(bars: list[dict], spec: dict, opts: dict | None = None) -> dict
     span = _span_days(bars)
 
     return {
+        "trades": trades,
+        "open_positions": [
+            {"entry_i": p["i"], "entry_t": p.get("entry_t", ""),
+             "entry": round(p["entry"], 4), "shares": p["shares"], "side": "long"}
+            for p in open_pos],
         "strategy": st.name,
         "bars": len(bars),
         "span_days": span,

@@ -36,6 +36,11 @@ Routes
   POST   /api/agents/{id}              patch a schedule {enabled, mode, ...}
   POST   /api/agents/{id}/run          fire one now
   POST   /api/agents/selftest         prove the LLM path works end to end
+  GET    /api/backtest/{id}/detail    full report + curves for one row
+  GET/POST/DELETE /api/code           coded strategies (real Python)
+  POST   /api/code/check              compile-check without running
+  GET/POST /api/risk/profiles         risk profiles and presets
+  GET/POST /api/risk/bank             tested risk profiles + leaderboard
   GET    /api/agents/{id}/runs         that agent's run history
 """
 from __future__ import annotations
@@ -566,6 +571,129 @@ def backtest_submit(spec: dict = Body(...)):
         return btjobs.submit(get_fleet(), spec)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/backtest/{job_id}/detail")
+def backtest_detail(job_id: str, row: int = 0):
+    """The full report for one row of a finished sweep.
+
+    Only the winner's curve is kept when a job finishes -- keeping all of them
+    would ship millions of equity points -- so any other row is re-run here on
+    demand. One combination is cheap; two hundred curves in memory are not.
+    """
+    import btjobs
+    try:
+        rep = btjobs.detail(get_fleet(), job_id, row)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "report": rep}
+
+
+# ================================================================ coded tests
+@app.get("/api/code")
+def code_list():
+    import btcode
+    btcode.install_template()
+    return {"ok": True, "files": btcode.listing(), "template": btcode.TEMPLATE}
+
+
+@app.get("/api/code/{slug}")
+def code_get(slug: str):
+    import btcode
+    try:
+        return {"ok": True, "slug": slug, "code": btcode.load(slug)}
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/code")
+def code_save(body: dict = Body(...)):
+    import btcode
+    try:
+        slug = btcode.save(body.get("slug") or body.get("name") or "",
+                           body.get("code") or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "slug": slug}
+
+
+@app.delete("/api/code/{slug}")
+def code_delete(slug: str):
+    import btcode
+    btcode.delete(slug)
+    return {"ok": True, "deleted": slug}
+
+
+@app.post("/api/code/check")
+def code_check(body: dict = Body(...)):
+    """Compile-check strategy code without running it, so the editor can say
+    what is wrong before a sweep spends a minute finding out."""
+    src = body.get("code") or ""
+    try:
+        compile(src, "<strategy>", "exec")
+    except SyntaxError as e:
+        return {"ok": False, "line": e.lineno, "offset": e.offset,
+                "error": f"line {e.lineno}: {e.msg}"}
+    if "def on_bar" not in src:
+        return {"ok": False, "line": None,
+                "error": "No on_bar(ctx, i). That function is what the "
+                         "backtester calls once per closed bar."}
+    return {"ok": True, "error": ""}
+
+
+# ======================================================================= risk
+@app.get("/api/risk/profiles")
+def risk_profiles():
+    import riskbank
+    return {"ok": True, "profiles": riskbank.profiles(),
+            "fields": riskbank.FIELDS, "groups": riskbank.GROUPS,
+            "defaults": riskbank.defaults()}
+
+
+@app.post("/api/risk/profiles")
+def risk_profile_save(body: dict = Body(...)):
+    import riskbank
+    try:
+        rec = riskbank.save_profile(body.get("name") or "",
+                                    body.get("values") or {},
+                                    body.get("note") or "",
+                                    body.get("slug") or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "profile": rec}
+
+
+@app.delete("/api/risk/profiles/{slug}")
+def risk_profile_delete(slug: str):
+    import riskbank
+    return {"ok": True, "deleted": riskbank.delete_profile(slug)}
+
+
+@app.get("/api/risk/bank")
+def risk_bank(limit: int = 200, symbol: str = "", profile: str = ""):
+    import riskbank
+    return {"ok": True,
+            "entries": riskbank.bank(limit, symbol, profile),
+            "leaderboard": riskbank.leaderboard(25, symbol),
+            "stats": riskbank.stats()}
+
+
+@app.post("/api/risk/bank")
+def risk_bank_add(body: dict = Body(...)):
+    """Bank a tested risk profile together with the result that justifies it."""
+    import riskbank
+    prof = body.get("profile") or {}
+    if not prof.get("values"):
+        raise HTTPException(400, "A profile with values is required.")
+    row = riskbank.record(
+        prof, body.get("result") or {},
+        strategy=body.get("strategy", ""), symbol=body.get("symbol", ""),
+        timeframe=body.get("timeframe", ""), days=body.get("days", 0),
+        mode=body.get("mode", ""), job=body.get("job", ""),
+        actor=body.get("actor", "human"), note=body.get("note", ""))
+    return {"ok": True, "entry": row}
 
 
 @app.get("/api/backtest/jobs")
