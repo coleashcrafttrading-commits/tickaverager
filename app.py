@@ -35,6 +35,7 @@ Routes
   GET    /api/agents                   agent jobs, schedules, last runs
   POST   /api/agents/{id}              patch a schedule {enabled, mode, ...}
   POST   /api/agents/{id}/run          fire one now
+  POST   /api/agents/selftest         prove the LLM path works end to end
   GET    /api/agents/{id}/runs         that agent's run history
 """
 from __future__ import annotations
@@ -329,6 +330,17 @@ def _sched():
 @app.get("/api/agents")
 def agents():
     return _sched().status()
+
+
+@app.post("/api/agents/selftest")
+def agents_selftest():
+    """Ask the model one trivial question and report exactly what came back.
+
+    A green readiness light is an inference from config files; this is
+    evidence, and it costs a fraction of a cent.
+    """
+    import scheduler
+    return scheduler.smoke_test()
 
 
 @app.post("/api/agents/{job_id}")

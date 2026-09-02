@@ -2,10 +2,13 @@
    Agents -- schedule, toggle and run the subagents; plus the audit log.
    ========================================================================= */
 "use strict";
-import { S, VIEWS, GET, POST, toast, el, esc, card, tableHTML } from "../core.js";
+import {
+  S, VIEWS, GET, POST, toast, el, esc, card, tableHTML, act,
+} from "../core.js";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let data = null;
+let testOut = "";   // survives the poll re-render
 
 VIEWS.agents = {
   title: () => "Agents",
@@ -74,10 +77,51 @@ function render() {
   const { a, au } = data;
   if (!el("agCards")) return;
 
-  el("agNote").innerHTML = a.ready.ready ? "" :
-    `<div class="note warn"><b>Agents cannot run yet</b> — ${esc(a.ready.problem)}<br>
-     ${esc(a.ready.fix)}<br><span class="faint">Schedules still save; every run until
-     then is recorded as blocked rather than failing silently.</span></div>`;
+  const AUTH = { api_key: "an API key from .env — billed per token",
+                 cli_login: "the Claude Code CLI login — your subscription" };
+  el("agNote").innerHTML = a.ready.ready
+    ? `<div class="note good"><b>Agents can run.</b> Authenticating with
+         ${esc(AUTH[a.ready.auth] || a.ready.auth || "the CLI")}.
+         <button class="btn sm" id="agTest" style="margin-left:8px">Test it</button>
+         <span id="agTestOut" class="faint">${testOut}</span></div>`
+    : `<div class="note warn"><b>Agents cannot run yet</b> — ${esc(a.ready.problem)}<br>
+       ${esc(a.ready.fix)}<br>
+       <div class="tip" style="margin-top:8px">Two separate one-time steps, and
+         you need <b>both</b>:<br>
+         <b>1. Trust</b> — open a terminal in the bot folder, run
+         <code>claude</code>, accept the trust prompt. Without it the CLI
+         silently ignores every permission rule in
+         <code>.claude/settings.json</code>.<br>
+         <b>2. Credentials</b> — in that same session run <code>/login</code>
+         (uses your subscription), <i>or</i> put
+         <code>ANTHROPIC_API_KEY=sk-ant-…</code> in <code>.env</code> and
+         restart the dashboard (billed per token, a few cents a run).<br>
+         Then press <b>Test it</b> — a green reply means every scheduled agent
+         below will work.</div>
+       <button class="btn sm" id="agTest" style="margin-top:8px">Test it anyway</button>
+       <span id="agTestOut" class="faint">${testOut}</span><br>
+       <span class="faint">Schedules still save; every run until then is recorded as
+       blocked rather than failing silently.</span></div>`;
+  const tb = el("agTest");
+  if (tb) tb.onclick = () => act(async () => {
+    tb.disabled = true; tb.textContent = "Asking…";
+    testOut = `<span class="faint">asking the model…</span>`;
+    el("agTestOut").innerHTML = testOut;
+    try {
+      const r = await POST("/api/agents/selftest", {});
+      testOut = r.ok
+        ? `<span class="up">replied “${esc(r.reply)}” in ${r.seconds}s${
+            r.cost_usd ? `, $${Number(r.cost_usd).toFixed(4)}` : ""}</span>`
+        : `<span class="down">${esc(r.error || r.problem || "no answer")}</span>`;
+    } catch (e) {
+      testOut = `<span class="down">${esc(e.message)}</span>`;
+    } finally {
+      tb.disabled = false;
+      tb.textContent = "Test it";
+      const o = el("agTestOut");
+      if (o) o.innerHTML = testOut;
+    }
+  });
 
   el("agRunning").innerHTML = a.running
     ? `<span class="up">${esc(a.running)} running · ${a.running_for}s</span>` : "idle";

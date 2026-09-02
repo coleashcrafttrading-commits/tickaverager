@@ -16,9 +16,20 @@ exactly as they are in an interactive session.
 
 ONE-TIME SETUP
 --------------
-The CLI needs its own login and the workspace needs to be trusted. Until then
-every run is recorded as blocked with the reason, rather than silently doing
-nothing. `readiness()` is what the dashboard reads to say so.
+The workspace has to be trusted, and the CLI has to be able to authenticate.
+There are two ways to authenticate and either is enough:
+
+  1. SUBSCRIPTION -- open a terminal in this folder, run `claude`, then
+     `/login`. Agent runs then come out of the Claude subscription.
+
+  2. API KEY -- put ANTHROPIC_API_KEY=sk-ant-... in .env. app.py loads .env
+     into the environment and this module hands the whole environment to the
+     CLI, so the key is picked up with no login at all. Runs are billed per
+     token; each run's cost is recorded in state/agent_runs.jsonl.
+
+Until one of those is in place every run is recorded as blocked with the
+reason, rather than silently doing nothing. `readiness()` is what the
+dashboard reads to say so, and `smoke_test()` proves it end to end.
 
 SCHEDULE MODES
 --------------
@@ -241,47 +252,107 @@ def find_cli() -> str:
     return best[1] if best else ""
 
 
+def auth_mode() -> str:
+    """Which credential a run would use. api_key wins because the CLI prefers
+    it over a stored login, so reporting anything else would be a lie."""
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    return "api_key" if key.startswith("sk-") else "cli_login"
+
+
 def readiness() -> dict:
     """Can we actually run an agent right now, and if not, what does Glenn do?"""
     exe = find_cli()
+    mode = auth_mode()
     if not exe:
-        return {"ready": False, "cli": "",
+        return {"ready": False, "cli": "", "auth": mode,
                 "problem": "Claude Code CLI not found",
                 "fix": "Install Claude Code, or set CLAUDE_CLI in .env to the "
                        "full path of claude.exe."}
 
-    trusted = False
+    # ~/.claude.json can hold SEVERAL keys for the same folder -- one with
+    # backslashes and one with forward slashes -- and the CLI reads only the
+    # one whose spelling it happens to use. Accepting "trusted" because any
+    # entry says so reported a green light while the CLI was refusing the
+    # workspace and silently dropping every permissions.allow rule in
+    # .claude/settings.json. Every matching entry must agree.
+    untrusted: list[str] = []
     try:
         cfg = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
-        projects = cfg.get("projects") or {}
-        for k, v in projects.items():
-            if Path(k).resolve() == ROOT and (v or {}).get("hasTrustDialogAccepted"):
-                trusted = True
-                break
+        for k, v in (cfg.get("projects") or {}).items():
+            try:
+                same = Path(k).resolve() == ROOT
+            except OSError:
+                continue
+            if same and not (v or {}).get("hasTrustDialogAccepted"):
+                untrusted.append(k)
     except Exception:
-        pass
+        untrusted.append(str(ROOT))
 
-    if not trusted:
-        return {"ready": False, "cli": exe, "trusted": False,
-                "problem": "This folder is not a trusted Claude Code workspace, "
-                           "and the CLI may not be logged in.",
-                "fix": "Open a terminal here and run `claude` once: accept the trust "
-                       "prompt, and run /login if it asks. Both are one-time."}
+    if untrusted:
+        return {"ready": False, "cli": exe, "trusted": False, "auth": mode,
+                "untrusted_keys": untrusted,
+                "problem": "This folder is not a trusted Claude Code workspace "
+                           f"under {untrusted[0]!r}, so the CLI ignores the "
+                           f"permissions in .claude/settings.json.",
+                "fix": "Open a terminal in this folder and run `claude` once, and "
+                       "accept the trust prompt. One time only."}
 
-    # Trust is not the same as being signed in, and claiming "ready" when the
-    # CLI will bounce every run with "Not logged in" is the kind of green light
-    # that wastes a day. The last run is the honest evidence.
-    last = read_runs(limit=1)
-    if last:
-        err = str(last[0].get("error") or "")
-        if "not logged in" in err.lower() or "/login" in err.lower():
-            return {"ready": False, "cli": exe, "trusted": True,
-                    "problem": "The Claude Code CLI is not signed in.",
-                    "fix": "Open a terminal in this folder and run `claude`, then "
-                           "`/login`. One time only -- every scheduled agent works "
-                           "after that."}
+    # Trust is not the same as being able to authenticate, and claiming "ready"
+    # when the CLI will bounce every run with "Not logged in" is the kind of
+    # green light that wastes a day. An API key needs no login; without one,
+    # the last run is the honest evidence about the stored login.
+    if mode != "api_key":
+        last = read_runs(limit=1)
+        if last:
+            err = str(last[0].get("error") or "")
+            if "not logged in" in err.lower() or "/login" in err.lower():
+                return {"ready": False, "cli": exe, "trusted": True, "auth": mode,
+                        "problem": "The Claude Code CLI is not signed in, and there "
+                                   "is no ANTHROPIC_API_KEY in .env.",
+                        "fix": "EITHER open a terminal in this folder and run "
+                               "`claude` then `/login` (uses your subscription), "
+                               "OR put ANTHROPIC_API_KEY=sk-ant-... in .env and "
+                               "restart the dashboard (billed per token). Either "
+                               "one is enough, and both are one-time."}
 
-    return {"ready": True, "cli": exe, "trusted": True, "problem": "", "fix": ""}
+    return {"ready": True, "cli": exe, "trusted": True, "auth": mode,
+            "problem": "", "fix": ""}
+
+
+def smoke_test(timeout: int = 120) -> dict:
+    """Prove the whole path works, cheaply, without touching the account.
+
+    A green readiness light is an inference from config; this is evidence. It
+    asks the model one trivial question and reports exactly what came back, so
+    a broken key or an expired login shows up here rather than at 04:00 in a
+    scheduled watchdog run.
+    """
+    r = readiness()
+    if not r["ready"]:
+        return {"ok": False, "stage": "readiness", **r}
+    started = time.time()
+    try:
+        p = subprocess.run(
+            [r["cli"], "-p", "Reply with exactly: AGENTS OK",
+             "--permission-mode", "bypassPermissions", "--output-format", "json"],
+            cwd=str(ROOT), env=dict(os.environ, AGENT_NAME="smoke-test"),
+            capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "stage": "run", "auth": r["auth"],
+                "error": f"the CLI did not answer within {timeout}s"}
+    text, cost, err = _parse_cli(p.stdout)
+    ok = p.returncode == 0 and not err and "AGENTS OK" in (text or "").upper()
+    out = {"ok": ok, "stage": "run", "auth": r["auth"],
+           "seconds": round(time.time() - started, 1),
+           "cost_usd": cost, "reply": (text or "").strip()[:300],
+           "error": err or (p.stderr[:400] if p.returncode else "")}
+    log_run({"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+             "job": "smoke-test", "agent": "none", "trigger": "manual",
+             "ok": ok, "status": "ok" if ok else "error",
+             "seconds": out["seconds"], "cost_usd": cost,
+             "output": out["reply"], "error": out["error"]})
+    return out
 
 
 # ================================================================= schedule
@@ -487,6 +558,7 @@ class Scheduler:
             cmd = [ready["cli"], "-p", spec["prompt"],
                    "--permission-mode", "bypassPermissions",
                    "--output-format", "json"]
+            row["auth"] = ready.get("auth", "")
             env = dict(os.environ, AGENT_NAME=f"scheduled-{job_id}")
             self.fleet.ev("INFO", f"Agent {job_id} started ({trigger}).")
             p = subprocess.run(cmd, cwd=str(ROOT), env=env, capture_output=True,
