@@ -1,0 +1,30 @@
+{
+ "name": "Turn-Of-Month Cash Cycle Window",
+ "note": "Pure calendar exposure: long from the (entry_off+1)-th-to-last trading day of the month through the exit_day-th trading day of the next, with an optional short leg over the following days. There is no price condition anywhere. Trading days are counted as weekdays from the date itself, which is a priori calendar knowledge -- exchange holidays are not modelled, so a holiday shifts the window by at most one session. Stated as a condition to be in, so exit_on_zero closes it when the window ends; the paper's 'no intra-window stops' is a sizing instruction, and the shared execution model is left alone so this stays comparable with every other family.",
+ "source": "Ogden, \"Turn-of-Month Evaluations of Liquid Profits and Stock Returns: A Common Explanation for the Monthly and January Effects,\" Journal of Finance 45(4), 1990, 1259-1272; Etula, Rinne, Suominen & Vaittinen, \"Dash for Cash: Monthly Market Impact of Institutional Liquidity Needs,\" Review of Financial Studies 33(1), 2020, 75-111",
+ "params": {
+  "entry_off": 4,
+  "exit_day": 3,
+  "short_leg": 0,
+  "short_end": 8,
+  "exit_on_zero": 1
+ },
+ "grid": {
+  "entry_off": [
+   1,
+   2,
+   4,
+   5
+  ],
+  "exit_day": [
+   1,
+   3,
+   5
+  ],
+  "short_leg": [
+   0,
+   1
+  ]
+ },
+ "code": "import math\n\n\ndef _sess(ctx):\n    \"\"\"Per-bar ET clock, session index and RTH flag, from the timestamps alone.\n\n    The feed carries extended hours (04:00-20:00 ET) and some symbols are\n    missing premarket bars entirely, so nothing here may count bars to find a\n    session -- it all comes off the clock. US DST boundaries are computed from\n    the calendar, which is a priori knowledge, not a peek at the tape.\n    \"\"\"\n    import datetime as _dt\n    etm = []\n    day = []\n    rth = []\n    ri = []\n    cache = {}\n    last = None\n    di = -1\n    nr = 0\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        key = (y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            pv = _dt.date(y, mo, dd) - _dt.timedelta(days=1)\n            key = (pv.year, pv.month, pv.day)\n        if key != last:\n            last = key\n            di += 1\n        r = 570 <= tot < 960\n        etm.append(tot); day.append(di); rth.append(r)\n        if r:\n            nr += 1\n        ri.append(nr)\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ri = ri\n\n\ndef _rth_returns(ctx):\n    \"\"\"RTH-only log returns and the raw bar index each one ends on.\n\n    Overnight and pre/post-market returns are dropped: the intraday moments\n    below estimate an intraday quantity, and a gap return is not a 5-minute\n    return however it is labelled.\n    \"\"\"\n    R = []\n    POS = []\n    prev = None\n    prevday = None\n    for i in range(len(ctx.bars)):\n        if ctx.f_rth[i]:\n            c = float(ctx.bars[i][\"c\"])\n            if prev is not None and prev > 0.0 and c > 0.0 and \\\n                    ctx.f_day[i] == prevday:\n                R.append(math.log(c / prev))\n                POS.append(i)\n            prev = c\n            prevday = ctx.f_day[i]\n    return R, POS\n\n\ndef _monthpos(y, mo, dd):\n    \"\"\"(trading-day index within the month, trading days left after today).\n\n    Weekdays stand in for exchange sessions: which weekday of the month a date\n    is, is knowable years ahead, so nothing here reads the tape.\n    \"\"\"\n    import datetime as _dt\n    nb = 0\n    for k in range(1, dd + 1):\n        if _dt.date(y, mo, k).weekday() < 5:\n            nb += 1\n    nxt = _dt.date(y + 1, 1, 1) if mo == 12 else _dt.date(y, mo + 1, 1)\n    last = (nxt - _dt.timedelta(days=1)).day\n    rem = 0\n    for k in range(dd + 1, last + 1):\n        if _dt.date(y, mo, k).weekday() < 5:\n            rem += 1\n    return nb, rem\n\n\ndef family_init(ctx):\n    _sess(ctx)\n    n = len(ctx.bars)\n    pos = [None] * n\n    cache = {}\n    for i in range(n):\n        if not ctx.f_rth[i]:\n            continue\n        ts = ctx.bars[i][\"t\"]\n        key = ts[0:10]\n        v = cache.get(key)\n        if v is None:\n            v = _monthpos(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]))\n            cache[key] = v\n        pos[i] = v\n    ctx.f_pos = pos\n\n\ndef signal(ctx, i):\n    v = ctx.f_pos[i]\n    if v is None:\n        return 0\n    nb, rem = v\n    if rem <= int(ctx.p.entry_off) or nb <= int(ctx.p.exit_day):\n        return 1\n    if int(ctx.p.short_leg) and int(ctx.p.exit_day) < nb <= int(ctx.p.short_end):\n        return -1\n    return 0\n"
+}

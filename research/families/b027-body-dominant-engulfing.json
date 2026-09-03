@@ -1,0 +1,34 @@
+{
+ "name": "Body-Dominant Engulfing with Close-Strength Exit",
+ "note": "An engulfing bar that has to earn the name three ways at once: its body engulfs the prior body (open inside the prior close, close beyond the prior open), that body is body_ratio times the prior body, and the body is at least body_frac of its own range while the range itself is at least rng_atr of ATR(14). The context gate asks that weak_k of the previous weak_n bars closed below their own prior close, so the bar arrives after real one-sided pressure rather than at random. Reversal is NOT assumed -- Bulkowski's outside-day data has these continuing 63% of the time -- so the trade is simply taken in the direction of the engulfing body. The exit is the real idea: a close-strength stop that liquidates on the first decisive close-against-the-position wide bar, CLV = ((close-low)-(high-close))/(high-low) <= clv_exit with the range at least clv_rng_atr of ATR -- bar geometry, not a price level and not an indicator. The engulfing bar's own low (minus low_pad) is also honoured as a stop inside exit_signal; the 3-ATR target is left to the shared execution grid, which sweeps 1 to 4.",
+ "source": "Bulkowski, T., thepatternsite.com/OutsideDays.html -- an engulfing bar is an outside day with body constraints, and Bulkowski's data show outside days act as a CONTINUATION 63% of the time in bull markets with up breakouts (average rise 10%, 32% break-even failure rate, rank 6 of 23 small patterns), which is why this rule does not assume reversal. Null-result context: Marshall, Young and Rose (2006), Journal of Banking & Finance 30(8), 2303-2323.",
+ "params": {
+  "body_ratio": 1.5,
+  "body_frac": 0.7,
+  "rng_atr": 1.0,
+  "weak_k": 3,
+  "weak_n": 5,
+  "clv_exit": -0.4,
+  "clv_rng_atr": 1.0,
+  "low_pad": 0.05,
+  "eng_atr_n": 14,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "body_ratio": [
+   1.2,
+   1.5,
+   2.0
+  ],
+  "clv_exit": [
+   -0.3,
+   -0.4,
+   -0.6
+  ],
+  "weak_k": [
+   0,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    import indicators as I\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    at = I.compute(\"atr\", bars, period=max(2, int(ctx.p.eng_atr_n)))[\"atr\"]\n\n    ratio = float(ctx.p.body_ratio)\n    frac = float(ctx.p.body_frac)\n    rmin = float(ctx.p.rng_atr)\n    wk = int(ctx.p.weak_k)\n    wn = max(1, int(ctx.p.weak_n))\n\n    # how many of the last wn bars closed below / above their own prior close\n    dn = [0] * (n + 1)\n    up = [0] * (n + 1)\n    for i in range(n):\n        d = 1 if (i > 0 and c[i] < c[i - 1]) else 0\n        u = 1 if (i > 0 and c[i] > c[i - 1]) else 0\n        dn[i + 1] = dn[i] + d\n        up[i + 1] = up[i] + u\n\n    sig = [0] * n\n    for i in range(max(2, wn), n):\n        a = at[i]\n        if not a or a <= 0.0:\n            continue\n        rg = h[i] - l[i]\n        if rg <= 0.0:\n            continue\n        if rg < rmin * a:\n            continue\n        b0 = abs(c[i] - o[i])\n        b1 = abs(c[i - 1] - o[i - 1])\n        if b1 <= 0.0 or b0 < ratio * b1 or b0 < frac * rg:\n            continue\n        if c[i] > o[i] and c[i - 1] < o[i - 1] \\\n                and o[i] <= c[i - 1] and c[i] > o[i - 1]:\n            if wk <= 0 or (dn[i] - dn[i - wn]) >= wk:\n                sig[i] = 1\n        elif c[i] < o[i] and c[i - 1] > o[i - 1] \\\n                and o[i] >= c[i - 1] and c[i] < o[i - 1]:\n            if wk <= 0 or (up[i] - up[i - wn]) >= wk:\n                sig[i] = -1\n\n    clv = [None] * n\n    for i in range(n):\n        rg = h[i] - l[i]\n        if rg > 0.0:\n            clv[i] = ((c[i] - l[i]) - (h[i] - c[i])) / rg\n\n    ctx.sig = ctx.series(sig, \"engulf\")\n    ctx.clv = ctx.series(clv, \"clv\")\n    ctx.eatr = ctx.series(at, \"eng_atr\")\n\n\ndef signal(ctx, i):\n    return int(ctx.sig[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Close-strength stop. One decisive wide bar closing against the position\n    ends it, whatever the price level has done -- and the engulfing bar's own\n    low is honoured as the structural stop.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    long_ = ctx.positions[0][\"side\"] == \"long\"\n    k = e - 1                      # the engulfing bar: the signal, not the fill\n    if k >= 0:\n        pad = float(ctx.p.low_pad)\n        if long_ and ctx.l[i] < ctx.l[k] - pad:\n            return True\n        if not long_ and ctx.h[i] > ctx.h[k] + pad:\n            return True\n    v = ctx.clv[i]\n    if v is None:\n        return False\n    a = ctx.eatr[i]\n    if not a or a <= 0.0:\n        return False\n    if (ctx.h[i] - ctx.l[i]) < float(ctx.p.clv_rng_atr) * a:\n        return False\n    thr = float(ctx.p.clv_exit)\n    return v <= thr if long_ else v >= -thr\n"
+}

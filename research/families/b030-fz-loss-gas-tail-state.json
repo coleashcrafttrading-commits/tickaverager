@@ -1,0 +1,35 @@
+{
+ "name": "FZ-Loss GAS Tail State",
+ "note": "A one-factor GAS recursion for joint VaR and expected shortfall whose forcing term is zero on any bar that did not breach VaR, so the latent state kappa updates only on tail days. a and b are set from the window's own empirical alpha-quantile and tail mean; beta and gamma are chosen by minimising the FZ0 loss over the trailing window, refitted on a cadence. Long while tail risk is both low (kappa below the median of its trailing 250) and falling; out when kappa reaches the 80th percentile or rises three closes running.",
+ "source": "Patton, Ziegel & Chen (2019), 'Dynamic semiparametric models for expected shortfall (and Value-at-Risk)', Journal of Econometrics 211(2), 388-413 - FZ0 loss eq. (6), one-factor GAS eqs. (17)-(20), and the finding that omega is unidentified in the one-factor specification.",
+ "params": {
+  "alpha": 0.05,
+  "win": 750,
+  "refit": 126,
+  "kap_lb": 250,
+  "med_pct": 0.5,
+  "hi_pct": 0.8,
+  "rise_n": 3,
+  "side": "long",
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "alpha": [
+   0.025,
+   0.05,
+   0.1
+  ],
+  "med_pct": [
+   0.35,
+   0.5
+  ],
+  "rise_n": [
+   2,
+   3,
+   5
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    y = [None] * n\n    for i in range(1, n):\n        if c[i - 1] > 0:\n            y[i] = math.log(c[i] / c[i - 1])\n\n    al = float(ctx.p.alpha)\n    W = int(ctx.p.win)\n    RF = int(ctx.p.refit)\n    LB = int(ctx.p.kap_lb)\n    BETAS = (0.90, 0.97, 0.995)\n    GAMMAS = (0.02, 0.06, 0.15, 0.4)\n    CAP = 4.0\n\n    def step(k, Y, a, b, beta, gamma):\n        \"\"\"one GAS update: flat above VaR, linear below it.\"\"\"\n        ex = math.exp(k)\n        vt = a * ex\n        et = b * ex\n        ind = Y if Y <= vt else 0.0\n        k = beta * k + gamma * (1.0 / et) * ((1.0 / al) * ind - et)\n        if k > CAP:\n            k = CAP\n        elif k < -CAP:\n            k = -CAP\n        return k, vt, et\n\n    def fz_loss(win, a, b, beta, gamma):\n        k = 0.0\n        tot = 0.0\n        for Y in win:\n            ex = math.exp(k)\n            vt = a * ex\n            et = b * ex\n            if et >= 0:\n                return 1e18\n            L = vt / et + math.log(-et) - 1.0\n            if Y <= vt:\n                L += -(1.0 / (al * et)) * (vt - Y)\n            tot += L\n            k, vt, et = step(k, Y, a, b, beta, gamma)\n        return tot / len(win)\n\n    def fit(win):\n        s = sorted(win)\n        m = len(s)\n        j = int(al * m)\n        if j < 1:\n            j = 1\n        a = s[j - 1]\n        if a >= 0:\n            return None\n        tail = s[:j]\n        b = sum(tail) / len(tail)\n        if b >= a:\n            b = a * 1.25\n        best = None\n        bp = None\n        for beta in BETAS:\n            for gamma in GAMMAS:\n                L = fz_loss(win, a, b, beta, gamma)\n                if best is None or L < best:\n                    best = L\n                    bp = (a, b, beta, gamma)\n        return bp\n\n    # ---- run the tail state forward, refitting on a schedule ------------\n    kap = [None] * n\n    par = None\n    last = -10 ** 9\n    k = 0.0\n    for i in range(n):\n        if y[i] is None:\n            continue\n        if i >= W + 1 and (par is None or i - last >= RF):\n            win = [y[j] for j in range(i - W, i) if y[j] is not None]\n            if len(win) >= 100:\n                p = fit(win)\n                if p is not None:\n                    par = p\n                    last = i\n        if par is None:\n            continue\n        a, b, beta, gamma = par\n        k, vt, et = step(k, y[i], a, b, beta, gamma)\n        kap[i] = k\n\n    # ---- rank of the current state inside its own trailing distribution -\n    q = [None] * n\n    rise = [0] * n\n    for i in range(n):\n        ki = kap[i]\n        if ki is None:\n            continue\n        j0 = i - LB\n        if j0 < 0:\n            j0 = 0\n        cnt = 0\n        tot = 0\n        for j in range(j0, i):\n            kj = kap[j]\n            if kj is None:\n                continue\n            tot += 1\n            if kj <= ki:\n                cnt += 1\n        if tot >= 30:\n            q[i] = cnt / float(tot)\n        kp = kap[i - 1] if i else None\n        if kp is not None and ki > kp:\n            rise[i] = rise[i - 1] + 1\n\n    ctx.k = ctx.series(kap, \"kappa\")\n    ctx.q = ctx.series(q, \"kappa_rank\")\n    ctx.rise = ctx.series(rise, \"kappa_rises\")\n\n\ndef signal(ctx, i):\n    k = ctx.k[i]\n    q = ctx.q[i]\n    kp = ctx.k[i - 1]\n    if k is None or q is None or kp is None:\n        return 0\n    if q < ctx.p.med_pct and k < kp:\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    q = ctx.q[i]\n    if q is not None and q > ctx.p.hi_pct:\n        return True\n    r = ctx.rise[i]\n    return r is not None and r >= int(ctx.p.rise_n)"
+}

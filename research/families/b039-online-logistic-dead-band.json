@@ -1,0 +1,33 @@
+{
+ "name": "Online Logistic Regression with Dead Band",
+ "note": "Eight technical features, each standardised by an EXPANDING mean/sd that only ever sees bars strictly before the current one, are fed to a logistic regression whose weights are updated by online SGD. The update is DELAYED and causally honest: the sample built at bar t is held in a queue and only learned from at bar t+hor, when its label (did the close rise over hor bars) has actually matured. Trading starts after warmup bars. The dead band is the point: long only when p > 0.5+band, short only when p < 0.5-band, silent in between, so the model abstains whenever its features disagree. Because the weights are never batch-refit they drift with the tape, and the sign of the coefficient on the momentum feature is free to flip, which is what makes one piece of code a momentum model in one regime and a reversion model in another. Exit is the same hor-bar horizon the label was defined over, plus a 2*ATR stop; a still-valid probability simply re-enters on the next bar, so a persistent signal rolls.",
+ "source": "Standard online SGD logistic regression. Finance instantiation with technical-indicator features and a cascaded architecture: Zhang, Zhang et al., 'Cascading logistic regression onto gradient boosted decision trees for forecasting and trading stock indices', Applied Soft Computing 84 (2019). Adaptive online mid-price learning with Hessian-based adaptive rate: PLOS ONE 15(6): e0234107, 'Mid-price prediction based on machine learning methods with technical and quantitative indicators'.",
+ "params": {
+  "eta": 0.01,
+  "l2": 0.0001,
+  "band": 0.08,
+  "hor": 5,
+  "warmup": 500,
+  "std_min": 30,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "eta": [
+   0.005,
+   0.02
+  ],
+  "band": [
+   0.05,
+   0.08,
+   0.12
+  ],
+  "hor": [
+   3,
+   5,
+   10
+  ]
+ },
+ "code": "import math\n\n\ndef _sigmoid(z):\n    if z > 35.0:\n        return 1.0\n    if z < -35.0:\n        return 0.0\n    return 1.0 / (1.0 + math.exp(-z))\n\n\ndef family_init(ctx):\n    ctx.e20 = ctx.indicator(\"ema\", period=20)\n    ctx.at14 = ctx.indicator(\"atr\", period=14)\n    ctx.rsi14 = ctx.indicator(\"rsi\", period=14)\n    ctx.nf = 8\n    ctx.w = [0.0] * ctx.nf\n    # Welford accumulators for the EXPANDING standardisation, one per feature\n    ctx.fmu = [0.0] * ctx.nf\n    ctx.fm2 = [0.0] * ctx.nf\n    ctx.fn = 0\n    ctx.q = []            # (bar index, standardised feature vector)\n    ctx.rets = []         # trailing 1-bar log returns, for sigma_20\n    ctx.vol20 = []\n    ctx.atr100 = []\n    ctx.seen = 0\n\n\ndef signal(ctx, i):\n    hor = max(1, int(ctx.p.hor))\n    if i < hor + 6:\n        return 0\n    c = ctx.c[i]\n    pc = ctx.c[i - 1]\n    o = ctx.o[i]\n    h = ctx.h[i]\n    l = ctx.l[i]\n    v = ctx.v[i]\n    e = ctx.e20[i]\n    a = ctx.at14[i]\n    r = ctx.rsi14[i]\n    if None in (c, pc, o, h, l, e, a, r) or c <= 0.0 or pc <= 0.0 or a <= 0.0:\n        return 0\n\n    # --- rolling pieces the features need ---\n    ctx.rets.append(math.log(c / pc))\n    if len(ctx.rets) > 20:\n        ctx.rets.pop(0)\n    ctx.vol20.append(float(v or 0.0))\n    if len(ctx.vol20) > 20:\n        ctx.vol20.pop(0)\n    ctx.atr100.append(a)\n    if len(ctx.atr100) > 100:\n        ctx.atr100.pop(0)\n    if len(ctx.rets) < 20:\n        return 0\n    m = sum(ctx.rets) / len(ctx.rets)\n    var = sum((x - m) * (x - m) for x in ctx.rets) / (len(ctx.rets) - 1)\n    sd = var ** 0.5\n    if sd <= 1e-12:\n        return 0\n    mv = sum(ctx.vol20) / len(ctx.vol20)\n    ma = sum(ctx.atr100) / len(ctx.atr100)\n    c5 = ctx.c[i - 5]\n    if c5 is None or c5 <= 0.0 or ma <= 0.0:\n        return 0\n\n    x = [0.0] * ctx.nf\n    x[0] = (c - e) / a\n    x[1] = math.log(c / c5) / (sd * (5.0 ** 0.5))\n    x[2] = r / 100.0 - 0.5\n    x[3] = math.log((float(v) + 1.0) / (mv + 1.0)) if mv >= 0.0 else 0.0\n    rng = h - l\n    x[4] = ((c - l) / rng - 0.5) if rng > 0.0 else 0.0\n    x[5] = a / ma - 1.0\n    x[6] = math.log(o / pc) / sd if o > 0.0 else 0.0\n    x[7] = 1.0\n\n    # --- standardise on the expanding statistics of everything BEFORE t ---\n    n = ctx.fn\n    xs = [0.0] * ctx.nf\n    ok = n >= int(ctx.p.std_min)\n    for j in range(ctx.nf - 1):\n        if ok:\n            s2 = ctx.fm2[j] / (n - 1) if n > 1 else 0.0\n            s = s2 ** 0.5\n            xs[j] = (x[j] - ctx.fmu[j]) / s if s > 1e-12 else 0.0\n            if xs[j] > 8.0:\n                xs[j] = 8.0\n            elif xs[j] < -8.0:\n                xs[j] = -8.0\n        else:\n            xs[j] = 0.0\n    xs[7] = 1.0\n    # only now does bar t enter the accumulators\n    ctx.fn = n + 1\n    for j in range(ctx.nf - 1):\n        d = x[j] - ctx.fmu[j]\n        ctx.fmu[j] += d / ctx.fn\n        ctx.fm2[j] += d * (x[j] - ctx.fmu[j])\n    if not ok:\n        return 0\n    ctx.seen += 1\n\n    # --- learn from the sample whose label has just matured ---\n    ctx.q.append((i, xs))\n    if len(ctx.q) > hor + 4:\n        ctx.q.pop(0)\n    eta = float(ctx.p.eta)\n    l2 = float(ctx.p.l2)\n    for k in range(len(ctx.q)):\n        bi, bx = ctx.q[k]\n        if bi == i - hor:\n            c0 = ctx.c[bi]\n            if c0 is not None and c0 > 0.0:\n                y = 1.0 if math.log(c / c0) > 0.0 else 0.0\n                z = 0.0\n                for j in range(ctx.nf):\n                    z += ctx.w[j] * bx[j]\n                g = y - _sigmoid(z)\n                for j in range(ctx.nf):\n                    ctx.w[j] += eta * g * bx[j] - eta * l2 * ctx.w[j]\n            ctx.q.pop(k)\n            break\n\n    if ctx.seen < int(ctx.p.warmup):\n        return 0\n    z = 0.0\n    for j in range(ctx.nf):\n        z += ctx.w[j] * xs[j]\n    p = _sigmoid(z)\n    b = float(ctx.p.band)\n    if p > 0.5 + b:\n        return 1\n    if p < 0.5 - b:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return (i - e) >= max(1, int(ctx.p.hor))"
+}

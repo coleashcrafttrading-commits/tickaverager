@@ -1,0 +1,31 @@
+{
+ "name": "Even Better Sinewave Saturation Exit",
+ "note": "Ehlers' Even Better Sinewave (40-bar high-pass, 10-bar SuperSmoother, 3-bar wave/RMS normalisation) traded on its SATURATION rather than its level: enter when the bounded wave un-pins from one rail, hold through the entire pinned stretch at the opposite rail, and exit only when it un-pins from THAT one. The normalisation is amplitude-free, so the rail needs no per-symbol tuning. The shared execution grid still applies an ATR target on top, so the wide-target variants are the ones that actually test the hold-through-saturation claim.",
+ "source": "John F. Ehlers, 'Cycle Analytics for Traders' (Wiley, 2013), 'Even Better Sinewave Indicator' chapter. Formula, the hpPeriod = 40 / lpPeriod = 10 defaults, the 3-bar wave/pwr normalisation and the +/-1.2 plot bounds verified against github.com/thetestspecimen/ehlers-indicators-mql5, file mq5/ehlers_even_better_sinewave.mq5, which I fetched and read. The saturate-and-hold exit structure is my synthesis of Ehlers' stated intent.",
+ "params": {
+  "hp_n": 40.0,
+  "lp_n": 10.0,
+  "norm_n": 3,
+  "rail": 0.9,
+  "need": 2,
+  "exit_signal_on": 1,
+  "st_atr": 1.5
+ },
+ "grid": {
+  "hp_n": [
+   30.0,
+   40.0,
+   60.0
+  ],
+  "rail": [
+   0.85,
+   0.9,
+   0.95
+  ],
+  "need": [
+   1,
+   2
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Ehlers' Even Better Sinewave, built exactly as published: a 2-pole\n    high-pass of period hp_n, a SuperSmoother of period lp_n, then the\n    norm_n-bar wave divided by the square root of the norm_n-bar mean square.\n    The quotient is a direction cosine bounded in about [-1, +1] which PINS at\n    a rail for as long as the filtered wave is monotone -- that pinning, not\n    the level, is what the family trades.\"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    hp_n = max(6.0, float(ctx.p.hp_n))\n    lp_n = max(3.0, float(ctx.p.lp_n))\n    nw = max(2, int(ctx.p.norm_n))\n\n    # ---- step 1: high-pass, roll off everything slower than hp_n bars\n    rt2pi = math.sqrt(2.0) * math.pi\n    ca = math.cos(rt2pi / hp_n)\n    sa = math.sin(rt2pi / hp_n)\n    if abs(ca) < 1e-12:\n        ca = 1e-12\n    alpha1 = (ca + sa - 1.0) / ca\n    k1 = (1.0 - alpha1 / 2.0) ** 2\n    k2 = 2.0 * (1.0 - alpha1)\n    k3 = (1.0 - alpha1) ** 2\n    hp = [0.0] * m\n    for i in range(2, m):\n        hp[i] = (k1 * (c[i] - 2.0 * c[i - 1] + c[i - 2])\n                 + k2 * hp[i - 1] - k3 * hp[i - 2])\n\n    # ---- step 2: SuperSmoother, roll off everything faster than lp_n bars\n    a1 = math.exp(-rt2pi / lp_n)\n    b1 = 2.0 * a1 * math.cos(rt2pi / lp_n)\n    c2 = b1\n    c3 = -a1 * a1\n    c1 = 1.0 - c2 - c3\n    ft = [0.0] * m\n    for i in range(2, m):\n        ft[i] = (c1 * (hp[i] + hp[i - 1]) / 2.0\n                 + c2 * ft[i - 1] + c3 * ft[i - 2])\n\n    # ---- step 3: normalise by the RMS of the same window -> amplitude free\n    warm = int(3.0 * hp_n) + nw + 4\n    eb = [None] * m\n    start = nw - 1\n    if warm > start:\n        start = warm\n    for i in range(start, m):\n        w = 0.0\n        pw = 0.0\n        for k in range(nw):\n            f = ft[i - k]\n            w += f\n            pw += f * f\n        w /= nw\n        pw /= nw\n        if pw <= 0.0:\n            eb[i] = 0.0\n        else:\n            x = w / math.sqrt(pw)\n            if x > 1.0:\n                x = 1.0\n            elif x < -1.0:\n                x = -1.0\n            eb[i] = x\n    ctx.eb = ctx.series(eb, \"ebsw\")\n    ctx._sat_ei = -1\n    ctx._sat_hit = False\n\n\ndef signal(ctx, i):\n    \"\"\"Entry is the UN-saturation: the wave has been pinned at a rail for\n    `need` bars and this bar has just come off it.\"\"\"\n    e = ctx.eb[i]\n    if e is None:\n        return 0\n    rail = float(ctx.p.rail)\n    need = max(1, int(ctx.p.need))\n    if i - need < 0:\n        return 0\n    lo = True\n    hi = True\n    for k in range(1, need + 1):\n        x = ctx.eb[i - k]\n        if x is None:\n            return 0\n        if x > -rail:\n            lo = False\n        if x < rail:\n            hi = False\n    if lo and e > -rail:\n        return 1\n    if hi and e < rail:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The point of the structure. A long is held through the whole time the\n    wave is pinned at +rail and is closed only when it comes OFF that rail --\n    so a running trend is never truncated by a level. The other way out is the\n    entry failing back onto the rail it came from.\"\"\"\n    if not ctx.positions:\n        return False\n    p = ctx.positions[0]\n    ei = p[\"entry_i\"]\n    if ctx._sat_ei != ei:\n        ctx._sat_ei = ei\n        ctx._sat_hit = False\n    e = ctx.eb[i]\n    if e is None:\n        return False\n    rail = float(ctx.p.rail)\n    if p[\"side\"] == \"long\":\n        if e >= rail:\n            ctx._sat_hit = True\n            return False\n        if ctx._sat_hit:\n            return True\n        if e <= -rail:\n            return True\n    else:\n        if e <= -rail:\n            ctx._sat_hit = True\n            return False\n        if ctx._sat_hit:\n            return True\n        if e >= rail:\n            return True\n    return False\n"
+}

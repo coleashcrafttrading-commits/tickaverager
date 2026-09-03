@@ -1,0 +1,26 @@
+{
+ "name": "Alpha Half-Life Surface",
+ "note": "Fires the reference signal -- a 20-bar Donchian breakout, close > max(high, t-20..t-1) -- and then deliberately WAITS `lag` bars before entering, dropping the observation if an opposite breakout intervenes. Holding is a fixed `time_stop` bars. Sweeping lag x hold IS the L-by-H surface the idea asks for; the tradeable output is the cell that survives. The 'clean pass' (no stop, no target) cannot be expressed because the shared execution grid always attaches an ATR stop and target, so what this measures is the dirty pass.",
+ "source": "Moskowitz, Ooi & Pedersen (2012), Journal of Financial Economics 104:228-250, read directly - for the lookback/holding decoupling argument. Garleanu & Pedersen, 'Dynamic Trading with Predictable Returns and Transaction Costs', NBER Working Paper 15205, August 2009 (later Journal of Finance), abstract read directly from the NBER PDF - for alpha decay as the quantity that determines a predictor's weight.",
+ "params": {
+  "don_n": 20,
+  "lag": 3,
+  "time_stop": 8,
+  "exit_on_flip": 0
+ },
+ "grid": {
+  "lag": [
+   0,
+   2,
+   3,
+   5,
+   8
+  ],
+  "time_stop": [
+   3,
+   8,
+   21
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"The reference signal, then the same signal shifted `lag` bars forward.\n\n    Entry lag is normally an accident of latency. Here it is the parameter:\n    an edge that survives an eight-bar delay is a different animal from one\n    that lives entirely in the first bar, and only sweeping L tells them apart.\n    \"\"\"\n    bars = ctx.bars\n    m = len(bars)\n    n = max(2, int(ctx.p.don_n))\n    lag = max(0, int(ctx.p.lag))\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n\n    fire = [0] * m\n    for i in range(n, m):\n        hi = h[i - n]\n        lo = l[i - n]\n        for j in range(i - n + 1, i):\n            if h[j] > hi:\n                hi = h[j]\n            if l[j] < lo:\n                lo = l[j]\n        if c[i] > hi:\n            fire[i] = 1\n        elif c[i] < lo:\n            fire[i] = -1\n\n    out = [0] * m\n    for i in range(m):\n        j = i - lag\n        if j < 0:\n            continue\n        s = fire[j]\n        if s == 0:\n            continue\n        bad = False\n        for k in range(j + 1, i + 1):\n            if fire[k] == -s:\n                bad = True\n                break\n        if not bad:\n            out[i] = s\n    ctx.sg = ctx.series(out, \"delayed_breakout\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    if s is None:\n        return 0\n    return int(s)\n"
+}

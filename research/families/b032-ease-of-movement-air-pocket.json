@@ -1,0 +1,34 @@
+{
+ "name": "Ease of movement air pocket",
+ "note": "Arms's box ratio, volume divided by the bar's range, is the local depth of resting liquidity. This buys a fresh ext_n-bar closing high made on a box ratio in the bottom pct_in percent of its own trailing 100-bar distribution, with the bar closing up and smoothed Ease of Movement positive -- a breakout into a price level where almost nobody was willing to trade. Shorts mirror it at a new closing low. The exit is symmetric and also a box-ratio percentile: the trade is over the moment volume per unit of range returns to the top pct_out percent, i.e. someone is defending the price again. A 2-ATR trailing stop runs underneath.",
+ "source": "Ease of Movement / box ratio arithmetic verified from the `ta` library source, https://raw.githubusercontent.com/bukosabino/ta/master/ta/volume.py (EaseOfMovementIndicator: emv = (high.diff(1) + low.diff(1)) * (high - low) / (2 * volume) * 1e8). Indicator originally Richard W. Arms Jr.; the air-pocket entry and the percentile exit are the harvested synthesis.",
+ "params": {
+  "pct_n": 100,
+  "pct_in": 15.0,
+  "pct_out": 85.0,
+  "ext_n": 20,
+  "emv_n": 14,
+  "side": "both",
+  "exit_signal_on": 1,
+  "trail_atr": 2.0,
+  "tp_atr": 0.0,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "pct_in": [
+   10.0,
+   15.0,
+   25.0
+  ],
+  "ext_n": [
+   10,
+   20,
+   40
+  ],
+  "pct_out": [
+   75.0,
+   85.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    from collections import deque\n    bars = ctx.bars\n    N = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    o = [float(b[\"o\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    # --- box ratio and Arms's Ease of Movement, bars with no range skipped ---\n    br = [None] * N\n    emv = [0.0] * N\n    for j in range(N):\n        rng = h[j] - l[j]\n        if rng > 0.0 and v[j] > 0.0:\n            br[j] = v[j] / rng\n            if j >= 1:\n                emv[j] = ((h[j] - h[j - 1]) + (l[j] - l[j - 1])) * 0.5 * rng / v[j] * 1e8\n\n    # --- SMA of EMV ---\n    en = max(1, int(ctx.p.emv_n))\n    esm = [None] * N\n    run = 0.0\n    for j in range(N):\n        run += emv[j]\n        if j >= en:\n            run -= emv[j - en]\n        if j >= en - 1:\n            esm[j] = run / en\n\n    # --- trailing percentiles of the box ratio, computed from PRIOR bars ---\n    pn = max(20, int(ctx.p.pct_n))\n    q1 = float(ctx.p.pct_in) / 100.0\n    q2 = float(ctx.p.pct_out) / 100.0\n    dq = deque(maxlen=pn)\n    lo = [None] * N\n    hi = [None] * N\n    for j in range(N):\n        if len(dq) >= 20:\n            s = sorted(dq)\n            m = len(s)\n            lo[j] = s[min(m - 1, int(q1 * m))]\n            hi[j] = s[min(m - 1, int(q2 * m))]\n        if br[j] is not None:\n            dq.append(br[j])\n\n    # --- rolling extreme of the CLOSE over ext_n bars ---\n    n = max(2, int(ctx.p.ext_n))\n    hh = [None] * N\n    ll = [None] * N\n    dmax = deque()\n    dmin = deque()\n    for j in range(N):\n        while dmax and c[dmax[-1]] <= c[j]:\n            dmax.pop()\n        dmax.append(j)\n        while dmax[0] <= j - n:\n            dmax.popleft()\n        while dmin and c[dmin[-1]] >= c[j]:\n            dmin.pop()\n        dmin.append(j)\n        while dmin[0] <= j - n:\n            dmin.popleft()\n        if j >= n - 1:\n            hh[j] = c[dmax[0]]\n            ll[j] = c[dmin[0]]\n\n    ctx.br = ctx.series(br, \"box_ratio\")\n    ctx.lo = ctx.series(lo, \"br_lo\")\n    ctx.hi = ctx.series(hi, \"br_hi\")\n    ctx.esm = ctx.series(esm, \"emv_sma\")\n    ctx.hh = ctx.series(hh, \"hh\")\n    ctx.ll = ctx.series(ll, \"ll\")\n    ctx.oo = ctx.series(o, \"open_raw\")\n\n\ndef signal(ctx, i):\n    b = ctx.br[i]\n    lo = ctx.lo[i]\n    e = ctx.esm[i]\n    hh = ctx.hh[i]\n    ll = ctx.ll[i]\n    if b is None or lo is None or e is None or hh is None or ll is None:\n        return 0\n    if b > lo:                      # liquidity was NOT thin -- no air pocket\n        return 0\n    cl = ctx.c[i]\n    op = ctx.oo[i]\n    if cl > op and e > 0.0 and cl >= hh:\n        return 1\n    if cl < op and e < 0.0 and cl <= ll:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    b = ctx.br[i]\n    hi = ctx.hi[i]\n    if b is None or hi is None:\n        return False\n    return b >= hi"
+}

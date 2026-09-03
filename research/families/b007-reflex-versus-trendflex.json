@@ -1,0 +1,30 @@
+{
+ "name": "Reflex versus Trendflex",
+ "note": "Ehlers' two oscillators that differ by exactly one term. The close is SuperSmoothed, then a difference-sum over n bars is taken twice: once with the linear slope of that window added back (Reflex, a detrended cycle reading) and once without (Trendflex, a trend reading). Both are divided by the square root of an EWMA of their own square, which makes them scale-free, so the zero line means the same thing on every instrument. Long when Reflex crosses above Trendflex with Trendflex positive, short on the mirror; mode=1 trades Reflex's zero cross instead. Exit is Reflex crossing back through zero.",
+ "source": "pandas-ta (fork gopalparashar421/pandas-ta), pandas_ta/cycle/reflex.py (np_reflex, slope-detrended difference sum) and pandas_ta/trend/trendflex.py (nb_trendflex, without it); paired as a crossover system in StockSharp/AlgoTrading API/1501-1600/1587_Reflex_Trendflex. Ehlers, 'Reflex: A New Zero-Lag Indicator', TASC Feb 2020.",
+ "params": {
+  "n": 20,
+  "k": 20.0,
+  "alpha": 0.04,
+  "mode": 0,
+  "side": "both",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "n": [
+   10,
+   20,
+   30
+  ],
+  "k": [
+   10.0,
+   20.0,
+   40.0
+  ],
+  "mode": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    N = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    n = int(ctx.p.n)\n    k = float(ctx.p.k)\n    al = float(ctx.p.alpha)\n    a1 = math.exp(-1.414 * math.pi / k)\n    b1 = 2.0 * a1 * math.cos(1.414 * math.pi / k)\n    c2 = b1\n    c3 = -a1 * a1\n    c1 = 1.0 - c2 - c3\n    f = [0.0] * N\n    for j in range(N):\n        p0 = c[j]\n        p1 = c[j - 1] if j >= 1 else p0\n        f1 = f[j - 1] if j >= 1 else p0\n        f2 = f[j - 2] if j >= 2 else p0\n        f[j] = c1 * (p0 + p1) * 0.5 + c2 * f1 + c3 * f2\n    rf = [None] * N\n    tf = [None] * N\n    msr = 0.0\n    mst = 0.0\n    sq = math.sqrt\n    for j in range(n + 2, N):\n        slope = (f[j - n] - f[j]) / n\n        fj = f[j]\n        sr = 0.0\n        st = 0.0\n        for q in range(1, n):\n            d = fj - f[j - q]\n            st += d\n            sr += d + q * slope\n        sr /= n\n        st /= n\n        msr = al * sr * sr + (1.0 - al) * msr\n        mst = al * st * st + (1.0 - al) * mst\n        if msr > 0.0:\n            rf[j] = sr / sq(msr)\n        if mst > 0.0:\n            tf[j] = st / sq(mst)\n    ctx.rf = ctx.series(rf, \"reflex\")\n    ctx.tf = ctx.series(tf, \"trendflex\")\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    r = ctx.rf[i]\n    t = ctx.tf[i]\n    pr = ctx.rf[i - 1]\n    pt = ctx.tf[i - 1]\n    if r is None or t is None or pr is None or pt is None:\n        return 0\n    if int(ctx.p.mode) == 1:\n        if pr <= 0.0 < r:\n            return 1\n        if pr >= 0.0 > r:\n            return -1\n        return 0\n    if pr <= pt and r > t and t > 0.0:\n        return 1\n    if pr >= pt and r < t and t < 0.0:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or i < 1:\n        return False\n    r = ctx.rf[i]\n    pr = ctx.rf[i - 1]\n    if r is None or pr is None:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return pr >= 0.0 > r\n    return pr <= 0.0 < r"
+}

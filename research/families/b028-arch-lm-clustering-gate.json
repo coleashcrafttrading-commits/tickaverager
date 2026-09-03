@@ -1,0 +1,31 @@
+{
+ "name": "ARCH-LM Clustering Gate",
+ "note": "Runs Engle's Lagrange-multiplier test for ARCH effects on a rolling window of the symbol's own log returns (auxiliary OLS of squared demeaned returns on five of their own lags, LM = m*R^2, chi-square(5)). A range-expansion bar is then traded WITH its direction when the test proves volatility clusters, and AGAINST it when the test says it does not -- the specification test picks the side rather than filtering the setup.",
+ "source": "Engle (1982), 'Autoregressive Conditional Heteroscedasticity with Estimates of the Variance of United Kingdom Inflation', Econometrica 50(4) - the LM test, T*R^2 from the auxiliary regression of squared residuals on their own lags. Chi-square critical values are standard table values; the two-branch regime switch is the harvested idea's synthesis.",
+ "params": {
+  "n_win": 250,
+  "lm_every": 25,
+  "tr_mult": 2.0,
+  "lm_hi": 15.086,
+  "lm_lo": 11.07,
+  "time_stop": 8,
+  "trail_atr": 2.5
+ },
+ "grid": {
+  "n_win": [
+   125,
+   250,
+   500
+  ],
+  "tr_mult": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "lm_hi": [
+   15.086,
+   30.0
+  ]
+ },
+ "code": "import math\n\n\ndef _solve(a, b):\n    \"\"\"Gaussian elimination with partial pivoting. Returns None if singular.\"\"\"\n    k = len(b)\n    m = [row[:] + [b[j]] for j, row in enumerate(a)]\n    for col in range(k):\n        piv = max(range(col, k), key=lambda r: abs(m[r][col]))\n        if abs(m[piv][col]) < 1e-14:\n            return None\n        m[col], m[piv] = m[piv], m[col]\n        pv = m[col][col]\n        for r in range(col + 1, k):\n            f = m[r][col] / pv\n            if f:\n                for cc in range(col, k + 1):\n                    m[r][cc] -= f * m[col][cc]\n    x = [0.0] * k\n    for col in range(k - 1, -1, -1):\n        s = m[col][k] - sum(m[col][cc] * x[cc] for cc in range(col + 1, k))\n        x[col] = s / m[col][col]\n    return x\n\n\ndef _arch_lm(r, end, win, q):\n    \"\"\"Engle's LM statistic on the win returns ending at index `end`.\n\n    Demean the window, square, regress e^2 on its own q lags with an\n    intercept, and return m * R^2 (m = usable observations), which is\n    chi-square(q) under the null of no ARCH effects.\n    \"\"\"\n    s = end - win + 1\n    w = r[s:end + 1]\n    mu = sum(w) / len(w)\n    e2 = [(x - mu) * (x - mu) for x in w]\n    m = len(e2) - q\n    if m < 20:\n        return None\n    k = q + 1\n    xtx = [[0.0] * k for _ in range(k)]\n    xty = [0.0] * k\n    sy = 0.0\n    syy = 0.0\n    for t in range(q, len(e2)):\n        row = [1.0] + [e2[t - j] for j in range(1, q + 1)]\n        y = e2[t]\n        sy += y\n        syy += y * y\n        for aa in range(k):\n            ra = row[aa]\n            if ra:\n                xty[aa] += ra * y\n                xr = xtx[aa]\n                for bb in range(aa, k):\n                    xr[bb] += ra * row[bb]\n    for aa in range(k):\n        for bb in range(aa):\n            xtx[aa][bb] = xtx[bb][aa]\n    sst = syy - sy * sy / m\n    if sst <= 1e-40:\n        return 0.0\n    beta = _solve(xtx, xty)\n    if beta is None:\n        return None\n    ssr_explained = sum(beta[aa] * xty[aa] for aa in range(k)) - sy * sy / m\n    r2 = ssr_explained / sst\n    if r2 < 0.0:\n        r2 = 0.0\n    elif r2 > 1.0:\n        r2 = 1.0\n    return m * r2\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n\n    q = 5\n    win = max(80, int(ctx.p.n_win))\n    every = max(1, int(ctx.p.lm_every))\n\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0 and c[i - 1] > 0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    # the LM statistic over a 250-bar window moves slowly, so it is refit\n    # every `lm_every` bars and held between refits -- always on data that\n    # ends at or before the bar reading it.\n    lm = [None] * n\n    cur = None\n    for i in range(n):\n        if i >= win and (cur is None or i % every == 0):\n            got = _arch_lm(r, i, win, q)\n            if got is not None:\n                cur = got\n        lm[i] = cur\n\n    tr = [None] * n\n    for i in range(1, n):\n        pc = c[i - 1]\n        tr[i] = max(h[i] - l[i], abs(h[i] - pc), abs(l[i] - pc))\n\n    ctx.lm = ctx.series(lm, \"arch_lm\")\n    ctx.tr = ctx.series(tr, \"true_range\")\n    ctx.atr20 = ctx.indicator(\"atr\", period=20)\n\n\ndef signal(ctx, i):\n    lmv = ctx.lm[i]\n    a = ctx.atr20[i]\n    t = ctx.tr[i]\n    if lmv is None or a is None or a <= 0 or t is None:\n        return 0\n    if t < ctx.p.tr_mult * a:\n        return 0                       # no range expansion, no setup\n    co, cc = ctx.o[i], ctx.c[i]\n    d = 1 if cc > co else (-1 if cc < co else 0)\n    if d == 0:\n        return 0\n    if lmv >= ctx.p.lm_hi:\n        return d                       # clustering proven: expansion begets expansion\n    if lmv <= ctx.p.lm_lo:\n        return -d                      # no clustering: the bar is an outlier, fade it\n    return 0                           # inconclusive band -- stand aside\n"
+}

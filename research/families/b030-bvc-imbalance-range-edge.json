@@ -1,0 +1,37 @@
+{
+ "name": "BVC Imbalance at Range Edge",
+ "note": "Bulk volume classification splits each bar's volume with Phi(dP/sigma), the halves accumulate on a volume clock in buckets of (median daily volume of the last 20 sessions)/50, and CI is the signed imbalance summed over the last 20 completed buckets, z-scored against its own 250-bucket history. It buys only where flow and price DISAGREE: price pinned near the low of a narrow 60-bar range while net buying is 1.5 sigma high. Short is the mirror. The two geometric thresholds are recalibrated to five-minute data, where a 60-bar range measures 5-13 ATR (median 9.6) and the distance to the nearer edge is 0.86 ATR at its 20th percentile: the source's 3.0 ATR range cap and 0.30 ATR proximity are unreachable there, so the swept bands are 7.5-11 and 0.6-1.0 ATR, which pick out the same relative narrowness and the same pinning.",
+ "source": "Easley, D., Lopez de Prado, M., O'Hara, M. (2012), 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies, and 'An Improved Version of the Volume-Synchronized Probability of Informed Trading' (Critical Finance Review) - BVC classifies bar volume via the CDF of the standardized price change; VPIN averages |Vbuy - Vsell| over n equal-volume buckets.",
+ "params": {
+  "sig_lb": 50,
+  "bucket_div": 50,
+  "imb_n": 20,
+  "z_lb": 250,
+  "z_thr": 1.5,
+  "rng_bars": 60,
+  "rng_atr_max": 9.0,
+  "prox_atr": 0.6,
+  "tp_atr": 0.0,
+  "st_atr": 0.8,
+  "time_stop": 60,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "z_thr": [
+   1.0,
+   1.5,
+   2.0
+  ],
+  "rng_atr_max": [
+   7.5,
+   9.0,
+   11.0
+  ],
+  "prox_atr": [
+   0.6,
+   1.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    day = [str(b[\"t\"])[:10] for b in bars]\n\n    # ---- sigma: rolling stdev of the bar-to-bar close change (running sums)\n    L = int(ctx.p.sig_lb)\n    dp = [None] * n\n    for i in range(1, n):\n        dp[i] = c[i] - c[i - 1]\n    sig = [None] * n\n    s1 = s2 = 0.0\n    cnt = 0\n    for i in range(n):\n        x = dp[i]\n        if x is not None:\n            s1 += x\n            s2 += x * x\n            cnt += 1\n        j = i - L\n        if j >= 0 and dp[j] is not None:\n            s1 -= dp[j]\n            s2 -= dp[j] * dp[j]\n            cnt -= 1\n        if cnt >= 10:\n            var = s2 / cnt - (s1 / cnt) ** 2\n            if var > 0:\n                sig[i] = math.sqrt(var)\n\n    # ---- median daily volume of the last 20 completed sessions -> bucket size\n    dayvol = {}\n    order = []\n    for i in range(n):\n        d = day[i]\n        if d not in dayvol:\n            dayvol[d] = 0.0\n            order.append(d)\n        dayvol[d] += v[i]\n    dv = {}\n    for k, d in enumerate(order):\n        # up to 20 completed sessions, and at least 3 -- waiting for a full 20\n        # burns two thirds of a 45-day probe window before the clock starts\n        prev = sorted(dayvol[x] for x in order[max(0, k - 20):k])\n        if len(prev) >= 3:\n            m = len(prev)\n            dv[d] = prev[m // 2] if m % 2 else 0.5 * (prev[m // 2 - 1] + prev[m // 2])\n        else:\n            dv[d] = None\n\n    # ---- bulk volume classification on a volume clock -------------------\n    div = float(ctx.p.bucket_div)\n    NW = int(ctx.p.imb_n)\n    ZW = int(ctx.p.z_lb)\n    sqrt2 = math.sqrt(2.0)\n\n    zs = [None] * n\n    imb_hist = []          # signed imbalance of each completed bucket\n    ci_hist = []           # CI = sum of the last NW bucket imbalances\n    acc = 0.0\n    imb = 0.0\n    z = None\n    for i in range(n):\n        vb = dv.get(day[i])\n        s = sig[i]\n        if vb and s and dp[i] is not None:\n            vstar = vb / div\n            if vstar > 0:\n                f = 0.5 * (1.0 + math.erf((dp[i] / s) / sqrt2))\n                left = v[i]\n                guard = 0\n                while left > 0 and guard < 5000:\n                    guard += 1\n                    take = vstar - acc\n                    if take > left:\n                        take = left\n                    acc += take\n                    imb += take * (2.0 * f - 1.0)\n                    left -= take\n                    if acc < vstar - 1e-9:\n                        break\n                    # a bucket just closed on this bar\n                    imb_hist.append(imb)\n                    if len(imb_hist) >= NW:\n                        ci = sum(imb_hist[-NW:])\n                        if len(ci_hist) >= 30:\n                            w = ci_hist[-ZW:]\n                            mu = sum(w) / len(w)\n                            var = sum((x - mu) * (x - mu) for x in w) / len(w)\n                            if var > 0:\n                                z = (ci - mu) / math.sqrt(var)\n                        ci_hist.append(ci)\n                        if len(ci_hist) > ZW + 50:\n                            del ci_hist[:len(ci_hist) - ZW]\n                        if len(imb_hist) > NW + 50:\n                            del imb_hist[:len(imb_hist) - NW]\n                    acc = 0.0\n                    imb = 0.0\n        zs[i] = z\n\n    # ---- the range the entry is measured against ------------------------\n    W = int(ctx.p.rng_bars)\n    rh = [None] * n\n    rl = [None] * n\n    for i in range(W - 1, n):\n        j0 = i - W + 1\n        rh[i] = max(hi[j0:i + 1])\n        rl[i] = min(lo[j0:i + 1])\n\n    ctx.z = ctx.series(zs, \"bvc_ci_z\")\n    ctx.rh = ctx.series(rh, \"range_high\")\n    ctx.rl = ctx.series(rl, \"range_low\")\n\n\ndef signal(ctx, i):\n    z = ctx.z[i]\n    a = ctx.a[i]\n    h = ctx.rh[i]\n    l = ctx.rl[i]\n    if z is None or a is None or a <= 0 or h is None or l is None:\n        return 0\n    if (h - l) > ctx.p.rng_atr_max * a:\n        return 0\n    c = ctx.c[i]\n    prox = ctx.p.prox_atr * a\n    if z >= ctx.p.z_thr and (c - l) <= prox:\n        return 1\n    if z <= -ctx.p.z_thr and (h - c) <= prox:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    p = ctx.positions[0]\n    d = 1 if p[\"side\"] == \"long\" else -1\n    z = ctx.z[i]\n    if z is not None and ((d > 0 and z <= 0.0) or (d < 0 and z >= 0.0)):\n        return True\n    e = p[\"entry_i\"]\n    t = ctx.rh[e] if d > 0 else ctx.rl[e]\n    if t is None:\n        return False\n    c = ctx.c[i]\n    return (c >= t) if d > 0 else (c <= t)"
+}

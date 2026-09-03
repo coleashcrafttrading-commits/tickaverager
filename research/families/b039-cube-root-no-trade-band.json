@@ -1,0 +1,32 @@
+{
+ "name": "Cube-Root No-Trade Band",
+ "note": "An impulse-control position rule. The target weight is w* = clip(z/zdiv, -1, 1) with z the 50-bar z-score of (close - SMA50). Each bar a live round-trip cost fraction is estimated as spread_hat + 2*Y*sigma_d*sqrt(Q/V20) - a bar-by-bar OHLC spread estimate plus a square-root impact term - and the no-trade half-width is Delta = k * cost^(1/3), the cube-root law, so a tiny cost still buys a surprisingly wide band. The held weight only moves when it leaves the band, and then only to the NEAR EDGE (w* +/- Delta), never to w*, which is what halves the turnover again. The traded side is the sign of that held weight, so the position closes only when w* has crossed zero by more than Delta. SUBSTITUTION, stated plainly: the spread input is the Corwin-Schultz high-low estimator over the same window rather than EDGE - EDGE's GMM moment conditions are heavier than family_init can carry, and the substitution is on an input, not on the band law or the near-edge rebalance that are the actual idea.",
+ "source": "Novy-Marx, R. & Velikov, M., 'A Taxonomy of Anomalies and their Trading Costs' (NBER w20721), footnote 6, which cites Arrow, Harris & Marschak (1951) for the sS inaction region, Davis & Norman (1990) for 'an inaction region and a return to the closer boundary when rebalancing', and Abel & Eberly (1996) which shows 'the size of this region is proportional to the cube-root of the price wedge for small wedges, which makes its derivative with respect to the wedge infinite'. Spread input: Corwin & Schultz (2012), 'A Simple Way to Estimate Bid-Ask Spreads from Daily High and Low Prices', Journal of Finance 67(2).",
+ "params": {
+  "k": 1.0,
+  "zdiv": 3.0,
+  "sma_n": 50,
+  "edge_win": 60,
+  "Y": 1.0,
+  "eps": 0.02,
+  "shares": 100,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0
+ },
+ "grid": {
+  "k": [
+   0.5,
+   1.0,
+   2.0,
+   4.0
+  ],
+  "zdiv": [
+   2.0,
+   3.0,
+   5.0
+  ]
+ },
+ "code": "import math\n\n_CS = 3.0 - 2.0 * (2.0 ** 0.5)\n\n\ndef family_init(ctx):\n    ctx.sm = ctx.indicator(\"sma\", period=int(ctx.p.sma_n))\n    ctx.dev = []          # trailing (close - sma)\n    ctx.cs = []           # trailing per-pair Corwin-Schultz spread estimates\n    ctx.lr = []           # trailing 1-bar log returns\n    ctx.vv = []           # trailing volumes\n    ctx.wact = 0.0\n\n\ndef signal(ctx, i):\n    if i < 2:\n        return 0\n    c = ctx.c[i]\n    s = ctx.sm[i]\n    h, l = ctx.h[i], ctx.l[i]\n    ph, pl = ctx.h[i - 1], ctx.l[i - 1]\n    pc = ctx.c[i - 1]\n    if None in (c, s, h, l, ph, pl, pc) or c <= 0.0 or pc <= 0.0:\n        return 0\n    win = max(20, int(ctx.p.edge_win))\n\n    ctx.dev.append(c - s)\n    if len(ctx.dev) > int(ctx.p.sma_n):\n        ctx.dev.pop(0)\n    ctx.lr.append(math.log(c / pc))\n    if len(ctx.lr) > 20:\n        ctx.lr.pop(0)\n    ctx.vv.append(float(ctx.v[i] or 0.0))\n    if len(ctx.vv) > 20:\n        ctx.vv.pop(0)\n\n    # --- Corwin-Schultz on this bar pair, averaged over the window ---\n    sp = 0.0\n    if l > 0.0 and pl > 0.0 and h > 0.0 and ph > 0.0:\n        b = math.log(h / l) ** 2 + math.log(ph / pl) ** 2\n        g = math.log(max(h, ph) / min(l, pl)) ** 2\n        al = (math.sqrt(2.0 * b) - math.sqrt(b)) / _CS - math.sqrt(g / _CS)\n        ea = math.exp(al) if -30.0 < al < 30.0 else (0.0 if al <= -30.0 else 1e13)\n        sp = 2.0 * (ea - 1.0) / (1.0 + ea)\n        if sp < 0.0 or sp != sp:\n            sp = 0.0\n    ctx.cs.append(sp)\n    if len(ctx.cs) > win:\n        ctx.cs.pop(0)\n\n    if len(ctx.dev) < int(ctx.p.sma_n) or len(ctx.lr) < 20 or len(ctx.cs) < win:\n        return 0\n    n = len(ctx.dev)\n    m = sum(ctx.dev) / n\n    var = sum((x - m) * (x - m) for x in ctx.dev) / (n - 1)\n    sd = var ** 0.5\n    if sd <= 1e-9:\n        return 0\n    z = (c - s) / sd\n    zd = float(ctx.p.zdiv)\n    w = z / zd if zd > 0.0 else 0.0\n    if w > 1.0:\n        w = 1.0\n    elif w < -1.0:\n        w = -1.0\n\n    spread = sum(ctx.cs) / len(ctx.cs)\n    mr = sum(ctx.lr) / len(ctx.lr)\n    sig_d = (sum((x - mr) * (x - mr) for x in ctx.lr) / (len(ctx.lr) - 1)) ** 0.5\n    v20 = sum(ctx.vv) / len(ctx.vv)\n    Q = abs(w) * float(ctx.p.shares)\n    imp = 0.0\n    if v20 > 0.0 and Q > 0.0:\n        imp = 2.0 * float(ctx.p.Y) * sig_d * math.sqrt(Q / v20)\n    cost = spread + imp\n    if cost <= 0.0:\n        cost = 1e-6\n    delta = float(ctx.p.k) * (cost ** (1.0 / 3.0))\n    if delta > 1.0:\n        delta = 1.0\n\n    # --- impulse control: move only on band exit, and only to the near edge ---\n    if ctx.wact < w - delta:\n        ctx.wact = w - delta\n    elif ctx.wact > w + delta:\n        ctx.wact = w + delta\n\n    e = float(ctx.p.eps)\n    if ctx.wact > e:\n        return 1\n    if ctx.wact < -e:\n        return -1\n    return 0"
+}

@@ -1,0 +1,34 @@
+{
+ "name": "Corwin-Schultz spread spike fade",
+ "note": "Estimates the effective bid-ask spread from highs and lows alone by comparing one two-bar range against the sum of two one-bar ranges (beta/gamma/alpha exactly as in AFML snippet 19.1), then buys when that estimated spread pushes above its own trailing `pct` percentile while price is down over the last `ret_win` bars - the OHLCV signature of market makers widening rather than of news arriving. Exits when the spread estimate falls back under its trailing median, or after `max_hold` bars, with a 2 ATR stop.",
+ "source": "Corwin & Schultz high-low spread estimator, implemented as AFML snippet 19.1 (p.285) in mlfinlab/microstructural_features/first_generation.py (_get_beta, _get_gamma, _get_alpha, get_corwin_schultz_estimator) - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB. Also documented in the open-access CRAN package 'bidask' (Ardia, Guidotti & Kroencke, JFE 2024).",
+ "params": {
+  "W": 20,
+  "hist": 252,
+  "min_hist": 100,
+  "pct": 95.0,
+  "ret_win": 5,
+  "max_hold": 10,
+  "side": "long",
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "pct": [
+   90.0,
+   95.0,
+   98.0
+  ],
+  "W": [
+   10,
+   20,
+   40
+  ],
+  "ret_win": [
+   5,
+   10
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    from bisect import insort, bisect_left\n    bars = ctx.bars\n    N = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    W = int(ctx.p.W)\n    hist = int(ctx.p.hist)\n    pct = float(ctx.p.pct) / 100.0\n    den = 3.0 - 2.0 * math.sqrt(2.0)\n    k1 = math.sqrt(2.0) - 1.0\n    lg = math.log\n    sq = math.sqrt\n\n    r2 = [0.0] * N\n    for j in range(N):\n        h = hi[j]\n        l = lo[j]\n        if h > l > 0.0:\n            x = lg(h / l)\n            r2[j] = x * x\n    pair = [0.0] * N\n    for j in range(1, N):\n        pair[j] = r2[j] + r2[j - 1]\n\n    S = [None] * N\n    run = 0.0\n    for j in range(1, N):\n        run += pair[j]\n        if j - W >= 1:\n            run -= pair[j - W]\n        if j < W:\n            continue\n        beta = run / W\n        if beta < 0.0:\n            beta = 0.0\n        hh = hi[j] if hi[j] > hi[j - 1] else hi[j - 1]\n        ll = lo[j] if lo[j] < lo[j - 1] else lo[j - 1]\n        if ll > 0.0 and hh > ll:\n            g = lg(hh / ll)\n            gamma = g * g\n        else:\n            gamma = 0.0\n        a = k1 * sq(beta) / den - sq(gamma / den)\n        if a < 0.0:\n            a = 0.0\n        ea = math.exp(a)\n        S[j] = 2.0 * (ea - 1.0) / (1.0 + ea)\n\n    thr = [None] * N\n    med = [None] * N\n    sl = []\n    win = []\n    minh = int(ctx.p.min_hist)\n    for j in range(N):\n        s = S[j]\n        if s is None:\n            continue\n        insort(sl, s)\n        win.append(s)\n        if len(win) > hist:\n            old = win.pop(0)\n            del sl[bisect_left(sl, old)]\n        m = len(sl)\n        if m >= minh:\n            thr[j] = sl[int(pct * (m - 1))]\n            med[j] = sl[m // 2]\n    ctx.S = ctx.series(S, \"cs_spread\")\n    ctx.thr = ctx.series(thr, \"cs_hi\")\n    ctx.med = ctx.series(med, \"cs_med\")\n\n\ndef signal(ctx, i):\n    s = ctx.S[i]\n    t = ctx.thr[i]\n    if s is None or t is None or s < t:\n        return 0\n    k = int(ctx.p.ret_win)\n    if i - k < 0:\n        return 0\n    cp = ctx.c[i - k]\n    c0 = ctx.c[i]\n    if cp is None or cp <= 0.0 or c0 >= cp:\n        return 0\n    return 1\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    if (i - e) >= int(ctx.p.max_hold):\n        return True\n    s = ctx.S[i]\n    m = ctx.med[i]\n    if s is None or m is None:\n        return False\n    return s < m"
+}

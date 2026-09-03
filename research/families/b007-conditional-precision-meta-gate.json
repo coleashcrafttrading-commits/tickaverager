@@ -1,0 +1,39 @@
+{
+ "name": "Conditional precision meta-gate",
+ "note": "Meta-labelling without a classifier. A primary long signal (Donchian upper breakout) is left untouched; what is learned is WHEN to obey it. Every primary signal in history, taken or skipped, is simulated through the same triple barrier the harness will trade (pt ATR up, sl ATR down, tb bars) and filed in one of nbuckets volatility buckets, the bucket being the percentile rank of the EWM(100) return stdev against its own trailing vol_win distribution. A fresh signal is taken only when the last `depth` COMPLETED trades from the same bucket contain at least min_n samples and hit the profit barrier more than prec_min of the time. Below the minimum sample it refuses rather than guesses. Only trades whose exit bar has already passed enter the ledger, so the gate at bar i is built entirely from outcomes known at bar i. Timeouts at the vertical barrier are scored by the sign of their P&L, as in AFML's getBins.",
+ "source": "Lopez de Prado, 'Advances in Financial Machine Learning', ch.3 meta-labelling (getBins case 2: 'bin in (0,1) <- label by pnl (meta-labeling)'), snippets 3.5/3.7 as reproduced at https://raw.githubusercontent.com/BlackArbsCEO/Adv_Fin_ML_Exercises/master/src/features/snippets.py. The ML classifier is replaced by an explicit bucketed frequency estimate so it is testable without a model - that substitution belongs to the idea's author, not the paper.",
+ "params": {
+  "dc_n": 20,
+  "vol_span": 100.0,
+  "vol_win": 252,
+  "min_vol_hist": 60,
+  "nbuckets": 3,
+  "pt": 1.5,
+  "sl": 1.5,
+  "tb": 20,
+  "depth": 50,
+  "min_n": 20,
+  "prec_min": 0.5,
+  "side": "long",
+  "tp_atr": 1.5,
+  "st_atr": 1.5,
+  "time_stop": 20
+ },
+ "grid": {
+  "prec_min": [
+   0.45,
+   0.5,
+   0.55
+  ],
+  "depth": [
+   30,
+   50,
+   80
+  ],
+  "min_n": [
+   10,
+   20
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    from bisect import insort, bisect_left\n    bars = ctx.bars\n    N = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    # --- Wilder ATR, rebuilt here because the prelude's ctx.a cannot be read\n    # --- ahead of the current bar and this pass needs the whole series.\n    na = int(ctx.p.atr_n)\n    atr = [None] * N\n    acc = 0.0\n    prev = None\n    for j in range(N):\n        if j == 0:\n            tr = hi[0] - lo[0]\n        else:\n            pc = cl[j - 1]\n            tr = hi[j] - lo[j]\n            x = abs(hi[j] - pc)\n            if x > tr:\n                tr = x\n            x = abs(lo[j] - pc)\n            if x > tr:\n                tr = x\n        if j < na:\n            acc += tr\n            if j == na - 1:\n                prev = acc / na\n                atr[j] = prev\n        else:\n            prev = (prev * (na - 1) + tr) / na\n            atr[j] = prev\n\n    # --- the PRIMARY signal: a Donchian upper breakout, long only.\n    dc = int(ctx.p.dc_n)\n    prim = [0] * N\n    for j in range(dc, N):\n        m = max(hi[j - dc:j])\n        if cl[j] > m:\n            prim[j] = 1\n\n    # --- the conditioning variable: EWM stdev of returns, ranked against its\n    # --- own trailing distribution and cut into nbuckets equal-count buckets.\n    span = float(ctx.p.vol_span)\n    al = 2.0 / (span + 1.0)\n    m1 = 0.0\n    m2 = 0.0\n    vol = [None] * N\n    for j in range(1, N):\n        p0 = cl[j - 1]\n        r = (cl[j] / p0 - 1.0) if p0 > 0.0 else 0.0\n        m1 = al * r + (1.0 - al) * m1\n        m2 = al * r * r + (1.0 - al) * m2\n        v = m2 - m1 * m1\n        vol[j] = math.sqrt(v) if v > 0.0 else 0.0\n\n    vw = int(ctx.p.vol_win)\n    nb = int(ctx.p.nbuckets)\n    minv = int(ctx.p.min_vol_hist)\n    bucket = [None] * N\n    sl = []\n    win = []\n    for j in range(N):\n        v = vol[j]\n        if v is None:\n            continue\n        insort(sl, v)\n        win.append(v)\n        if len(win) > vw:\n            old = win.pop(0)\n            del sl[bisect_left(sl, old)]\n        m = len(sl)\n        if m >= minv:\n            b = int((bisect_left(sl, v) / float(m)) * nb)\n            if b >= nb:\n                b = nb - 1\n            bucket[j] = b\n\n    # --- simulate EVERY primary signal forward through the triple barrier,\n    # --- taken or skipped, so the track record keeps updating either way.\n    pt = float(ctx.p.pt)\n    slm = float(ctx.p.sl)\n    T = int(ctx.p.tb)\n    ev = []\n    for j in range(N):\n        if not prim[j]:\n            continue\n        b = bucket[j]\n        a = atr[j]\n        if b is None or a is None or a <= 0.0:\n            continue\n        e = cl[j]\n        up = e + pt * a\n        dn = e - slm * a\n        last = j + T\n        if last > N - 1:\n            last = N - 1\n        out = None\n        ex = last\n        q = j + 1\n        while q <= last:\n            if lo[q] <= dn:\n                out = 0\n                ex = q\n                break\n            if hi[q] >= up:\n                out = 1\n                ex = q\n                break\n            q += 1\n        if out is None:\n            out = 1 if cl[last] > e else 0\n        ev.append((ex, b, out))\n    ev.sort()\n\n    depth = int(ctx.p.depth)\n    min_n = int(ctx.p.min_n)\n    pmin = float(ctx.p.prec_min)\n    ledger = [[] for _ in range(nb)]\n    wins = [0] * nb\n    gate = [0] * N\n    ptr = 0\n    ne = len(ev)\n    for j in range(N):\n        while ptr < ne and ev[ptr][0] <= j:\n            b = ev[ptr][1]\n            o = ev[ptr][2]\n            L = ledger[b]\n            L.append(o)\n            wins[b] += o\n            if len(L) > depth:\n                wins[b] -= L.pop(0)\n            ptr += 1\n        b = bucket[j]\n        if b is None:\n            continue\n        L = ledger[b]\n        nL = len(L)\n        if nL > 0 and nL >= min_n and (wins[b] / float(nL)) > pmin:\n            gate[j] = 1\n\n    ctx.prim = ctx.series(prim, \"primary\")\n    ctx.gate = ctx.series(gate, \"precision_gate\")\n\n\ndef signal(ctx, i):\n    if ctx.prim[i] and ctx.gate[i]:\n        return 1\n    return 0"
+}

@@ -1,0 +1,35 @@
+{
+ "name": "Half-N Pyramid with Shared Ratcheting Stop",
+ "note": "Turtle Donchian breakout entry, then the Turtle pyramid's STOP SCHEDULE: a virtual unit is booked every add_n*N beyond the last unit's level (N = ATR at the original entry, frozen), up to max_units, and one shared stop is dragged to (newest unit - stop_n*N), ratcheting only in the favourable direction and freezing once the stack is full. Exit on that stop or on a close through the exit_n channel. The signal contract permits one entry per trade, so the added units are virtual -- the convex position sizing is NOT tested, only the stop geometry it implies.",
+ "source": "Original Turtle Trading Rules, 'Adding Units' (adds at 1/2 N intervals from the previous unit's fill, max 4 units per market) and 'Stops for Added Units' (all units share one stop, moved up as units are added). Public PDF: https://oxfordstrat.com/coasdfASD32/uploads/2016/01/turtle-rules.pdf",
+ "params": {
+  "entry_n": 20,
+  "exit_n": 10,
+  "n_period": 20,
+  "add_n": 0.5,
+  "max_units": 4,
+  "stop_n": 2.0,
+  "need_sig": 1,
+  "atr_n": 14,
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "add_n": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "max_units": [
+   2,
+   4
+  ],
+  "stop_n": [
+   1.5,
+   2.0,
+   3.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Turtle pyramid geometry, expressed as a stop schedule.\n\n    N = ATR(n_period) frozen at the original entry. The trade tracks a virtual\n    stack of units: a new unit is booked every time price trades add_n * N\n    beyond the fill of the MOST RECENT unit, up to max_units, and every add\n    drags one SHARED stop up to (newest unit's level - stop_n * N). The stop\n    only ever ratchets in the favourable direction, so with four units at 0.5N\n    spacing and a 2N stop the whole stack sits risk-free.\n\n    HONEST LIMIT: the signal contract is one entry per trade, so the units\n    cannot actually be bought -- the convexity of the position size is NOT\n    tested here. What is tested is the exit structure: a single stop anchored\n    to the last add rather than to the entry or to a fixed trailing distance,\n    which stops moving once the stack is full, plus the Turtle exit-channel\n    close.\n    \"\"\"\n    ctx.dc = ctx.indicator(\"donchian\", period=int(ctx.p.entry_n))\n    ctx.dx = ctx.indicator(\"donchian\", period=int(ctx.p.exit_n))\n    ctx.N = ctx.indicator(\"atr\", period=int(ctx.p.n_period))\n    ctx._py = None\n\n\ndef _base(ctx, i):\n    u, l = ctx.dc.upper[i - 1], ctx.dc.lower[i - 1]\n    if u is None or l is None:\n        return 0\n    if ctx.h[i] > u:\n        return 1\n    if ctx.l[i] < l:\n        return -1\n    return 0\n\n\ndef signal(ctx, i):\n    sig = _base(ctx, i)\n    if not ctx.positions:\n        ctx._py = None\n        return sig\n\n    p = ctx.positions[0]\n    d = 1 if p[\"side\"] == \"long\" else -1\n    j = p[\"entry_i\"]\n    st = ctx._py\n    if st is None or st[\"ei\"] != j:\n        n = ctx.N[j]\n        if n is None or n <= 0:\n            return sig\n        s0 = p[\"entry\"] - d * float(ctx.p.stop_n) * n\n        st = {\"ei\": j, \"n\": n, \"last\": p[\"entry\"], \"units\": 1,\n              \"stop\": s0, \"dead\": False}\n        ctx._py = st\n        for q in ctx.positions:\n            ctx.modify(position=q, stop=s0)\n\n    if sig and sig == -d:\n        st[\"dead\"] = True            # the base condition has gone false\n\n    add = float(ctx.p.add_n) * st[\"n\"]\n    mx = max(1, int(ctx.p.max_units))\n    moved = False\n    while st[\"units\"] < mx and not (ctx.p.need_sig and st[\"dead\"]):\n        nxt = st[\"last\"] + d * add\n        got = (ctx.h[i] >= nxt) if d > 0 else (ctx.l[i] <= nxt)\n        if not got:\n            break\n        st[\"last\"] = nxt\n        st[\"units\"] += 1\n        cand = nxt - d * float(ctx.p.stop_n) * st[\"n\"]\n        if d > 0:\n            if cand > st[\"stop\"]:\n                st[\"stop\"] = cand\n                moved = True\n        else:\n            if cand < st[\"stop\"]:\n                st[\"stop\"] = cand\n                moved = True\n    if moved:\n        for q in ctx.positions:\n            ctx.modify(position=q, stop=st[\"stop\"])\n    return sig\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The Turtle channel exit: a close through the exit_n extreme.\"\"\"\n    if not ctx.positions:\n        return False\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    u, l = ctx.dx.upper[i - 1], ctx.dx.lower[i - 1]\n    if u is None or l is None:\n        return False\n    if d > 0:\n        return ctx.c[i] < l\n    return ctx.c[i] > u\n"
+}

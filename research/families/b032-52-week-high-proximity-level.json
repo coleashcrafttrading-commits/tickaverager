@@ -1,0 +1,36 @@
+{
+ "name": "52-week high proximity level",
+ "note": "George and Hwang's price level, not a price change: PH = close / the highest high of the trailing lb bars. Long while PH sits in the band [ph_lo, 1.00) AND the close is NOT a new lb-bar closing high AND no new high has been made in the last excl bars -- deliberately the opposite of a breakout, the trade is on price pinned just under the anchor and unable to get through it. Short when PH falls to ph_short. Entries are only considered every `every` bars, the monthly cadence of the original construction, and the hold is the time stop; early exit when PH leaves the band badly. TWO PARTS OF THE PUBLISHED RULE ARE NOT HERE and are not faked: the cross-sectional top/bottom 30% fleet rank needs every symbol at once, which a single-symbol ctx cannot see, and the six overlapping cohorts are a portfolio construction the shared one-position harness has no way to express.",
+ "source": "Thomas J. George and Chuan-Yang Hwang, 'The 52-Week High and Momentum Investing', Journal of Finance 59(5), October 2004, 2145-2176, read at https://www.bauer.uh.edu/tgeorge/papers/gh4-paper.pdf -- stocks ranked on P_{i,t-1}/high_{i,t-1}, 30% cutoffs, 6-month hold. Grinblatt & Keloharju corroborate the price-level effect on Finnish account data.",
+ "params": {
+  "lb": 252,
+  "ph_lo": 0.92,
+  "ph_short": 0.55,
+  "excl": 5,
+  "every": 21,
+  "ph_exit_long": 0.75,
+  "ph_exit_short": 0.7,
+  "side": "both",
+  "exit_signal_on": 1,
+  "time_stop": 126,
+  "st_atr": 2.5,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "lb": [
+   252,
+   500,
+   1000
+  ],
+  "ph_lo": [
+   0.92,
+   0.97,
+   0.99
+  ],
+  "time_stop": [
+   126,
+   252
+  ]
+ },
+ "code": "def family_init(ctx):\n    from collections import deque\n    bars = ctx.bars\n    N = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    lb = max(5, int(ctx.p.lb))\n\n    # rolling max of HIGH (the anchor) and of CLOSE (the new-high test), O(N)\n    ph = [None] * N\n    fresh = [0] * N\n    dh = deque()\n    dc = deque()\n    for j in range(N):\n        while dh and h[dh[-1]] <= h[j]:\n            dh.pop()\n        dh.append(j)\n        while dh[0] <= j - lb:\n            dh.popleft()\n        while dc and c[dc[-1]] <= c[j]:\n            dc.pop()\n        dc.append(j)\n        while dc[0] <= j - lb:\n            dc.popleft()\n        if j >= lb - 1:\n            hi = h[dh[0]]\n            if hi > 0.0:\n                ph[j] = c[j] / hi\n            if c[j] >= c[dc[0]]:\n                fresh[j] = 1          # this bar IS a new lb-bar closing high\n\n    # bars since the last fresh high\n    excl = max(0, int(ctx.p.excl))\n    since = [10 ** 9] * N\n    last = -10 ** 9\n    for j in range(N):\n        if fresh[j]:\n            last = j\n        since[j] = j - last\n    ctx.ph = ctx.series(ph, \"ph\")\n    ctx.fresh = ctx.series(fresh, \"fresh_high\")\n    ctx.since = ctx.series(since, \"since_high\")\n\n\ndef signal(ctx, i):\n    ev = max(1, int(ctx.p.every))\n    if i % ev:\n        return 0                       # the monthly rebalance clock\n    p = ctx.ph[i]\n    if p is None:\n        return 0\n    if float(ctx.p.ph_lo) <= p < 1.0:\n        if ctx.fresh[i]:\n            return 0                   # never the bar that makes the high\n        if ctx.since[i] <= int(ctx.p.excl):\n            return 0                   # nor the excl bars after it\n        return 1\n    if p <= float(ctx.p.ph_short):\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    p = ctx.ph[i]\n    if p is None:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return p < float(ctx.p.ph_exit_long)\n    return p > float(ctx.p.ph_exit_short)"
+}

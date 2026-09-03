@@ -1,0 +1,33 @@
+{
+ "name": "Laguerre RSI Unpinning",
+ "note": "The four-stage Laguerre cascade saturates LRSI at 0 or 1 for as long as the four stages stay perfectly ordered, so being pinned is a STATE, not a level. The entry is the termination of that state -- the first bar that comes off the rail after three or more pinned bars -- and the exit is the traverse to the opposite rail or a fall back onto the one it left.",
+ "source": "John F. Ehlers, 'Time Warp - Without Space Travel' (mesasoftware.com/papers/TimeWarp.pdf) for the Laguerre filter and Laguerre RSI. The exact CU/CD accumulation over the three adjacent stage pairs and the default gamma = 0.5 were verified against github.com/MathisWellmann/go_ehlers_indicators, file laguerre_rsi.go, which I fetched and read. The unpinning entry and rail-to-rail exit are my synthesis.",
+ "params": {
+  "lg_gamma": 0.5,
+  "lg_src": 1,
+  "rail": 0.05,
+  "pinned": 3,
+  "exit_rail": 0.95,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "side": "both"
+ },
+ "grid": {
+  "lg_gamma": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "rail": [
+   0.05,
+   0.1
+  ],
+  "pinned": [
+   2,
+   3,
+   5
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    src = int(ctx.p.lg_src)\n    if src == 0:\n        p = [float(b[\"c\"]) for b in bars]\n    elif src == 2:\n        p = [(float(b[\"h\"]) + float(b[\"l\"]) + float(b[\"c\"])) / 3.0 for b in bars]\n    else:\n        p = [(float(b[\"h\"]) + float(b[\"l\"])) / 2.0 for b in bars]\n\n    g = float(ctx.p.lg_gamma)\n    L0 = L1 = L2 = L3 = p[0]\n    out = [None] * n\n    prev = 0.5\n    for i in range(1, n):\n        n0 = (1.0 - g) * p[i] + g * L0\n        n1 = -g * n0 + L0 + g * L1\n        n2 = -g * n1 + L1 + g * L2\n        n3 = -g * n2 + L2 + g * L3\n        L0, L1, L2, L3 = n0, n1, n2, n3\n        cu = 0.0\n        cd = 0.0\n        if L0 >= L1:\n            cu += L0 - L1\n        else:\n            cd += L1 - L0\n        if L1 >= L2:\n            cu += L1 - L2\n        else:\n            cd += L2 - L1\n        if L2 >= L3:\n            cu += L2 - L3\n        else:\n            cd += L3 - L2\n        t = cu + cd\n        v = cu / t if t > 0 else prev\n        prev = v\n        out[i] = v\n    ctx.lr = ctx.series(out, \"laguerre_rsi\")\n\n\ndef signal(ctx, i):\n    v = ctx.lr[i]\n    if v is None:\n        return 0\n    lo = float(ctx.p.rail)\n    hi = 1.0 - lo\n    k = max(2, int(ctx.p.pinned))\n    if i <= k:\n        return 0\n    if v > lo:\n        pinned = True\n        for z in range(1, k + 1):\n            u = ctx.lr[i - z]\n            if u is None or u > lo:\n                pinned = False\n                break\n        if pinned:\n            return 1\n    if v < hi:\n        pinned = True\n        for z in range(1, k + 1):\n            u = ctx.lr[i - z]\n            if u is None or u < hi:\n                pinned = False\n                break\n        if pinned:\n            return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    v = ctx.lr[i]\n    if v is None or not ctx.positions:\n        return False\n    lo = float(ctx.p.rail)\n    ex = float(ctx.p.exit_rail)\n    if ctx.positions[0][\"side\"] == \"long\":\n        return v >= ex or v <= lo\n    return v <= 1.0 - ex or v >= 1.0 - lo"
+}

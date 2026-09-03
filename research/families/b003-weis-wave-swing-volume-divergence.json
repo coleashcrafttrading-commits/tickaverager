@@ -1,0 +1,30 @@
+{
+ "name": "Weis Wave swing volume divergence",
+ "note": "Segments price into waves with an ATR zigzag on the close, then compares each completed leg with the previous leg in the same direction: same ground covered (travel >= previous) on materially less volume (wave volume <= 0.70x) is Wyckoff effort-versus-result at swing scale, so the leg is faded. Holding period is measured in waves - the trade is closed when the next wave running in its direction completes.",
+ "source": "David Weis's Weis Wave, a computerisation of the wave charts in Wyckoff's course; see Weis, 'Trades About to Happen' (Wiley, 2013). The harvester could not retrieve a primary page for the construction and pinned the wave definition to a 2.0-ATR zigzag itself; that segmentation is the harvester's choice, not Weis's.",
+ "params": {
+  "wv_k": 2.0,
+  "wv_atr": 14,
+  "wv_ratio": 0.7,
+  "wv_back": 1,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "wv_k": [
+   1.0,
+   1.5,
+   2.0,
+   3.0
+  ],
+  "wv_ratio": [
+   0.55,
+   0.7,
+   0.85
+  ],
+  "wv_atr": [
+   14,
+   30
+  ]
+ },
+ "code": "def _wilder_atr(h, l, c, period):\n    \"\"\"Causal Wilder ATR over raw lists. None until it has formed.\"\"\"\n    n = len(c)\n    out = [None] * n\n    prev_c = None\n    acc = 0.0\n    for i in range(n):\n        tr = (h[i] - l[i]) if prev_c is None else max(\n            h[i] - l[i], abs(h[i] - prev_c), abs(l[i] - prev_c))\n        prev_c = c[i]\n        if i < period:\n            acc += tr\n            if i == period - 1:\n                out[i] = acc / period\n        else:\n            out[i] = (out[i - 1] * (period - 1) + tr) / period\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    vol = [float(b.get(\"v\") or 0.0) for b in bars]\n    per = max(2, int(ctx.p.wv_atr))\n    atr = _wilder_atr(h, l, c, per)\n\n    # cumulative volume, so a wave's volume is one subtraction\n    cum = [0.0] * (n + 1)\n    for i in range(n):\n        cum[i + 1] = cum[i] + vol[i]\n\n    k = float(ctx.p.wv_k)\n    ratio = float(ctx.p.wv_ratio)\n    back = max(1, int(ctx.p.wv_back))\n\n    sig = [0] * n            # entry signal on the confirming bar\n    conf = [0] * n           # direction of the wave completed on this bar\n\n    start_i = None           # bar index of the turning point that began the wave\n    ext_i = None             # bar index of the wave's extreme close so far\n    ext_p = None\n    direction = 0            # +1 = up wave in progress, -1 = down wave\n    waves = []               # (dir, travel, wave_volume)\n\n    for i in range(n):\n        a = atr[i]\n        if a is None or a <= 0:\n            continue\n        if direction == 0:\n            start_i, ext_i, ext_p, direction = i, i, c[i], 1\n            continue\n        turn = False\n        if direction > 0:\n            if c[i] > ext_p:\n                ext_p, ext_i = c[i], i\n            elif c[i] < ext_p - k * a:\n                turn = True\n        else:\n            if c[i] < ext_p:\n                ext_p, ext_i = c[i], i\n            elif c[i] > ext_p + k * a:\n                turn = True\n        if not turn:\n            continue\n\n        # the wave that just completed ran from start_i to ext_i\n        travel = abs(ext_p - c[start_i])\n        wvol = cum[ext_i + 1] - cum[start_i + 1]\n        waves.append((direction, travel, wvol))\n        conf[i] = direction\n\n        m = len(waves) - 1\n        j = m - 2 * back                      # previous same-direction wave\n        if j >= 0:\n            d0, p0, w0 = waves[m]\n            dj, pj, wj = waves[j]\n            if dj == d0 and wj > 0 and p0 >= pj and w0 <= ratio * wj:\n                # same ground covered on materially less volume -> fade the leg\n                sig[i] = -direction\n\n        # the new wave begins at this bar's close, which is the new extreme\n        start_i, ext_i, ext_p = ext_i, i, c[i]\n        direction = -direction\n\n    ctx.wv_sig = ctx.series(sig, \"weis_signal\")\n    ctx.wv_conf = ctx.series(conf, \"weis_wave_end\")\n\n\ndef signal(ctx, i):\n    s = ctx.wv_sig[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out when the next wave running in the trade's direction completes.\"\"\"\n    d = ctx.wv_conf[i]\n    if not d or not ctx.positions:\n        return False\n    long_side = ctx.positions[0][\"side\"] == \"long\"\n    return (d < 0) if long_side else (d > 0)"
+}

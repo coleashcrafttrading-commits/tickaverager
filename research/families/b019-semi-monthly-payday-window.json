@@ -1,0 +1,37 @@
+{
+ "name": "Semi-Monthly Payday Window",
+ "note": "A large share of US employers run semi-monthly payroll on the 15th and at month end, and the payroll-deducted retirement contributions are swept into index and target-date funds a day or two later by buyers with no price sensitivity at all. This holds long from the close of the last session on or before the target day through the close of the first session on or after the exit day, with no indicator condition of any kind. The turn-of-month overlap check is kept so the window cannot double-count the month-end flow that a separate family already tests; `also_eom` deliberately turns that second window back on so the pair can be compared.",
+ "source": "Aixin Ma and William Robert Pratt, 'Payday Anomaly', SSRN working paper 3257064 - rule, mechanism and performance verified via https://quantpedia.com/strategies/payday-anomaly/, which states the rule as 'Buy and hold the S&P 500 index on the 16th day of each month only' and reports 2.57% annualised at 4.31% volatility, Sharpe ~0.6, 1980-2010, with the authors quoted that 'the 16th day of the month statistically and economically outperforms all other calendar days except the 1st and 2nd'.",
+ "params": {
+  "pay_day": 15,
+  "exit_day": 17,
+  "pre_sess": 0,
+  "entry_min": 955,
+  "exit_min": 960,
+  "also_eom": 0,
+  "skip_tom": 1,
+  "tom_pre": 1,
+  "tom_post": 1,
+  "atr_n": 20,
+  "st_atr": 2.5,
+  "tp_atr": 0.0,
+  "exit_on_zero": 1,
+  "side": "long"
+ },
+ "grid": {
+  "exit_day": [
+   17,
+   18,
+   19
+  ],
+  "pre_sess": [
+   0,
+   1
+  ],
+  "also_eom": [
+   0,
+   1
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    \"\"\"US eastern daylight time from the calendar date alone.\"\"\"\n    import datetime as dt\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        f = dt.date(y, 3, 1)\n        return d >= 1 + (6 - f.weekday()) % 7 + 7\n    f = dt.date(y, 11, 1)\n    return d < 1 + (6 - f.weekday()) % 7\n\n\ndef _et(ts):\n    \"\"\"(eastern date, minutes past eastern midnight) for a UTC bar stamp.\"\"\"\n    import datetime as dt\n    s = str(ts)\n    y = int(s[0:4]); mo = int(s[5:7]); d = int(s[8:10])\n    mins = int(s[11:13]) * 60 + int(s[14:16])\n    mins -= 240 if _dst(y, mo, d) else 300\n    dd = dt.date(y, mo, d)\n    if mins < 0:\n        mins += 1440\n        dd = dd - dt.timedelta(days=1)\n    return dd, mins\n\n\ndef family_init(ctx):\n    \"\"\"Pure calendar. No price condition of any kind: the position is on from\n    the close of the last session on or before the target calendar day through\n    the close of the first session on or after the exit day, which is the\n    window the semi-monthly payroll sweep lands in.\n\n    Session membership comes from the bar timestamps only - the exchange\n    calendar is published years ahead, so knowing which session a bar belongs\n    to is public information on the day, not a peek forward.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n\n    sess = [0] * n\n    dates = []\n    mins = [0] * n\n    key = None\n    for i in range(n):\n        d, m = _et(bars[i][\"t\"])\n        if d != key:\n            key = d\n            dates.append(d)\n        sess[i] = len(dates) - 1\n        mins[i] = m\n    ns = len(dates)\n\n    pay = int(ctx.p.pay_day)\n    xd = int(ctx.p.exit_day)\n    pre = max(0, int(ctx.p.pre_sess))\n    emin = int(ctx.p.entry_min)\n    xmin = int(ctx.p.exit_min)\n    also = int(ctx.p.also_eom)\n    skip_tom = int(ctx.p.skip_tom)\n    tom_pre = int(ctx.p.tom_pre)\n    tom_post = int(ctx.p.tom_post)\n\n    # trading-day-of-month, forward and backward, over the sessions we hold\n    fwd = [0] * ns\n    back = [0] * ns\n    cnt = {}\n    for k in range(ns):\n        mk = (dates[k].year, dates[k].month)\n        cnt[mk] = cnt.get(mk, 0) + 1\n        fwd[k] = cnt[mk]\n    tot = dict(cnt)\n    for k in range(ns):\n        mk = (dates[k].year, dates[k].month)\n        back[k] = tot[mk] - fwd[k] + 1\n\n    months = {}\n    for k in range(ns):\n        months.setdefault((dates[k].year, dates[k].month), []).append(k)\n\n    windows = []                       # (entry session, exit session)\n    for mk in sorted(months):\n        ks = months[mk]\n        ent = None\n        for k in ks:\n            if dates[k].day <= pay:\n                ent = k\n        ex = None\n        for k in ks:\n            if dates[k].day >= xd:\n                ex = k\n                break\n        if ent is None or ex is None or ex <= ent:\n            continue\n        ent = max(ks[0], ent - pre)\n        if skip_tom and (back[ent] <= tom_pre or fwd[ex] <= tom_post):\n            continue\n        windows.append((ent, ex))\n\n    if also:\n        # the other half of the payroll cycle: month end into the 1st-2nd\n        allm = sorted(months)\n        for j in range(len(allm) - 1):\n            ks = months[allm[j]]\n            nx = months[allm[j + 1]]\n            ent = ks[-1]\n            ex = None\n            for k in nx:\n                if fwd[k] >= 2:\n                    ex = k\n                    break\n            if ex is None:\n                ex = nx[-1]\n            if ex > ent:\n                windows.append((ent, ex))\n\n    on = [0] * n\n    for (ent, ex) in windows:\n        for i in range(n):\n            s = sess[i]\n            if s < ent or s > ex:\n                continue\n            if s == ent and mins[i] < emin:\n                continue\n            if s == ex and mins[i] > xmin:\n                continue\n            on[i] = 1\n    ctx.on = ctx.series(on, \"payday_window\")\n\n\ndef signal(ctx, i):\n    return 1 if ctx.on[i] else 0"
+}

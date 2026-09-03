@@ -1,0 +1,28 @@
+{
+ "name": "Ariel semi-month exposure split",
+ "note": "Ariel's month partition, unconditional on price: long from the last trading day of the prior month through the Nth trading day of this one, then short (or flat) until the second-to-last session, flat for one day, repeat. Trading-day indices come from the session calendar -- weekday arithmetic with observed holidays removed -- so no price is used to place a session in its month. The daily hold is expressed as a state signal, which is what a rule with no exit event of its own has to be.",
+ "source": "Ariel, 'A Monthly Effect in Stock Returns', Journal of Financial Economics 18(1), 1987 - cited from the literature; not re-fetched this session (search budget exhausted). The exact split point (Ariel uses the last day of the prior month plus the first half of the month by trading-day count) is pinned to the 9th trading day here so the rule is unambiguous; sweep it.",
+ "params": {
+  "split_td": 9,
+  "short_half2": 1,
+  "long_last_day": 1,
+  "exit_on_flip": 1,
+  "exit_on_zero": 1
+ },
+ "grid": {
+  "split_td": [
+   8,
+   9,
+   10
+  ],
+  "short_half2": [
+   0,
+   1
+  ],
+  "long_last_day": [
+   0,
+   1
+  ]
+ },
+ "code": "def _dst(d):\n    \"\"\"US eastern daylight time, from the date alone.\"\"\"\n    import datetime as dt\n    if d.month < 3 or d.month > 11:\n        return False\n    if 3 < d.month < 11:\n        return True\n    if d.month == 3:\n        f = dt.date(d.year, 3, 1)\n        return d.day >= 1 + (6 - f.weekday()) % 7 + 7\n    f = dt.date(d.year, 11, 1)\n    return d.day < 1 + (6 - f.weekday()) % 7\n\n\ndef _sessions(ctx):\n    \"\"\"Session structure from the TIMESTAMPS only -- no price is read here.\n\n    The exchange session calendar is published years ahead, so knowing which\n    session a bar belongs to, and where that session sits in the week and the\n    month, is public information on the day, not a peek at the future.\n\n    Returns (sess, dates, rth, first, last): sess[i] is bar i's session index,\n    dates the ordered session dates, rth[i] True inside 09:30-16:00 ET, and\n    first/last the bar index of each session's opening and closing RTH bar.\n    \"\"\"\n    import datetime as dt\n    n = len(ctx.bars)\n    sess = [0] * n\n    rth = [False] * n\n    dates = []\n    key = None\n    for i in range(n):\n        s = str(ctx.bars[i][\"t\"])\n        d = dt.date(int(s[0:4]), int(s[5:7]), int(s[8:10]))\n        if d != key:\n            key = d\n            dates.append(d)\n        sess[i] = len(dates) - 1\n        m = int(s[11:13]) * 60 + int(s[14:16]) - (240 if _dst(d) else 300)\n        rth[i] = 570 <= m < 960\n    first = [-1] * len(dates)\n    last = [-1] * len(dates)\n    for i in range(n):\n        if rth[i]:\n            k = sess[i]\n            if first[k] < 0:\n                first[k] = i\n            last[k] = i\n    return sess, dates, rth, first, last\n\n\ndef _et_minutes(ctx):\n    \"\"\"Minutes past ET midnight for every bar.\"\"\"\n    import datetime as dt\n    out = []\n    for b in ctx.bars:\n        s = str(b[\"t\"])\n        d = dt.date(int(s[0:4]), int(s[5:7]), int(s[8:10]))\n        out.append(int(s[11:13]) * 60 + int(s[14:16]) - (240 if _dst(d) else 300))\n    return out\n\n\ndef _tdom(dates):\n    \"\"\"Trading-day-of-month, counted forward and backward, calendar only.\n\n    Weekdays inside the sample that have no session are real exchange holidays\n    and are dropped; weekdays outside the sample are assumed to trade. Prices\n    are never consulted, so this is the session calendar and nothing else.\n    \"\"\"\n    import datetime as dt\n    have = set(dates)\n    lo, hi = dates[0], dates[-1]\n\n    def trades(d):\n        if d.weekday() >= 5:\n            return False\n        if lo <= d <= hi:\n            return d in have\n        return True\n\n    fwd, back = [], []\n    for d in dates:\n        m1 = d.replace(day=1)\n        nxt = (m1 + dt.timedelta(days=32)).replace(day=1)\n        a = 0\n        x = m1\n        while x <= d:\n            if trades(x):\n                a += 1\n            x += dt.timedelta(days=1)\n        b = 0\n        x = d\n        while x < nxt:\n            if trades(x):\n                b += 1\n            x += dt.timedelta(days=1)\n        fwd.append(a)\n        back.append(b)\n    return fwd, back\n\n\ndef family_init(ctx):\n    sess, dates, rth, first, last = _sessions(ctx)\n    fwd, back = _tdom(dates)\n    split = int(ctx.p.split_td)\n    st = []\n    for k in range(len(dates)):\n        if fwd[k] <= split:\n            st.append(1.0)                       # first half of the month\n        elif back[k] == 1:\n            st.append(1.0 if int(ctx.p.long_last_day) else 0.0)\n        else:\n            st.append(-1.0 if int(ctx.p.short_half2) else 0.0)\n    sig = [0.0] * len(ctx.bars)\n    for i in range(len(ctx.bars)):\n        sig[i] = st[sess[i]]                     # a daily hold is on all day\n    ctx.sig = ctx.series(sig, \"ariel\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    if not s:\n        return 0\n    return 1 if s > 0 else -1\n"
+}

@@ -1,0 +1,30 @@
+{
+ "name": "Take-Profit Cluster Rejection",
+ "note": "Osler's dealing-bank order book shows take-profit limit orders cluster hard on round numbers, so price reverses when it walks into one. Fades a poke through the nearest UNTESTED round-number grid level (tier-sized: 0.10 / 0.50 / 1.00) that closes back on the wrong side of it and in the far 40% of its own bar range. Target is the next grid level, and everything is flat before the bell.",
+ "source": "C. L. Osler, 'Stop-Loss Orders and Price Cascades in Currency Markets', FRBNY Staff Report (June 2002), https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr150.pdf - VERIFIED by reading the PDF. Section III provides 'evidence that rates reverse course relatively frequently when they reach take-profit clusters'; p.7 reports that of 9,655 orders, 'Almost 10 percent of all such orders are placed at rates ending in 00' and 'executed take-profit orders have a stronger tendency to cluster at rates ending in 00 than executed stop-loss orders'. Companion: Osler (2003), 'Currency Orders and Exchange Rate Dynamics', Journal of Finance 58(5).",
+ "params": {
+  "lookback": 20,
+  "clp": 0.4,
+  "g_mult": 1.0,
+  "flat_min": 950,
+  "time_stop": 12,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "lookback": [
+   10,
+   20,
+   40
+  ],
+  "clp": [
+   0.3,
+   0.4,
+   0.55
+  ],
+  "g_mult": [
+   0.5,
+   1.0
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    import datetime as _dt\n    m1 = _dt.date(y, 3, 1)\n    ms = 1 + ((6 - m1.weekday()) % 7) + 7\n    n1 = _dt.date(y, 11, 1)\n    ne = 1 + ((6 - n1.weekday()) % 7)\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        return d >= ms\n    return d < ne\n\n\ndef _et_minutes(bars):\n    \"\"\"Minute-of-day in America/New_York for every bar. UTC in, ET out.\"\"\"\n    off = {}\n    out = []\n    for b in bars:\n        ts = str(b[\"t\"])\n        day = ts[:10]\n        o = off.get(day)\n        if o is None:\n            o = -4 if _dst(int(ts[0:4]), int(ts[5:7]), int(ts[8:10])) else -5\n            off[day] = o\n        out.append((int(ts[11:13]) + o) * 60 + int(ts[14:16]))\n    return out\n\n\ndef _grid_size(px, mult):\n    \"\"\"Osler's round-number grid, sized by price tier.\"\"\"\n    if px < 20.0:\n        g = 0.10\n    elif px < 100.0:\n        g = 0.50\n    else:\n        g = 1.00\n    return g * mult\n\n\ndef family_init(ctx):\n    ctx.et = _et_minutes(ctx.bars)\n    ctx._lvl = None\n\n\ndef signal(ctx, i):\n    import math\n    lb = int(ctx.p.lookback)\n    if i < lb + 1:\n        return 0\n    h, l, c = ctx.h[i], ctx.l[i], ctx.c[i]\n    c1 = ctx.c[i - 1]\n    if None in (h, l, c, c1):\n        return 0\n    rng = h - l\n    if rng <= 0:\n        return 0\n    g = _grid_size(c, float(ctx.p.g_mult))\n    if g <= 0:\n        return 0\n    clp = float(ctx.p.clp)\n\n    # ---- SHORT: nearest untested grid level ABOVE the close was poked ----\n    short_ok = False\n    rs = (math.floor(c / g + 1e-9) + 1.0) * g\n    if h >= rs and c1 < rs and (c - l) / rng <= clp:\n        short_ok = True\n        for k in range(1, lb + 1):\n            x = ctx.c[i - k]\n            if x is None or x >= rs:\n                short_ok = False\n                break\n\n    # ---- LONG: nearest untested grid level BELOW the close was poked ----\n    long_ok = False\n    rl = (math.ceil(c / g - 1e-9) - 1.0) * g\n    if l <= rl and c1 > rl and (h - c) / rng <= clp:\n        long_ok = True\n        for k in range(1, lb + 1):\n            x = ctx.c[i - k]\n            if x is None or x <= rl:\n                long_ok = False\n                break\n\n    if short_ok and long_ok:\n        return 0                      # a bar straddling two levels says nothing\n    if short_ok:\n        if not ctx.positions:\n            ctx._lvl = (rs, g, -1)\n        return -1\n    if long_ok:\n        if not ctx.positions:\n            ctx._lvl = (rl, g, 1)\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.et[i] >= int(ctx.p.flat_min):\n        return True                   # flat before the bell\n    lv = ctx._lvl\n    if lv is None:\n        return False\n    r, g, d = lv\n    if d < 0:\n        lo = ctx.l[i]\n        return lo is not None and lo <= r - g\n    hi = ctx.h[i]\n    return hi is not None and hi >= r + g"
+}

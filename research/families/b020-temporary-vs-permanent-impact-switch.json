@@ -1,0 +1,33 @@
+{
+ "name": "Temporary vs Permanent Impact Switch",
+ "note": "Hasbrouck's permanent/temporary impact split, estimated bar by bar from the symbol's own history and used to choose the SIDE of the trade rather than to filter it. An event bar is one whose log return exceeds ev_sd trailing return standard deviations; for every event whose k forward returns are already known, ti = -(sum of the k forward returns)/r_event, and TI is the median of the last `hist` of them. TI high means large moves are liquidity and revert, so fade the next event; TI low or negative means they are informational, so follow it; in between, no trade. The estimation horizon and the holding horizon are the same k by construction, so the estimate is of the exact quantity being traded. THRESHOLDS RECALIBRATED: the idea's +0.5 / -0.2 cuts are unreachable at 5-minute sampling - measured on real bars TI spans roughly -0.45 to +0.40, with XLU sitting near +0.25 (liquidity-dominated) and SOXL near -0.07 at 2sd (informational) - so the defaults are placed inside the range the estimator actually occupies and the cut is swept. The estimator itself is unchanged.",
+ "source": "Hasbrouck (1991), 'Measuring the Information Content of Stock Trades', Review of Financial Studies 4(1), on permanent vs transitory impact; Huang & Stoll (1996), 'Dealer versus auction markets', Journal of Financial Economics 41(3), for the effective-vs-realized-spread decomposition. The bar-level TI estimator and the sign-switching rule are my synthesis of that decomposition.",
+ "params": {
+  "ev_sd": 1.5,
+  "k_fwd": 3,
+  "hist": 100,
+  "sd_win": 60,
+  "ti_hi": 0.15,
+  "ti_lo": -0.1,
+  "tp_atr": 0.0,
+  "st_atr": 1.5,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "ev_sd": [
+   1.0,
+   1.5,
+   2.0
+  ],
+  "k_fwd": [
+   1,
+   3,
+   5
+  ],
+  "ti_hi": [
+   0.1,
+   0.2
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    \"\"\"Bar-level Hasbrouck/Huang-Stoll impact decomposition, estimated online.\n\n    An 'event' is a bar whose log return is large relative to a trailing\n    return stdev. For every event far enough in the PAST that its k forward\n    returns are already known, the temporary-impact ratio is\n\n        ti = -(r_{e+1} + ... + r_{e+k}) / r_e\n\n    ti near +1 means the move fully reverted (pure liquidity), ti near 0 or\n    negative means it extended (information). TI is the median of the last\n    `hist` completed ti values, so the number the strategy trades on at bar i\n    only ever uses events whose whole k-bar future had already happened by\n    bar i.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    W = max(10, int(ctx.p.sd_win))\n    k = max(1, int(ctx.p.k_fwd))\n    H = max(10, int(ctx.p.hist))\n    mult = float(ctx.p.ev_sd)\n\n    # trailing stdev of returns, causal\n    sd = [None] * n\n    s = 0.0\n    ss = 0.0\n    for i in range(n):\n        s += r[i]\n        ss += r[i] * r[i]\n        j = i - W\n        if j >= 0:\n            s -= r[j]\n            ss -= r[j] * r[j]\n        if i >= W:\n            v = ss / W - (s / W) ** 2\n            sd[i] = math.sqrt(v) if v > 0.0 else 0.0\n\n    ev = [False] * n\n    for i in range(n):\n        d = sd[i]\n        if d and d > 0.0 and abs(r[i]) >= mult * d:\n            ev[i] = True\n    ev_list = [i for i in range(n) if ev[i]]\n\n    # TI available for a decision made ON bar i: only events e with e + k <= i\n    need = max(8, H // 4)\n    ti_at = [None] * n\n    hist = []\n    ptr = 0\n    for i in range(n):\n        while ptr < len(ev_list) and ev_list[ptr] + k <= i:\n            e = ev_list[ptr]\n            re = r[e]\n            ptr += 1\n            if re == 0.0:\n                continue\n            fwd = 0.0\n            for j in range(1, k + 1):\n                fwd += r[e + j]\n            hist.append(-fwd / re)\n            if len(hist) > H:\n                hist.pop(0)\n        m = len(hist)\n        if m >= need:\n            q = sorted(hist)\n            ti_at[i] = q[m // 2] if m % 2 else 0.5 * (q[m // 2 - 1] + q[m // 2])\n\n    ctx.f_ev = ctx.series([1 if x else 0 for x in ev], \"event\")\n    ctx.f_r = ctx.series(r, \"logret\")\n    ctx.f_ti = ctx.series(ti_at, \"TI\")\n\n\ndef signal(ctx, i):\n    if not ctx.f_ev[i]:\n        return 0\n    ti = ctx.f_ti[i]\n    if ti is None:\n        return 0\n    r = ctx.f_r[i]\n    if r == 0.0:\n        return 0\n    s = 1 if r > 0.0 else -1\n    if ti >= ctx.p.ti_hi:        # moves revert -> take the other side\n        return -s\n    if ti <= ctx.p.ti_lo:        # moves extend -> go with it\n        return s\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out at the close of bar t+k, the same horizon TI is estimated over.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return i - e >= max(1, int(ctx.p.k_fwd))\n"
+}

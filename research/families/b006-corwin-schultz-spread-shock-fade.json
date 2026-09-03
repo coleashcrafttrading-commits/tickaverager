@@ -1,0 +1,31 @@
+{
+ "name": "Corwin-Schultz Spread Shock Fade",
+ "note": "Recovers the effective bid-ask spread from the geometry of one-bar versus two-bar high/low ranges (Corwin-Schultz), smooths it, and fades the direction of the move whenever that estimated cost of immediacy sits at the top of its own 250-bar distribution -- the mechanical part of short-horizon reversal.",
+ "source": "Corwin & Schultz (2012), 'A Simple Way to Estimate Bid-Ask Spreads from Daily High and Low Prices', Journal of Finance 67(2):719-759; intraday application per Corwin's Notre Dame notes.",
+ "params": {
+  "smooth": 5,
+  "pct_win": 250,
+  "pct_in": 0.95,
+  "pct_out": 0.5,
+  "gap_adj": 1,
+  "time_stop": 5,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "smooth": [
+   1,
+   5,
+   10
+  ],
+  "pct_in": [
+   0.9,
+   0.95,
+   0.99
+  ],
+  "gap_adj": [
+   0,
+   1
+  ]
+ },
+ "code": "import math\nfrom bisect import bisect_left, insort\n\n\ndef family_init(ctx):\n    \"\"\"Corwin-Schultz high/low bid-ask spread estimator, smoothed and ranked.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n\n    K = 3.0 - 2.0 * math.sqrt(2.0)\n    gap_adj = int(ctx.p.gap_adj) != 0\n\n    # --- the two-bar spread estimate ----------------------------------\n    S = [None] * n\n    for i in range(1, n):\n        h0, l0, h1, l1 = h[i - 1], l[i - 1], h[i], l[i]\n        if h0 <= 0 or l0 <= 0 or h1 <= 0 or l1 <= 0:\n            continue\n        if gap_adj:\n            # Corwin & Schultz's overnight adjustment: shift the second bar\n            # back onto the first when the two ranges do not overlap, so a\n            # pure gap is not read as a spread\n            if l1 > h0:\n                d = l1 - h0\n                h1 -= d; l1 -= d\n            elif h1 < l0:\n                d = l0 - h1\n                h1 += d; l1 += d\n            if h1 <= 0 or l1 <= 0:\n                continue\n        b0 = math.log(h0 / l0)\n        b1 = math.log(h1 / l1)\n        beta = b0 * b0 + b1 * b1\n        g = math.log(max(h0, h1) / min(l0, l1))\n        gamma = g * g\n        alpha = (math.sqrt(2.0 * beta) - math.sqrt(beta)) / K \\\n            - math.sqrt(gamma / K)\n        if alpha < 0:\n            S[i] = 0.0\n        else:\n            e = math.exp(alpha) if alpha < 50 else math.exp(50.0)\n            S[i] = 2.0 * (e - 1.0) / (1.0 + e)\n\n    # --- smoothed spread Sbar ------------------------------------------\n    sm = max(1, int(ctx.p.smooth))\n    sbar = [None] * n\n    tot = 0.0\n    cnt = 0\n    for i in range(n):\n        if S[i] is not None:\n            tot += S[i]; cnt += 1\n        j = i - sm\n        if j >= 0 and S[j] is not None:\n            tot -= S[j]; cnt -= 1\n        if cnt >= sm:\n            sbar[i] = tot / cnt\n\n    # --- rank of Sbar within its own trailing window --------------------\n    # a rank fraction answers both questions the rule asks: \"at or above the\n    # 95th percentile\" for entry and \"back under the 50th\" for exit.\n    W = max(30, int(ctx.p.pct_win))\n    rank = [None] * n\n    win = []\n    hist = []\n    for i in range(n):\n        cur = sbar[i]\n        if cur is None:\n            continue\n        if len(win) >= 20:\n            rank[i] = bisect_left(win, cur) / float(len(win))\n        insort(win, cur)\n        hist.append(cur)\n        if len(win) > W:\n            old = hist.pop(0)\n            k = bisect_left(win, old)\n            if k < len(win) and win[k] == old:\n                del win[k]\n\n    # --- two-bar cumulative return used for the direction filter --------\n    ret2 = [None] * n\n    for i in range(2, n):\n        if c[i - 2] > 0:\n            ret2[i] = c[i] / c[i - 2] - 1.0\n\n    ctx.sbar = ctx.series(sbar, \"sbar\")\n    ctx.rank = ctx.series(rank, \"spread_rank\")\n    ctx.ret2 = ctx.series(ret2, \"ret2\")\n\n\ndef signal(ctx, i):\n    r = ctx.rank[i]\n    if r is None or r < ctx.p.pct_in:\n        return 0\n    d = ctx.ret2[i]\n    if d is None or d == 0.0:\n        return 0\n    return 1 if d < 0 else -1          # fade the move made through a wide spread\n\n\ndef exit_signal(ctx, i):\n    r = ctx.rank[i]\n    return r is not None and r < ctx.p.pct_out\n"
+}

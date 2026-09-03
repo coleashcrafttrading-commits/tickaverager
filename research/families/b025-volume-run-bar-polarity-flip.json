@@ -1,0 +1,33 @@
+{
+ "name": "Volume Run-Bar Polarity Flip",
+ "note": "Builds Lopez de Prado volume run bars whose boundaries are endogenous -- a bar closes when one side's cumulative volume exceeds E[T]*max(P_b*E[V_b],(1-P_b)*E[V_s]), all three terms EWMAs of the recent run-bar history -- and signs the flow by bulk volume classification, V_b = V*Phi(dP/sigma_dP). Enters when the polarity of the sampling process itself flips: `confirm` buy-side run bars immediately after `opp` or more consecutive sell-side ones. Exits on the first opposite-polarity run bar or after `hold` run bars.",
+ "source": "Marcos Lopez de Prado, 'Advances in Financial Machine Learning' (Wiley, 2018), Ch. 2, section 2.3.2.2 'Run Bars' -- the threshold condition max(theta_buy, theta_sell) >= E[T] * max(P_b*E[V_b], (1-P_b)*E[V_s]) is his. Signing via bulk volume classification is the OHLCV proxy for his tick rule, from Easley, Lopez de Prado & O'Hara (2012). The polarity-flip entry is my synthesis.",
+ "params": {
+  "rb_span": 50,
+  "t0": 30,
+  "sig_n": 50,
+  "confirm": 2,
+  "opp": 3,
+  "hold": 5,
+  "atr_n": 14,
+  "st_atr": 1.5,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "rb_span": [
+   20,
+   50,
+   100
+  ],
+  "confirm": [
+   1,
+   2
+  ],
+  "opp": [
+   2,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Lopez de Prado volume RUN BARS, signed by bulk volume classification.\n\n    A run bar closes when one side's cumulative volume exceeds what recent\n    history says should be expected of it:\n\n        max(theta_buy, theta_sell) >= E[T] * max(P_b*E[V_b], (1-P_b)*E[V_s])\n\n    E[T] is an EWMA of past run-bar tick counts, P_b an EWMA of the buy-volume\n    fraction, E[V_b]/E[V_s] EWMAs of buy and sell volume per tick. The bar\n    boundaries are therefore endogenous: in a quiet tape a run bar closes\n    quickly, in a violent one it takes far more one-sided volume.\n\n    Signs come from bulk volume classification (Easley, Lopez de Prado &\n    O'Hara 2012): V_b = V * Phi(dP / sigma_dP), V_s = V - V_b, which is the\n    OHLCV stand-in for the tick rule we cannot run without trades.\n    \"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    vv = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    span = max(5, int(ctx.p.rb_span))\n    alpha = 2.0 / (span + 1.0)\n    n_sig = max(10, int(ctx.p.sig_n))\n\n    # rolling stdev of the one-bar price change, causal\n    dp = [0.0] * m\n    for i in range(1, m):\n        dp[i] = c[i] - c[i - 1]\n    sig = [None] * m\n    s1 = 0.0\n    s2 = 0.0\n    for i in range(1, m):\n        s1 += dp[i]\n        s2 += dp[i] * dp[i]\n        if i - n_sig >= 1:\n            j = i - n_sig\n            s1 -= dp[j]\n            s2 -= dp[j] * dp[j]\n        k = min(i, n_sig)\n        if k >= 10:\n            var = s2 / k - (s1 / k) ** 2\n            sig[i] = math.sqrt(var) if var > 0.0 else None\n\n    root2 = math.sqrt(2.0)\n    e_t = float(ctx.p.t0)            # expected ticks per run bar\n    p_b = 0.5                        # expected buy-volume fraction\n    e_vb = None                      # buy volume per tick\n    e_vs = None\n\n    theta_b = 0.0\n    theta_s = 0.0\n    n_t = 0\n    lab = [0] * m                    # +1 / -1 on the bar a run bar CLOSED\n    cnt = [0] * m                    # how many run bars have closed by bar i\n    n_closed = 0\n    labels = []                      # the closed run bars in order\n\n    sgn = [0] * m                    # entry trigger, evaluated on closing bars\n    confirm = max(1, int(ctx.p.confirm))\n    opp = max(1, int(ctx.p.opp))\n\n    for i in range(m):\n        s = sig[i]\n        v = vv[i]\n        if s is None or s <= 0.0:\n            z = 0.0\n        else:\n            z = dp[i] / s\n        if z > 8.0:\n            z = 8.0\n        elif z < -8.0:\n            z = -8.0\n        phi = 0.5 * (1.0 + math.erf(z / root2))\n        vb = v * phi\n        vs = v - vb\n        theta_b += vb\n        theta_s += vs\n        n_t += 1\n\n        if e_vb is None:\n            thr = None\n        else:\n            thr = e_t * max(p_b * e_vb, (1.0 - p_b) * e_vs)\n\n        fire = False\n        if thr is not None and thr > 0.0:\n            fire = max(theta_b, theta_s) >= thr\n        elif n_t >= int(ctx.p.t0):\n            fire = True              # bootstrap the very first run bar\n\n        if fire:\n            side = 1 if theta_b >= theta_s else -1\n            tot = theta_b + theta_s\n            frac = 0.5 if tot <= 0.0 else theta_b / tot\n            per_b = theta_b / n_t\n            per_s = theta_s / n_t\n            e_t = e_t + alpha * (n_t - e_t)\n            p_b = p_b + alpha * (frac - p_b)\n            e_vb = per_b if e_vb is None else e_vb + alpha * (per_b - e_vb)\n            e_vs = per_s if e_vs is None else e_vs + alpha * (per_s - e_vs)\n            n_closed += 1\n            labels.append(side)\n            lab[i] = side\n            # polarity flip: `confirm` bars of one polarity, immediately\n            # preceded by `opp` or more of the other\n            if len(labels) >= confirm + opp:\n                tail = labels[-confirm:]\n                prev = labels[-(confirm + opp):-confirm]\n                if all(x == 1 for x in tail) and all(x == -1 for x in prev):\n                    sgn[i] = 1\n                elif all(x == -1 for x in tail) and all(x == 1 for x in prev):\n                    sgn[i] = -1\n            theta_b = 0.0\n            theta_s = 0.0\n            n_t = 0\n        cnt[i] = n_closed\n\n    ctx.sgn = ctx.series(sgn, \"run_flip\")\n    ctx.lab = ctx.series(lab, \"run_label\")\n    ctx.cnt = ctx.series(cnt, \"run_count\")\n\n\ndef signal(ctx, i):\n    s = ctx.sgn[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out on the first opposite-polarity run bar, or after `hold` run bars.\"\"\"\n    if not ctx.positions:\n        return False\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    j = ctx.positions[0][\"entry_i\"]\n    if ctx.lab[i] == -d:\n        return True\n    n0 = ctx.cnt[j]\n    if n0 is not None and ctx.cnt[i] - n0 >= max(1, int(ctx.p.hold)):\n        return True\n    return False\n"
+}

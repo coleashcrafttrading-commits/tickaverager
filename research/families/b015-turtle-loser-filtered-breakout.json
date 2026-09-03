@@ -1,0 +1,35 @@
+{
+ "name": "Turtle System 1 loser-filtered breakout",
+ "note": "A 20-bar Donchian breakout that is only taken when the PREVIOUS breakout, phantom-traded whether or not it was taken, would have LOST -- entry at the broken level, 2N stop, 10-bar trailing exit, stop wins a tie. The 55-bar failsafe overrides the filter. State is the outcome of the most recent breakout that has actually RESOLVED by the current bar, so the memory is causal. use_filter=0 is the unfiltered Donchian control, which is the point of sweeping it.",
+ "source": "Original Turtle Trading rules as published by Richard Dennis's students (Curtis Faith, 'The Original Turtle Trading Rules'), rules summary at https://www.theturtletrader.com/turtle-trading-rules/ -- System 1 20-day entry with the skip-if-previous-breakout-was-a-winner filter, the 55-day failsafe, N as the 20-day Wilder average of true range, 2N stop, 10-day exit.",
+ "params": {
+  "dc_n": 20,
+  "fail_n": 55,
+  "exit_n": 10,
+  "n_period": 20,
+  "max_walk": 300,
+  "use_filter": 1,
+  "side": "both",
+  "atr_n": 20,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "dc_n": [
+   10,
+   20,
+   40
+  ],
+  "exit_n": [
+   5,
+   10,
+   20
+  ],
+  "use_filter": [
+   0,
+   1
+  ]
+ },
+ "code": "def _roll(src, w, want_max):\n    \"\"\"Extreme of the w bars BEFORE each bar (never includes the bar itself).\"\"\"\n    n = len(src)\n    out = [None] * n\n    if w < 1:\n        return out\n    for j in range(w, n):\n        seg = src[j - w:j]\n        out[j] = max(seg) if want_max else min(seg)\n    return out\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    h = [float(x[\"h\"]) for x in b]\n    l = [float(x[\"l\"]) for x in b]\n    c = [float(x[\"c\"]) for x in b]\n    dn = int(ctx.p.dc_n)\n    fn = int(ctx.p.fail_n)\n    xn = int(ctx.p.exit_n)\n    an = int(ctx.p.n_period)\n    mw = int(ctx.p.max_walk)\n\n    # N = Wilder-smoothed true range, exactly the Turtle definition\n    N = [None] * n\n    acc = 0.0\n    prev = None\n    for j in range(n):\n        if j == 0:\n            tr = h[0] - l[0]\n        else:\n            pc = c[j - 1]\n            tr = max(h[j] - l[j], abs(h[j] - pc), abs(l[j] - pc))\n        if j < an:\n            acc += tr\n            if j == an - 1:\n                prev = acc / an\n                N[j] = prev\n        else:\n            prev = ((an - 1) * prev + tr) / an\n            N[j] = prev\n\n    hid = _roll(h, dn, True)\n    lod = _roll(l, dn, False)\n    hif = _roll(h, fn, True)\n    lof = _roll(l, fn, False)\n    hix = _roll(h, xn, True)\n    lox = _roll(l, xn, False)\n\n    # a breakout EVENT is the rising edge: the first bar to clear the channel,\n    # not every bar that happens to stay above it\n    evdir = [0] * n\n    for j in range(n):\n        d = 0\n        if hid[j] is not None and h[j] > hid[j]:\n            d = 1\n        elif lod[j] is not None and l[j] < lod[j]:\n            d = -1\n        if d and j > 0 and evdir[j - 1] == d:\n            d = 0\n        evdir[j] = d\n\n    # phantom-trade every event, traded or not, to learn whether it WOULD have\n    # been a winner: stop first, then the 10-bar trailing exit\n    by_resolve = {}\n    for j in range(n):\n        d = evdir[j]\n        if not d:\n            continue\n        nb = N[j]\n        lvl = hid[j] if d > 0 else lod[j]\n        if nb is None or nb <= 0 or lvl is None:\n            continue\n        stop = lvl - 2.0 * nb * d\n        end = min(n, j + 1 + mw)\n        res = None\n        ru = None\n        for u in range(j + 1, end):\n            if d > 0:\n                if l[u] <= stop:\n                    res, ru = 0, u\n                    break\n                if lox[u] is not None and l[u] < lox[u]:\n                    res, ru = 1, u\n                    break\n            else:\n                if h[u] >= stop:\n                    res, ru = 0, u\n                    break\n                if hix[u] is not None and h[u] > hix[u]:\n                    res, ru = 1, u\n                    break\n        if res is not None:\n            by_resolve.setdefault(ru, []).append((j, res))\n\n    # state at bar i = outcome of the most recent event that has RESOLVED by i\n    state = [None] * n\n    best_j = -1\n    best_r = None\n    for i in range(n):\n        for (j, r) in by_resolve.get(i, ()):\n            if j > best_j:\n                best_j, best_r = j, r\n        state[i] = best_r\n\n    take = [1] * n\n    fail = [0] * n\n    for i in range(n):\n        d = evdir[i]\n        if d:\n            if d > 0:\n                fail[i] = 1 if (hif[i] is not None and h[i] > hif[i]) else 0\n            else:\n                fail[i] = 1 if (lof[i] is not None and l[i] < lof[i]) else 0\n        # take it only when the last resolved breakout LOST, or there is none\n        take[i] = 1 if (state[i] is None or state[i] == 0) else 0\n\n    ctx.ev = ctx.series(evdir, \"breakout_event\")\n    ctx.take = ctx.series(take, \"prev_breakout_lost\")\n    ctx.fail = ctx.series(fail, \"failsafe_55\")\n    ctx.hix = ctx.series(hix, \"exit_high\")\n    ctx.lox = ctx.series(lox, \"exit_low\")\n\n\ndef signal(ctx, i):\n    d = ctx.ev[i]\n    if not d:\n        return 0\n    if int(ctx.p.use_filter) and not ctx.take[i] and not ctx.fail[i]:\n        return 0\n    return 1 if d > 0 else -1\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        v = ctx.lox[i]\n        return v is not None and ctx.l[i] < v\n    v = ctx.hix[i]\n    return v is not None and ctx.h[i] > v"
+}

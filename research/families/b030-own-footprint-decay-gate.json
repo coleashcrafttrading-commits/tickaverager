@@ -1,0 +1,32 @@
+{
+ "name": "Own-Footprint Decay Gate",
+ "note": "A propagator-model cooldown: every fill of our own leaves a residual footprint sigma*(q/V)^psi that decays as (1+lag)^-beta, and no new entry fires until the signed sum of those footprints has decayed below theta_foot * the 20-bar per-bar return stdev. The base signal it gates is a plain N-bar breakout, so what is being measured is the gate. theta_foot is swept below the paper's 0.1-0.5 band because 100-share slices against five-minute bar volume produce a footprint of order 0.01-0.05, where the published band would leave the gate permanently open.",
+ "source": "Bouchaud, J-P. (2009), 'Price Impact' (arXiv:0903.2428): propagator p_T = p_-inf + lambda * SUM G(N-n) eps_n v_n^psi with G(l) ~ l^-beta, beta = (1-gamma)/2 ~ 0.25, and the BARRA-style response R(dt,v) = A sigma sqrt(v/V). Motivated by Gatheral (2010), 'No-Dynamic-Arbitrage and Market Impact', Quantitative Finance 10(7); decay level sanity-checked against Zarinelli, Treccani, Farmer & Lillo (2014, arXiv:1412.2152).",
+ "params": {
+  "base_n": 20,
+  "vol_n": 20,
+  "beta": 0.25,
+  "psi": 0.5,
+  "theta_foot": 0.05,
+  "side": "both",
+  "tp_atr": 2.0,
+  "st_atr": 1.5
+ },
+ "grid": {
+  "beta": [
+   0.15,
+   0.25,
+   0.5
+  ],
+  "theta_foot": [
+   0.01,
+   0.05,
+   0.2
+  ],
+  "psi": [
+   0.5,
+   0.7
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n\n    # ---- the base signal the gate sits in front of: an N-bar breakout ----\n    N = int(ctx.p.base_n)\n    base = [0] * n\n    for i in range(N, n):\n        j0 = i - N\n        if c[i] > max(hi[j0:i]):\n            base[i] = 1\n        elif c[i] < min(lo[j0:i]):\n            base[i] = -1\n\n    # ---- sigma_bar: stdev of per-bar log returns over VW bars -----------\n    VW = int(ctx.p.vol_n)\n    lr = [None] * n\n    for i in range(1, n):\n        if c[i - 1] > 0:\n            lr[i] = math.log(c[i] / c[i - 1])\n    sg = [None] * n\n    s1 = s2 = 0.0\n    cnt = 0\n    for i in range(n):\n        x = lr[i]\n        if x is not None:\n            s1 += x\n            s2 += x * x\n            cnt += 1\n        j = i - VW\n        if j >= 0 and lr[j] is not None:\n            s1 -= lr[j]\n            s2 -= lr[j] * lr[j]\n            cnt -= 1\n        if cnt >= 8:\n            var = s2 / cnt - (s1 / cnt) ** 2\n            if var > 0:\n                sg[i] = math.sqrt(var)\n\n    ctx.base = ctx.series(base, \"breakout\")\n    ctx.sg = ctx.series(sg, \"sigma_bar\")\n    ctx._sl = []       # own slices: (bar, sign, sigma_at_fill * (q/V)**psi)\n    ctx._seen = set()\n    ctx._nc = 0\n\n\ndef _register(ctx, i):\n    \"\"\"Record every fill of our own as a slice in the propagator sum.\"\"\"\n    psi = float(ctx.p.psi)\n    for p in ctx.positions:\n        key = (p[\"entry_i\"], round(p[\"entry\"], 4), p[\"side\"])\n        if key in ctx._seen:\n            continue\n        ctx._seen.add(key)\n        e = p[\"entry_i\"]\n        vv = ctx.v[e]\n        s = ctx.sg[e]\n        if vv and s and vv > 0:\n            amp = s * ((float(p[\"shares\"]) / vv) ** psi)\n            ctx._sl.append((e, 1 if p[\"side\"] == \"long\" else -1, amp))\n    while ctx._nc < len(ctx.closed):\n        tr = ctx.closed[ctx._nc]\n        ctx._nc += 1\n        e = tr[\"exit_i\"]\n        vv = ctx.v[e]\n        s = ctx.sg[e]\n        if vv and s and vv > 0:\n            amp = s * ((float(tr[\"shares\"]) / vv) ** psi)\n            ctx._sl.append((e, -1 if tr[\"side\"] == \"long\" else 1, amp))\n    if len(ctx._sl) > 240:\n        del ctx._sl[:len(ctx._sl) - 240]\n\n\ndef signal(ctx, i):\n    _register(ctx, i)\n    b = ctx.base[i]\n    if not b:\n        return 0\n    s = ctx.sg[i]\n    if s is None or s <= 0:\n        return 0\n    beta = float(ctx.p.beta)\n    fp = 0.0\n    for t, sgn, amp in ctx._sl:\n        lag = i - t\n        if lag < 0:\n            continue\n        fp += sgn * amp * ((1.0 + lag) ** (-beta))\n    if fp < 0:\n        fp = -fp\n    if fp >= ctx.p.theta_foot * s:\n        return 0\n    return b"
+}

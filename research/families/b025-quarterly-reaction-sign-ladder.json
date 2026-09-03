@@ -1,0 +1,38 @@
+{
+ "name": "Quarterly Reaction Sign Ladder",
+ "note": "Detects earnings-like events from OHLCV (a k-sigma return on vmult-times-average volume, with a refractory period), scores each by its reaction return EAR, extrapolates the next event from the median spacing of the last three intervals, and takes a position `lead` bars before it in the direction of S = sign(EAR1)+sign(EAR2)+sign(EAR3)+w4*sign(EAR4). w4 = -1 is Bernard & Thomas's lag-4 sign flip; w4 = +1 is the control. Exits `post` bars after the event actually fires, or `abandon` bars after the anticipated date if it never does. Scale note: the literal 50-80 session band needs ~250 daily sessions that an intraday window does not contain, so spacing is tested for REGULARITY (sp_min, sp_tol) instead; on daily bars set sp_min=50, sp_tol=1.6.",
+ "source": "Bernard and Thomas (1989, 1990). The naive-expectations mechanism - investors fail 'to recognize fully the implications of current earnings for future earnings' - and the seasonal random walk model were VERIFIED via https://en.wikipedia.org/wiki/Post-earnings-announcement_drift and the Quantpedia PEAD page (which specifies SUE 'calculated using a seasonal random walk model with drift'). The specific lags-1-to-3-positive, lag-4-negative sign pattern is from Bernard and Thomas (1990), 'Evidence that stock prices do not fully reflect the implications of current earnings for future earnings', Journal of Accounting and Economics 13 - I did NOT open that paper in this session; that lag detail is from background knowledge. The S-score ladder and the pre-positioning construction are my own.",
+ "params": {
+  "k": 2.25,
+  "vmult": 1.5,
+  "stat_n": 100,
+  "sp_min": 12,
+  "sp_tol": 4.0,
+  "ear_w": 2,
+  "lead": 2,
+  "thr": 2.0,
+  "w4": -1.0,
+  "post": 2,
+  "abandon": 10,
+  "atr_n": 20,
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "w4": [
+   -1.0,
+   1.0
+  ],
+  "k": [
+   2.0,
+   2.25,
+   3.0
+  ],
+  "lead": [
+   2,
+   5
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"A signed ladder over the last four recurrences of a periodic shock.\n\n    Events are detected from OHLCV alone: a bar whose return is at least k\n    rolling standard deviations AND whose volume is at least vmult times its\n    rolling average, with a refractory period so one shock cannot register as\n    a cluster. Each event carries EAR, the cumulative return over the event\n    bar and the ear_w-1 bars after it -- the market's REACTION, which is all we\n    can observe when the earnings number itself is invisible.\n\n    m = the median spacing of the last three intervals; the next event is\n    anticipated at e1 + m and the position is taken `lead` bars ahead of it.\n    Direction comes from S = sign(EAR1) + sign(EAR2) + sign(EAR3)\n    + w4 * sign(EAR4): Bernard & Thomas's naive-expectations signature is\n    positive at the first three lags and NEGATIVE at the fourth, so w4 = -1 is\n    the claim and w4 = +1 is its control.\n\n    SCALE SUBSTITUTION, stated plainly: four quarterly events need roughly 250\n    daily sessions, which no intraday research window contains. The spacing\n    test here is therefore a REGULARITY test -- intervals at least sp_min bars\n    apart and within sp_tol of each other -- rather than the literal 50-80\n    session band. On daily bars the published instantiation is sp_min = 50,\n    sp_tol = 1.6, lead = 2, ear_w = 2.\n    \"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    vv = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    r = [0.0] * m\n    for i in range(1, m):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    n = max(20, int(ctx.p.stat_n))\n    sd = [None] * m\n    av = [None] * m\n    s1 = s2 = sv = 0.0\n    for i in range(1, m):\n        s1 += r[i]\n        s2 += r[i] * r[i]\n        sv += vv[i]\n        if i - n >= 1:\n            j = i - n\n            s1 -= r[j]\n            s2 -= r[j] * r[j]\n            sv -= vv[j]\n        k = min(i, n)\n        if k >= 20:\n            var = s2 / k - (s1 / k) ** 2\n            sd[i] = math.sqrt(var) if var > 0.0 else None\n            av[i] = sv / k\n\n    kk = float(ctx.p.k)\n    vm = float(ctx.p.vmult)\n    ew = max(1, int(ctx.p.ear_w))\n    ref = max(1, int(ctx.p.sp_min))\n\n    ev = [0] * m\n    last = -10 ** 9\n    idxs = []\n    for i in range(1, m):\n        if sd[i] is None or sd[i] <= 0.0 or av[i] is None or av[i] <= 0.0:\n            continue\n        if i - last < ref:\n            continue\n        if abs(r[i]) >= kk * sd[i] and vv[i] >= vm * av[i]:\n            ev[i] = 1\n            last = i\n            idxs.append(i)\n\n    # EAR of each event: the reaction over the event bar and ear_w-1 after it,\n    # usable only once those bars exist\n    ear = {}\n    for e in idxs:\n        end = min(m - 1, e + ew - 1)\n        ear[e] = sum(r[e:end + 1])\n\n    sig = [0] * m\n    tg = [0] * m\n    lead = max(1, int(ctx.p.lead))\n    thr = float(ctx.p.thr)\n    w4 = float(ctx.p.w4)\n    tol = float(ctx.p.sp_tol)\n    ready = []                      # events whose EAR is known\n    nxt = 0\n    fired_for = -1\n    for i in range(m):\n        while nxt < len(idxs) and idxs[nxt] + ew - 1 <= i:\n            ready.append(idxs[nxt])\n            nxt += 1\n        if len(ready) < 4:\n            continue\n        e1, e2, e3, e4 = ready[-1], ready[-2], ready[-3], ready[-4]\n        sp = [e1 - e2, e2 - e3, e3 - e4]\n        lo = min(sp)\n        hi = max(sp)\n        if lo < ref or hi > tol * lo:\n            continue\n        med = sorted(sp)[1]\n        t = e1 + med\n        want = t - lead\n        if i < want or i > want + 2 or fired_for == e1:\n            continue\n        s = 0.0\n        for e, w in ((e1, 1.0), (e2, 1.0), (e3, 1.0), (e4, w4)):\n            x = ear[e]\n            s += w * (1.0 if x > 0 else (-1.0 if x < 0 else 0.0))\n        if s >= thr:\n            sig[i] = 1\n        elif s <= -thr:\n            sig[i] = -1\n        if sig[i]:\n            tg[i] = t\n            fired_for = e1\n\n    ctx.sg = ctx.series(sig, \"ladder\")\n    ctx.ev = ctx.series(ev, \"event\")\n    ctx.tg = ctx.series(tg, \"anticipated\")\n    ctx._ex = None\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out `post` bars after the event actually fires, or `abandon` bars after\n    the anticipated date if it never does.\"\"\"\n    if not ctx.positions:\n        ctx._ex = None\n        return False\n    j = ctx.positions[0][\"entry_i\"]\n    st = ctx._ex\n    if st is None or st[\"ei\"] != j:\n        t = ctx.tg[j - 1] if j >= 1 else 0\n        st = {\"ei\": j, \"tgt\": t or 0, \"fired\": None}\n        ctx._ex = st\n    if st[\"fired\"] is None and i > j and ctx.ev[i]:\n        st[\"fired\"] = i\n    if st[\"fired\"] is not None:\n        return i - st[\"fired\"] >= int(ctx.p.post)\n    if st[\"tgt\"] and i > st[\"tgt\"] + int(ctx.p.abandon):\n        return True\n    return False\n"
+}

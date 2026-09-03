@@ -1,0 +1,34 @@
+{
+ "name": "BinHV45 Bollinger break with candle anatomy",
+ "note": "The BinHV45 conjunction: a close below the PREVIOUS bar's lower band (so the breaking bar does not widen the band it must break), no higher than the previous close, and three bar-geometry magnitudes each normalised to a different denominator -- band width bbdelta/close, bar displacement closedelta/close, and wick length tail/bbdelta, which must be SMALL because the close has to sit on the low with no dip-buying absorption yet. THRESHOLD NOTE: the published 0.007/0.017/0.025 were tuned on crypto and the source explicitly says to re-sweep them; measured on real 5-minute equity bars the same three ratios differ by more than 10x across symbols (median bbdelta/close is 0.0015 on SPY and 0.020 on SOXL), so one absolute constant cannot mean the same thing on two names. Each ratio is therefore compared to its own trailing q_win-bar percentile, which is the same conjunction self-calibrated per instrument. Exit is the first close back above the 40-bar mid, with a 20-bar time stop.",
+ "source": "freqtrade-strategies, user_data/strategies/berlinguyinca/BinHV45.py -- https://github.com/freqtrade/freqtrade-strategies/blob/main/user_data/strategies/berlinguyinca/BinHV45.py",
+ "params": {
+  "bb_n": 40,
+  "bb_k": 2.0,
+  "q_win": 500,
+  "bb_q": 0.5,
+  "cd_q": 0.8,
+  "tail_q": 0.3,
+  "side": "long",
+  "exit_signal_on": 1,
+  "time_stop": 20
+ },
+ "grid": {
+  "bb_q": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "cd_q": [
+   0.6,
+   0.78,
+   0.9
+  ],
+  "tail_q": [
+   0.15,
+   0.3,
+   0.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    from bisect import insort, bisect_left\n    bars = ctx.bars\n    N = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    P = max(5, int(ctx.p.bb_n))\n    k = float(ctx.p.bb_k)\n    W = max(60, int(ctx.p.q_win))\n\n    mid = [None] * N\n    low = [None] * N\n    bbd = [None] * N\n    s = 0.0\n    q = 0.0\n    for j in range(N):\n        s += c[j]\n        q += c[j] * c[j]\n        if j >= P:\n            s -= c[j - P]\n            q -= c[j - P] * c[j - P]\n        if j >= P - 1:\n            m = s / P\n            var = q / P - m * m\n            sd = math.sqrt(var) if var > 1e-18 else 0.0\n            mid[j] = m\n            low[j] = m - k * sd\n            bbd[j] = k * sd\n\n    r1 = [None] * N\n    r2 = [None] * N\n    r3 = [None] * N\n    for j in range(N):\n        d = bbd[j]\n        if d is None or c[j] <= 0:\n            continue\n        r1[j] = d / c[j]\n        if j >= 1:\n            r2[j] = abs(c[j] - c[j - 1]) / c[j]\n        if d > 0:\n            r3[j] = abs(c[j] - lo[j]) / d\n\n    def ranks(x):\n        out = [None] * N\n        buf = []\n        seq = []\n        head = 0\n        for j in range(N):\n            xv = x[j]\n            if xv is None:\n                continue\n            n = len(buf)\n            if n >= 40:\n                out[j] = bisect_left(buf, xv) / float(n)\n            insort(buf, xv)\n            seq.append(xv)\n            if len(buf) > W:\n                old = seq[head]\n                head += 1\n                del buf[bisect_left(buf, old)]\n        return out\n\n    ctx.q1 = ctx.series(ranks(r1), \"bbdelta_rank\")\n    ctx.q2 = ctx.series(ranks(r2), \"closedelta_rank\")\n    ctx.q3 = ctx.series(ranks(r3), \"tail_rank\")\n    ctx.lb = ctx.series(low, \"lower\")\n    ctx.mb = ctx.series(mid, \"mid\")\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    a = ctx.q1[i]\n    b = ctx.q2[i]\n    t = ctx.q3[i]\n    lb = ctx.lb[i - 1]\n    if a is None or b is None or t is None or lb is None or lb <= 0:\n        return 0\n    if a < float(ctx.p.bb_q):\n        return 0\n    if b < float(ctx.p.cd_q):\n        return 0\n    if t > float(ctx.p.tail_q):\n        return 0\n    cn = ctx.c[i]\n    if cn >= lb:\n        return 0\n    if cn > ctx.c[i - 1]:\n        return 0\n    return 1\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    m = ctx.mb[i]\n    if m is None:\n        return False\n    return ctx.c[i] > m"
+}

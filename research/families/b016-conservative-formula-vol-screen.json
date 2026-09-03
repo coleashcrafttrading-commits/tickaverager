@@ -1,0 +1,32 @@
+{
+ "name": "Conservative Formula Vol Screen",
+ "note": "Blitz and van Vliet's sequential construction: screen on volatility FIRST, rank on momentum SECOND, never a composite score. The published rule is cross-sectional (keep the calmest half of a 500-name universe, then buy the top decile of that half by 12-month return); a single-symbol harness has no cross-section, so each name is ranked against its OWN trailing distribution instead - the volatility percentile must sit below screen_pct and only then must the momentum percentile sit in the top sel_pct. The net-payout-yield leg of the published formula is a fundamental field this bot does not have and is dropped, exactly as the idea specifies. The selection is re-evaluated only every rebal bars (the monthly rebalance) and held in between, and the position is a CONDITION TO BE IN, so exit_on_zero is set.",
+ "source": "backtrader blog, 'Rebalancing - Conservative Formula', implementing Blitz and van Vliet, 'The Conservative Formula: Quantitative Investing Made Easy' (SSRN 3145152) - https://www.backtrader.com/blog/2019-07-19-rebalancing-conservative/rebalancing-conservative/",
+ "params": {
+  "mom_win": 252,
+  "vol_win": 756,
+  "rank_win": 500,
+  "rebal": 21,
+  "screen_pct": 50.0,
+  "sel_pct": 20.0,
+  "side": "long",
+  "exit_on_zero": 1
+ },
+ "grid": {
+  "mom_win": [
+   126,
+   252,
+   504
+  ],
+  "sel_pct": [
+   10.0,
+   20.0,
+   35.0
+  ],
+  "screen_pct": [
+   50.0,
+   70.0
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n\n    mw = max(2, int(ctx.p.mom_win))\n    vw = max(20, int(ctx.p.vol_win))\n    rw = max(50, int(ctx.p.rank_win))\n    rb = max(1, int(ctx.p.rebal))\n    keep = float(ctx.p.screen_pct) / 100.0\n    sel = float(ctx.p.sel_pct) / 100.0\n\n    # ---- log returns ----\n    r = [0.0] * n\n    for j in range(1, n):\n        a = c[j - 1]\n        if a > 0.0 and c[j] > 0.0:\n            r[j] = math.log(c[j] / a)\n\n    # ---- the LONG volatility window: stdev of returns over vw bars ----\n    vol = [None] * n\n    s1 = 0.0\n    s2 = 0.0\n    for j in range(1, n):\n        s1 += r[j]\n        s2 += r[j] * r[j]\n        if j - vw >= 1:\n            k = j - vw\n            s1 -= r[k]\n            s2 -= r[k] * r[k]\n        m = j if j < vw else vw\n        if m >= 20:\n            mu = s1 / m\n            v = s2 / m - mu * mu\n            vol[j] = math.sqrt(v) if v > 0.0 else 0.0\n\n    # ---- momentum: total return over mw bars ----\n    mom = [None] * n\n    for j in range(mw, n):\n        a = c[j - mw]\n        if a > 0.0:\n            mom[j] = c[j] / a - 1.0\n\n    # ---- the sequential screen, re-run only on rebalance bars ----\n    hold = [0] * n\n    state = 0\n    start = max(vw, mw) + rw\n    for j in range(n):\n        if j >= start and (j - start) % rb == 0:\n            state = 0\n            v = vol[j]\n            m = mom[j]\n            if v is not None and m is not None:\n                lo = j - rw\n                nv = 0\n                cv = 0\n                nm = 0\n                cm = 0\n                for k in range(lo, j):\n                    vk = vol[k]\n                    if vk is not None:\n                        nv += 1\n                        if vk < v:\n                            cv += 1\n                    mk = mom[k]\n                    if mk is not None:\n                        nm += 1\n                        if mk < m:\n                            cm += 1\n                if nv > 0 and nm > 0:\n                    # STEP 1 -- the volatility screen. Survive only if this\n                    # bar's long-window vol sits in the calm part of the\n                    # symbol's own vol distribution.\n                    if (cv / nv) <= keep:\n                        # STEP 2 -- and only then, rank on momentum.\n                        if (cm / nm) >= 1.0 - sel:\n                            state = 1\n        hold[j] = state\n    ctx.hold = ctx.series(hold, \"cf_hold\")\n\n\ndef signal(ctx, i):\n    h = ctx.hold[i]\n    if h is None:\n        return 0\n    return 1 if h else 0"
+}

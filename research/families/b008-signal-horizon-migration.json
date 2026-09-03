@@ -1,0 +1,33 @@
+{
+ "name": "Signal horizon migration detector",
+ "note": "Measures WHERE IN TIME a signal's alpha sits: the rank information coefficient of a z-scored momentum score against forward returns at h in {1,2,3,5,10,20}, recomputed every step bars, with h* = argmax meanIC(h). The holding period is h* itself, so it contracts automatically as alpha migrates earlier; the signal is retired after retire_chk consecutive checks with max_h meanIC(h) <= 0. Honest adaptation: the paper's IC is CROSS-SECTIONAL across a 30-name universe, which single-symbol OHLCV cannot supply, so the IC here is a rolling time-series Spearman of the score against its own forward returns. The migration response is also partly the harness's: execution timing and position size are not the family's to set, so mig_mode=1 expresses 'cut size when alpha has migrated' as standing aside, and mig_mode=0 sweeps the same family with the detector off, which is the comparison that says whether the detector earns its keep.",
+ "source": "Volpati, V., Benzaquen, M., Eisler, Z., Mastromatteo, I., Toth, B. & Bouchaud, J.-P., 'Zooming In on Equity Factor Crowding', arXiv:2001.04185 (crowding measured from trade-imbalance fluctuations; momentum rebalancing = 1-2% of order flow and rising). The IC-term-structure migration statistic and the execution/holding-period response are my own synthesis - Volpati et al. use signed order flow, which we do not have, so the horizon shift is the OHLCV-observable consequence of the same mechanism.",
+ "params": {
+  "score_n": 40,
+  "zwin": 500,
+  "ic_win": 300,
+  "step": 78,
+  "lag_chk": 20,
+  "mig_thr": -2,
+  "mig_mode": 1,
+  "retire_chk": 60,
+  "thr": 1.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "score_n": [
+   20,
+   40,
+   80
+  ],
+  "ic_win": [
+   250,
+   500
+  ],
+  "mig_mode": [
+   0,
+   1
+  ]
+ },
+ "code": "HORIZONS = (1, 2, 3, 5, 10, 20)\n\n\ndef _ranks(v):\n    n = len(v)\n    order = sorted(range(n), key=lambda j: v[j])\n    r = [0.0] * n\n    i = 0\n    while i < n:\n        j = i\n        vi = v[order[i]]\n        while j + 1 < n and v[order[j + 1]] == vi:\n            j += 1\n        avg = (i + j) * 0.5 + 1.0\n        for t in range(i, j + 1):\n            r[order[t]] = avg\n        i = j + 1\n    return r\n\n\ndef _spearman(a, b):\n    n = len(a)\n    if n < 20:\n        return None\n    ra, rb = _ranks(a), _ranks(b)\n    m = (n + 1) * 0.5\n    sa = sb = sab = 0.0\n    for j in range(n):\n        x = ra[j] - m\n        y = rb[j] - m\n        sa += x * x\n        sb += y * y\n        sab += x * y\n    if sa <= 0.0 or sb <= 0.0:\n        return None\n    return sab / (sa * sb) ** 0.5\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    # ---- the continuous signal score S: a z-scored momentum\n    sn = int(ctx.p.score_n)\n    zw = int(ctx.p.zwin)\n    mom = [None] * n\n    for t in range(sn, n):\n        base = c[t - sn]\n        if base:\n            mom[t] = c[t] / base - 1.0\n    score = [None] * n\n    s1 = s2 = 0.0\n    cnt = 0\n    for t in range(n):\n        x = mom[t]\n        if x is not None:\n            s1 += x\n            s2 += x * x\n            cnt += 1\n        old = mom[t - zw] if t - zw >= 0 else None\n        if old is not None:\n            s1 -= old\n            s2 -= old * old\n            cnt -= 1\n        if x is not None and cnt >= 30:\n            mu = s1 / cnt\n            var = s2 / cnt - mu * mu\n            if var > 1e-18:\n                score[t] = (x - mu) / var ** 0.5\n\n    icw = int(ctx.p.ic_win)\n    step = max(10, int(ctx.p.step))\n    lagchk = max(1, int(ctx.p.lag_chk))\n    mig_thr = int(ctx.p.mig_thr)\n    retire_chk = int(ctx.p.retire_chk)\n    nh = len(HORIZONS)\n\n    hstar = [0] * n          # holding period in force on this bar\n    tradable = [0] * n       # is the signal alive and not migrating away\n    hpos_hist = []\n    dead_run = 0\n    retired = False\n    cur_h = HORIZONS[0]\n    cur_ok = 0\n    nxt = icw + 40\n    for t in range(n):\n        if t >= nxt:\n            nxt = t + step\n            ics = []\n            for hh in HORIZONS:\n                a, b = [], []\n                lo = t - hh - icw + 1\n                if lo < 0:\n                    lo = 0\n                for u in range(lo, t - hh + 1):\n                    s = score[u]\n                    if s is None:\n                        continue\n                    base = c[u]\n                    if not base:\n                        continue\n                    a.append(s)\n                    b.append(c[u + hh] / base - 1.0)\n                ics.append(_spearman(a, b))\n            best_i, best_v = None, None\n            for j, v in enumerate(ics):\n                if v is None:\n                    continue\n                if best_v is None or v > best_v:\n                    best_v, best_i = v, j\n            if best_i is None:\n                cur_ok = 0\n            else:\n                hpos_hist.append(best_i)\n                cur_h = HORIZONS[best_i]\n                if best_v <= 0.0:\n                    dead_run += 1\n                    if dead_run >= retire_chk:\n                        retired = True\n                    cur_ok = 0\n                else:\n                    dead_run = 0\n                    ok = 1\n                    if int(ctx.p.mig_mode) and len(hpos_hist) > lagchk:\n                        mig = best_i - hpos_hist[-1 - lagchk]\n                        if mig <= mig_thr:\n                            ok = 0          # alpha has migrated earlier: stand down\n                    cur_ok = 0 if retired else ok\n        hstar[t] = cur_h\n        tradable[t] = cur_ok\n    ctx.hstar = ctx.series(hstar, \"h_star\")\n    ctx.tradable = ctx.series(tradable, \"ic_alive\")\n    ctx.score = ctx.series(score, \"score\")\n\n\ndef signal(ctx, i):\n    if not ctx.tradable[i]:\n        return 0\n    s = ctx.score[i]\n    if s is None:\n        return 0\n    thr = float(ctx.p.thr)\n    if s > thr:\n        return 1\n    if s < -thr:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    h = ctx.hstar[i]\n    if h is None:\n        return False\n    age = i - min(p[\"entry_i\"] for p in ctx.positions)\n    return age >= int(h)"
+}

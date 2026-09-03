@@ -1,0 +1,32 @@
+{
+ "name": "Fade the close-on-the-low candle in an uptrend",
+ "note": "Buys the bar every shooting-star scanner reads as weakness: an open-at-high / close-at-low candle (Black Marubozu, Closing Black Marubozu or Gravestone Doji, selected by the pset bitmask 1/2/4) printing while price is above its EMA(10). Tharavanij et al. measured every bearish one-day pattern on SET50 names 2006-2016 and the nominal short lost money in all of them, so this takes the long side. No profit target by default: the published tables pair positive means with sub-0.5 win rates, a right skew a fixed target would truncate. Held `hold` bars, stopped at 2 ATR.",
+ "source": "Tharavanij, Siraprapasiri & Rajchamaha (2017), 'Profitability of Candlestick Charting Patterns in the Stock Exchange of Thailand', SAGE Open, doi:10.1177/2158244017736799, Table 2 (bearish single-day patterns, 1/3/5/10-day holds, SET50 2006-2016). Pattern inequalities from Goo, Chen & Chang (2007); EMA(10) trend definition from Marshall, Young & Rose (2006).",
+ "params": {
+  "ema_n": 10,
+  "eps_frac": 0.05,
+  "pset": 7,
+  "hold": 10,
+  "side": "long",
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "eps_frac": [
+   0.02,
+   0.05,
+   0.1
+  ],
+  "hold": [
+   3,
+   5,
+   10
+  ],
+  "pset": [
+   3,
+   7
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n\n\ndef signal(ctx, i):\n    e = ctx.e[i]\n    if e is None:\n        return 0\n    o, h, l, c = ctx.o[i], ctx.h[i], ctx.l[i], ctx.c[i]\n    rng = h - l\n    if rng <= 0:\n        return 0\n    if c <= e:\n        return 0\n    eps = float(ctx.p.eps_frac) * rng\n    ps = int(ctx.p.pset)\n    if (ps & 1) and abs(h - o) <= eps and abs(c - l) <= eps and c < o:\n        return 1\n    if (ps & 2) and abs(c - l) <= eps and c < o and (h - o) > eps:\n        return 1\n    if (ps & 4) and abs(o - c) <= eps and abs(c - l) <= eps and (h - o) > 0.5 * rng:\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return (i - e) >= int(ctx.p.hold)"
+}

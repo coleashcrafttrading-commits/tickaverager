@@ -1,0 +1,32 @@
+{
+ "name": "Kernel-Regression Smoothed Extremum",
+ "note": "Fits a one-sided Nadaraya-Watson kernel regression of close on time over a trailing window, picks the bandwidth by leave-one-out CV and then deliberately under-smooths it by 0.3x as Lo-Mamaysky-Wang do, and buys a local minimum of that nonparametric conditional mean once it is confirmed two bars later. Exit is the next opposing extremum. Note on the bandwidth: on intraday prices LOO-CV selects the smallest admissible bandwidth (a near-martingale is best predicted by its immediate neighbours), so 0.3 x h_cv leaves the fit close to an interpolator; the multiplier is therefore swept above 1 as well, which the idea's own parameter list allows.",
+ "source": "Lo, Mamaysky & Wang, 'Foundations of Technical Analysis', NBER WP 7613 / Journal of Finance 55(4) 2000, 1705-1765. Causal window, confirmation lag and CV cadence are the harvester's own construction.",
+ "params": {
+  "win": 38,
+  "bw_mult": 0.3,
+  "lag": 2,
+  "prox": 0.5,
+  "cv_every": 20,
+  "epan": 0,
+  "time_stop": 20,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "win": [
+   30,
+   38,
+   60
+  ],
+  "bw_mult": [
+   0.3,
+   1.0,
+   3.0
+  ],
+  "prox": [
+   0.5,
+   1.0
+  ]
+ },
+ "code": "import math\n\n_HCAND = (0.5, 0.75, 1.0, 1.5, 2.25, 3.5, 5.0, 8.0)\n\n\ndef _kernel(h, W, epan):\n    \"\"\"Weights w[d] for lag d = 0..W-1, truncated where they stop mattering.\"\"\"\n    w = [0.0] * W\n    if epan:\n        # Epanechnikov on a bandwidth-scaled support\n        span = h * 2.2360679775          # sqrt(5) * h, the usual scaling\n        lim = int(span) + 1\n        for d in range(min(W, lim + 1)):\n            u = d / span\n            if u < 1.0:\n                w[d] = 0.75 * (1.0 - u * u)\n        cut = min(W, lim + 1)\n        if w[0] <= 0:\n            w[0] = 0.75\n    else:\n        cut = W\n        two_h2 = 2.0 * h * h\n        for d in range(W):\n            z = -(d * d) / two_h2\n            if z < -13.8:                # exp() below 1e-6: stop here\n                cut = d\n                break\n            w[d] = math.exp(z)\n    return w, cut\n\n\ndef family_init(ctx):\n    \"\"\"Nadaraya-Watson fit of close on time, its extrema, causally.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    W = max(8, int(ctx.p.win))\n    L = max(1, int(ctx.p.lag))\n    mult = float(ctx.p.bw_mult)\n    every = max(1, int(ctx.p.cv_every))\n    epan = int(ctx.p.epan) != 0\n\n    cands = [(h,) + _kernel(h, W, epan) for h in _HCAND]\n\n    # ext[i] = +1 when a local MINIMUM of the smoothed path is declared at\n    # bar i-L as of bar i, -1 for a local maximum, 0 for neither.\n    ext = [0] * n\n    kern = None\n    since = 10 ** 9\n\n    for t in range(W - 1, n):\n        s = t - W + 1\n        P = c[s:t + 1]\n\n        # ---- leave-one-out cross-validated bandwidth, refreshed on a cadence\n        if since >= every:\n            since = 0\n            best = None\n            best_err = None\n            for h, w, cut in cands:\n                err = 0.0\n                bad = False\n                for i in range(W):\n                    num = 0.0\n                    den = 0.0\n                    lo = i - cut + 1\n                    if lo < 0:\n                        lo = 0\n                    hi = i + cut\n                    if hi > W:\n                        hi = W\n                    for j in range(lo, hi):\n                        wd = w[i - j] if j <= i else w[j - i]\n                        num += wd * P[j]\n                        den += wd\n                    dex = den - w[0]\n                    if dex < 1e-9:\n                        bad = True\n                        break\n                    e = P[i] - (num - w[0] * P[i]) / dex\n                    err += e * e\n                if bad:\n                    continue\n                if best_err is None or err < best_err:\n                    best_err = err\n                    best = h\n            if best is None:\n                best = _HCAND[len(_HCAND) // 2]\n            h_use = max(0.05, mult * best)\n            kern = _kernel(h_use, W, epan)\n        since += 1\n        if kern is None:\n            continue\n        w, cut = kern\n\n        # ---- the three fitted points the extremum test needs\n        vals = []\n        ok = True\n        for tau in (W - L - 2, W - L - 1, W - L):\n            if tau < 0:\n                ok = False\n                break\n            num = 0.0\n            den = 0.0\n            lo = tau - cut + 1\n            if lo < 0:\n                lo = 0\n            hi = tau + cut\n            if hi > W:\n                hi = W\n            for j in range(lo, hi):\n                wd = w[tau - j] if j <= tau else w[j - tau]\n                num += wd * P[j]\n                den += wd\n            if den <= 1e-12:\n                ok = False\n                break\n            vals.append(num / den)\n        if not ok:\n            continue\n        a, b, d = vals\n        if a > b and b < d:\n            ext[t] = 1\n        elif a < b and b > d:\n            ext[t] = -1\n\n    ctx.ext = ctx.series(ext, \"extremum\")\n    ctx.atr14 = ctx.indicator(\"atr\", period=14)\n\n\ndef signal(ctx, i):\n    e = ctx.ext[i]\n    if not e:\n        return 0\n    L = max(1, int(ctx.p.lag))\n    if i - L < 0:\n        return 0\n    a = ctx.atr14[i]\n    if a is None or a <= 0:\n        return 0\n    if abs(ctx.c[i] - ctx.c[i - L]) > ctx.p.prox * a:\n        return 0                       # price already ran away from the turn\n    return 1 if e > 0 else -1\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out on the next opposing extremum -- the holding period is endogenous.\"\"\"\n    e = ctx.ext[i]\n    if not e:\n        return False\n    d = getattr(ctx, \"_dir\", 0)\n    if d > 0:\n        return e < 0\n    if d < 0:\n        return e > 0\n    return False\n"
+}

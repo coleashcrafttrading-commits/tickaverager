@@ -1,0 +1,40 @@
+{
+ "name": "Bai-Perron Last-Segment Allocator",
+ "note": "Bai-Perron multiple mean shifts, fitted by dynamic programming to the trailing return series with a minimum segment length and at most m breaks, the number of breaks chosen by BIC or LWZ. Everything before the LAST estimated break is thrown away and the annualised Sharpe of only the post-break segment sets the weight w = clip(|SR|/sr_norm, 0, 1); a rolling window blends across breaks by construction, and this one refuses to. The harness cannot vary position size, so w acts as a GATE (trade only while w >= w_min) rather than a multiplier, and the base strategy being allocated to is the symbol itself -- long while the current regime's Sharpe is positive, short while it is negative. The daily half of the rule is kept: a fresh break inside the last `fresh` bars whose post-break mean is negative flattens and blocks new entries until the next rebalance. Break dates are searched on a grid of bstep bars to keep the DP affordable per bar.",
+ "source": "Bai, J. & Perron, P. (1998) Econometrica 66:47-78 and (2003) Journal of Applied Econometrics 18:1-22, sequential sup-F(l+1|l) testing for multiple unknown breaks; empirical motivation from Alexander, N. & Fabozzi, F.J., 'Measuring Strategy-Decay Risk: Minimum Regime Performance and the Durability of Systematic Investing', arXiv:2604.08356, Exhibit 3 (per-factor split dates and left/right Sharpe ratios).",
+ "params": {
+  "hist": 750,
+  "hist2": 500,
+  "h_min": 60,
+  "m_max": 3,
+  "bstep": 15,
+  "crit": 0,
+  "ann": 19656,
+  "sr_norm": 1.0,
+  "w_min": 0.25,
+  "refit": 195,
+  "recheck": 78,
+  "fresh": 5,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.5
+ },
+ "grid": {
+  "h_min": [
+   40,
+   60,
+   120
+  ],
+  "m_max": [
+   3,
+   5
+  ],
+  "sr_norm": [
+   0.5,
+   1.0,
+   1.5
+  ]
+ },
+ "code": "import math\n\n\ndef _breaks(r, h, mmax, bstep, crit):\n    \"\"\"Bai-Perron multiple mean shifts by dynamic programming.\n\n    Global least squares over all partitions with segments no shorter than h,\n    candidate break dates thinned to every `bstep` bars so the search stays\n    affordable inside a per-bar backtest. Returns (n_segments, break_ends).\n    \"\"\"\n    T = len(r)\n    if T < 2 * h + 2:\n        return 1, []\n    S1 = [0.0] * (T + 1)\n    S2 = [0.0] * (T + 1)\n    for j in range(T):\n        S1[j + 1] = S1[j] + r[j]\n        S2[j + 1] = S2[j] + r[j] * r[j]\n\n    def cost(a, b):\n        L = b - a + 1\n        if L <= 0:\n            return 0.0\n        s = S1[b + 1] - S1[a]\n        q = S2[b + 1] - S2[a]\n        v = q - s * s / L\n        return v if v > 0 else 0.0\n\n    ends = list(range(h - 1, T - h, bstep))\n    if not ends:\n        return 1, []\n    prev = {}\n    pback = {}\n    for e in ends:\n        prev[e] = cost(0, e)\n        pback[e] = []\n    res = {1: (cost(0, T - 1), [])}\n    for k in range(2, mmax + 2):\n        best = None\n        for e2 in prev:\n            if e2 <= T - 1 - h:\n                val = prev[e2] + cost(e2 + 1, T - 1)\n                if best is None or val < best[0]:\n                    best = (val, pback[e2] + [e2])\n        if best is None:\n            break\n        res[k] = best\n        cur = {}\n        cback = {}\n        for e in ends:\n            bb = None\n            for e2 in prev:\n                if e2 <= e - h:\n                    val = prev[e2] + cost(e2 + 1, e)\n                    if bb is None or val < bb[0]:\n                        bb = (val, pback[e2] + [e2])\n            if bb is not None:\n                cur[e] = bb[0]\n                cback[e] = bb[1]\n        if not cur:\n            break\n        prev = cur\n        pback = cback\n\n    lt = math.log(T)\n    bestk = 1\n    bestv = None\n    for k, (ssr, bl) in res.items():\n        p = 2 * (k - 1) + 1\n        if T - p <= 0:\n            continue\n        s = ssr if ssr > 1e-300 else 1e-300\n        if crit == 1:\n            val = math.log(s / (T - p)) + 0.299 * p * lt * lt / T\n        else:\n            val = math.log(s / T) + p * lt / T\n        if bestv is None or val < bestv:\n            bestv = val\n            bestk = k\n    return bestk, res[bestk][1]\n\n\ndef _sr(r, a, b, ann):\n    L = b - a + 1\n    if L < 5:\n        return None\n    w = r[a:b + 1]\n    m = sum(w) / L\n    var = sum((x - m) ** 2 for x in w) / L\n    if var <= 0:\n        return None\n    return m / math.sqrt(var) * math.sqrt(ann)\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n    r = [0.0] * n\n    for j in range(1, n):\n        if c[j - 1] > 0:\n            r[j] = math.log(c[j] / c[j - 1])\n    ctx.r = r\n    ctx.w = 0.0\n    ctx.d = 0\n    ctx.block = 0\n    ctx.next_fit = int(ctx.p.hist) + 2\n    ctx.next_chk = int(ctx.p.hist) + 2\n\n\ndef _fit(ctx, i):\n    hist = int(ctx.p.hist)\n    h = int(ctx.p.h_min)\n    a0 = i - hist + 1\n    if a0 < 1:\n        ctx.w = 0.0\n        ctx.d = 0\n        return\n    r = ctx.r[a0:i + 1]\n    k, bl = _breaks(r, h, int(ctx.p.m_max), int(ctx.p.bstep),\n                    int(ctx.p.crit))\n    T = len(r)\n    if bl:\n        s = bl[-1] + 1\n        if T - s < h and len(bl) >= 2:\n            s = bl[-2] + 1\n        elif T - s < h:\n            s = 0\n    else:\n        s = 0\n    sr = _sr(r, s, T - 1, float(ctx.p.ann))\n    if sr is None:\n        ctx.w = 0.0\n        ctx.d = 0\n        return\n    w = abs(sr) / float(ctx.p.sr_norm)\n    ctx.w = 1.0 if w > 1.0 else w\n    ctx.d = 1 if sr > 0 else -1\n    ctx.block = 0\n\n\ndef _recheck(ctx, i):\n    \"\"\"The daily half of the rule: a break that has just happened, into a\n    losing regime, kills the allocation before the next rebalance.\"\"\"\n    hist = int(ctx.p.hist2)\n    h = int(ctx.p.h_min)\n    a0 = i - hist + 1\n    if a0 < 1:\n        return\n    r = ctx.r[a0:i + 1]\n    k, bl = _breaks(r, h, 2, int(ctx.p.bstep), int(ctx.p.crit))\n    if not bl:\n        return\n    T = len(r)\n    s = bl[-1] + 1\n    if T - s > int(ctx.p.fresh):\n        return\n    w = r[s:T]\n    if w and sum(w) / len(w) < 0:\n        ctx.block = 1\n\n\ndef signal(ctx, i):\n    if i >= ctx.next_fit:\n        _fit(ctx, i)\n        ctx.next_fit = i + int(ctx.p.refit)\n    if i >= ctx.next_chk:\n        _recheck(ctx, i)\n        ctx.next_chk = i + int(ctx.p.recheck)\n    if ctx.block:\n        return 0\n    if ctx.w < float(ctx.p.w_min):\n        return 0\n    return ctx.d"
+}

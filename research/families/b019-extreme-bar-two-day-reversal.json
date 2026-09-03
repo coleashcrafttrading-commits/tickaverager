@@ -1,0 +1,36 @@
+{
+ "name": "Extreme-Bar Two-Day Reversal",
+ "note": "A one-window move of several of the symbol's OWN sigmas that also clears an absolute floor and closes at the extreme of its own range, faded for a fixed clock and nothing else - no profit target, so the test measures the documented short-horizon reversal drift alone. The paper's unit is a daily bar; here the unit is `win_min` minutes (390 = one regular session) converted to bars from the timestamps, so the rule means the same thing on 1, 5 and 15 minute data. The 5% absolute floor is a daily number and is scaled with the window and swept. The liquidity floor on average window dollar volume is kept because the academic reversal is largely an artefact of spread in thin names.",
+ "source": "Bremer, M. and Sweeney, R. J. (1991), 'The Reversal of Large Stock-Price Decreases', Journal of Finance 46(2) - stocks falling 10%+ in a day rebound roughly 2.2% over the following two days. Cox, D. R. and Peterson, D. R. (1994), 'Stock Returns following Large One-Day Declines', Journal of Finance 49(1) - reversal concentrated in low-price/illiquid names, hence the liquidity filter. Atkins, A. B. and Dyl, E. A. (1990), 'Price Reversals, Bid-Ask Spreads, and Market Efficiency', JFQA 25, 535-547 - reversal largely inside the spread. Zawadowski, Kertesz and Andor, 'Short-term market reaction after extreme price changes of liquid stocks' (arXiv cond-mat/0406696).",
+ "params": {
+  "win_min": 390.0,
+  "sig_n": 20,
+  "sig_k": 2.5,
+  "abs_min": 0.01,
+  "cl_max": 0.3,
+  "dv_min": 20000000.0,
+  "hold": 2,
+  "tp_atr": 0.0,
+  "st_atr": 1.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "sig_k": [
+   2.0,
+   2.5,
+   3.0
+  ],
+  "abs_min": [
+   0.005,
+   0.01,
+   0.02
+  ],
+  "hold": [
+   1,
+   2,
+   3
+  ]
+ },
+ "code": "def _bar_minutes(bars):\n    \"\"\"Bar size in minutes, read off the timestamps.\"\"\"\n    import datetime as dt\n\n    def p(s):\n        s = str(s)\n        return dt.datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]),\n                           int(s[11:13]), int(s[14:16]))\n    best = None\n    for i in range(1, min(len(bars), 400)):\n        d = (p(bars[i][\"t\"]) - p(bars[i - 1][\"t\"])).total_seconds() / 60.0\n        if d > 0 and (best is None or d < best):\n            best = d\n    if not best or best <= 0:\n        return 1.0\n    return best\n\n\ndef family_init(ctx):\n    \"\"\"Bremer-Sweeney extreme-bar reversal, with the paper's daily bar replaced\n    by a window of `win_min` MINUTES so the rule means the same thing on every\n    timeframe the study runs: r is the return over that window, s the standard\n    deviation of the previous `sig_n` non-overlapping window returns, and the\n    close-location is where the close sits inside the window's own high-low\n    range. 390 minutes is one regular session, i.e. the paper's own unit.\n    \"\"\"\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    hi_ = [float(b[\"h\"]) for b in bars]\n    lo_ = [float(b[\"l\"]) for b in bars]\n    vol = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    bm = _bar_minutes(bars)\n    w = int(round(float(ctx.p.win_min) / bm))\n    if w < 1:\n        w = 1\n    sn = max(3, int(ctx.p.sig_n))\n    k = float(ctx.p.sig_k)\n    amin = float(ctx.p.abs_min)\n    clmax = float(ctx.p.cl_max)\n    dvmin = float(ctx.p.dv_min)\n\n    # rolling high/low over the trailing w bars, monotonic deques -> O(1)/bar\n    rhi = [None] * n\n    rlo = [None] * n\n    dqh = []\n    dql = []\n    for i in range(n):\n        while dqh and hi_[dqh[-1]] <= hi_[i]:\n            dqh.pop()\n        dqh.append(i)\n        while dql and lo_[dql[-1]] >= lo_[i]:\n            dql.pop()\n        dql.append(i)\n        lb = i - w + 1\n        while dqh[0] < lb:\n            del dqh[0]\n        while dql[0] < lb:\n            del dql[0]\n        if i >= w - 1:\n            rhi[i] = hi_[dqh[0]]\n            rlo[i] = lo_[dql[0]]\n\n    dvp = [0.0] * (n + 1)\n    for i in range(n):\n        dvp[i + 1] = dvp[i] + c[i] * vol[i]\n\n    need = w * (sn + 1)\n    raw = [0] * n\n    for i in range(n):\n        if i < need:\n            continue\n        base = c[i - w]\n        if base <= 0.0:\n            continue\n        r = c[i] / base - 1.0\n\n        # sigma of the sn window-returns ENDING at i-w: the trigger window is\n        # excluded so it cannot inflate the yardstick it is measured against\n        vals = []\n        bad = False\n        for j in range(1, sn + 1):\n            a = c[i - j * w]\n            b = c[i - (j + 1) * w]\n            if b <= 0.0:\n                bad = True\n                break\n            vals.append(a / b - 1.0)\n        if bad or len(vals) < 3:\n            continue\n        mu = sum(vals) / len(vals)\n        var = sum((x - mu) * (x - mu) for x in vals) / (len(vals) - 1)\n        s = math.sqrt(var) if var > 0.0 else 0.0\n        if s <= 0.0:\n            continue\n\n        hh = rhi[i]\n        ll = rlo[i]\n        if hh is None or ll is None or hh <= ll:\n            continue\n        cl = (c[i] - ll) / (hh - ll)\n\n        # average dollar volume per window, the paper's liquidity floor\n        adv = (dvp[i + 1] - dvp[i + 1 - sn * w]) / float(sn)\n        if adv < dvmin:\n            continue\n\n        if r <= -k * s and r <= -amin and cl <= clmax:\n            raw[i] = 1\n        elif r >= k * s and r >= amin and cl >= 1.0 - clmax:\n            raw[i] = -1\n\n    # one entry per extreme window: fire on the bar the condition turns on\n    sig = [0] * n\n    for i in range(n):\n        if raw[i] and (i == 0 or raw[i - 1] != raw[i]):\n            sig[i] = raw[i]\n    ctx.sig = ctx.series(sig, \"extreme_bar\")\n    ctx._hold_bars = max(1, int(ctx.p.hold) * w)\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Pure clock: out `hold` windows after entry, nothing else.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return (i - e) >= ctx._hold_bars"
+}

@@ -1,0 +1,31 @@
+{
+ "name": "Percentile-Band Spread with Median Exit",
+ "note": "SINGLE-SYMBOL ADAPTATION of a pairs rule. The harness supplies one symbol, so the second leg is absent and the spread collapses to the leg's own formation-window z-score with mean and sd frozen at formation. What makes the idea distinct is kept intact: entry bands are EMPIRICAL quantiles of the realised formation distribution rather than sigma multiples, the exit is the formation MEDIAN rather than zero, the stop is a quantile of the same distribution, and none of the three ever touches the trading window that uses them. The first-touch rule and the end-of-window time exit are the published ones.",
+ "source": "Nath (2003), 'High Frequency Pairs Trading with U.S. Treasury Securities: Risks and Rewards for Hedge Funds', applied to GovPX 1994-2000; rules summarized in Krauss (2015), FAU Discussion Paper 09/2015, section 2.1 (page 8 discussion of Nath's percentile triggers, median reversion exit and stop-loss percentiles).",
+ "params": {
+  "win": 40,
+  "entry_q": 15.0,
+  "exit_q": 50.0,
+  "stop_q": 95.0,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "win": [
+   20,
+   40,
+   80
+  ],
+  "entry_q": [
+   10.0,
+   15.0,
+   25.0
+  ],
+  "stop_q": [
+   95.0,
+   99.0
+  ]
+ },
+ "code": "def _q(srt, p):\n    \"\"\"Linear-interpolated empirical quantile of an already-sorted list.\"\"\"\n    n = len(srt)\n    if n == 0:\n        return None\n    if n == 1:\n        return srt[0]\n    x = (p / 100.0) * (n - 1)\n    lo = int(x)\n    if lo >= n - 1:\n        return srt[n - 1]\n    f = x - lo\n    return srt[lo] * (1.0 - f) + srt[lo + 1] * f\n\n\ndef family_init(ctx):\n    \"\"\"Nath's percentile bands with a median exit, on a formation/trading split.\n\n    SINGLE-SYMBOL ADAPTATION. The harness supplies one symbol, so the second\n    leg of the pair is absent and the spread collapses to the leg's own\n    formation-window z-score, z(t) = (P(t) - mean_F(P)) / sd_F(P), with mean\n    and sd FROZEN at the formation window. Everything that makes the idea\n    distinct survives that: the bands are empirical quantiles of the realised\n    formation distribution rather than sigma multiples, the exit is the\n    formation MEDIAN rather than zero, the stop is a quantile of the same\n    distribution, and the bands are out-of-sample by construction because the\n    trading window never touches them. Krauss's hazard - a series already\n    beyond the band on the first trading bar - is preserved too, which is\n    exactly what the q95/q05 stop is there to bound.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    F = max(10, int(ctx.p.win))\n    T = F\n    eq = float(ctx.p.entry_q)\n    sq = float(ctx.p.stop_q)\n    xq = float(ctx.p.exit_q)\n\n    z = [None] * n\n    q_hi = [None] * n\n    q_lo = [None] * n\n    q_md = [None] * n\n    q_sh = [None] * n\n    q_sl = [None] * n\n    wid = [None] * n\n    ent = [0] * n\n\n    w = 0\n    s = F\n    while s < n:\n        a = s - F\n        seg = c[a:s]\n        m = sum(seg) / F\n        v = sum((x - m) ** 2 for x in seg) / F\n        sd = v ** 0.5\n        if sd > 0.0:\n            fz = sorted((x - m) / sd for x in seg)\n            hi = _q(fz, 100.0 - eq)\n            lo = _q(fz, eq)\n            md = _q(fz, xq)\n            sh = _q(fz, sq)\n            sl = _q(fz, 100.0 - sq)\n            hit_s = False\n            hit_l = False\n            for i in range(s, min(n, s + T)):\n                zi = (c[i] - m) / sd\n                z[i] = zi\n                q_hi[i] = hi\n                q_lo[i] = lo\n                q_md[i] = md\n                q_sh[i] = sh\n                q_sl[i] = sl\n                wid[i] = w\n                if not hit_s and zi >= hi:\n                    hit_s = True\n                    ent[i] = -1              # short the (standardised) spread\n                elif not hit_l and zi <= lo:\n                    hit_l = True\n                    ent[i] = 1\n        w += 1\n        s += T\n\n    ctx.f_z = ctx.series(z, \"z\")\n    ctx.f_hi = ctx.series(q_hi, \"q_entry_hi\")\n    ctx.f_lo = ctx.series(q_lo, \"q_entry_lo\")\n    ctx.f_md = ctx.series(q_md, \"q_median\")\n    ctx.f_sh = ctx.series(q_sh, \"q_stop_hi\")\n    ctx.f_sl = ctx.series(q_sl, \"q_stop_lo\")\n    ctx.f_wid = ctx.series(wid, \"trading_window\")\n    ctx.f_ent = ctx.series(ent, \"first_touch\")\n\n\ndef signal(ctx, i):\n    if ctx.positions:\n        return 0\n    return ctx.f_ent[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Back to the formation median, or out at the percentile stop, or at the\n    end of the trading window - whichever comes first.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    wn = ctx.f_wid[i]\n    if wn is None or wn != ctx.f_wid[e]:\n        return True\n    zi = ctx.f_z[i]\n    if zi is None:\n        return True\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    if d > 0:\n        return zi >= ctx.f_md[i] or zi <= ctx.f_sl[i]\n    return zi <= ctx.f_md[i] or zi >= ctx.f_sh[i]\n"
+}

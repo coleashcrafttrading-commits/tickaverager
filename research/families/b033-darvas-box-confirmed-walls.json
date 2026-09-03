@@ -1,0 +1,32 @@
+{
+ "name": "Darvas box with three-day confirmed walls",
+ "note": "The box is built exactly as Darvas described it. A new hi_n-bar high on volume above vol_mult times the 50-bar average opens a candidate ceiling; the ceiling only counts once conf consecutive bars have all failed to exceed it, and any bar that does exceed it resets the ceiling and restarts the count. Then the lowest low made since the ceiling bar becomes the candidate floor, confirmed the same way, restarting on any violation. Entry is the breakout above the confirmed ceiling plus off_atr*ATR. The exit is the box floor and nothing else -- no profit target -- and it RATCHETS: when a new box completes higher the floor rises with it, and it never falls.",
+ "source": "Nicolas Darvas, 'How I Made $2,000,000 in the Stock Market' (1960); algorithmic box construction with the three-consecutive-day confirmation rule for both ceiling and floor described at https://clickalgo.com/darvas-box-theory and https://investinganswers.com/dictionary/d/darvas-box-theory",
+ "params": {
+  "conf": 3,
+  "vol_mult": 1.5,
+  "hi_n": 252,
+  "vol_n": 50,
+  "off_atr": 0.25,
+  "side": "long",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "conf": [
+   2,
+   3,
+   5
+  ],
+  "vol_mult": [
+   1.0,
+   1.5,
+   2.5
+  ],
+  "hi_n": [
+   63,
+   126,
+   252
+  ]
+ },
+ "code": "def family_init(ctx):\n    from collections import deque\n    bars = ctx.bars\n    N = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    hn = max(20, int(ctx.p.hi_n))\n    vn = max(5, int(ctx.p.vol_n))\n    conf = max(1, int(ctx.p.conf))\n    vm = float(ctx.p.vol_mult)\n    oa = float(ctx.p.off_atr)\n    an = max(2, int(ctx.p.atr_n))\n\n    at = [None] * N\n    tr = 0.0\n    acc = 0.0\n    for j in range(1, N):\n        t = h[j] - l[j]\n        t2 = abs(h[j] - c[j - 1])\n        t3 = abs(l[j] - c[j - 1])\n        if t2 > t:\n            t = t2\n        if t3 > t:\n            t = t3\n        if j <= an:\n            acc += t\n            if j == an:\n                tr = acc / an\n                at[j] = tr\n        else:\n            tr = (tr * (an - 1) + t) / an\n            at[j] = tr\n\n    dq = deque()\n    rmax = [None] * N\n    for j in range(N):\n        while dq and h[dq[-1]] <= h[j]:\n            dq.pop()\n        dq.append(j)\n        while dq[0] <= j - hn:\n            dq.popleft()\n        if j >= hn - 1:\n            rmax[j] = h[dq[0]]\n\n    vs = [None] * N\n    s = 0.0\n    for j in range(N):\n        s += v[j]\n        if j >= vn:\n            s -= v[j - vn]\n        if j >= vn - 1:\n            vs[j] = s / vn\n\n    sig = [0] * N\n    stp = [None] * N\n    st = 0\n    hbox = 0.0\n    lcand = 0.0\n    lows = 0.0\n    cnt = 0\n    stop = None\n    for i in range(N):\n        a = at[i]\n        off = oa * a if a else 0.0\n        if stop is not None and c[i] < stop - off:\n            stop = None\n        if st == 0:\n            if (i >= 1 and rmax[i] is not None and vs[i - 1] is not None\n                    and h[i] >= rmax[i] - 1e-12 and v[i] >= vm * vs[i - 1]):\n                hbox = h[i]\n                lows = l[i]\n                cnt = 0\n                st = 1\n        elif st == 1:\n            if h[i] > hbox:\n                hbox = h[i]\n                lows = l[i]\n                cnt = 0\n            else:\n                if l[i] < lows:\n                    lows = l[i]\n                cnt += 1\n                if cnt >= conf:\n                    lcand = lows\n                    cnt = 0\n                    st = 2\n        elif st == 2:\n            if h[i] > hbox:\n                hbox = h[i]\n                lows = l[i]\n                cnt = 0\n                st = 1\n            elif l[i] < lcand:\n                lcand = l[i]\n                cnt = 0\n            else:\n                cnt += 1\n                if cnt >= conf:\n                    if stop is None or lcand > stop:\n                        stop = lcand\n                    st = 3\n        else:\n            if h[i] > hbox + off:\n                sig[i] = 1\n                hbox = h[i]\n                lows = l[i]\n                cnt = 0\n                st = 1\n            elif l[i] < lcand:\n                st = 0\n        stp[i] = stop\n    ctx.sg = ctx.series(sig, \"darvas_break\")\n    ctx.stp = ctx.series(stp, \"box_floor\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return 1 if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    s = ctx.stp[i]\n    if s is None:\n        return True\n    return ctx.c[i] < s"
+}

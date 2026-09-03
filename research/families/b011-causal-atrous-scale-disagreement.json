@@ -1,0 +1,32 @@
+{
+ "name": "Causal a-trous scale disagreement",
+ "note": "Undecimated (a-trous) causal wavelet decomposition of log close. Trades when the coarse approximation S_J and the mid-scale detail sum D_j disagree: coarse rising while the mid scales sit in the bottom p-th percentile of their own 200-bar distribution, and the mirror for shorts. Shift-invariant and strictly backward-looking by construction, so there is no boundary leakage.",
+ "source": "Donald Percival & Andrew Walden, 'Wavelet Methods for Time Series Analysis' (Cambridge University Press, 2000) - the a-trous / maximal-overlap (undecimated) transform, its shift invariance, and the boundary-coefficient problem. Evidence on wavelet denoising of financial series: 'Can Denoising Enhance Prediction Accuracy of Learning Models? A Case of Wavelet Decomposition Approach', Forecasting 6(1), 2024, DOI 10.3390/forecast6010005 (open access). The scale-disagreement trading rule is my synthesis.",
+ "params": {
+  "levels": 5,
+  "wave": "haar",
+  "detail_set": "34",
+  "pct_win": 200,
+  "p_lo": 20,
+  "exit_signal_on": 1,
+  "st_atr": 2.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "detail_set": [
+   "23",
+   "34",
+   "345"
+  ],
+  "p_lo": [
+   10,
+   20,
+   30
+  ],
+  "wave": [
+   "haar",
+   "b3"
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math, bisect\n    bars = ctx.bars\n    n = len(bars)\n    s = []\n    for b in bars:\n        x = float(b[\"c\"])\n        s.append(math.log(x) if x > 0.0 else 0.0)\n\n    lv = int(ctx.p.levels)\n    wave = str(ctx.p.wave)\n    det = {}\n    for j in range(1, lv + 1):\n        sh = 1 << (j - 1)\n        cur = [0.0] * n\n        if wave == \"b3\":\n            for t in range(n):\n                a0 = s[t]\n                a1 = s[t - sh] if t >= sh else s[0]\n                a2 = s[t - 2 * sh] if t >= 2 * sh else s[0]\n                a3 = s[t - 3 * sh] if t >= 3 * sh else s[0]\n                a4 = s[t - 4 * sh] if t >= 4 * sh else s[0]\n                cur[t] = (a0 + 4.0 * a1 + 6.0 * a2 + 4.0 * a3 + a4) / 16.0\n        else:\n            for t in range(n):\n                a1 = s[t - sh] if t >= sh else s[0]\n                cur[t] = 0.5 * (s[t] + a1)\n        det[j] = [s[t] - cur[t] for t in range(n)]\n        s = cur\n\n    ctx.S = s\n    sets = {\"23\": (2, 3), \"34\": (3, 4), \"345\": (3, 4, 5)}\n    which = tuple(j for j in sets.get(str(ctx.p.detail_set), (3, 4)) if j <= lv)\n    if not which:\n        which = (lv,)\n    M = [0.0] * n\n    for t in range(n):\n        tot = 0.0\n        for j in which:\n            tot += det[j][t]\n        M[t] = tot\n    ctx.M = M\n\n    w = int(ctx.p.pct_win)\n    rank = [None] * n\n    win = []\n    for t in range(n):\n        bisect.insort(win, M[t])\n        if len(win) > w:\n            old = M[t - w]\n            k = bisect.bisect_left(win, old)\n            if k < len(win) and win[k] == old:\n                del win[k]\n        if len(win) >= w:\n            rank[t] = bisect.bisect_left(win, M[t]) / float(len(win))\n    ctx.rank = rank\n\n    span = (1 << lv) * (4 if wave == \"b3\" else 1)\n    ctx.start = span + w + 2\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    r = ctx.rank[i]\n    if r is None:\n        return 0\n    lo = float(ctx.p.p_lo) / 100.0\n    hi = 1.0 - lo\n    a, b = ctx.S[i], ctx.S[i - 1]\n    if a > b and r <= lo:\n        return 1\n    if a < b and r >= hi:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if i < 1:\n        return False\n    r = ctx.rank[i]\n    if r is None:\n        return False\n    lo = float(ctx.p.p_lo) / 100.0\n    hi = 1.0 - lo\n    d = ctx._dir\n    if d > 0:\n        return r >= hi or ctx.S[i] < ctx.S[i - 1]\n    if d < 0:\n        return r <= lo or ctx.S[i] > ctx.S[i - 1]\n    return False"
+}

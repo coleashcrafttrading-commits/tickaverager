@@ -1,0 +1,35 @@
+{
+ "name": "BVC-VPIN Toxicity Continuation",
+ "note": "Bulk volume classification splits each bar's volume into buy and sell halves with Phi(dP/sigma), those halves are accumulated in volume buckets of ADV/50 (a bar's volume and its buy fraction are pro-rated across a bucket boundary), and VPIN is the mean absolute bucket imbalance over 50 buckets. Trades the continuation when VPIN is in its own top decile over the prior 250 buckets and the bucket was one-sided in the same direction as its price move. Runs on a volume clock, not a time clock.",
+ "source": "Easley, Lopez de Prado & O'Hara (2012), 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies 25(5); SSRN 1695596 and the NYU Stern working copy at stern.nyu.edu/sites/default/files/assets/documents/con_035928.pdf. BVC buy-fraction f = Phi(dP/sigma_dP) and VPIN = (1/n) sum |V^B - V^S| / V confirmed against the same paper's implementations.",
+ "params": {
+  "bucket_div": 50,
+  "vpin_n": 50,
+  "pct_thr": 0.9,
+  "pct_lb": 250,
+  "sig_lb": 50,
+  "exit_pct": 0.5,
+  "max_buckets": 3,
+  "tp_atr": 0.0,
+  "st_atr": 1.5,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "pct_thr": [
+   0.85,
+   0.9,
+   0.95
+  ],
+  "vpin_n": [
+   25,
+   50,
+   100
+  ],
+  "bucket_div": [
+   25,
+   50
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    day = [str(b[\"t\"])[:10] for b in bars]\n\n    # ---- rolling stdev of bar-to-bar price change, running sums, O(n) ----\n    L = int(ctx.p.sig_lb)\n    dp = [None] * n\n    for i in range(1, n):\n        dp[i] = c[i] - c[i - 1]\n    sig = [None] * n\n    s1 = s2 = 0.0\n    cnt = 0\n    for i in range(n):\n        x = dp[i]\n        if x is not None:\n            s1 += x\n            s2 += x * x\n            cnt += 1\n        j = i - L\n        if j >= 0 and dp[j] is not None:\n            s1 -= dp[j]\n            s2 -= dp[j] * dp[j]\n            cnt -= 1\n        if cnt >= 10:\n            var = s2 / cnt - (s1 / cnt) ** 2\n            if var > 0:\n                sig[i] = math.sqrt(var)\n\n    # ---- ADV over the trailing 20 completed sessions, known at session start\n    dayvol = {}\n    order = []\n    for i in range(n):\n        d = day[i]\n        if d not in dayvol:\n            dayvol[d] = 0.0\n            order.append(d)\n        dayvol[d] += v[i]\n    adv = {}\n    for k, d in enumerate(order):\n        prev = [dayvol[x] for x in order[max(0, k - 20):k]]\n        adv[d] = (sum(prev) / len(prev)) if prev else None\n\n    # ---- bulk volume classification into volume buckets ----\n    div = float(ctx.p.bucket_div)\n    NW = int(ctx.p.vpin_n)\n    PW = int(ctx.p.pct_lb)\n    sqrt2 = math.sqrt(2.0)\n\n    sigv = [0] * n           # -1 / 0 / +1, the toxicity-continuation trigger\n    pr = [None] * n          # percentile rank of the latest VPIN\n    bc = [0] * n             # completed-bucket counter, for the 3-bucket stop\n\n    imb_hist = []            # |signed imbalance| per completed bucket\n    vpin_hist = []\n    acc = 0.0\n    imb = 0.0\n    firstpx = None\n    nb = 0\n    for i in range(n):\n        a = adv.get(day[i])\n        s = sig[i]\n        if a is None or not a or s is None or dp[i] is None:\n            bc[i] = nb\n            pr[i] = pr[i - 1] if i else None\n            continue\n        vstar = a / div\n        if vstar <= 0:\n            bc[i] = nb\n            pr[i] = pr[i - 1] if i else None\n            continue\n        f = 0.5 * (1.0 + math.erf((dp[i] / s) / sqrt2))\n        if firstpx is None:\n            firstpx = c[i]\n        left = v[i]\n        fired = 0\n        guard = 0\n        while left > 0 and guard < 5000:\n            guard += 1\n            take = vstar - acc\n            if take > left:\n                take = left\n            acc += take\n            imb += take * (2.0 * f - 1.0)\n            left -= take\n            if acc < vstar - 1e-9:\n                break\n            # ---- a bucket has just closed on this bar ----\n            imb_hist.append(imb)\n            nb += 1\n            if len(imb_hist) >= NW:\n                vp = sum(abs(x) for x in imb_hist[-NW:]) / (NW * vstar)\n                if len(vpin_hist) >= PW:\n                    hist = sorted(vpin_hist[-PW:])\n                    rank = 0\n                    for x in hist:\n                        if x <= vp:\n                            rank += 1\n                    q = rank / float(len(hist))\n                    pr[i] = q\n                    if q >= ctx.p.pct_thr:\n                        if imb > 0 and c[i] > firstpx:\n                            fired = 1\n                        elif imb < 0 and c[i] < firstpx:\n                            fired = -1\n                vpin_hist.append(vp)\n            acc = 0.0\n            imb = 0.0\n            firstpx = c[i]\n        if pr[i] is None:\n            pr[i] = pr[i - 1] if i else None\n        bc[i] = nb\n        sigv[i] = fired\n\n    ctx.sig = ctx.series(sigv, \"vpin_signal\")\n    ctx.pr = ctx.series(pr, \"vpin_pctile\")\n    ctx.bc = ctx.series(bc, \"bucket_count\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    return int(s) if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    q = ctx.pr[i]\n    if q is not None and q < ctx.p.exit_pct:\n        return True\n    e = ctx.positions[0][\"entry_i\"]\n    b0, b1 = ctx.bc[e], ctx.bc[i]\n    if b0 is not None and b1 is not None and b1 - b0 >= int(ctx.p.max_buckets):\n        return True\n    return False"
+}

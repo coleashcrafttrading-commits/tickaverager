@@ -1,0 +1,30 @@
+{
+ "name": "Kagi yin-yang thickness flip",
+ "note": "Builds a Kagi line from closes with a reversal amount of kg_mult ATRs, fixed at each session open. Turning points give shoulders and waists; the line's thickness state goes yang above the last shoulder and yin below the last waist and persists until the opposite condition fires. Entry is on the state flip, optionally only when the immediately preceding counter-swing was shallower than the median of its own recent distribution - sellers unable to force a full-sized retracement before buyers reclaimed the prior high. Exit on the flip back.",
+ "source": "Kagi construction and the yin/yang (thick/thin) shoulder-waist rules: Steve Nison, 'Beyond Candlesticks' (Wiley, 1994), Kagi chapter. Empirical work on Kagi in a systematic context: 'Performance of Pairs Trading Strategies Based on Renko and Kagi Charts' (2025), DOI 10.33138/2957-0506.2025.20.483. The shallow-preceding-swing filter is the harvester's synthesis.",
+ "params": {
+  "kg_atr": 20,
+  "kg_mult": 2.0,
+  "kg_med": 10,
+  "kg_shallow": 1,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "kg_mult": [
+   1.0,
+   1.5,
+   2.0,
+   3.0
+  ],
+  "kg_med": [
+   5,
+   10,
+   20
+  ],
+  "kg_shallow": [
+   0,
+   1
+  ]
+ },
+ "code": "import datetime as _dt\n\n_TZB = {}\n_TZC = {}\n\n\ndef _et(ts):\n    \"\"\"(ET day ordinal, ET minute of day) from a UTC ISO timestamp.\"\"\"\n    k = ts[:13]\n    v = _TZC.get(k)\n    if v is None:\n        u = _dt.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]), int(ts[11:13]))\n        y = u.year\n        b = _TZB.get(y)\n        if b is None:\n            d = _dt.date(y, 3, 1)\n            s = _dt.datetime(y, 3, 1 + (6 - d.weekday()) % 7 + 7, 7, 0)\n            d2 = _dt.date(y, 11, 1)\n            e = _dt.datetime(y, 11, 1 + (6 - d2.weekday()) % 7, 6, 0)\n            b = _TZB[y] = (s, e)\n        x = u - _dt.timedelta(hours=(4 if b[0] <= u < b[1] else 5))\n        v = _TZC[k] = (x.toordinal(), x.hour * 60)\n    return v[0], v[1] + int(ts[14:16])\n\n\ndef _wilder_atr(h, l, c, period):\n    n = len(c)\n    out = [None] * n\n    prev_c = None\n    acc = 0.0\n    for i in range(n):\n        tr = (h[i] - l[i]) if prev_c is None else max(\n            h[i] - l[i], abs(h[i] - prev_c), abs(l[i] - prev_c))\n        prev_c = c[i]\n        if i < period:\n            acc += tr\n            if i == period - 1:\n                out[i] = acc / period\n        else:\n            out[i] = (out[i - 1] * (period - 1) + tr) / period\n    return out\n\n\ndef _median(xs):\n    s = sorted(xs)\n    n = len(s)\n    return s[n // 2] if n % 2 else 0.5 * (s[n // 2 - 1] + s[n // 2])\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    per = max(2, int(ctx.p.kg_atr))\n    atr = _wilder_atr(h, l, c, per)\n    mult = float(ctx.p.kg_mult)\n    med_n = max(2, int(ctx.p.kg_med))\n    shallow = int(ctx.p.kg_shallow)\n\n    entry = [0] * n\n    flip = [0] * n\n\n    R = None\n    day = None\n    dr = 0                 # direction the kagi line is currently drawing\n    ext = None             # its running extreme close\n    shoulder = None        # last high where the line turned down\n    waist = None           # last low where it turned up\n    state = 0              # +1 yang (thick), -1 yin (thin)\n    swings = []            # completed swing lengths, oldest first\n    dn_i = -1              # index in swings of the last completed DOWN swing\n    up_i = -1\n\n    for i in range(n):\n        a = atr[i]\n        if a is None or a <= 0:\n            continue\n        d, m = _et(bars[i][\"t\"])\n        # the reversal amount is set at the open and held for the session\n        if R is None or (d != day and m >= 570):\n            R = mult * a\n            day = d\n        p = c[i]\n        if dr == 0:\n            dr, ext = 1, p\n            continue\n\n        if dr > 0:\n            if p > ext:\n                ext = p\n            elif p <= ext - R:\n                if waist is not None:\n                    swings.append(abs(ext - waist))\n                    up_i = len(swings) - 1\n                shoulder = ext\n                dr, ext = -1, p\n        else:\n            if p < ext:\n                ext = p\n            elif p >= ext + R:\n                if shoulder is not None:\n                    swings.append(abs(shoulder - ext))\n                    dn_i = len(swings) - 1\n                waist = ext\n                dr, ext = 1, p\n\n        # thickness: yang once above the last shoulder, yin once below the\n        # last waist, and it persists until the opposite condition fires\n        ns = state\n        if shoulder is not None and p > shoulder:\n            ns = 1\n        elif waist is not None and p < waist:\n            ns = -1\n        if ns != state:\n            if state != 0:\n                flip[i] = ns\n                ok = True\n                if shallow:\n                    ok = False\n                    j = dn_i if ns > 0 else up_i\n                    if j >= 0:\n                        hist = swings[max(0, j - med_n):j]\n                        if len(hist) >= 3 and swings[j] < _median(hist):\n                            ok = True\n                if ok:\n                    entry[i] = ns\n            state = ns\n\n    ctx.kg_entry = ctx.series(entry, \"kagi_entry\")\n    ctx.kg_flip = ctx.series(flip, \"kagi_flip\")\n\n\ndef signal(ctx, i):\n    s = ctx.kg_entry[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    f = ctx.kg_flip[i]\n    if not f or not ctx.positions:\n        return False\n    long_side = ctx.positions[0][\"side\"] == \"long\"\n    return (f < 0) if long_side else (f > 0)"
+}

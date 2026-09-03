@@ -1,0 +1,36 @@
+{
+ "name": "Factor Valuation Percentile Timing",
+ "note": "PARTIAL, AND DELIBERATELY SO. The published rule is a cross-sectional book of K factor spreads sorted into terciles by their own valuation; a single-symbol harness cannot hold a book, so that layer is dropped rather than faked. What is implemented is the signal construction the idea itself calls the novel part: the expanding-window percentile of a STRATEGY's trailing cumulative return, used to decide whether to run that strategy long, inverted, or not at all. The sleeve being valued is a time-series momentum leg on the symbol. `flip` runs the same book with the sign reversed, which is factor momentum - the null the idea asks to be run alongside. Volatility-equalised sizing is not representable and is not simulated.",
+ "source": "Arnott, Beck, Kalesnik & West, 'How Can Smart Beta Go Horribly Wrong?' (Research Affiliates, 2016) versus Asness, Ilmanen & Maloney, 'Market Timing: Sin a Little' (Journal of Investment Management 2017) and Asness, 'The Siren Song of Factor Timing' (Journal of Portfolio Management 2016). The Research Affiliates URL now redirects to a dead page, so the relative-price percentile is the harvesting agent's own OHLCV-only substitute for the book-to-market spread those papers use. Haddad, Kozak & Santosh, 'Factor Timing' (RFS 2020; NBER WP 26708) independently confirms anomaly portfolios are predictable by their own valuation ratios.",
+ "params": {
+  "look": 750,
+  "mom_n": 252,
+  "q_edge": 0.3333,
+  "min_hold": 75,
+  "dd_n": 252,
+  "dd_q": 0.1,
+  "stop_on": 1,
+  "flip": 0,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "side": "both"
+ },
+ "grid": {
+  "look": [
+   500,
+   750,
+   1500
+  ],
+  "q_edge": [
+   0.2,
+   0.3333
+  ],
+  "flip": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Valuation applied to a STRATEGY rather than to an asset.\n\n    WHAT SURVIVES THE SINGLE-SYMBOL HARNESS AND WHAT DOES NOT. The published\n    rule ranks K factor spreads against each other and holds a tercile book of\n    them, equal-weighted and volatility-scaled. A family here sees one symbol\n    and can hold one position, so the cross-sectional book is NOT representable\n    and is not attempted. What is representable, and is the part the idea calls\n    novel, is the object being ranked: the percentile of a factor sleeve's OWN\n    trailing cumulative return within its OWN expanding history. So one sleeve\n    is built on this symbol - a time-series momentum leg, sign of the `mom_n`\n    bar return - its per-bar returns are accumulated over `look` bars to give\n    the sleeve's relative price P, and P is ranked in an expanding window that\n    only opens after `look` bars of sleeve history exist.\n\n    Cheap sleeve (q below the lower tercile): run it. Expensive (q above the\n    upper tercile): run it INVERTED, which is the paper's short leg. Middle\n    tercile: stand aside. `flip` = 1 runs the same book with the sign reversed,\n    which is factor momentum - the honest null the idea asks for, so one sweep\n    adjudicates Arnott against Asness on our data. `min_hold` stops the tercile\n    boundary generating churn, and the portfolio stop flattens the book when the\n    sleeve's own trailing return sits in the bottom `dd_q` of its history, which\n    is the signature of the momentum-dominates world where the trade is wrong.\n    \"\"\"\n    import bisect\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    look = max(20, int(ctx.p.look))\n    mn = max(5, int(ctx.p.mom_n))\n    lo_q = float(ctx.p.q_edge)\n    hi_q = 1.0 - lo_q\n    mh = max(1, int(ctx.p.min_hold))\n    ddn = max(5, int(ctx.p.dd_n))\n    ddq = float(ctx.p.dd_q)\n    stop_on = int(ctx.p.stop_on)\n    flip = -1.0 if int(ctx.p.flip) else 1.0\n\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    # the factor sleeve: sign of the trailing mom_n-bar return, known at i-1\n    leg = [0.0] * n\n    for i in range(mn, n):\n        base = c[i - mn]\n        if base > 0.0:\n            d = c[i] / base - 1.0\n            leg[i] = 1.0 if d > 0.0 else (-1.0 if d < 0.0 else 0.0)\n\n    # the sleeve's own per-bar return, and its cumulative \"relative price\"\n    sr = [0.0] * n\n    for i in range(1, n):\n        sr[i] = leg[i - 1] * r[i]\n    pre = [0.0] * (n + 1)\n    for i in range(n):\n        pre[i + 1] = pre[i] + sr[i]\n\n    first = mn + 1\n    tilt = [0.0] * n\n    hist = []\n    dhist = []\n    state = 0.0\n    held = 0\n    for i in range(n):\n        if i < first + look:\n            continue\n        p = pre[i + 1] - pre[i + 1 - look]\n        q = None\n        if len(hist) >= look:\n            q = bisect.bisect_left(hist, p) / float(len(hist))\n        bisect.insort(hist, p)\n\n        dd_ok = True\n        if stop_on:\n            dpv = pre[i + 1] - pre[i + 1 - ddn]\n            if len(dhist) >= look:\n                dq = bisect.bisect_left(dhist, dpv) / float(len(dhist))\n                dd_ok = dq > ddq\n            bisect.insort(dhist, dpv)\n\n        want = state\n        if q is not None:\n            if q < lo_q:\n                want = 1.0\n            elif q > hi_q:\n                want = -1.0\n            else:\n                want = 0.0\n        if want != state:\n            if held >= mh or state == 0.0:\n                state = want\n                held = 0\n            else:\n                held += 1\n        else:\n            held += 1\n        tilt[i] = (state * flip) if dd_ok else 0.0\n\n    sig = [0] * n\n    for i in range(n):\n        s = tilt[i] * leg[i]\n        sig[i] = 1 if s > 0.0 else (-1 if s < 0.0 else 0)\n    ctx.sig = ctx.series(sig, \"factor_val\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]"
+}

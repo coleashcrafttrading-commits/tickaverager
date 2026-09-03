@@ -1,0 +1,34 @@
+{
+ "name": "Attention U-shape fade",
+ "note": "Barber-Odean attention buying. Shorts a bar with abnormal volume (vs the trailing 252-bar mean) AND an extreme move measured in trailing-60 sigmas, regardless of the SIGN of that move - the U-shape is the whole idea. Covers on a fixed hold, or early once abnormal volume decays back to normal.",
+ "source": "Brad M. Barber and Terrance Odean, 'All That Glitters: The Effect of Attention and News on the Buying Behavior of Individual and Institutional Investors', Review of Financial Studies 21(2), 2008, 785-818 - VERIFIED by reading the PDF from Odean's Berkeley faculty page. Table 1 note: 'Abnormal volume is calculated as the ratio of the current day's volume ... divided by the average volume over the previous 252 trading days.' p.14: buy-sell imbalance is '+29.5%' for the highest-volume vingtile versus '-18.15%' for the lowest decile. p.16-17: for stocks sorted on the previous day's return, imbalance 'is 29.4% for the vingtile of stocks with the worst return performance on the previous day', drops 'to 1.8% in the eighth return decile' and rises back for the best - the U-shape.",
+ "params": {
+  "av_min": 5.0,
+  "ret_sig": 3.0,
+  "av_out": 1.2,
+  "av_win": 252,
+  "sig_win": 60,
+  "side": "short",
+  "time_stop": 5,
+  "st_atr": 1.5,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "av_min": [
+   3.0,
+   5.0,
+   8.0
+  ],
+  "ret_sig": [
+   2.0,
+   3.0,
+   4.0
+  ],
+  "av_out": [
+   1.0,
+   1.2
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    W = int(ctx.p.av_win)\n    S = int(ctx.p.sig_win)\n\n    r = [0.0] * n\n    for t in range(1, n):\n        r[t] = (c[t] / c[t - 1] - 1.0) if c[t - 1] > 0.0 else 0.0\n    ctx.r = r\n\n    av = [None] * n\n    run = 0.0\n    for t in range(n):\n        if t >= 1:\n            run += v[t - 1]\n            if t - 1 - W >= 0:\n                run -= v[t - 1 - W]\n            if t >= W:\n                mean = run / W\n                if mean > 0.0:\n                    av[t] = v[t] / mean\n    ctx.av = av\n\n    sd = [None] * n\n    s1 = 0.0\n    s2 = 0.0\n    for t in range(n):\n        if t >= 1:\n            s1 += r[t - 1]\n            s2 += r[t - 1] * r[t - 1]\n            if t - 1 - S >= 0:\n                o = r[t - 1 - S]\n                s1 -= o\n                s2 -= o * o\n            if t >= S:\n                mu = s1 / S\n                var = s2 / S - mu * mu\n                if var > 1e-18:\n                    sd[t] = var ** 0.5\n    ctx.sd = sd\n    ctx.start = max(W, S) + 2\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    a = ctx.av[i]\n    s = ctx.sd[i]\n    if a is None or s is None or s <= 0.0:\n        return 0\n    if a >= float(ctx.p.av_min) and abs(ctx.r[i]) >= float(ctx.p.ret_sig) * s:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    a = ctx.av[i]\n    if a is None:\n        return False\n    return a < float(ctx.p.av_out)"
+}

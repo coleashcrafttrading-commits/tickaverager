@@ -1,0 +1,40 @@
+{
+ "name": "V-shaped selling pressure overhang",
+ "note": "The Grinblatt-Han turnover-weighted cost-basis distribution with the ABSOLUTE value taken inside the sum, so a name whose holders are half deep in gains and half deep in losses scores high while the signed capital-gains measure scores it near zero. Weights w_{t-n} = V_{t-n} * prod(1 - V) are built exactly as in the paper but maintained recursively (every stored weight decays by (1-V_t) each bar), and the turnover V is proxied from OHLCV as turn_c * volume / its own rolling mean, capped at vmax - single-symbol bars carry no shares outstanding. Short a rally running into a top-pct_cut overhang, buy a rally running into a bottom-pct_cut one. The paper's +3%-over-5-sessions rally trigger is expressed as rally_atr * ATR over rally_win bars, because a fixed 3% is unreachable on the intraday bars this harness runs and would make the family fire on leveraged names only.",
+ "source": "Synthesis extending the Grinblatt & Han construction (NBER w8734) with the V-shaped selling schedule of Ben-David & Hirshleifer, 'Are Investors Really Reluctant to Realize Their Losses?', Review of Financial Studies 25(8), 2012, 2485-2532 (cited by the idea's author from background knowledge, not verified in their session). The VSP statistic and the trade construction are the idea author's own. Related: An, Ang, Bali & Cakici on V-shaped net selling propensity.",
+ "params": {
+  "vwin": 200,
+  "turn_c": 0.05,
+  "vmax": 0.5,
+  "lb": 150,
+  "prune": 0.001,
+  "min_lb": 30,
+  "hist": 1000,
+  "min_hist": 250,
+  "pct_cut": 20.0,
+  "rally_win": 5,
+  "rally_atr": 1.0,
+  "hold": 10,
+  "side": "both",
+  "st_atr": 1.5,
+  "tp_atr": 2.5,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "pct_cut": [
+   10.0,
+   20.0,
+   30.0
+  ],
+  "rally_atr": [
+   0.5,
+   1.0,
+   2.0
+  ],
+  "hold": [
+   10,
+   30
+  ]
+ },
+ "code": "def family_init(ctx):\n    from bisect import insort, bisect_left\n    bars = ctx.bars\n    N = len(bars)\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    vwin = int(ctx.p.vwin)\n    turn_c = float(ctx.p.turn_c)\n    vmax = float(ctx.p.vmax)\n    lb = int(ctx.p.lb)\n    prune = float(ctx.p.prune)\n    min_lb = int(ctx.p.min_lb)\n\n    vsp = [None] * N\n    prices = []\n    qs = []\n    D = 1.0\n    vsum = 0.0\n    for j in range(N):\n        vsum += vo[j]\n        n = j + 1\n        if j >= vwin:\n            vsum -= vo[j - vwin]\n            n = vwin\n        mv = vsum / n\n        V = (turn_c * vo[j] / mv) if mv > 0.0 else turn_c\n        if V > vmax:\n            V = vmax\n        elif V < 1e-6:\n            V = 1e-6\n        D *= (1.0 - V)\n        q = V / D\n        prices.append(cl[j])\n        qs.append(q)\n        if q > 1e100:\n            D *= q\n            f = q\n            for k in range(len(qs)):\n                qs[k] /= f\n        qb = qs[-1]\n        while len(qs) > lb or (len(qs) > 2 and qs[0] < prune * qb):\n            qs.pop(0)\n            prices.pop(0)\n        c0 = cl[j]\n        if c0 <= 0.0 or len(qs) < min_lb:\n            continue\n        s1 = 0.0\n        s2 = 0.0\n        for k in range(len(qs)):\n            wt = qs[k]\n            s1 += wt\n            d = c0 - prices[k]\n            s2 += wt * (d if d >= 0.0 else -d)\n        if s1 > 0.0:\n            vsp[j] = s2 / (s1 * c0)\n\n    hist = int(ctx.p.hist)\n    minh = int(ctx.p.min_hist)\n    cut = float(ctx.p.pct_cut) / 100.0\n    lo_t = [None] * N\n    hi_t = [None] * N\n    sl = []\n    win = []\n    for j in range(N):\n        x = vsp[j]\n        if x is None:\n            continue\n        insort(sl, x)\n        win.append(x)\n        if len(win) > hist:\n            old = win.pop(0)\n            del sl[bisect_left(sl, old)]\n        m = len(sl)\n        if m >= minh:\n            lo_t[j] = sl[int(cut * (m - 1))]\n            hi_t[j] = sl[int((1.0 - cut) * (m - 1))]\n    ctx.vsp = ctx.series(vsp, \"vsp\")\n    ctx.vsp_lo = ctx.series(lo_t, \"vsp_lo\")\n    ctx.vsp_hi = ctx.series(hi_t, \"vsp_hi\")\n\n\ndef signal(ctx, i):\n    x = ctx.vsp[i]\n    if x is None:\n        return 0\n    lo_ = ctx.vsp_lo[i]\n    hi_ = ctx.vsp_hi[i]\n    if lo_ is None or hi_ is None:\n        return 0\n    rw = int(ctx.p.rally_win)\n    if i - rw < 0:\n        return 0\n    a = ctx.a[i]\n    if a is None or a <= 0.0:\n        return 0\n    if (ctx.c[i] - ctx.c[i - rw]) < float(ctx.p.rally_atr) * a:\n        return 0\n    if x >= hi_:\n        return -1\n    if x <= lo_:\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return (i - e) >= int(ctx.p.hold)"
+}

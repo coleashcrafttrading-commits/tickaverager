@@ -1,0 +1,31 @@
+{
+ "name": "No Supply No Demand Bar",
+ "note": "Volume Spread Analysis read of an ABSENCE of participation: a narrow-range bar whose volume undercuts each of the previous two bars, closing in the half of its range that contradicts its own direction, taken only in the matching side of the SMA. Mandatory confirmation on the very next bar (close through the signal bar's extreme on higher volume) turns the qualitative read into a rule.",
+ "source": "Tom Williams, 'Master the Markets' (Volume Spread Analysis). Operational definition -- up/down bar, narrow spread, volume lower than the previous two bars, close position within the bar, confirming next bar on rising volume -- from tradingsetupsreview.com's VSA guide and atas.net's no-demand/no-supply article. 'Narrow spread' is undefined in both sources and is pinned here to a fraction of the mean range of the five bars before the signal bar.",
+ "params": {
+  "spread_mult": 0.7,
+  "close_pos": 0.5,
+  "vol_back": 2,
+  "sma_n": 20,
+  "time_stop": 8,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "spread_mult": [
+   0.5,
+   0.7,
+   0.9
+  ],
+  "close_pos": [
+   0.4,
+   0.5,
+   0.65
+  ],
+  "vol_back": [
+   1,
+   2,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n\n    # 5-bar mean range of the bars IMMEDIATELY BEFORE each bar -- the\n    # \"narrow spread\" yardstick, which must not include the bar it judges.\n    rng = [h[i] - l[i] for i in range(n)]\n    prior = [None] * n\n    run = 0.0\n    for i in range(n):\n        if i >= 1:\n            run += rng[i - 1]\n        if i >= 6:\n            run -= rng[i - 6]\n        if i >= 5:\n            prior[i] = run / 5.0\n    ctx.prior5 = ctx.series(prior, \"mean_range_5_prior\")\n    ctx.sma = ctx.indicator(\"sma\", period=int(ctx.p.sma_n))\n\n\ndef _quiet_bar(ctx, s, want_down):\n    \"\"\"Is bar s a no-supply (want_down) / no-demand (not want_down) bar?\"\"\"\n    c, o, h, l, v = ctx.c, ctx.o, ctx.h, ctx.l, ctx.v\n    cs, ps = c[s], c[s - 1]\n    if cs is None or ps is None:\n        return False\n    if want_down and not (cs < ps):\n        return False\n    if (not want_down) and not (cs > ps):\n        return False\n\n    m = ctx.prior5[s]\n    if m is None or m <= 0:\n        return False\n    rng = h[s] - l[s]\n    if rng > ctx.p.spread_mult * m:          # (b) narrow spread\n        return False\n\n    k = int(ctx.p.vol_back)                  # (c) below the last k bars' volume\n    vs = v[s]\n    for j in range(1, k + 1):\n        if s - j < 0 or not (vs < v[s - j]):\n            return False\n\n    if rng <= 0:                             # a doji bar has no close position\n        return False\n    pos = (c[s] - l[s]) / rng                # (d) close position within the bar\n    if want_down and pos < ctx.p.close_pos:\n        return False\n    if (not want_down) and pos > 1.0 - ctx.p.close_pos:\n        return False\n\n    sm = ctx.sma[s]                          # (e) context\n    if sm is None:\n        return False\n    if want_down and not (cs > sm):\n        return False\n    if (not want_down) and not (cs < sm):\n        return False\n    return True\n\n\ndef signal(ctx, i):\n    \"\"\"i is the CONFIRMATION bar; the signal bar S is the one before it.\"\"\"\n    s = i - 1\n    if s < 8:\n        return 0\n    if _quiet_bar(ctx, s, True):\n        # confirmation: closes above the signal bar's high on rising volume\n        if ctx.c[i] > ctx.h[s] and ctx.v[i] > ctx.v[s]:\n            return 1\n    if _quiet_bar(ctx, s, False):\n        if ctx.c[i] < ctx.l[s] and ctx.v[i] > ctx.v[s]:\n            return -1\n    return 0\n"
+}

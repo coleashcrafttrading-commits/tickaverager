@@ -1,0 +1,30 @@
+{
+ "name": "Honest Pullback Test",
+ "note": "One complete signal - close crossing above EMA(20) while ADX(14) is above adx_min - and TWO entry arms selected by pb_atr. pb_atr = 0 is Arm I: act on the signal bar itself. pb_atr > 0 is Arm P: arm a limit at min(EMA20, close - pb_atr*ATR) for the next pb_bars bars and act only on the first bar whose LOW touches it; a signal no bar touches produces no trade at all, which is exactly the sample the folklore quietly deletes. Exits are identical for both arms - a 2*ATR trail off the best close since entry plus an unconditional 30-bar time stop - so the only difference between two grid cells is WHEN the entry happened. The opportunity-cost ledger the idea asks for (scoring Arm P's unfilled signals at Arm I's realised return) is a report over the two arms' trade lists, not something a signal function can emit; putting both arms in one sweep is what makes that report computable downstream.",
+ "source": "Perold (1988) implementation shortfall opportunity-cost term, framework confirmed via the implementation shortfall literature; the survivorship-in-entries critique and the test design are my own synthesis.",
+ "params": {
+  "ema_n": 20,
+  "adx_n": 14,
+  "adx_min": 25.0,
+  "pb_atr": 0.5,
+  "pb_bars": 5,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "trail_atr": 2.0,
+  "time_stop": 30
+ },
+ "grid": {
+  "pb_atr": [
+   0.0,
+   0.25,
+   0.5,
+   1.0
+  ],
+  "adx_min": [
+   20.0,
+   25.0,
+   30.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.em = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n    ctx.dx = ctx.indicator(\"adx\", period=int(ctx.p.adx_n))\n    ctx.aa = ctx.indicator(\"atr\", period=14)\n    ctx.arm = None          # (direction, limit price, last bar the limit lives)\n\n\ndef _raw(ctx, i):\n    e, pe = ctx.em[i], ctx.em[i - 1]\n    c, pc = ctx.c[i], ctx.c[i - 1]\n    d = ctx.dx.adx[i]\n    if None in (e, pe, c, pc, d) or d < float(ctx.p.adx_min):\n        return 0\n    if pc <= pe and c > e:\n        return 1\n    if pc >= pe and c < e:\n        return -1\n    return 0\n\n\ndef signal(ctx, i):\n    if i < 2:\n        return 0\n    s = _raw(ctx, i)\n    if float(ctx.p.pb_atr) <= 0.0:\n        return s                       # Arm I: take the signal where it fired\n\n    a = ctx.aa[i]\n    e = ctx.em[i]\n    c = ctx.c[i]\n    # a fresh signal replaces whatever was resting -- one live limit at a time\n    if s and a is not None and e is not None and c is not None and a > 0.0:\n        depth = float(ctx.p.pb_atr) * a\n        lim = min(e, c - depth) if s > 0 else max(e, c + depth)\n        ctx.arm = (s, lim, i + max(1, int(ctx.p.pb_bars)))\n        return 0\n\n    if ctx.arm is None:\n        return 0\n    d, lim, last = ctx.arm\n    if i > last:\n        ctx.arm = None                 # expired unfilled -- this signal is lost\n        return 0\n    lo, hi = ctx.l[i], ctx.h[i]\n    if lo is None or hi is None:\n        return 0\n    if d > 0 and lo <= lim:\n        ctx.arm = None\n        return 1\n    if d < 0 and hi >= lim:\n        ctx.arm = None\n        return -1\n    return 0"
+}

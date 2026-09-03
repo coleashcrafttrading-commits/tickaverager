@@ -1,0 +1,33 @@
+{
+ "name": "Close-Auction Hedging Reversal",
+ "note": "Measures the last half hour of the cash session -- rLH = log(close / the price 30 minutes earlier) -- and when its magnitude is in the top of the trailing 60-session distribution, takes the OPPOSITE side at the next session's open for a three-day hold. The premise is that a big closing move is dealer hedging pressure, not information, so it unwinds. Signals are placed on the last bar before the cash open so the fill lands on that open.",
+ "source": "Baltussen, Da, Lammers & Martens (2021), JFE 142(1), 377-403 - the reversal test: 'in all four asset classes, returns in the next three days are opposite to those of rLH'.",
+ "params": {
+  "tail_min": 30,
+  "close_min": 960,
+  "open_min": 570,
+  "pct": 0.7,
+  "plook": 60,
+  "min_sess": 8,
+  "hold": 3,
+  "exit_signal_on": 1,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "pct": [
+   0.7,
+   0.8,
+   0.9
+  ],
+  "plook": [
+   30,
+   60
+  ],
+  "hold": [
+   1,
+   3,
+   5
+  ]
+ },
+ "code": "def _et_clock(bars):\n    \"\"\"Minutes after ET midnight and the ET calendar date for every bar.\n\n    zoneinfo needs a tz database that Windows does not ship, so the US rule is\n    applied directly: EDT (UTC-4) from the second Sunday of March 07:00 UTC to\n    the first Sunday of November 06:00 UTC, EST (UTC-5) otherwise.\n    \"\"\"\n    import datetime as dt\n    mins = []\n    days = []\n    off_cache = {}\n    for b in bars:\n        s = str(b[\"t\"])\n        key = s[:13]\n        off = off_cache.get(key)\n        if off is None:\n            u = dt.datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]), int(s[11:13]))\n            mar = dt.datetime(u.year, 3, 8)\n            mar = mar + dt.timedelta(days=(6 - mar.weekday()) % 7)\n            mar = mar.replace(hour=7)\n            nov = dt.datetime(u.year, 11, 1)\n            nov = nov + dt.timedelta(days=(6 - nov.weekday()) % 7)\n            nov = nov.replace(hour=6)\n            off = 4 if (mar <= u < nov) else 5\n            off_cache[key] = off\n        hh = int(s[11:13]) - off\n        d = s[0:10]\n        if hh < 0:\n            hh += 24\n            d = (dt.date(int(s[0:4]), int(s[5:7]), int(s[8:10]))\n                 - dt.timedelta(days=1)).isoformat()\n        mins.append(hh * 60 + int(s[14:16]))\n        days.append(d)\n    return mins, days\n\n\ndef family_init(ctx):\n    \"\"\"rLH = log(session close / the price `tail` minutes before it) -- the size\n    of the closing hedging push. When |rLH| is in the top of its own trailing\n    distribution, take the OTHER side at the next session's open and hold a few\n    days, which is the reversal Baltussen et al. document.\n\n    A daily bar cannot express this: close-relative-to-15:30 is invisible in\n    OHLC, so the signal is read off intraday bars and the ET clock. The order\n    is placed on the last bar before the cash open so it fills AT that open.\"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    mins, days = _et_clock(bars)\n\n    cm = int(ctx.p.close_min)\n    om = int(ctx.p.open_min)\n    tl = int(ctx.p.tail_min)\n\n    sess = [0] * m\n    si = -1\n    prev = None\n    for i in range(m):\n        if days[i] != prev:\n            si += 1\n            prev = days[i]\n        sess[i] = si\n    ns = si + 1\n\n    cbar = [-1] * ns          # last bar of the cash session\n    rbar = [-1] * ns          # the bar whose close is the reference price\n    fo = [-1] * ns            # first bar of the cash session\n    for i in range(m):\n        s = sess[i]\n        t = mins[i]\n        if om <= t < cm:\n            cbar[s] = i\n            if fo[s] < 0:\n                fo[s] = i\n        if om <= t < cm - tl:\n            rbar[s] = i\n\n    rlh = [None] * ns\n    for s in range(ns):\n        a = rbar[s]\n        b = cbar[s]\n        if a >= 0 and b > a and c[a] > 0.0 and c[b] > 0.0:\n            rlh[s] = math.log(c[b] / c[a])\n\n    sig = [0] * m\n    isc = [False] * m\n    for s in range(ns):\n        if cbar[s] >= 0:\n            isc[cbar[s]] = True\n\n    pl = max(5, int(ctx.p.plook))\n    q = float(ctx.p.pct)\n    mn = max(3, int(ctx.p.min_sess))\n    for s in range(1, ns):\n        j = fo[s]\n        if j <= 0:\n            continue\n        k = j - 1                       # fills at the cash open of session s\n        if cbar[s - 1] < 0 or k < cbar[s - 1]:\n            continue\n        r = rlh[s - 1]\n        if r is None:\n            continue\n        hist = [abs(x) for x in rlh[max(0, s - pl):s] if x is not None]\n        if len(hist) < mn:\n            continue\n        hist.sort()\n        Q = hist[int(q * (len(hist) - 1))]\n        if Q <= 0.0:\n            continue\n        if r >= Q:\n            sig[k] = -1                 # fade the closing push up\n        elif r <= -Q:\n            sig[k] = 1\n    ctx.sig = ctx.series(sig, \"close_push\")\n    ctx.sess = ctx.series(sess, \"session\")\n    ctx.isc = ctx.series(isc, \"session_close\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out at the close of the hold-th session after entry -- the window over\n    which the paper measures the reversal.\"\"\"\n    if not ctx.positions:\n        return False\n    a = ctx.sess[ctx.positions[0][\"entry_i\"]]\n    b = ctx.sess[i]\n    if a is None or b is None:\n        return False\n    n = int(ctx.p.hold)\n    if b - a > n:\n        return True\n    return b - a >= n and bool(ctx.isc[i])\n"
+}

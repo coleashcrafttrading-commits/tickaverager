@@ -1,0 +1,35 @@
+{
+ "name": "Momentum Life Cycle Turnover Interaction",
+ "note": "Lee-Swaminathan's momentum life cycle rebuilt as a within-name two-way sort, because the harness sees one symbol at a time: MOM is the form-bar return skipping the last skip bars, RVOL_LONGRUN is mean(volume over a short window) / mean(volume over a long window), and each is ranked against its OWN trailing distribution instead of against the cross-section. Long the top-momentum / bottom-relative-volume state (early-stage winner), short the bottom-momentum / top-relative-volume state (late-stage loser), rebalance every reb bars, hold exactly hold bars. The cross-sectional tercile sort and the shares-outstanding turnover cannot be reproduced from single-symbol OHLCV; the idea itself proposes the relative-volume substitute, and the time-series percentile is the honest stand-in for the tercile.",
+ "source": "Lee, C.M.C. and Swaminathan, B. (2000), 'Price Momentum and Trading Volume', Journal of Finance 55(5) - https://onlinelibrary.wiley.com/doi/abs/10.1111/0022-1082.00280 ; international confirmation in 'Trading Volume and Momentum: The International Evidence'. PROXY NOTE from the idea: their turnover is volume/shares-outstanding, which we do not have; a within-name long-run relative volume ratio is substituted.",
+ "params": {
+  "form": 131,
+  "skip": 5,
+  "rvol_short": 126,
+  "rvol_long": 756,
+  "rank_w": 252,
+  "tiles": 3,
+  "reb": 21,
+  "hold": 63,
+  "dv_min": 0.0,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "side": "both"
+ },
+ "grid": {
+  "form": [
+   63,
+   131,
+   252
+  ],
+  "rvol_short": [
+   63,
+   126
+  ],
+  "rvol_long": [
+   504,
+   756
+  ]
+ },
+ "code": "def _pct_rank(hist, x):\n    \"\"\"Share of the trailing sample at or below x, in [0, 1].\"\"\"\n    n = len(hist)\n    if n < 20:\n        return None\n    k = 0\n    for v in hist:\n        if v <= x:\n            k += 1\n    return k / float(n)\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    form = int(ctx.p.form)\n    skip = int(ctx.p.skip)\n    sw = int(ctx.p.rvol_short)\n    lw = int(ctx.p.rvol_long)\n\n    # prefix sums so the two volume means cost O(1) per bar\n    ps = [0.0] * (n + 1)\n    pd = [0.0] * (n + 1)\n    for j in range(n):\n        ps[j + 1] = ps[j] + v[j]\n        pd[j + 1] = pd[j] + v[j] * c[j]\n\n    mom = [None] * n\n    rv = [None] * n\n    dv = [None] * n\n    for j in range(n):\n        if j >= form and c[j - form] > 0:\n            mom[j] = c[j - skip] / c[j - form] - 1.0\n        if j >= lw:\n            a = (ps[j + 1] - ps[j + 1 - sw]) / float(sw)\n            b = (ps[j + 1] - ps[j + 1 - lw]) / float(lw)\n            if b > 0:\n                rv[j] = a / b\n        if j >= 50:\n            dv[j] = (pd[j + 1] - pd[j + 1 - 50]) / 50.0\n    ctx.mom = mom\n    ctx.rv = rv\n    ctx.dv = dv\n    ctx.p.time_stop = int(ctx.p.hold)\n\n\ndef signal(ctx, i):\n    if i % int(ctx.p.reb) != 0:\n        return 0\n    m = ctx.mom[i]\n    r = ctx.rv[i]\n    if m is None or r is None:\n        return 0\n    d = ctx.dv[i]\n    if d is not None and d < float(ctx.p.dv_min):\n        return 0\n    rw = int(ctx.p.rank_w)\n    lo = max(0, i - rw)\n    hm = [x for x in ctx.mom[lo:i] if x is not None]\n    hr = [x for x in ctx.rv[lo:i] if x is not None]\n    pm = _pct_rank(hm, m)\n    pr = _pct_rank(hr, r)\n    if pm is None or pr is None:\n        return 0\n    t = float(ctx.p.tiles)\n    hi = 1.0 - 1.0 / t\n    lo_ = 1.0 / t\n    # early-stage winner: top momentum tercile, BOTTOM long-run relative volume\n    if pm >= hi and pr <= lo_:\n        return 1\n    # late-stage loser: bottom momentum tercile, TOP long-run relative volume\n    if pm <= lo_ and pr >= hi:\n        return -1\n    return 0"
+}

@@ -1,0 +1,30 @@
+{
+ "name": "Consecutive Close-Above-Prior-High Exhaustion",
+ "note": "Counts consecutive bars whose close exceeds the PREVIOUS bar's high -- a strictly stiffer test than an up close, since the whole prior range was engulfed -- and shorts the first bar the streak reaches its threshold, optionally only beneath a 200 EMA. One entry per streak: the signal fires on the bar the counter crosses the threshold and never while it merely stays there. Covers on the first close beneath the previous bar's low.",
+ "source": "StockSharp/AlgoTrading, strategy API/1601-1700/1601_Consecutive_Close_High1_Mean_Reversion -- 'counts consecutive closes above the prior high and sells once the count reaches a threshold; position exits when price falls below the prior low; optional 200 EMA filter'",
+ "params": {
+  "streak": 3,
+  "ema_n": 200,
+  "ema_on": 1,
+  "side": "short",
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 1.0
+ },
+ "grid": {
+  "streak": [
+   2,
+   3,
+   4
+  ],
+  "ema_on": [
+   0,
+   1
+  ],
+  "ema_n": [
+   100,
+   200
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n    b = ctx.bars\n    n = len(b)\n    closes = [float(x[\"c\"]) for x in b]\n    highs = [float(x[\"h\"]) for x in b]\n    k = [0] * n\n    run = 0\n    for j in range(1, n):\n        run = run + 1 if closes[j] > highs[j - 1] else 0\n        k[j] = run\n    ctx.k = ctx.series(k, \"streak_count\")\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    k = ctx.k[i]\n    pk = ctx.k[i - 1]\n    if k is None or pk is None:\n        return 0\n    thr = int(ctx.p.streak)\n    if k < thr or pk >= thr:\n        return 0\n    if int(ctx.p.ema_on):\n        e = ctx.e[i]\n        if e is None or ctx.c[i] >= e:\n            return 0\n    return -1\n\n\ndef exit_signal(ctx, i):\n    if i < 1:\n        return False\n    return ctx.c[i] < ctx.l[i - 1]"
+}

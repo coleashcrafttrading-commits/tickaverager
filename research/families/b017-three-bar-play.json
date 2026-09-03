@@ -1,0 +1,35 @@
+{
+ "name": "Three-Bar Play",
+ "note": "Ignition, hold, release. Bar 1 is a repricing event: range at least ign_atr x ATR(14), close in the top (or bottom) loc_min of its own range, volume at least vol_mult x the 20-bar average. Bar 2 is the measurement of acceptance: it must stay inside bar 1, give back no more than `giveback` of bar 1's range, be no wider than r2_cap of it, and trade less volume. The trade is the release -- bar 3 taking out bar 2's extreme, valid on that one bar only. Short setup is the exact mirror. The stop-order entry becomes a close-of-bar-3 decision filled at bar 4's open, because that is the only honest way this harness can fill it.",
+ "source": "Bellafiore, M. (2010), 'One Good Trade' and SMB Capital training material, where the 'three bar play' is taught as an ignition bar, a small consolidation bar, and a break of the consolidation bar's high. Published as a discretionary pattern with no numeric thresholds; the range multiples, close-location floor, give-back cap and volume ratios above are my quantification so that it can be backtested at all.",
+ "params": {
+  "ign_atr": 1.6,
+  "loc_min": 0.76,
+  "giveback": 0.45,
+  "r2_cap": 0.6,
+  "v2_cap": 0.75,
+  "vol_mult": 1.4,
+  "vol_n": 20,
+  "atr_n": 14,
+  "tick": 0.01,
+  "time_stop": 6,
+  "tp_atr": 2.0,
+  "st_atr": 1.0
+ },
+ "grid": {
+  "ign_atr": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "loc_min": [
+   0.75,
+   0.85
+  ],
+  "giveback": [
+   0.3,
+   0.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    v = [float(x.get(\"v\") or 0.0) for x in b]\n    ctx.a = ctx.indicator(\"atr\", period=int(ctx.p.atr_n))\n    VN = int(ctx.p.vol_n)\n    av = [None] * n\n    s = 0.0\n    for j in range(n):\n        s += v[j]\n        if j >= VN:\n            s -= v[j - VN]\n        if j >= VN - 1 and VN > 0:\n            av[j] = s / VN\n    ctx.av = ctx.series(av, \"avgvol\")\n\n\ndef signal(ctx, i):\n    if i < 3:\n        return 0\n    a = ctx.a[i - 2]\n    av = ctx.av[i - 2]\n    if a is None or av is None or a <= 0 or av <= 0:\n        return 0\n\n    h1, l1, c1, v1 = ctx.h[i - 2], ctx.l[i - 2], ctx.c[i - 2], ctx.v[i - 2]\n    r1 = h1 - l1\n    if r1 <= 0:\n        return 0\n    # --- bar 1: the ignition. Wide, heavy, closing on its extreme.\n    if r1 < float(ctx.p.ign_atr) * a:\n        return 0\n    if v1 < float(ctx.p.vol_mult) * av:\n        return 0\n    loc = (c1 - l1) / r1\n\n    # --- bar 2: the hold. Narrow, quiet, and it gives almost nothing back.\n    h2, l2, v2 = ctx.h[i - 1], ctx.l[i - 1], ctx.v[i - 1]\n    r2 = h2 - l2\n    if r2 > float(ctx.p.r2_cap) * r1:\n        return 0\n    if v1 > 0 and v2 > float(ctx.p.v2_cap) * v1:\n        return 0\n    keep = 1.0 - float(ctx.p.giveback)\n    tick = float(ctx.p.tick)\n\n    # --- bar 3: the release, taken only on the very next bar.\n    if loc >= float(ctx.p.loc_min):\n        if h2 <= h1 and l2 >= l1 + keep * r1 and ctx.h[i] > h2 + tick:\n            return 1\n    if loc <= 1.0 - float(ctx.p.loc_min):\n        if l2 >= l1 and h2 <= h1 - keep * r1 and ctx.l[i] < l2 - tick:\n            return -1\n    return 0"
+}

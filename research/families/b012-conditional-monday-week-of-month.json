@@ -1,0 +1,30 @@
+{
+ "name": "Conditional Monday by week-of-month",
+ "note": "Wang/Li/Erickson's conditional weekend effect. At the closing bar of the last session of a trading week, take the sign of that week's close-to-close return and the calendar day-of-month of the next session: short a down week whose next session lands late in the month, buy an up week whose next session lands early. Held for exactly one session and closed on its 16:00 bar. 'Monday' is generalised to any session followed by a calendar gap of gap_days or more, so a Tuesday after a Monday holiday counts.",
+ "source": "Wang, Li & Erickson, 'A New Look at the Monday Effect', Journal of Finance 52(5), 1997 - documents that the Monday effect is concentrated in the last two weeks of the month; cited from the literature, not re-fetched this session (search budget exhausted). The prior-week-sign conditioning follows the conditional-weekend-effect literature (Jaffe, Westerfield & Ma and successors); the multi-day-gap generalisation of 'Monday' is my own tightening.",
+ "params": {
+  "dom_hi": 18,
+  "dom_lo": 14,
+  "w_thr": 0.0,
+  "long_leg": 1,
+  "gap_days": 3,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "dom_hi": [
+   15,
+   18,
+   21
+  ],
+  "w_thr": [
+   0.0,
+   -0.005
+  ],
+  "long_leg": [
+   0,
+   1
+  ]
+ },
+ "code": "def _dst(d):\n    \"\"\"US eastern daylight time, from the date alone.\"\"\"\n    import datetime as dt\n    if d.month < 3 or d.month > 11:\n        return False\n    if 3 < d.month < 11:\n        return True\n    if d.month == 3:\n        f = dt.date(d.year, 3, 1)\n        return d.day >= 1 + (6 - f.weekday()) % 7 + 7\n    f = dt.date(d.year, 11, 1)\n    return d.day < 1 + (6 - f.weekday()) % 7\n\n\ndef _sessions(ctx):\n    \"\"\"Session structure from the TIMESTAMPS only -- no price is read here.\n\n    The exchange session calendar is published years ahead, so knowing which\n    session a bar belongs to, and where that session sits in the week and the\n    month, is public information on the day, not a peek at the future.\n\n    Returns (sess, dates, rth, first, last): sess[i] is bar i's session index,\n    dates the ordered session dates, rth[i] True inside 09:30-16:00 ET, and\n    first/last the bar index of each session's opening and closing RTH bar.\n    \"\"\"\n    import datetime as dt\n    n = len(ctx.bars)\n    sess = [0] * n\n    rth = [False] * n\n    dates = []\n    key = None\n    for i in range(n):\n        s = str(ctx.bars[i][\"t\"])\n        d = dt.date(int(s[0:4]), int(s[5:7]), int(s[8:10]))\n        if d != key:\n            key = d\n            dates.append(d)\n        sess[i] = len(dates) - 1\n        m = int(s[11:13]) * 60 + int(s[14:16]) - (240 if _dst(d) else 300)\n        rth[i] = 570 <= m < 960\n    first = [-1] * len(dates)\n    last = [-1] * len(dates)\n    for i in range(n):\n        if rth[i]:\n            k = sess[i]\n            if first[k] < 0:\n                first[k] = i\n            last[k] = i\n    return sess, dates, rth, first, last\n\n\ndef _et_minutes(ctx):\n    \"\"\"Minutes past ET midnight for every bar.\"\"\"\n    import datetime as dt\n    out = []\n    for b in ctx.bars:\n        s = str(b[\"t\"])\n        d = dt.date(int(s[0:4]), int(s[5:7]), int(s[8:10]))\n        out.append(int(s[11:13]) * 60 + int(s[14:16]) - (240 if _dst(d) else 300))\n    return out\n\n\ndef _tdom(dates):\n    \"\"\"Trading-day-of-month, counted forward and backward, calendar only.\n\n    Weekdays inside the sample that have no session are real exchange holidays\n    and are dropped; weekdays outside the sample are assumed to trade. Prices\n    are never consulted, so this is the session calendar and nothing else.\n    \"\"\"\n    import datetime as dt\n    have = set(dates)\n    lo, hi = dates[0], dates[-1]\n\n    def trades(d):\n        if d.weekday() >= 5:\n            return False\n        if lo <= d <= hi:\n            return d in have\n        return True\n\n    fwd, back = [], []\n    for d in dates:\n        m1 = d.replace(day=1)\n        nxt = (m1 + dt.timedelta(days=32)).replace(day=1)\n        a = 0\n        x = m1\n        while x <= d:\n            if trades(x):\n                a += 1\n            x += dt.timedelta(days=1)\n        b = 0\n        x = d\n        while x < nxt:\n            if trades(x):\n                b += 1\n            x += dt.timedelta(days=1)\n        fwd.append(a)\n        back.append(b)\n    return fwd, back\n\n\ndef family_init(ctx):\n    import datetime as dt\n    sess, dates, rth, first, last = _sessions(ctx)\n    ns = len(dates)\n    px = [float(ctx.bars[j][\"c\"]) if j >= 0 else None for j in last]\n\n    def nxt(k):\n        if k + 1 < ns:\n            return dates[k + 1]\n        d = dates[k] + dt.timedelta(days=1)\n        while d.weekday() >= 5:\n            d += dt.timedelta(days=1)\n        return d\n\n    gap = int(ctx.p.gap_days)\n    thr = float(ctx.p.w_thr)\n    hi = int(ctx.p.dom_hi)\n    lo = int(ctx.p.dom_lo)\n    sig = [0.0] * len(ctx.bars)\n    prev = None\n    for k in range(ns):\n        if (nxt(k) - dates[k]).days < gap:\n            continue                              # not a week-close session\n        cur, ref = px[k], (px[prev] if prev is not None else None)\n        prev_k, prev = prev, k\n        if cur is None or not ref:\n            continue\n        w = cur / ref - 1.0\n        d = nxt(k).day\n        s = 0.0\n        if w <= thr and d >= hi:\n            s = -1.0\n        elif int(ctx.p.long_leg) and w >= -thr and d <= lo:\n            s = 1.0\n        if not s or k + 1 >= ns:\n            continue\n        a, b = last[k], last[k + 1]\n        if a < 0 or b <= a:\n            continue\n        # on from this session's closing bar up to, but not including, the\n        # next session's closing bar -- so exit_on_zero closes at that 16:00\n        for j in range(a, b):\n            sig[j] = s\n    ctx.sig = ctx.series(sig, \"condmon\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    if not s:\n        return 0\n    return 1 if s > 0 else -1\n"
+}

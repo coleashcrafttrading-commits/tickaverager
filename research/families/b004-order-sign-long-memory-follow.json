@@ -1,0 +1,37 @@
+{
+ "name": "Order-Sign Long-Memory Follow",
+ "note": "Estimates the Hurst exponent of the BVC order-sign series by detrended fluctuation analysis over a rolling window, and follows a one-sided run of signs only while H is high FOR THIS NAME -- its own trailing percentile, plus an absolute floor at 0.50. The absolute 0.60 in the source is a tick-level order-sign figure; a DFA of 5-minute bar signs sits near 0.49 with a 95th percentile of about 0.56 on real bars, so a fixed 0.60 gate would never fire. DFA is computed from prefix sums (the linear detrend absorbs the affine difference between the integrated series and the raw cumulative sum), which is what keeps family_init cheap.",
+ "source": "Lillo & Farmer (2004), 'The Long Memory of the Efficient Market', Studies in Nonlinear Dynamics & Econometrics 8(3); Santa Fe Institute working paper 03-12-066 (sfi-edu.s3.amazonaws.com/sfi-edu/production/uploads/sfi-com/dev/uploads/filer/d0/d9/d0d92e50-17b7-4072-98a7-293ca01b8d89/03-12-066.pdf); the order-splitting mechanism is from Lillo, Mike & Farmer (2005).",
+ "params": {
+  "dfa_win": 512,
+  "dfa_step": 5,
+  "h_hist": 200,
+  "h_pct": 0.8,
+  "h_floor": 0.5,
+  "h_exit_pct": 0.5,
+  "run_n": 20,
+  "run_min": 7,
+  "sig_lb": 50,
+  "time_stop": 30,
+  "st_atr": 2.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "h_pct": [
+   0.7,
+   0.8,
+   0.9
+  ],
+  "run_min": [
+   6,
+   7,
+   8
+  ],
+  "dfa_win": [
+   256,
+   512
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    # ---- BVC signed imbalance, and its sign ----\n    # OI = V * (2*Phi(dP/sigma) - 1); V > 0 and Phi is monotone, so sign(OI)\n    # is sign(dP). Kept in this form because the magnitude is what the\n    # imbalance RUN below is built from.\n    L = int(ctx.p.sig_lb)\n    dp = [None] * n\n    for i in range(1, n):\n        dp[i] = c[i] - c[i - 1]\n    sqrt2 = math.sqrt(2.0)\n    u = [0] * n\n    s1 = s2 = 0.0\n    cnt = 0\n    for i in range(n):\n        x = dp[i]\n        if x is not None:\n            s1 += x\n            s2 += x * x\n            cnt += 1\n        j = i - L\n        if j >= 0 and dp[j] is not None:\n            s1 -= dp[j]\n            s2 -= dp[j] * dp[j]\n            cnt -= 1\n        if x is None or cnt < 10:\n            continue\n        var = s2 / cnt - (s1 / cnt) ** 2\n        if var <= 0:\n            continue\n        oi = float(bars[i].get(\"v\") or 0.0) * (\n            2.0 * (0.5 * (1.0 + math.erf((x / math.sqrt(var)) / sqrt2))) - 1.0)\n        u[i] = 1 if oi > 0 else (-1 if oi < 0 else 0)\n\n    # running sum of the last run_n signs\n    R = int(ctx.p.run_n)\n    run = [None] * n\n    acc = 0\n    for i in range(n):\n        acc += u[i]\n        if i >= R:\n            acc -= u[i - R]\n        if i >= R - 1:\n            run[i] = acc\n    ctx.run = ctx.series(run, \"sign_run\")\n\n    # ---- DFA on the sign series ----\n    # The integrated, mean-centred series differs from the raw cumulative sum\n    # by an affine function of the index, and a linear detrend inside each\n    # window removes exactly that -- so F(n) can be read straight off prefix\n    # sums of the raw cumulative sum, O(1) per window instead of O(n).\n    # the requested window, capped so a short series still produces\n    # enough H estimates for its own percentile to mean anything\n    W = min(int(ctx.p.dfa_win), max(128, n // 6))\n    scales = [s for s in (8, 16, 32, 64, 128) if W // s >= 4]\n    y = [0.0] * n\n    t = 0.0\n    for i in range(n):\n        t += u[i]\n        y[i] = t\n    p1 = [0.0] * (n + 1)\n    p2 = [0.0] * (n + 1)\n    pj = [0.0] * (n + 1)\n    for i in range(n):\n        p1[i + 1] = p1[i] + y[i]\n        p2[i + 1] = p2[i] + y[i] * y[i]\n        pj[i + 1] = pj[i] + i * y[i]\n\n    def _F(a, m):\n        tot = 0.0\n        k = 0\n        sx = m * (m - 1) / 2.0\n        sxx = m * (m - 1) * (2 * m - 1) / 6.0 - sx * sx / m\n        if sxx <= 0:\n            return None\n        for w in range(W // m):\n            s = a + w * m\n            e = s + m\n            sy = p1[e] - p1[s]\n            syy = (p2[e] - p2[s]) - sy * sy / m\n            sjy = (pj[e] - pj[s]) - s * sy - sx * sy / m\n            res = syy - sjy * sjy / sxx\n            if res < 0.0:\n                res = 0.0\n            tot += res / m\n            k += 1\n        return math.sqrt(tot / k) if k else None\n\n    step = max(1, int(ctx.p.dfa_step))\n    HP = int(ctx.p.h_hist)\n    H = [None] * n\n    hq = [None] * n              # H's own percentile rank in its recent history\n    hist = []\n    cur_h = None\n    cur_q = None\n    lx = [math.log(s) for s in scales]\n    mx = sum(lx) / len(lx)\n    dxx = sum((x - mx) ** 2 for x in lx)\n    for i in range(n):\n        if i >= W - 1 and (i - (W - 1)) % step == 0 and dxx > 0:\n            a = i - W + 1\n            ly = []\n            ok = True\n            for m in scales:\n                f = _F(a, m)\n                if not f or f <= 0:\n                    ok = False\n                    break\n                ly.append(math.log(f))\n            if ok:\n                my = sum(ly) / len(ly)\n                cur_h = sum((lx[k] - mx) * (ly[k] - my)\n                            for k in range(len(lx))) / dxx\n                if len(hist) >= min(HP, 60):\n                    hh = hist[-HP:]\n                    r = 0\n                    for x in hh:\n                        if x <= cur_h:\n                            r += 1\n                    cur_q = r / float(len(hh))\n                else:\n                    cur_q = None\n                hist.append(cur_h)\n        H[i] = cur_h\n        hq[i] = cur_q\n    ctx.H = ctx.series(H, \"hurst\")\n    ctx.hq = ctx.series(hq, \"hurst_pctile\")\n\n\ndef signal(ctx, i):\n    h, q, r = ctx.H[i], ctx.hq[i], ctx.run[i]\n    if h is None or q is None or r is None:\n        return 0\n    # \"H rises above its baseline\" -- measured against this name's own recent\n    # distribution of H, because the absolute 0.60 of the tick-level\n    # literature is simply not attainable by a DFA of 5-minute bar signs\n    # (measured on the probe names: median H ~0.49, 95th percentile ~0.56).\n    if q < ctx.p.h_pct or h < ctx.p.h_floor:\n        return 0\n    if r >= ctx.p.run_min:\n        return 1\n    if r <= -ctx.p.run_min:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    q, r = ctx.hq[i], ctx.run[i]\n    if q is not None and q < ctx.p.h_exit_pct:\n        return True\n    if r is None:\n        return False\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    return r * d <= 0"
+}

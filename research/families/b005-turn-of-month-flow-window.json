@@ -1,0 +1,32 @@
+{
+ "name": "Turn-of-Month Flow Window",
+ "note": "Pure calendar: long from the close of the second-to-last weekday session of the month through the close of the third session of the new month, with no indicator condition. Optional skip when the previous session's ATR/close sits above the 90th percentile of its own trailing history. McConnell & Xu's four-day turn-of-month window.",
+ "source": "John J. McConnell and Wei Xu, 'Equity Returns at the Turn of the Month', Financial Analysts Journal 64(2), 2008 - trading rules and magnitude VERIFIED via https://quantpedia.com/strategies/turn-of-the-month-in-equity-indexes/, which specifies 'Buy SPY ETF 1 day (some papers say 4 days) before the end of the month and sell the 3rd trading day of the new month at the close'. Mechanism: Ogden (1990) on standardised payment dates; Lakonishok and Smidt (1988) on calendar anomalies.",
+ "params": {
+  "entry_off": 1,
+  "exit_day": 3,
+  "entry_min": 955,
+  "vol_gate": 0,
+  "vol_pct": 0.9,
+  "vol_n": 250,
+  "side": "long",
+  "exit_on_zero": 1,
+  "st_atr": 2.5
+ },
+ "grid": {
+  "entry_off": [
+   1,
+   4
+  ],
+  "exit_day": [
+   2,
+   3,
+   5
+  ],
+  "vol_gate": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"No indicator input at all -- the window is read off the bar timestamps.\n    T is the last weekday session of the calendar month; the position runs\n    from the close of T-1 to the close of session `exit_day` of the new month.\"\"\"\n    import calendar\n    import indicators as I\n    bars = ctx.bars\n    m = len(bars)\n\n    def nth_dow(y, mo, dow, n):\n        c = 0\n        for d in range(1, calendar.monthrange(y, mo)[1] + 1):\n            if calendar.weekday(y, mo, d) == dow:\n                c += 1\n                if c == n:\n                    return d\n        return 32\n\n    dst = {}\n    wds = {}\n\n    def fields(t):\n        y = int(t[0:4]); mo = int(t[5:7]); d = int(t[8:10])\n        hh = int(t[11:13]); mi = int(t[14:16])\n        k = (y, mo)\n        if k not in dst:\n            dst[k] = (nth_dow(y, 3, 6, 2), nth_dow(y, 11, 6, 1))\n            wds[k] = [x for x in range(1, calendar.monthrange(y, mo)[1] + 1)\n                      if calendar.weekday(y, mo, x) < 5]\n        s0, e0 = dst[k]\n        on = ((mo > 3 or (mo == 3 and d >= s0))\n              and (mo < 11 or (mo == 11 and d < e0)))\n        et = hh * 60 + mi + (-240 if on else -300)\n        return y, mo, d, et, wds[k]\n\n    # one bar per calendar date means daily bars: every bar IS a session close\n    daily = len(set(b[\"t\"][:10] for b in bars)) == m\n\n    eo = max(0, int(ctx.p.entry_off))\n    ed = max(1, int(ctx.p.exit_day))\n    emin = int(ctx.p.entry_min)\n    win = [False] * m\n    for i in range(m):\n        y, mo, d, et, wd = fields(bars[i][\"t\"])\n        if calendar.weekday(y, mo, d) >= 5:\n            continue\n        if daily:\n            et = 960\n        left = 0\n        for x in wd:\n            if x > d:\n                left += 1\n        idx = len(wd) - left\n        w = False\n        if left < eo:\n            w = True\n        elif left == eo:\n            w = et >= emin\n        if not w and idx <= ed:\n            w = (idx < ed) or (et <= 960)\n        win[i] = w\n    ctx.win = ctx.series(win, \"tom_window\")\n\n    # optional skip: session-level ATR/close above its own trailing percentile\n    at = I.compute(\"atr\", bars, period=int(ctx.p.atr_n))[\"atr\"]\n    vn = max(20, int(ctx.p.vol_n))\n    pct = float(ctx.p.vol_pct)\n    gate = [True] * m\n    hist = []\n    last = None\n    prev = None\n    ok = True\n    for i in range(m):\n        dte = bars[i][\"t\"][:10]\n        if dte != prev:\n            if last is not None:\n                hist.append(last)\n                if len(hist) > vn:\n                    del hist[0]\n            if len(hist) >= 20:\n                srt = sorted(hist)\n                thr = srt[int(pct * (len(srt) - 1))]\n                ok = hist[-1] <= thr\n            else:\n                ok = True\n            prev = dte\n        a = at[i]\n        c0 = float(bars[i][\"c\"])\n        if a is not None and c0 > 0.0:\n            last = a / c0\n        gate[i] = ok\n    ctx.gate = ctx.series(gate, \"vol_gate\")\n\n\ndef signal(ctx, i):\n    if not ctx.win[i]:\n        return 0\n    if ctx.p.vol_gate and not ctx.gate[i]:\n        return 0\n    return 1\n"
+}

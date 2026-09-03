@@ -1,0 +1,33 @@
+{
+ "name": "Ornstein-Uhlenbeck residual s-score",
+ "note": "Avellaneda-Lee, one symbol at a time. Over a `win`-bar window the cumulative residual X is accumulated, an AR(1) X_{k+1}=a+b*X_k is fitted, and the score is s=(X_last-m)/sigma_eq with m=a/(1-b) and sigma_eq=sqrt(var(zeta)/(1-b^2)) - a deviation measured in units of the FITTED OU stationary sigma, not of a rolling sample sigma. The gate is the estimated speed of reversion: b must be in (0,1) and the implied half-life ln2/-ln(b) must be at or under max_hl bars (the paper's 'half-life under 30 calendar days' is ~21 trading periods). A wide residual that reverts slowly is explicitly not a trade. Fade at |s|>s_in, cover on the paper's asymmetric bands, force out if kappa collapses or after max_hold bars. DEPARTURE, stated: the harness serves one symbol, so the sector-ETF leg cannot be estimated or hedged; the residual is taken against the symbol's own drift over the same window, which is the degenerate one-factor case. Everything distinctive - the AR(1) fit, kappa, sigma_eq, the asymmetric bands - is intact. Measured on the probe bars, the fitted half-life runs ~5 bars at win=60 and ~10 at win=120, so the paper's daily 21-period gate passes 97-98% of 5-minute windows and barely bites; the sweep therefore carries 4 and 10 bars as well, which is where the gate is actually a gate.",
+ "source": "Avellaneda & Lee, 'Statistical arbitrage in the US equities market', Quantitative Finance 10(7), 2010, 761-782 (Crossref-confirmed; SSRN 2008 working paper). Entry/exit band values 1.25/1.25/0.75/0.50 are the paper's own.",
+ "params": {
+  "win": 60,
+  "s_in": 1.25,
+  "s_out_l": 0.5,
+  "s_out_s": 0.75,
+  "max_hl": 21.0,
+  "max_hold": 60,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "win": [
+   40,
+   60,
+   120
+  ],
+  "s_in": [
+   1.25,
+   1.5
+  ],
+  "max_hl": [
+   4.0,
+   10.0,
+   21.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Avellaneda-Lee, one symbol at a time.\n\n    The paper residualises r_i against a sector ETF or a PCA factor before\n    accumulating.  The harness serves one symbol's OHLCV and nothing else, so\n    the factor leg is unavailable; what is used here is the degenerate\n    one-factor case -- the residual against the symbol's own drift over the\n    same window.  Everything the idea is actually ABOUT survives that: the\n    cumulative residual is fitted as an AR(1), kappa comes out of the fitted\n    b, and the score is the deviation in units of the OU stationary sigma,\n    not of a rolling sample sigma.\n    \"\"\"\n    import math\n\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    r = [0.0] * n\n    for k in range(1, n):\n        a, b = c[k - 1], c[k]\n        r[k] = math.log(b / a) if (a > 0.0 and b > 0.0) else 0.0\n\n    win = max(20, int(ctx.p.win))\n    max_hl = float(ctx.p.max_hl)\n    ln2 = math.log(2.0)\n\n    s = [None] * n\n    fast = [False] * n\n\n    for i in range(win, n):\n        seg = r[i - win + 1:i + 1]\n        m = sum(seg) / win\n        # X_k: cumulative residual.  Centred over the same window, so X ends\n        # at ~0 by construction -- exactly as in the paper, where the OLS\n        # residuals sum to zero and the score becomes -m / sigma_eq.\n        X = []\n        acc = 0.0\n        for x in seg:\n            acc += x - m\n            X.append(acc)\n        L = len(X) - 1\n        if L < 8:\n            continue\n        sx = 0.0\n        sy = 0.0\n        for k in range(L):\n            sx += X[k]\n            sy += X[k + 1]\n        mx = sx / L\n        my = sy / L\n        sxx = 0.0\n        sxy = 0.0\n        for k in range(L):\n            dx = X[k] - mx\n            sxx += dx * dx\n            sxy += dx * (X[k + 1] - my)\n        if sxx <= 0.0:\n            continue\n        b1 = sxy / sxx\n        if not (0.0 < b1 < 1.0):\n            continue                      # not mean reverting: no trade\n        a0 = my - b1 * mx\n        ss = 0.0\n        for k in range(L):\n            e = X[k + 1] - (a0 + b1 * X[k])\n            ss += e * e\n        dof = L - 2\n        if dof <= 0:\n            continue\n        vz = ss / dof\n        den = 1.0 - b1 * b1\n        if vz <= 0.0 or den <= 0.0:\n            continue\n        sig_eq = math.sqrt(vz / den)\n        if sig_eq <= 0.0:\n            continue\n        mm = a0 / (1.0 - b1)\n        s[i] = (X[-1] - mm) / sig_eq\n        # kappa = -ln(b) per bar.  The paper's gate \"half-life under ~30\n        # calendar days\" is 21 trading periods, so it is carried here as a\n        # maximum half-life in BARS and stays scale free across timeframes.\n        lb = -math.log(b1)\n        if lb > 0.0:\n            fast[i] = (ln2 / lb) <= max_hl\n\n    ctx.s = s\n    ctx.fast = fast\n\n\ndef signal(ctx, i):\n    sc = ctx.s[i]\n    if sc is None or not ctx.fast[i]:\n        return 0\n    t = float(ctx.p.s_in)\n    if sc < -t:\n        return 1\n    if sc > t:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    held = i - min(p[\"entry_i\"] for p in ctx.positions)\n    if held >= int(ctx.p.max_hold):\n        return True\n    sc = ctx.s[i]\n    if sc is None:\n        return False\n    if not ctx.fast[i]:\n        return True                       # kappa collapsed: stop fading it\n    longs = ctx.positions[0][\"side\"] == \"long\"\n    if longs:\n        return sc > -float(ctx.p.s_out_l)\n    return sc < float(ctx.p.s_out_s)"
+}

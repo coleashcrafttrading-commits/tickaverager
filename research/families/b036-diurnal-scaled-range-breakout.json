@@ -1,0 +1,37 @@
+{
+ "name": "Diurnal-Scaled Range Breakout",
+ "note": "Every 5-minute slot of the day gets its own volatility unit D_s -- the median high-low range of that same clock slot over the previous N sessions -- and both the breakout buffer and the risk are quoted in D_s, so a 12-cent midday break and a 40-cent opening break are the same event. The regular session is located from the tape's own volume profile rather than assumed, so it is right in either DST; the stop/target/trail are carried in exit_signal because the whole point is that they re-scale with the clock rather than with a flat ATR.",
+ "source": "Andersen & Bollerslev, \"Intraday periodicity and volatility persistence in financial markets,\" Journal of Empirical Finance 4(2-3), 1997, 115-158; Andersen, Bollerslev, Dobrev & co-authors, \"Time-Varying Periodicity in Intraday Volatility,\" CREATES RP 2018-05 (pure.au.dk/ws/files/120472862/rp18_05.pdf)",
+ "params": {
+  "buf": 0.25,
+  "brk": 12,
+  "slot_lb": 20,
+  "min_sess": 4,
+  "stop_d": 1.0,
+  "tp_d": 2.0,
+  "t_open": 15,
+  "t_close": 25,
+  "time_stop": 24,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0,
+  "side": "both"
+ },
+ "grid": {
+  "buf": [
+   0.1,
+   0.25,
+   0.5
+  ],
+  "brk": [
+   8,
+   12,
+   20
+  ],
+  "slot_lb": [
+   10,
+   20
+  ]
+ },
+ "code": "def _session_clock(bars):\n    \"\"\"(open_min, close_min, step_min) for the regular session, measured from\n    the tape's own volume profile so it is correct in either DST, on any\n    timeframe, and on symbols whose feed carries no extended hours.\"\"\"\n    vol = {}\n    for b in bars:\n        s = str(b[\"t\"])\n        m = int(s[11:13]) * 60 + int(s[14:16])\n        vol.setdefault(m, []).append(float(b.get(\"v\") or 0))\n    slots = sorted(vol)\n    ns = len(slots)\n    if ns < 4:\n        return (slots[0] if slots else 0), (slots[-1] if slots else 0), 5\n    gaps = {}\n    for k in range(ns - 1):\n        g = slots[k + 1] - slots[k]\n        gaps[g] = gaps.get(g, 0) + 1\n    step = max(gaps, key=gaps.get) or 5\n    med = []\n    for s in slots:\n        v = sorted(vol[s])\n        m = len(v)\n        med.append(v[m // 2] if m % 2 else 0.5 * (v[m // 2 - 1] + v[m // 2]))\n    w = max(1, int(round(15.0 / step)))\n    if ns <= 2 * w + 1 or (slots[-1] - slots[0]) <= 400:\n        return slots[0], slots[-1], step\n    best = None\n    bj = w\n    for k in range(w, ns - w + 1):\n        f = sum(med[k:k + w]) / w\n        p = sum(med[k - w:k]) / w\n        r = (f + 1.0) / (p + 1.0)\n        if best is None or r > best:\n            best = r\n            bj = k\n    lo = max(1, bj - w)\n    hi = min(ns - 1, bj + w)\n    bj = max(range(lo, hi + 1), key=lambda k: (med[k] + 1.0) / (med[k - 1] + 1.0))\n    o = slots[bj]\n    return o, min(slots[-1], o + 390 - step), step\n\n\ndef _median(v):\n    v = sorted(v)\n    m = len(v)\n    if not m:\n        return None\n    return v[m // 2] if m % 2 else 0.5 * (v[m // 2 - 1] + v[m // 2])\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    tt = [str(b[\"t\"]) for b in bars]\n    slot = [int(s[11:13]) * 60 + int(s[14:16]) for s in tt]\n    day = [s[:10] for s in tt]\n    o_min, c_min, step = _session_clock(bars)\n\n    # ---- D_s : the median range of THIS time-of-day slot over the previous\n    #      `slot_lb` sessions. The table is frozen at each session open, so a\n    #      bar is only ever scaled by sessions that finished before it.\n    lb = max(2, int(ctx.p.slot_lb))\n    need = max(2, int(ctx.p.min_sess))\n    hist = {}\n    pend = {}\n    cur = {}\n    Dv = [None] * n\n    for i in range(n):\n        if i == 0 or day[i] != day[i - 1]:\n            for s, r in pend.items():\n                hist.setdefault(s, []).append(r)\n            pend = {}\n            cur = {}\n            for s, lst in hist.items():\n                if len(lst) >= need:\n                    cur[s] = _median(lst[-lb:])\n        pend[slot[i]] = float(bars[i][\"h\"]) - float(bars[i][\"l\"])\n        Dv[i] = cur.get(slot[i])\n\n    t0 = o_min + float(ctx.p.t_open)\n    t1 = c_min - float(ctx.p.t_close)\n    ctx.D = ctx.series(Dv, \"diurnal_unit\")\n    ctx.win = ctx.series([1 if t0 <= slot[i] <= t1 else 0 for i in range(n)],\n                         \"in_window\")\n    ctx.eod = ctx.series([1 if slot[i] >= c_min - step else 0 for i in range(n)],\n                         \"session_end\")\n    ctx.dc = ctx.indicator(\"donchian\", period=max(2, int(ctx.p.brk)))\n\n\ndef signal(ctx, i):\n    if not ctx.win[i]:\n        return 0\n    d = ctx.D[i]\n    if d is None or d <= 0:\n        return 0\n    u, l = ctx.dc.upper[i - 1], ctx.dc.lower[i - 1]\n    if u is None or l is None:\n        return 0\n    c = ctx.c[i]\n    b = float(ctx.p.buf) * d\n    if c > u + b:\n        return 1\n    if c < l - b:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.eod[i]:\n        return True\n    d = ctx.D[i]\n    if d is None or d <= 0:\n        return False\n    p = ctx.positions[0]\n    e = max(0, int(p[\"entry_i\"]))\n    px = ctx.c[i]\n    stop = float(ctx.p.stop_d) * d\n    tgt = float(ctx.p.tp_d) * d\n    if p[\"side\"] == \"long\":\n        best = p[\"entry\"]\n        for k in range(e, i + 1):\n            v = ctx.c[k]\n            if v > best:\n                best = v\n        if px >= p[\"entry\"] + tgt:\n            return True\n        return px <= best - stop\n    best = p[\"entry\"]\n    for k in range(e, i + 1):\n        v = ctx.c[k]\n        if v < best:\n            best = v\n    if px <= p[\"entry\"] - tgt:\n        return True\n    return px >= best + stop"
+}

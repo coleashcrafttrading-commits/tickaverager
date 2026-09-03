@@ -1,0 +1,33 @@
+{
+ "name": "White Reality Check benchmark gate",
+ "note": "Five candidate rules are scored bar by bar against a benchmark (buy-and-hold or flat); every recheck bars a stationary-bootstrap Reality Check -- Politis-Romano blocks, ONE common index path across all rules, statistics recentred by the original sample mean -- tests the MAXIMUM of the five against the null that the best of them has no edge over the benchmark. The argmax rule is traded only while P_RC < alpha. Deviations, both for wall clock: the sample is capped at rc_n bars instead of expanding without limit, and B defaults to 200 rather than 1000. The seed is a recorded parameter.",
+ "source": "White, H. (2000), 'A Reality Check for Data Snooping', Econometrica 68(5), 1097-1126 - Corollary 2.4 and Section 3 'Implementing the Bootstrap Reality Check' (P_RC = 1 - M/N, the recursive V_k updates, q=0.1, N=500-1000). PDF: https://users.ssc.wisc.edu/~bhansen/718/White2000.pdf . Applied to technical trading rules in Sullivan, R., Timmermann, A. & White, H. (1999), 'Data-Snooping, Technical Trading Rule Performance, and the Bootstrap', Journal of Finance 54(5), 1647-1691. Bootstrap: Politis, D. & Romano, J. (1994), 'The Stationary Bootstrap', JASA 89(428), 1303-1313.",
+ "params": {
+  "q": 0.1,
+  "B": 200,
+  "alpha": 0.1,
+  "bench": 0,
+  "rc_n": 750,
+  "recheck": 126,
+  "seed": 20260902,
+  "hold_bench": 0,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "q": [
+   0.05,
+   0.1,
+   0.2
+  ],
+  "alpha": [
+   0.05,
+   0.1
+  ],
+  "bench": [
+   0,
+   1
+  ]
+ },
+ "code": "def _rc(P, a, m, q, B, rng):\n    \"\"\"One bootstrap Reality Check on the sample [a, a+m). Returns (p, kstar).\"\"\"\n    import math\n    L = len(P)\n    sq = math.sqrt(m)\n    fbar = [(P[k][a + m] - P[k][a]) / m for k in range(L)]\n    kstar = 0\n    for k in range(1, L):\n        if fbar[k] > fbar[kstar]:\n            kstar = k\n    V = sq * fbar[kstar]\n    if V <= 0.0:\n        return 1.0, kstar          # nothing beat the benchmark, nothing to test\n    lg = math.log(1.0 - q)\n    ri = rng.random\n    cnt = 0\n    idx = range(L)\n    for _ in range(B):\n        tot = [0.0] * L\n        filled = 0\n        while filled < m:\n            st = int(ri() * m)\n            if st >= m:\n                st = m - 1\n            u = ri()\n            ln = int(math.log(1.0 - u) / lg) + 1\n            if ln > m - filled:\n                ln = m - filled\n            e = st + ln\n            if e <= m:\n                for k in idx:\n                    Pk = P[k]\n                    tot[k] += Pk[a + e] - Pk[a + st]\n            else:\n                wrap = e - m\n                for k in idx:\n                    Pk = P[k]\n                    tot[k] += (Pk[a + m] - Pk[a + st]) + (Pk[a + wrap] - Pk[a])\n            filled += ln\n        best = None\n        for k in idx:\n            x = sq * (tot[k] / m - fbar[k])\n            if best is None or x > best:\n                best = x\n        if best <= V:\n            cnt += 1\n    return 1.0 - cnt / float(B), kstar\n\n\ndef family_init(ctx):\n    import random\n    import indicators as I\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    ef = I.compute(\"ema\", bars, period=9)[\"ema\"]\n    es = I.compute(\"ema\", bars, period=30)[\"ema\"]\n    rs = I.compute(\"rsi\", bars, period=14)[\"rsi\"]\n    dc = I.compute(\"donchian\", bars, period=20)\n    du, dl = dc[\"upper\"], dc[\"lower\"]\n    sm = I.compute(\"sma\", bars, period=20)[\"sma\"]\n    sd = I.compute(\"stddev\", bars, period=20)[\"stddev\"]\n\n    # ---- the l candidate rules. Each is a POSITION decided on the close of\n    # bar t and held over bar t+1. Several are near-duplicates by design --\n    # that cross-rule dependence is exactly what one common bootstrap index\n    # path across all rules exists to preserve.\n    L = 5\n    pos = [[0] * n for _ in range(L)]\n    mom = 20\n    for t in range(n):\n        if ef[t] is not None and es[t] is not None:\n            pos[0][t] = 1 if ef[t] > es[t] else -1\n        if t >= mom:\n            pos[1][t] = 1 if c[t] > c[t - mom] else -1\n        prev = pos[2][t - 1] if t else 0\n        if t and du[t - 1] is not None and dl[t - 1] is not None:\n            if c[t] > du[t - 1]:\n                prev = 1\n            elif c[t] < dl[t - 1]:\n                prev = -1\n        pos[2][t] = prev\n        if rs[t] is not None:\n            pos[3][t] = 1 if rs[t] < 35 else (-1 if rs[t] > 65 else 0)\n        if sm[t] is not None and sd[t] is not None and sd[t] > 0:\n            z = (c[t] - sm[t]) / sd[t]\n            pos[4][t] = -1 if z > 2.0 else (1 if z < -2.0 else 0)\n\n    ret = [0.0] * n\n    for t in range(1, n):\n        ret[t] = (c[t] / c[t - 1] - 1.0) if c[t - 1] else 0.0\n    use_bh = int(ctx.p.bench) == 1\n\n    # prefix sums of the per-bar performance differential f_{k,t}\n    P = []\n    for k in range(L):\n        pk = pos[k]\n        acc = [0.0] * (n + 1)\n        s = 0.0\n        for t in range(n):\n            f = 0.0\n            if t:\n                f = pk[t - 1] * ret[t] - (ret[t] if use_bh else 0.0)\n            s += f\n            acc[t + 1] = s\n        P.append(acc)\n\n    q = float(ctx.p.q)\n    if q <= 0.0 or q >= 1.0:\n        q = 0.1\n    B = int(ctx.p.B)\n    rc_n = int(ctx.p.rc_n)\n    step = max(20, int(ctx.p.recheck))\n    warm = 60\n    rng = random.Random(int(ctx.p.seed))\n\n    pv = [1.0] * n\n    ks = [0] * n\n    cur_p, cur_k = 1.0, 0\n    nxt = warm + 200\n    for t in range(n):\n        if t >= nxt:\n            a = t - rc_n\n            if a < warm:\n                a = warm\n            m = t - a\n            if m >= 100:\n                cur_p, cur_k = _rc(P, a, m, q, B, rng)\n            nxt = t + step\n        pv[t] = cur_p\n        ks[t] = cur_k\n    ctx.pv = ctx.series(pv, \"rc_p\")\n    ctx.kk = ctx.series(ks, \"rc_kstar\")\n    ctx.rulepos = [ctx.series(p, \"rulepos%d\" % j) for j, p in enumerate(pos)]\n\n\ndef signal(ctx, i):\n    p = ctx.pv[i]\n    if p is None:\n        return 0\n    if p >= ctx.p.alpha:\n        # the family is rejected: hold the benchmark, or stand aside\n        return 1 if int(ctx.p.hold_bench) else 0\n    k = ctx.kk[i]\n    if k is None:\n        return 0\n    v = ctx.rulepos[int(k)][i]\n    if not v:\n        return 0\n    return 1 if v > 0 else -1"
+}

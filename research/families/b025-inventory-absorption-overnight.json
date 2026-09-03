@@ -1,0 +1,31 @@
+{
+ "name": "Inventory Absorption Overnight",
+ "note": "At the regular-session close, buy the day that closed in the bottom clv_lo of its own high-low range on above-average volume and hold only across the closed-market window; the mirror (closed in the top of its range) is the control arm the source predicts will be much weaker. No stop and no target -- the position exists only overnight, where no bar could evaluate one.",
+ "source": "Boyarchenko, Larsen & Whelan, 'The Overnight Drift', Federal Reserve Bank of New York Staff Reports no. 917, February 2020, revised August 2022. Read directly from newyorkfed.org; the inventory mechanism, the end-of-day order imbalance link and the selloff/rally asymmetry are all in the abstract and introduction. CLV as an imbalance proxy is my substitution, since the paper uses signed volume we do not have.",
+ "params": {
+  "clv_lo": 0.3,
+  "clv_hi": 0.7,
+  "rv_min": 0.9,
+  "vol_n": 20,
+  "atr_n": 14,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "clv_lo": [
+   0.2,
+   0.25,
+   0.35
+  ],
+  "rv_min": [
+   0.9,
+   1.2
+  ],
+  "vol_n": [
+   10,
+   20
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"The overnight window as a dealer-inventory trade.\n\n    At the regular-session close, CLV = (C-L)/(H-L) over the day's own RTH\n    range says who won the session and RV = V / SMA(V,20) says how much stock\n    had to change hands to settle it. A close pinned to the low on heavy volume\n    is the negative-imbalance state Boyarchenko/Larsen/Whelan say dealers get\n    paid to absorb overnight. The long arm is the paper's prediction; the short\n    arm (close pinned to the high) is the control it predicts will be weak.\n\n    Timing on intraday bars: the harness fills an entry at the NEXT bar's open,\n    so the decision is taken on the last bar BEFORE the closing bar, which puts\n    the fill at the 16:00 ET open -- the close itself. The exit fires on the\n    first regular-session bar of the next day, i.e. one bar after the opening\n    print. The overnight gap therefore sits entirely inside the trade.\n    \"\"\"\n    from datetime import date\n    bars = ctx.bars\n    m = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    vv = [float(b.get(\"v\") or 0.0) for b in bars]\n    ts = [str(b[\"t\"]) for b in bars]\n\n    def mins(s):\n        return int(s[11:13]) * 60 + int(s[14:16])\n\n    mn = [mins(s) for s in ts]\n    ds = [s[:10] for s in ts]\n\n    # bar length in minutes, read off the data rather than assumed\n    gaps = {}\n    for i in range(1, min(m, 400)):\n        g = mn[i] - mn[i - 1]\n        if 0 < g <= 60:\n            gaps[g] = gaps.get(g, 0) + 1\n    step = max(gaps, key=gaps.get) if gaps else 5\n\n    _dstc = {}\n\n    def is_dst(d):\n        if d in _dstc:\n            return _dstc[d]\n        y = int(d[0:4])\n        mo = int(d[5:7])\n        dd = int(d[8:10])\n        mar = date(y, 3, 1)\n        sec_sun = 1 + (6 - mar.weekday()) % 7 + 7\n        nov = date(y, 11, 1)\n        fst_sun = 1 + (6 - nov.weekday()) % 7\n        v = ((mo > 3 or (mo == 3 and dd >= sec_sun)) and\n             (mo < 11 or (mo == 11 and dd < fst_sun)))\n        _dstc[d] = v\n        return v\n\n    sig = [0] * m\n    sid = [0] * m          # session ordinal\n    opb = [0] * m          # 1 on the first regular-session bar of a day\n    sess = -1\n    cur = None\n    hi = lo = None\n    vol = 0.0\n    hist = []              # past sessions' regular-hours volume\n    nv = max(2, int(ctx.p.vol_n))\n    clv_lo = float(ctx.p.clv_lo)\n    clv_hi = float(ctx.p.clv_hi)\n    rv_min = float(ctx.p.rv_min)\n\n    for i in range(m):\n        d = ds[i]\n        if d != cur:\n            if cur is not None and hi is not None:\n                hist.append(vol)\n                if len(hist) > nv:\n                    hist.pop(0)\n            cur = d\n            sess += 1\n            hi = lo = None\n            vol = 0.0\n        sid[i] = sess\n        off = 60 if is_dst(d) else 0\n        o_min = 14 * 60 + 30 - off\n        c_min = 21 * 60 - off\n        t = mn[i]\n        if t < o_min or t >= c_min:\n            continue                        # regular session only\n        if t < o_min + step:\n            opb[i] = 1\n        hi = h[i] if hi is None else max(hi, h[i])\n        lo = l[i] if lo is None else min(lo, l[i])\n        vol += vv[i]\n        if t < c_min - step:\n            continue                        # not the decision bar yet\n        if len(hist) < nv // 2 or hi is None or hi <= lo:\n            continue\n        av = (sum(hist) + vol) / (len(hist) + 1)\n        if av <= 0.0:\n            continue\n        rv = vol / av\n        if rv <= rv_min:\n            continue\n        clv = (c[i] - lo) / (hi - lo)\n        if clv < clv_lo:\n            sig[i] = 1                      # sold off into the close\n        elif clv > clv_hi:\n            sig[i] = -1                     # the control arm\n\n    ctx.sg = ctx.series(sig, \"overnight_sig\")\n    ctx.sid = ctx.series(sid, \"session\")\n    ctx.opb = ctx.series(opb, \"session_open_bar\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out on the first regular-session bar of the following day.\"\"\"\n    if not ctx.positions:\n        return False\n    j = ctx.positions[0][\"entry_i\"]\n    s0 = ctx.sid[j]\n    s1 = ctx.sid[i]\n    if s0 is None or s1 is None:\n        return False\n    if s1 > s0 and ctx.opb[i]:\n        return True\n    return s1 - s0 >= 2\n"
+}

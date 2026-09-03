@@ -1,0 +1,35 @@
+{
+ "name": "Vol-scaled time-series momentum",
+ "note": "Moskowitz-Ooi-Pedersen time-series momentum: the sign of the trailing k-bar log return, sampled at every reb-th bar, with h overlapping sub-portfolios averaged so entries and exits stagger instead of reversing in one bar - the position is the majority vote of the h live formation dates, and a sign flip walks the book out over h rebalances. The exact ex ante variance model (exponentially weighted, centre of mass 60, only returns strictly before the bar) is computed and used as a stand-aside band. HONEST LIMIT: dollar sizing belongs to the shared harness, so the inverse-volatility position size cannot be expressed; what survives translation is the tail of that rule, standing aside when sigma is in the top of its own distribution, which is where the sized position would collapse towards zero. The risk-free leg is dropped - there is no second instrument and it is negligible at these horizons.",
+ "source": "Moskowitz, Ooi & Pedersen, 'Time Series Momentum' (Journal of Financial Economics 104, 2012, 228-250; PDF fetched from https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf). Section 2.4 equation (1) gives the ex ante volatility model with the 261 annualisation scalar and the centre-of-mass 60-day weighting; Section 3.2 specifies the sign rule, the position size inversely proportional to sigma_{t-1}, and the Jegadeesh-Titman overlapping-portfolio averaging used to avoid overlapping observations.",
+ "params": {
+  "k": 780,
+  "reb": 78,
+  "h": 6,
+  "com": 60,
+  "vote": 0.0,
+  "vol_pct": 0.9,
+  "vol_hist": 1000,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "k": [
+   390,
+   780,
+   1560
+  ],
+  "h": [
+   1,
+   3,
+   6
+  ],
+  "vol_pct": [
+   0.85,
+   1.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    r = [0.0] * n\n    for t in range(1, n):\n        a, b = c[t - 1], c[t]\n        r[t] = math.log(b / a) if (a > 0.0 and b > 0.0) else 0.0\n\n    # ---- Moskowitz-Ooi-Pedersen ex ante variance -------------------------\n    # sigma_t^2 = A * sum_i (1-d) d^i (r_{t-1-i} - rbar_t)^2 with the centre of\n    # mass d/(1-d) = com. Expanding the square against the SAME exponentially\n    # weighted mean gives E_w[r^2] - E_w[r]^2 exactly, so the recursion below\n    # is the published estimator and not an approximation of it. Only returns\n    # up to t-1 enter, which is what keeps sigma usable against day t.\n    com = float(ctx.p.com)\n    d = com / (com + 1.0)\n    w = 1.0 - d\n    s1 = 0.0\n    s2 = 0.0\n    sig = [None] * n\n    for t in range(1, n):\n        x = r[t - 1]\n        s1 = w * x + d * s1\n        s2 = w * x * x + d * s2\n        if t > int(ctx.p.com):\n            var = s2 - s1 * s1\n            sig[t] = var ** 0.5 if var > 0.0 else 0.0\n    ctx.sig = sig\n\n    # ---- the sign of the trailing k-bar return, sampled at rebalances -----\n    # No smoothing of price anywhere: this is sign(ln(C_t / C_{t-k})), the\n    # paper's rule, not a crossover. The risk-free leg is dropped - there is\n    # no second instrument here and it is negligible at these horizons.\n    k = int(ctx.p.k)\n    reb = max(1, int(ctx.p.reb))\n    h = max(1, int(ctx.p.h))\n\n    votes = [None] * n            # the average of the h live sub-portfolios\n    hist = []                     # the sub-portfolio signs, newest last\n    cur = None\n    for t in range(n):\n        if t >= k and t % reb == 0:\n            a, b = c[t - k], c[t]\n            if a > 0.0 and b > 0.0:\n                s = 1.0 if b > a else (-1.0 if b < a else 0.0)\n                hist.append(s)\n                if len(hist) > h:\n                    hist.pop(0)\n                cur = sum(hist) / len(hist) if len(hist) >= h else None\n        votes[t] = cur\n    ctx.votes = votes\n\n    # ---- the risk model, expressed as a stand-aside band ------------------\n    # The paper sizes at N = (target_vol / sigma) * S * capital. This harness\n    # owns share count, so the one part of that model a signal CAN carry is\n    # its tail: the dollar position implied by the model collapses towards\n    # zero exactly when sigma is in the top of its own distribution. That is\n    # the automatic crisis de-risking, and nothing else about the sizing rule\n    # survives translation into a fixed-size signal.\n    vh = int(ctx.p.vol_hist)\n    cap = [None] * n\n    cut = None\n    for t in range(n):\n        if t % reb == 0 and t >= vh:\n            wv = [x for x in sig[t - vh:t] if x is not None]\n            if len(wv) >= 60:\n                wv.sort()\n                j = int(float(ctx.p.vol_pct) * (len(wv) - 1))\n                cut = wv[j]\n        cap[t] = cut\n    ctx.cap = cap\n    ctx.start = k + h * reb + 2\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    v = ctx.votes[i]\n    if v is None:\n        return 0\n    s = ctx.sig[i]\n    cut = ctx.cap[i]\n    if s is not None and cut is not None and s > cut:\n        return 0                  # the model's implied position is negligible\n    th = float(ctx.p.vote)\n    if v > th:\n        return 1\n    if v < -th:\n        return -1\n    return 0"
+}

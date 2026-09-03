@@ -1,0 +1,30 @@
+{
+ "name": "Cumulative Delta Extreme Break",
+ "note": "Close-location-weighted signed volume accumulated from the cash open; the trade is a new extreme of that ACCUMULATOR against its own trailing 20 bars, not of price -- price can be flat while the accumulator breaks out, and that divergence is the signal. Out on the accumulator crossing back through zero, a percent stop, or the bell.",
+ "source": "StockSharp/AlgoTrading, strategy API/0001-0100/0054_Cumulative_Delta_Breakout -- 'Cumulative Delta sums the difference between buy and sell volume... trades when it breaks above its highest value or below its lowest value within the lookback period; exit when delta crosses back through zero'. The repo's own PY file uses a coarse sign(Close-Open)*Volume proxy; the close-location-value weighting used here is the standard OHLCV refinement.",
+ "params": {
+  "lb": 20,
+  "reset": 1,
+  "stop_pct": 0.02,
+  "close_min": 960,
+  "open_min": 570,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "lb": [
+   10,
+   20,
+   40
+  ],
+  "stop_pct": [
+   0.01,
+   0.02,
+   0.03
+  ],
+  "reset": [
+   0,
+   1
+  ]
+ },
+ "code": "def _et_clock(bars):\n    \"\"\"Minutes after ET midnight and the ET calendar date for every bar.\n\n    zoneinfo needs a tz database that Windows does not ship, so the US rule is\n    applied directly: EDT (UTC-4) from the second Sunday of March 07:00 UTC to\n    the first Sunday of November 06:00 UTC, EST (UTC-5) otherwise.\n    \"\"\"\n    import datetime as dt\n    mins = []\n    days = []\n    off_cache = {}\n    for b in bars:\n        s = str(b[\"t\"])\n        key = s[:13]\n        off = off_cache.get(key)\n        if off is None:\n            u = dt.datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]), int(s[11:13]))\n            mar = dt.datetime(u.year, 3, 8)\n            mar = mar + dt.timedelta(days=(6 - mar.weekday()) % 7)\n            mar = mar.replace(hour=7)\n            nov = dt.datetime(u.year, 11, 1)\n            nov = nov + dt.timedelta(days=(6 - nov.weekday()) % 7)\n            nov = nov.replace(hour=6)\n            off = 4 if (mar <= u < nov) else 5\n            off_cache[key] = off\n        hh = int(s[11:13]) - off\n        d = s[0:10]\n        if hh < 0:\n            hh += 24\n            d = (dt.date(int(s[0:4]), int(s[5:7]), int(s[8:10]))\n                 - dt.timedelta(days=1)).isoformat()\n        mins.append(hh * 60 + int(s[14:16]))\n        days.append(d)\n    return mins, days\n\n\ndef family_init(ctx):\n    \"\"\"Delta = volume signed by where the bar closed inside its own range --\n    the best net-aggression estimate OHLCV allows. Accumulated from the cash\n    open, a new extreme of the ACCUMULATOR (not of price) is the entry, and the\n    position lives exactly as long as the session's net flow agrees with it.\"\"\"\n    bars = ctx.bars\n    m = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    mins, days = _et_clock(bars)\n\n    cm = int(ctx.p.close_min)\n    om = int(ctx.p.open_min)\n    lb = max(2, int(ctx.p.lb))\n    reset = int(ctx.p.reset)\n\n    sess = [0] * m\n    rth = [False] * m\n    si = -1\n    prev = None\n    for i in range(m):\n        if days[i] != prev:\n            si += 1\n            prev = days[i]\n        sess[i] = si\n        rth[i] = (om <= mins[i] < cm)\n\n    isc = [False] * m\n    last = {}\n    for i in range(m):\n        if rth[i]:\n            last[sess[i]] = i\n    for i in last.values():\n        isc[i] = True\n\n    cum = [None] * m\n    sig = [0] * m\n    run = 0.0\n    seg = []                       # cum values of the current accumulation leg\n    cur = -1\n    for i in range(m):\n        if not rth[i]:\n            continue\n        if reset and sess[i] != cur:\n            run = 0.0\n            seg = []\n        cur = sess[i]\n        d = h[i] - l[i]\n        if d > 0.0:\n            run += v[i] * ((c[i] - l[i]) - (h[i] - c[i])) / d\n        cum[i] = run\n        n = len(seg)\n        if n >= lb and not isc[i]:\n            w = seg[n - lb:n]\n            if run > max(w):\n                sig[i] = 1\n            elif run < min(w):\n                sig[i] = -1\n        seg.append(run)\n    ctx.cum = ctx.series(cum, \"cumdelta\")\n    ctx.sig = ctx.series(sig, \"delta_break\")\n    ctx.sess = ctx.series(sess, \"session\")\n    ctx.rth = ctx.series(rth, \"rth\")\n    ctx.isc = ctx.series(isc, \"session_close\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Zero-cross of the accumulator, a percent stop, or the session bell.\"\"\"\n    if not ctx.positions:\n        return False\n    p = ctx.positions[0]\n    if not ctx.rth[i] or ctx.isc[i]:\n        return True\n    if ctx.sess[i] != ctx.sess[p[\"entry_i\"]]:\n        return True\n    u = ctx.cum[i]\n    if u is None:\n        return True\n    e = float(p[\"entry\"])\n    sp = float(ctx.p.stop_pct)\n    if p[\"side\"] == \"long\":\n        if u < 0.0:\n            return True\n        if e > 0.0 and ctx.c[i] <= e * (1.0 - sp):\n            return True\n    else:\n        if u > 0.0:\n            return True\n        if e > 0.0 and ctx.c[i] >= e * (1.0 + sp):\n            return True\n    return False\n"
+}

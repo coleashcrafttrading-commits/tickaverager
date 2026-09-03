@@ -1,0 +1,35 @@
+{
+ "name": "Hill-vs-EPD bias gap reliability gate",
+ "note": "Fits the trailing loss tail twice at six values of k -- the naive Hill estimator and the bias-corrected extended-Pareto ML (rho fixed at -1, profile likelihood, xi closed-form given delta) -- and takes the base long only while the two agree (BIASGAP) and Hill is stable in k (HILLDISP). Deviation, measured rather than assumed: on 5-minute bars the rho=-1 EPD-ML runs to its delta boundary and BIASGAP sits in roughly 0.3-6.0, not the paper's 0.15-0.30, so the gap thresholds are recalibrated to the observed range; HILLDISP keeps the paper's scale because 0.15 falls near its real quartile. The half-size step is dropped because sizing belongs to the harness; the 3-close persistence flatten is kept as the exit.",
+ "source": "Maribe, Verster & Beirlant, 'Reducing bias and MSE in estimation of heavy tails: a Bayesian approach', arXiv:1606.05687 - Hill estimator eq. (3), Weissman tail-probability estimator eq. (4), extended Pareto survival function eq. (6) and the EPD-ML bias-reduced estimator; the observation that Hill stability 'is not visible' in most cases motivates the dispersion term. Hill (1975) for the base estimator; Beirlant et al. (2009) for the EPD subclass F(xi, tau).",
+ "params": {
+  "win": 1000,
+  "step": 78,
+  "gap_max": 2.5,
+  "disp_max": 0.17,
+  "persist": 3,
+  "ema_n": 20,
+  "ndelta": 11,
+  "dmin": -0.9,
+  "dmax": 4.0,
+  "side": "long",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "gap_max": [
+   1.0,
+   2.5,
+   4.0
+  ],
+  "disp_max": [
+   0.13,
+   0.17,
+   0.22
+  ],
+  "ema_n": [
+   20,
+   50
+  ]
+ },
+ "code": "def _epd_xi(ys, ndelta, dmin, dmax):\n    \"\"\"Extended-Pareto ML with rho fixed at -1, by profile likelihood.\n\n    Gbar(y) = [y(1 + d - d*y^rho)]^(-1/xi) with rho = -1 collapses to\n    u(y) = (1+d)y - d, so xi_hat(d) = mean(ln u_j) in closed form and only d\n    has to be searched. At d = 0 this reproduces the Hill estimator exactly,\n    which is the check that the likelihood is the right one.\n    \"\"\"\n    import math\n    k = len(ys)\n    best = None\n    bxi = None\n    stp = (dmax - dmin) / float(ndelta - 1) if ndelta > 1 else 0.0\n    for mm in range(ndelta):\n        d = dmin + mm * stp\n        one = 1.0 + d\n        if one <= 0.0:\n            continue\n        s = 0.0\n        ok = True\n        for y in ys:\n            z = one * y - d\n            if z <= 1e-12:\n                ok = False\n                break\n            s += math.log(z)\n        if not ok:\n            continue\n        xi = s / k\n        if xi <= 1e-9:\n            continue\n        ll = -math.log(xi) + math.log(one) - 1.0 - xi\n        if best is None or ll > best:\n            best = ll\n            bxi = xi\n    return bxi\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n\n    r = [0.0] * n\n    for t in range(1, n):\n        r[t] = (c[t] / c[t - 1] - 1.0) if c[t - 1] else 0.0\n\n    win = int(ctx.p.win)\n    step = max(10, int(ctx.p.step))\n    ks = [int(x) for x in (25, 50, 75, 100, 125, 150) if x < win // 4]\n    if not ks:\n        ks = [25]\n    ndelta = int(ctx.p.ndelta)\n    dmin, dmax = float(ctx.p.dmin), float(ctx.p.dmax)\n    gmax, dsmax = float(ctx.p.gap_max), float(ctx.p.disp_max)\n\n    good = [0] * n          # is the tail model trustworthy right now\n    badrun = [0] * n        # consecutive bad checks we are into\n    cur_good, cur_bad = 0, 0\n    nxt = win\n    for t in range(n):\n        if t >= nxt:\n            nxt = t + step\n            xs = sorted(-x for x in r[t - win + 1:t + 1])\n            m = len(xs)\n            hs, xis = [], []\n            for k in ks:\n                base = xs[m - k - 1]\n                if base <= 0.0:\n                    hs = []\n                    break\n                ys = [xs[m - j] / base for j in range(1, k + 1)]\n                H = 0.0\n                for y in ys:\n                    H += math.log(y)\n                H /= k\n                xi = _epd_xi(ys, ndelta, dmin, dmax)\n                if xi is None or xi <= 0.0 or H <= 0.0:\n                    hs = []\n                    break\n                hs.append(H)\n                xis.append(xi)\n            if len(hs) < 2:\n                cur_good, cur_bad = 0, cur_bad + 1\n            else:\n                gap = 0.0\n                for H, xi in zip(hs, xis):\n                    gap += abs(H - xi) / xi\n                gap /= len(hs)\n                mh = sum(hs) / len(hs)\n                var = 0.0\n                for H in hs:\n                    var += (H - mh) ** 2\n                disp = math.sqrt(var / (len(hs) - 1)) / mh if mh > 0 else 9.9\n                if gap < gmax and disp < dsmax:\n                    cur_good, cur_bad = 1, 0\n                else:\n                    cur_good, cur_bad = 0, cur_bad + 1\n        good[t] = cur_good\n        badrun[t] = cur_bad\n    ctx.good = ctx.series(good, \"tail_ok\")\n    ctx.badrun = ctx.series(badrun, \"tail_badrun\")\n\n\ndef signal(ctx, i):\n    if not ctx.good[i]:\n        return 0\n    e, pe = ctx.e[i], ctx.e[i - 1]\n    if e is None or pe is None:\n        return 0\n    if ctx.c[i] > e and ctx.c[i - 1] <= pe:\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    b = ctx.badrun[i]\n    return b is not None and b >= int(ctx.p.persist)"
+}

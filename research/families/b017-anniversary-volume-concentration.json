@@ -1,0 +1,39 @@
+{
+ "name": "Anniversary Volume Concentration",
+ "note": "Frazzini-Lamont's expected-announcer trade rebuilt from volume alone. Two things in the paper are unavailable here and are replaced rather than faked, and both replacements are the point of the family: the calendar MONTH becomes one trading session (a single-symbol intraday backtest has no 24 months of daily history), and the CROSS-SECTIONAL tercile on volume concentration becomes a self-normalising per-symbol ratio. A session is FLAGGED when it contains a bar trading vspike x the normal volume for that time of day and moving rsig sigma -- the paper's 'a month containing a session with a volume and a return spike', one level down, measured slot-relative because a plain trailing median just rediscovers the diurnal volume smile and flags every session. A session is an EXPECTED ANNOUNCER if the session `anniv` back was flagged, which is the paper's 93%-accurate last-year's-announcement-month predictor. Concentration is the share of the trailing vcr_win sessions' volume falling in flagged sessions, lagged one session, divided by the flagged sessions' share of the COUNT: 1.0 means volume is spread evenly and above 1.0 means it clusters in the events. Long an expected announcer whose volume concentrates, short a non-announcer whose volume does not, as a rolling book that re-forms at every session boundary.",
+ "source": "Frazzini & Lamont, 'The Earnings Announcement Premium and Trading Volume', NBER Working Paper 13090 (May 2007) - PDF fetched and read directly this session. Verified specifics: long expected-announcers / short expected-non-announcers earns 61bp per month, t > 5, annual Sharpe 0.94 (higher than value, size, momentum or the market over the same period); 7-18% per year across specifications; announcement months predicted from last year's announcement month gives 93% accuracy for firms with 4 announcements in the prior year; the sorting variable is the volume concentration ratio (percent of total share volume over the previous four years occurring in announcement months), lagged 3 months; day-0 volume is more than 50% above normal, which is what makes the volume-spike proxy viable; effect present continuously since 1926.",
+ "params": {
+  "vspike": 3.0,
+  "rsig": 2.0,
+  "spike_win": 60,
+  "slot_n": 5,
+  "min_slot": 3,
+  "vcr_lag": 1,
+  "vcr_win": 10,
+  "anniv": 12,
+  "cycle": 12,
+  "req4": 0,
+  "conc_thr": 1.1,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.5
+ },
+ "grid": {
+  "vspike": [
+   2.0,
+   3.0,
+   4.0
+  ],
+  "anniv": [
+   8,
+   12
+  ],
+  "conc_thr": [
+   1.0,
+   1.1,
+   1.25
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n    v = [float(x.get(\"v\") or 0.0) for x in b]\n    ts = [str(x[\"t\"]) for x in b]\n    day = [t[:10] for t in ts]\n    slot = [t[11:16] for t in ts]\n\n    # ---- bar-level attention spikes: vspike x the normal volume for THIS\n    # time of day AND a move of rsig sigma. Both, because volume alone is not\n    # an event -- and slot-relative, because measuring an intraday bar against\n    # a plain trailing median just rediscovers the diurnal volume smile and\n    # flags every single session.\n    W = int(ctx.p.spike_win)\n    SN = int(ctx.p.slot_n)\n    vm = float(ctx.p.vspike)\n    rm = float(ctx.p.rsig)\n    spike = [0] * n\n    rets = [0.0] * n\n    for j in range(1, n):\n        if c[j - 1] > 0:\n            rets[j] = math.log(c[j] / c[j - 1])\n    prior = {}\n    for j in range(n):\n        pv = prior.get(slot[j])\n        if pv is not None and len(pv) >= int(ctx.p.min_slot) and j > W:\n            w = pv[-SN:]\n            m = sum(w) / len(w)\n            if m > 0 and v[j] >= vm * m:\n                wr = rets[j - W:j]\n                mu = sum(wr) / W\n                var = sum((x - mu) ** 2 for x in wr) / W\n                if var > 0 and abs(rets[j]) >= rm * math.sqrt(var):\n                    spike[j] = 1\n        if pv is None:\n            prior[slot[j]] = [v[j]]\n        else:\n            pv.append(v[j])\n\n    # ---- roll bars up into sessions. A session stands in for the paper's\n    # calendar month: it is the unit the cycle is counted in.\n    sess = []\n    idx = []\n    last = None\n    for j in range(n):\n        if day[j] != last:\n            last = day[j]\n            sess.append({\"vol\": 0.0, \"flag\": 0, \"a\": j, \"b\": j})\n            idx.append(len(sess) - 1)\n        else:\n            idx.append(len(sess) - 1)\n        s = sess[-1]\n        s[\"vol\"] += v[j]\n        s[\"b\"] = j\n        if spike[j]:\n            s[\"flag\"] = 1\n\n    ns = len(sess)\n    lag = int(ctx.p.vcr_lag)\n    win = int(ctx.p.vcr_win)\n    anniv = int(ctx.p.anniv)\n    cyc = int(ctx.p.cycle)\n    need = int(ctx.p.req4)\n    thr = float(ctx.p.conc_thr)\n\n    d = [0] * ns\n    for s in range(ns):\n        if s - anniv < 0:\n            continue\n        lo = s - lag - win\n        hi = s - lag\n        if lo < 0 or hi <= lo:\n            continue\n        tot = 0.0\n        fl = 0.0\n        nf = 0\n        for q in range(lo, hi):\n            tot += sess[q][\"vol\"]\n            if sess[q][\"flag\"]:\n                fl += sess[q][\"vol\"]\n                nf += 1\n        if tot <= 0 or nf == 0 or nf == (hi - lo):\n            continue\n        vcr = fl / tot\n        share = float(nf) / float(hi - lo)\n        conc = vcr / share                 # 1.0 = volume spread evenly\n        if need:\n            k = 0\n            for q in range(max(0, s - cyc), s):\n                k += sess[q][\"flag\"]\n            if k != 4:\n                continue\n        exp = sess[s - anniv][\"flag\"]\n        if exp and conc >= thr:\n            d[s] = 1\n        elif (not exp) and conc < thr:\n            d[s] = -1\n\n    # ---- a rolling book: on the last bar of a session we already carry the\n    # next session's direction, so the fill lands on that session's open.\n    want = [0] * n\n    for j in range(n):\n        s = idx[j]\n        if j == sess[s][\"b\"]:\n            want[j] = d[s + 1] if s + 1 < ns else 0\n        else:\n            want[j] = d[s]\n    ctx.w = ctx.series(want, \"want\")\n\n\ndef signal(ctx, i):\n    w = ctx.w[i]\n    return 0 if w is None else int(w)"
+}

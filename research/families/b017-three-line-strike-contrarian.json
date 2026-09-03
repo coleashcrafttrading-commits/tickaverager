@@ -1,0 +1,33 @@
+{
+ "name": "Three-Line Strike Traded Against Its Name",
+ "note": "Three same-coloured bars making monotonic progress -- rising closes AND rising lows, each with a body at least bmin of its own range, in the direction the EMA(10) already says -- then one bar of at least rmin x ATR(14) that closes back through `erase` of everything the run achieved, measured from close(C) to open(A). Bulkowski's 4.7-million-line census says this resolves AGAINST its textbook label in both directions (the bullish strike is a bearish reversal 65% of the time, the bearish strike a bullish one 84%), so the trade is taken opposite the pattern's name. Two knobs exist because the pattern is defined on daily bars and this study runs intraday. `erase` = 1.0 is the textbook full erasure and is in the sweep, but on 5-minute bars one bar undoing three strong ones is close to nonexistent, so the default asks for most of the run rather than all of it. `gap` switches the open(D)-beyond-close(C) condition on: intraday, consecutive opens sit on the prior close, so that clause stops meaning 'opened against the run and reversed' and becomes a coin-flip on one tick -- it is off by default and swept, not silently dropped. Optional 3-bar entry delay, no target, a 10-bar time stop: the claimed edge is in the tail, not the median.",
+ "source": "Bulkowski, Encyclopedia of Candlestick Charts; https://thepatternsite.com/ThreeLineStrikeBull.html (rank 2/103, frequency rank 95, bearish reversal 65%, n=69, 'wait 3 days before selling after downward breakouts in uptrends') and https://thepatternsite.com/ThreeLineStrikeBear.html (overall rank 1/103, bullish reversal 84%, n=85).",
+ "params": {
+  "delay": 0,
+  "bmin": 0.4,
+  "rmin": 1.0,
+  "erase": 0.65,
+  "gap": 0,
+  "atr_n": 14,
+  "ema_n": 10,
+  "time_stop": 10,
+  "tp_atr": 0.0,
+  "st_atr": 1.5
+ },
+ "grid": {
+  "delay": [
+   0,
+   3
+  ],
+  "erase": [
+   0.6,
+   0.8,
+   1.0
+  ],
+  "gap": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.a = ctx.indicator(\"atr\", period=int(ctx.p.atr_n))\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n\n\ndef _body_ok(o, h, l, c, bmin):\n    r = h - l\n    if r <= 0:\n        return False\n    return abs(c - o) >= bmin * r\n\n\ndef signal(ctx, i):\n    j = i - int(ctx.p.delay)\n    if j < 3:\n        return 0\n    a = ctx.a[j]\n    e = ctx.e[j]\n    if a is None or e is None or a <= 0:\n        return 0\n    bmin = float(ctx.p.bmin)\n    rmin = float(ctx.p.rmin)\n    er = float(ctx.p.erase)\n    gap = int(ctx.p.gap)\n    A, B, C, D = j - 3, j - 2, j - 1, j\n\n    oA, hA, lA, cA = ctx.o[A], ctx.h[A], ctx.l[A], ctx.c[A]\n    oB, hB, lB, cB = ctx.o[B], ctx.h[B], ctx.l[B], ctx.c[B]\n    oC, hC, lC, cC = ctx.o[C], ctx.h[C], ctx.l[C], ctx.c[C]\n    oD, hD, lD, cD = ctx.o[D], ctx.h[D], ctx.l[D], ctx.c[D]\n\n    if (hD - lD) < rmin * a:\n        return 0\n    if not (_body_ok(oA, hA, lA, cA, bmin) and _body_ok(oB, hB, lB, cB, bmin)\n            and _body_ok(oC, hC, lC, cC, bmin)):\n        return 0\n\n    # ---- the BULLISH three-line strike. Bulkowski's census says it resolves\n    # DOWN 65% of the time, so it is sold, not bought.\n    if cA > oA and cB > oB and cC > oC \\\n            and cA < cB < cC and lA < lB < lC and cC > e \\\n            and cD < oD and (not gap or oD > cC) \\\n            and cD <= cC - er * (cC - oA):\n        return -1\n\n    # ---- the BEARISH three-line strike: up 84% of the time. Bought.\n    if cA < oA and cB < oB and cC < oC \\\n            and cA > cB > cC and hA > hB > hC and cC < e \\\n            and cD > oD and (not gap or oD < cC) \\\n            and cD >= cC + er * (oA - cC):\n        return 1\n    return 0"
+}

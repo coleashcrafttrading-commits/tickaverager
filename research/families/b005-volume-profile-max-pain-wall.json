@@ -1,0 +1,33 @@
+{
+ "name": "Volume-Profile Max-Pain Wall",
+ "note": "Trailing-session volume snapped to the option strike lattice; the heaviest grid level within a few strikes of price stands in for the largest open-interest strike. Over the sessions running into monthly expiry, trade TOWARD that level whenever price is more than a fraction of a strike interval away, out at convergence, at the expiry close, or on a fixed strike-fraction stop.",
+ "source": "Ni, Pearson & Poteshman (2005), JFE 78(1), 49-87 - Figure 6 Panel A (clustering conditional on market makers holding net purchased positions, spike ~2% vs ~1% unconditional, and elevated levels on pre-expiration dates). Max-pain framing is practitioner; the volume-profile-snapped-to-strike-grid proxy is my synthesis.",
+ "params": {
+  "prof_n": 20,
+  "win_days": 5,
+  "trig_g": 0.3,
+  "targ_g": 0.05,
+  "stop_g": 0.6,
+  "radius": 3,
+  "g_scale": 1.0,
+  "entry_hour": 14,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "win_days": [
+   3,
+   5,
+   10
+  ],
+  "trig_g": [
+   0.2,
+   0.3,
+   0.45
+  ],
+  "prof_n": [
+   10,
+   20
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Volume profile bucketed onto the OPTION STRIKE LATTICE, not into\n    arbitrary price bins. The grid level that has absorbed the most volume\n    over the trailing sessions is the proxy for the largest open-interest\n    strike; in the run-up to monthly expiry price is pulled toward it.\"\"\"\n    import calendar\n    bars = ctx.bars\n    m = len(bars)\n\n    cal = {}\n\n    def month(y, mo):\n        k = (y, mo)\n        if k not in cal:\n            nd = calendar.monthrange(y, mo)[1]\n            fri = 0\n            mar = 0\n            nov = 0\n            cf = 0\n            for d in range(1, nd + 1):\n                if calendar.weekday(y, mo, d) == 4:\n                    cf += 1\n                    if cf == 3:\n                        fri = d\n                        break\n            # US DST runs 2nd Sunday of March -> 1st Sunday of November\n            cn = 0\n            for d in range(1, calendar.monthrange(y, 3)[1] + 1):\n                if calendar.weekday(y, 3, d) == 6:\n                    cn += 1\n                    if cn == 2:\n                        mar = d\n                        break\n            for d in range(1, calendar.monthrange(y, 11)[1] + 1):\n                if calendar.weekday(y, 11, d) == 6:\n                    nov = d\n                    break\n            wk = [d for d in range(1, nd + 1) if calendar.weekday(y, mo, d) < 5]\n            cal[k] = (fri, mar, nov, wk)\n        return cal[k]\n\n    def gsize(p):\n        s = float(ctx.p.g_scale)\n        if p < 20.0:\n            g = 0.5\n        elif p < 100.0:\n            g = 1.0\n        elif p < 200.0:\n            g = 2.5\n        else:\n            g = 5.0\n        return g * s\n\n    # ---- per-bar calendar fields, session ids, ET minute ----\n    sid = [0] * m\n    etm = [0] * m\n    rank = [0] * m          # weekdays from this date to expiry, inclusive\n    order = []\n    seen = {}\n    for i in range(m):\n        t = bars[i][\"t\"]\n        y = int(t[0:4]); mo = int(t[5:7]); d = int(t[8:10])\n        hh = int(t[11:13]); mi = int(t[14:16])\n        fri, mar, nov, wk = month(y, mo)\n        on = ((mo > 3 or (mo == 3 and d >= mar))\n              and (mo < 11 or (mo == 11 and d < nov)))\n        etm[i] = hh * 60 + mi + (-240 if on else -300)\n        dte = t[:10]\n        if dte not in seen:\n            seen[dte] = len(order)\n            order.append(dte)\n        sid[i] = seen[dte]\n        r = 0\n        if fri and d <= fri and calendar.weekday(y, mo, d) < 5:\n            for x in wk:\n                if d <= x <= fri:\n                    r += 1\n        rank[i] = r\n\n    daily = len(order) == m\n    ns = len(order)\n\n    # ---- each session's own (typical price, volume) pairs ----\n    own = [[] for _ in range(ns)]\n    close = [None] * ns\n    for i in range(m):\n        k = sid[i]\n        tp = (float(bars[i][\"h\"]) + float(bars[i][\"l\"])\n              + float(bars[i][\"c\"])) / 3.0\n        own[k].append((tp, float(bars[i].get(\"v\") or 0.0)))\n        close[k] = float(bars[i][\"c\"])\n\n    # ---- profile for each session, built ONLY from earlier sessions ----\n    lb = max(1, int(ctx.p.prof_n))\n    prof = [None] * ns\n    for k in range(ns):\n        if k == 0:\n            continue\n        g = gsize(close[k - 1])\n        acc = {}\n        for j in range(max(0, k - lb), k):\n            for tp, v in own[j]:\n                b = int(round(tp / g))\n                acc[b] = acc.get(b, 0.0) + v\n        prof[k] = (g, acc)\n    ctx.prof = prof\n    ctx.sid = sid\n\n    # ---- the trading window: the W weekday sessions ending on expiry ----\n    w = max(1, int(ctx.p.win_days))\n    eh = int(ctx.p.entry_hour) * 60\n    act = [False] * m\n    for i in range(m):\n        r = rank[i]\n        if r < 1 or r > w:\n            continue\n        e = 960 if daily else etm[i]\n        if r == w:\n            act[i] = e >= eh          # first day: not before the entry hour\n        elif r == 1:\n            act[i] = e <= 958         # expiry Friday: out by 15:58 ET\n        else:\n            act[i] = True\n    ctx.act = ctx.series(act, \"expiry_window\")\n\n\ndef _kstar(ctx, i):\n    k = ctx.sid[i]\n    p = ctx.prof[k]\n    if p is None:\n        return None, None\n    g, acc = p\n    if not acc or g <= 0.0:\n        return None, None\n    px = ctx.c[i]\n    lv = int(round(px / g))\n    r = max(1, int(ctx.p.radius))\n    best = None\n    bv = -1.0\n    for j in range(lv - r, lv + r + 1):\n        v = acc.get(j, 0.0)\n        if v > bv:\n            bv = v\n            best = j\n    if best is None or bv <= 0.0:\n        return None, None\n    return best * g, g\n\n\ndef signal(ctx, i):\n    if not ctx.act[i]:\n        return 0\n    ks, g = _kstar(ctx, i)\n    if ks is None:\n        return 0\n    d = ctx.c[i] - ks\n    t = ctx.p.trig_g * g\n    if d <= -t:\n        return 1\n    if d >= t:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if not ctx.act[i]:\n        return True\n    ks, g = _kstar(ctx, i)\n    if ks is None:\n        return True\n    px = ctx.c[i]\n    if abs(px - ks) <= ctx.p.targ_g * g:\n        return True\n    p = ctx.positions[0]\n    d = 1.0 if p[\"side\"] == \"long\" else -1.0\n    if (px - p[\"entry\"]) * d <= -ctx.p.stop_g * g:\n        return True\n    return False\n"
+}

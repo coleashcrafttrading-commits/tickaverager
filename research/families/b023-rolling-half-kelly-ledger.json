@@ -1,0 +1,40 @@
+{
+ "name": "Rolling Half-Kelly Ledger Sizing",
+ "note": "The signal is a deliberately fixed harness - a 20-bar Donchian breakout, out on a 10-bar low, stop at 2 ATR - so the only thing under test is the QUANTITY rule. A rolling ledger of the last N closed trades on this symbol gives W, the average win and the average loss, hence f* = W - (1-W)/R; the share count is kelly_c * f* of equity divided by the per-share stop distance, capped at risk_cap, and a NEGATIVE f* vetoes the trade outright. ONE GAP HAD TO BE FILLED: as literally written the veto is absorbing, because f* is only recomputed when a trade closes and no trade can close once trading stops - measured on the probe it froze every symbol at exactly 30 trades and left the whole grid inert. probe_n therefore takes one floor-sized trade after that many consecutive vetoes so the ledger can refresh; the sweep includes an arm large enough to reproduce the literal absorbing rule.",
+ "source": "Edward O. Thorp, 'The Kelly Criterion in Blackjack, Sports Betting, and the Stock Market' (2006/2007), open PDF at https://gwern.net/doc/statistics/decision/2006-thorp.pdf - the half-Kelly growth/drawdown result is in the fractional-Kelly section.",
+ "params": {
+  "dc_in": 20,
+  "dc_out": 10,
+  "ledger_n": 100,
+  "kelly_c": 0.5,
+  "risk_cap": 0.02,
+  "warm_risk": 0.005,
+  "min_ledger": 30,
+  "probe_n": 10,
+  "equity0": 100000.0,
+  "max_shares": 5000,
+  "shares": 100,
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "time_stop": 0,
+  "exit_signal_on": 1,
+  "side": "long"
+ },
+ "grid": {
+  "ledger_n": [
+   50,
+   100,
+   250
+  ],
+  "kelly_c": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "probe_n": [
+   10,
+   999999
+  ]
+ },
+ "code": "def _f_star(ctx):\n    \"\"\"Kelly's f from the strategy's OWN last N closed trades on this symbol.\"\"\"\n    n = int(ctx.p.ledger_n)\n    tr = ctx.closed[-n:]\n    if len(tr) < int(ctx.p.min_ledger):\n        return None\n    wins = []\n    loss = []\n    for t in tr:\n        d = -1.0 if t[\"side\"] == \"short\" else 1.0\n        pl = (t[\"exit\"] - t[\"entry\"]) * t[\"shares\"] * d - float(t.get(\"fees\") or 0.0)\n        if pl > 0:\n            wins.append(pl)\n        else:\n            loss.append(-pl)\n    if not wins or not loss:\n        return None\n    W = len(wins) / float(len(tr))\n    A = sum(wins) / len(wins)\n    B = sum(loss) / len(loss)\n    if B <= 0 or A <= 0:\n        return None\n    R = A / B\n    return W - (1.0 - W) / R\n\n\ndef family_init(ctx):\n    ctx.dh = ctx.indicator(\"donchian\", period=int(ctx.p.dc_in))\n    ctx.dl = ctx.indicator(\"donchian\", period=int(ctx.p.dc_out))\n    ctx._veto = 0\n\n\ndef signal(ctx, i):\n    if i < 2:\n        return 0\n    u = ctx.dh.upper[i - 1]\n    pu = ctx.dh.upper[i - 2]\n    if u is None or pu is None:\n        return 0\n    if not (ctx.c[i] > u and ctx.c[i - 1] <= pu):\n        return 0                        # the fixed entry harness, held constant\n    a = ctx.a[i]\n    if a is None or a <= 0:\n        return 0\n\n    f = _f_star(ctx)\n    if f is None:\n        rf = float(ctx.p.warm_risk)     # before the ledger is deep enough\n    elif f > 0:\n        rf = min(max(float(ctx.p.kelly_c) * f, 0.0), float(ctx.p.risk_cap))\n        ctx._veto = 0\n    else:\n        # The ledger says there is no edge. Skip -- but a rule that only ever\n        # recomputes on a CLOSED trade can never leave this state on its own,\n        # so after probe_n consecutive vetoes one signal is taken at the floor\n        # size purely to refresh the ledger. probe_n is swept, and one arm of\n        # the sweep is large enough to be the literal absorbing rule.\n        ctx._veto += 1\n        if ctx._veto < int(ctx.p.probe_n):\n            return 0\n        ctx._veto = 0\n        rf = float(ctx.p.warm_risk)\n\n    per_share = float(ctx.p.st_atr) * a\n    if per_share <= 0:\n        return 0\n    eq = float(ctx.p.equity0) + ctx.realized\n    if eq <= 0:\n        return 0\n    n = int(rf * eq / per_share)\n    if n < 1:\n        return 0\n    ctx.p.shares = min(n, int(ctx.p.max_shares))\n    return 1\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or i < 1:\n        return False\n    lo = ctx.dl.lower[i - 1]\n    if lo is None:\n        return False\n    return ctx.c[i] < lo"
+}

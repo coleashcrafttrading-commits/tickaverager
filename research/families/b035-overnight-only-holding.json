@@ -1,0 +1,33 @@
+{
+ "name": "Overnight-only holding",
+ "note": "Buys the regular-session close on a weak-close day inside an uptrend and sells the next regular-session open, holding exactly one overnight gap and nothing else. IBS is (close - low)/(high - low) over the running 09:30-16:00 extremes at the decision bar; the entry fires on the last session bar before the cut, so the harness fills it at the next bar's open, which is the closing print. The exit fires on the last bar before 09:30 the next morning, whose close is the last price before the opening auction. Two honest deviations: the source's SMA(200) daily trend gate needs 200 daily closes that a 45-day intraday window does not contain, so the gate length is a swept parameter with 0 = off; and the fills are bar-boundary proxies for MOC/MOO, which the source itself flags as the assumption this strategy is most sensitive to.",
+ "source": "Overnight-edge strategies are a standing published category at quantifiedstrategies.com - their index states the construction directly: 'buying at the close of the stock exchange until the open the next day'. Oddmund Groette publishes several such backtests free and covers them on YouTube. The underlying close-to-open versus open-to-close return decomposition is one of the most widely replicated results in equity microstructure. CAVEAT: their specific equity curves are behind a bot wall and unverified here; also, this strategy is uniquely sensitive to realistic modelling of MOC/MOO fills and gap slippage - backtest it with explicit auction-price assumptions or the result will be fiction.",
+ "params": {
+  "ibs_max": 0.4,
+  "trend_days": 10,
+  "entry_lead": 0,
+  "down_day": 0,
+  "side": "long",
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "ibs_max": [
+   0.3,
+   0.4,
+   0.5,
+   1.01
+  ],
+  "trend_days": [
+   0,
+   10,
+   20
+  ],
+  "down_day": [
+   0,
+   1
+  ]
+ },
+ "code": "import datetime as _dt\n\n_DSTB = {}\n_OFF = {}\n\n\ndef _et(ts):\n    \"\"\"(ET day ordinal, ET minute-of-day) for a UTC ISO timestamp.\"\"\"\n    k = ts[:13]\n    off = _OFF.get(k)\n    if off is None:\n        y = int(ts[0:4])\n        u = _dt.datetime(y, int(ts[5:7]), int(ts[8:10]), int(ts[11:13]))\n        b = _DSTB.get(y)\n        if b is None:\n            d = _dt.date(y, 3, 1)\n            s = _dt.datetime(y, 3, 1 + (6 - d.weekday()) % 7 + 7, 7, 0)\n            d2 = _dt.date(y, 11, 1)\n            e = _dt.datetime(y, 11, 1 + (6 - d2.weekday()) % 7, 6, 0)\n            b = _DSTB[y] = (s, e)\n        off = _OFF[k] = (4 if b[0] <= u < b[1] else 5)\n    loc = _dt.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]),\n                       int(ts[11:13]), int(ts[14:16])) - _dt.timedelta(hours=off)\n    return loc.toordinal(), loc.hour * 60 + loc.minute\n\n\n_OPEN = 9 * 60 + 30      # 09:30 ET\n_CLOSE = 16 * 60         # 16:00 ET\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    ibs_max = float(ctx.p.ibs_max)\n    tdays = int(ctx.p.trend_days)\n    lead = int(ctx.p.entry_lead)\n    need_down = int(ctx.p.down_day)\n    cut = _CLOSE - lead                 # decide on the last bar starting before this\n\n    day = [0] * n\n    mnt = [0] * n\n    for i in range(n):\n        day[i], mnt[i] = _et(bars[i][\"t\"])\n\n    hi = ctx._cols[\"h\"] if hasattr(ctx, \"_cols\") else None\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n\n    entry = [0] * n            # +1 on the decision bar of a qualifying day\n    leave = [False] * n        # True on the last bar before the next open\n\n    # running regular-session extremes, rebuilt each ET day\n    cur_day = None\n    r_hi = r_lo = None\n    day_closes = []            # completed regular-session closes, in day order\n    prev_close = None\n    pend_close = None          # this day's last RTH close, banked at day end\n\n    for i in range(n):\n        d, m = day[i], mnt[i]\n        if d != cur_day:\n            # a new ET day: bank yesterday's regular-session close\n            if pend_close is not None:\n                day_closes.append(pend_close)\n                prev_close = pend_close\n            cur_day = d\n            r_hi = r_lo = None\n            pend_close = None\n        rth = _OPEN <= m < _CLOSE\n        if rth:\n            r_hi = h[i] if r_hi is None else (h[i] if h[i] > r_hi else r_hi)\n            r_lo = l[i] if r_lo is None else (l[i] if l[i] < r_lo else r_lo)\n            pend_close = c[i]\n\n        # ---- exit trigger: the last bar that is still before the open ----\n        if m < _OPEN:\n            nxt_new = (i + 1 >= n) or (day[i + 1] != d) or (mnt[i + 1] >= _OPEN)\n            if nxt_new:\n                leave[i] = True\n        elif i == 0 or day[i - 1] != d:\n            leave[i] = True        # a day with no pre-open bars at all\n\n        # ---- entry trigger: last regular-session bar starting before the cut --\n        if rth and m < cut:\n            last = (i + 1 >= n) or (day[i + 1] != d) or (mnt[i + 1] >= cut) \\\n                or (mnt[i + 1] >= _CLOSE)\n            if last and r_hi is not None and r_hi > r_lo:\n                ibs = (c[i] - r_lo) / (r_hi - r_lo)\n                ok = ibs < ibs_max\n                if ok and tdays > 0:\n                    if len(day_closes) < tdays:\n                        ok = False\n                    else:\n                        sm = sum(day_closes[-tdays:]) / float(tdays)\n                        ok = c[i] > sm\n                if ok and need_down:\n                    ok = prev_close is not None and c[i] < prev_close\n                if ok:\n                    entry[i] = 1\n\n    ctx.on_entry = ctx.series(entry, \"overnight_entry\")\n    ctx.on_leave = ctx.series(leave, \"overnight_leave\")\n\n\ndef signal(ctx, i):\n    return 1 if ctx.on_entry[i] else 0\n\n\ndef exit_signal(ctx, i):\n    return bool(ctx.on_leave[i])"
+}

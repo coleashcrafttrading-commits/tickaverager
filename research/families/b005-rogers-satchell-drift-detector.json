@@ -1,0 +1,31 @@
+{
+ "name": "Rogers-Satchell Drift Detector",
+ "note": "Ratio of the UNdemeaned close-to-close variance (expectation sigma^2 + mu^2) to the Rogers-Satchell range variance (drift-free), so DR-1 estimates (drift/vol)^2 per bar with no smoothing constant. Trades in the direction of the N-bar return sum when DR clears the gate and the close is the extreme of the last few bars; exits when DR collapses back into the noise. From Rogers & Satchell (1991).",
+ "source": "Rogers & Satchell (1991), 'Estimating variance from high, low and closing prices', Annals of Applied Probability 1(4), 504-512 (the drift-independent estimator); Parkinson (1980), Journal of Business 53(1), 61-65; Garman & Klass (1980), Journal of Business 53(1), 67-78. Estimator comparison and formulas: https://portfoliooptimizer.io/blog/range-based-volatility-estimators-overview-and-examples-of-usage/ and https://macrosynergy.com/research/six-ways-to-estimate-realized-volatility/ . The drift-ratio construction itself is my synthesis from those estimators' bias properties.",
+ "params": {
+  "rs_n": 20,
+  "dr_in": 1.25,
+  "dr_out": 1.05,
+  "conf": 5,
+  "exit_signal_on": 1,
+  "trail_atr": 2.0,
+  "time_stop": 25
+ },
+ "grid": {
+  "rs_n": [
+   10,
+   20,
+   40
+  ],
+  "dr_in": [
+   1.15,
+   1.25,
+   1.5
+  ],
+  "conf": [
+   3,
+   5
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Two variance estimators of the same diffusion, differing only in how\n    they treat drift. Their ratio is the drift-to-noise estimate.\"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    n = max(2, int(ctx.p.rs_n))\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n\n    lr = [0.0] * m          # log return\n    r2 = [0.0] * m          # squared log return -- UNdemeaned on purpose\n    rs = [0.0] * m          # Rogers-Satchell per-bar term\n    for i in range(m):\n        if i > 0 and c[i] > 0.0 and c[i - 1] > 0.0:\n            x = math.log(c[i] / c[i - 1])\n            lr[i] = x\n            r2[i] = x * x\n        if o[i] > 0.0 and h[i] > 0.0 and l[i] > 0.0 and c[i] > 0.0:\n            v = (math.log(h[i] / c[i]) * math.log(h[i] / o[i])\n                 + math.log(l[i] / c[i]) * math.log(l[i] / o[i]))\n            rs[i] = v if v > 0.0 else 0.0\n\n    dr = [None] * m\n    sr = [None] * m\n    s2 = 0.0\n    ss = 0.0\n    sl = 0.0\n    for i in range(m):\n        s2 += r2[i]\n        ss += rs[i]\n        sl += lr[i]\n        if i >= n:\n            s2 -= r2[i - n]\n            ss -= rs[i - n]\n            sl -= lr[i - n]\n            sr[i] = sl\n            if ss > 1e-16:\n                x = s2 / ss\n                dr[i] = x if x < 100.0 else 100.0\n    ctx.dr = ctx.series(dr, \"drift_ratio\")\n    ctx.sr = ctx.series(sr, \"ret_sum\")\n\n\ndef signal(ctx, i):\n    d = ctx.dr[i]\n    s = ctx.sr[i]\n    if d is None or s is None:\n        return 0\n    if d < ctx.p.dr_in:\n        return 0\n    k = max(2, int(ctx.p.conf))\n    cc = ctx.c[i]\n    hi = True\n    lo = True\n    for j in range(1, k):\n        if i - j < 0:\n            break\n        p = ctx.c[i - j]\n        if p is None:\n            break\n        if p > cc:\n            hi = False\n        if p < cc:\n            lo = False\n    if s > 0.0 and hi:\n        return 1\n    if s < 0.0 and lo:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    d = ctx.dr[i]\n    return d is not None and d < ctx.p.dr_out\n"
+}

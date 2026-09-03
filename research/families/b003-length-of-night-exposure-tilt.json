@@ -1,0 +1,31 @@
+{
+ "name": "Length-of-night exposure tilt",
+ "note": "A pure calendar rule with no market data in it at all. Hours of night are computed from the solar-declination formula at a fixed latitude; the SAD variable is hours-of-night minus twelve, nonzero only between the autumn and spring equinoxes, and a fall dummy makes the autumn leg asymmetric. Target exposure E = clip(1 + a*SAD - b*FALL*SAD, 0, 2) is minimum (short) through the lengthening nights of autumn, maximum from the solstice through February, neutral in summer. Fixed share size means E is read as a sign: long above e_long, short below e_short, flat in between - so the rebalance band of the continuous form has no analogue here and the two thresholds do that job.",
+ "source": "Kamstra, Kramer & Levi, 'Winter Blues: A SAD Stock Market Cycle', American Economic Review 93(1), 2003. The harvester could not re-verify the published coefficient values this session, so a and b are indicative starting points for the sweep, not the paper's estimates; the SAD variable and fall dummy definitions are as specified in that paper.",
+ "params": {
+  "sad_a": 0.25,
+  "sad_b": 0.55,
+  "sad_lat": 40.7,
+  "e_long": 1.0,
+  "e_short": 0.55,
+  "e_cap": 2.0,
+  "exit_on_zero": 1
+ },
+ "grid": {
+  "sad_a": [
+   0.15,
+   0.25,
+   0.4
+  ],
+  "sad_b": [
+   0.4,
+   0.55,
+   0.75
+  ],
+  "e_short": [
+   0.55,
+   0.8
+  ]
+ },
+ "code": "import datetime as _dt\nimport math as _m\n\n_TZB = {}\n_TZC = {}\n\n\ndef _et_day(ts):\n    \"\"\"ET calendar day (ordinal, day-of-year) for a UTC ISO timestamp.\"\"\"\n    k = ts[:13]\n    v = _TZC.get(k)\n    if v is None:\n        u = _dt.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]), int(ts[11:13]))\n        y = u.year\n        b = _TZB.get(y)\n        if b is None:\n            d = _dt.date(y, 3, 1)\n            s = _dt.datetime(y, 3, 1 + (6 - d.weekday()) % 7 + 7, 7, 0)\n            d2 = _dt.date(y, 11, 1)\n            e = _dt.datetime(y, 11, 1 + (6 - d2.weekday()) % 7, 6, 0)\n            b = _TZB[y] = (s, e)\n        x = (u - _dt.timedelta(hours=(4 if b[0] <= u < b[1] else 5))).date()\n        v = _TZC[k] = (x.toordinal(), x.timetuple().tm_yday)\n    return v\n\n\ndef _hours_of_night(doy, lat_deg):\n    \"\"\"Standard solar-declination day length, inverted to hours of night.\n\n    delta = 0.4102 * sin(2*pi*(doy - 80.25)/365)  (Kamstra-Kramer-Levi's form)\n    daylight = (24/pi) * arccos(-tan(lat) * tan(delta))\n    \"\"\"\n    delta = 0.4102 * _m.sin(2.0 * _m.pi * (doy - 80.25) / 365.0)\n    x = -_m.tan(lat_deg * _m.pi / 180.0) * _m.tan(delta)\n    if x > 1.0:\n        x = 1.0\n    elif x < -1.0:\n        x = -1.0\n    return 24.0 - (24.0 / _m.pi) * _m.acos(x)\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    a = float(ctx.p.sad_a)\n    b = float(ctx.p.sad_b)\n    lat = float(ctx.p.sad_lat)\n    e_lo = float(ctx.p.e_short)\n    e_hi = float(ctx.p.e_long)\n    cap = float(ctx.p.e_cap)\n\n    # one exposure number per calendar day, then broadcast to bars\n    per_day = {}\n    ex = [1.0] * n\n    for i in range(n):\n        ordi, doy = _et_day(bars[i][\"t\"])\n        e = per_day.get(ordi)\n        if e is None:\n            hn = _hours_of_night(doy, lat)\n            # KKL's SAD variable: hours of night minus twelve, and only in the\n            # autumn-equinox-to-spring-equinox half of the year\n            sad = (hn - 12.0) if (doy >= 264 or doy <= 79) else 0.0\n            fall = 1.0 if (264 <= doy <= 366) else 0.0\n            e = 1.0 + a * sad - b * fall * sad\n            if e < 0.0:\n                e = 0.0\n            elif e > cap:\n                e = cap\n            per_day[ordi] = e\n        ex[i] = e\n    ctx.sad_e = ctx.series(ex, \"sad_exposure\")\n\n\ndef signal(ctx, i):\n    e = ctx.sad_e[i]\n    if e is None:\n        return 0\n    if e >= ctx.p.e_long:\n        return 1\n    if e <= ctx.p.e_short:\n        return -1\n    return 0"
+}

@@ -1,0 +1,32 @@
+{
+ "name": "Bar location gate on a Donchian breakout",
+ "note": "The reference signal is the plain Donchian rule -- close above the highest high of the preceding dc_n bars, mirrored short. The manipulated variable is a close-location gate: CLV = (close - low) / (high - low), the close's position inside the bar's own range, taken as the only OHLCV proxy available for whether the imbalance that produced the signal survived to the bar's end. A breakout bar that closes on its low is a breakout that already failed inside the bar. The gate is a TIMING rule rather than a filter: a signal whose bar closes badly is not discarded, it is carried forward for up to `defer` more bars and taken at the close of the first one that both clears CLV and (when require_s is on) still satisfies S. defer=0 in the grid is the pure filter, and clv_hi=0.5 is close to no gate at all, so the sweep spans the gate's whole range from off to strict. On the four probe symbols the median CLV of a 20-bar breakout bar is about 0.88 and 78 percent clear 0.7, so the paper threshold is comfortably reachable rather than aspirational. Execution follows the idea's reference: a hard 2*ATR stop, no profit target, and a 30-bar time stop, so the gate is the only thing that varies.",
+ "source": "Cont, Kukanov & Stoikov (2014), 'The Price Impact of Order Book Events', Journal of Financial Econometrics 12(1):47-88, arXiv:1011.6402 - near-linear order-flow-imbalance to price relation with the coefficient inverse to depth. Gould & Bonart (2016), 'Queue Imbalance as a One-Tick-Ahead Price Predictor in a Limit Order Book', arXiv:1512.03492. The CLV substitution for book imbalance is the harvesting agent's own proxy, since there is no level 2 here.",
+ "params": {
+  "dc_n": 20,
+  "clv_hi": 0.7,
+  "defer": 2,
+  "require_s": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "time_stop": 30
+ },
+ "grid": {
+  "clv_hi": [
+   0.5,
+   0.6,
+   0.7,
+   0.8
+  ],
+  "defer": [
+   0,
+   1,
+   2
+  ],
+  "dc_n": [
+   10,
+   20
+  ]
+ },
+ "code": "from collections import deque as _deque\n\n\ndef _roll_max(x, w):\n    \"\"\"max(x[i-w .. i-1]) for every i, None until the window is full. O(n).\"\"\"\n    n = len(x)\n    out = [None] * n\n    dq = _deque()\n    for i in range(n):\n        while dq and dq[0] < i - w:\n            dq.popleft()\n        if i >= w and dq:\n            out[i] = x[dq[0]]\n        while dq and x[dq[-1]] <= x[i]:\n            dq.pop()\n        dq.append(i)\n    return out\n\n\ndef _roll_min(x, w):\n    n = len(x)\n    out = [None] * n\n    dq = _deque()\n    for i in range(n):\n        while dq and dq[0] < i - w:\n            dq.popleft()\n        if i >= w and dq:\n            out[i] = x[dq[0]]\n        while dq and x[dq[-1]] >= x[i]:\n            dq.pop()\n        dq.append(i)\n    return out\n\n\ndef family_init(ctx):\n    \"\"\"The reference signal S, and the close-location gate that times it.\n\n    S is the Donchian rule named in the idea: close above the highest high of\n    the preceding dc_n bars (mirrored for shorts). CLV is the close's position\n    inside the bar's own range -- the OHLCV stand-in for which side of the book\n    won the bar. The gate does not veto S, it defers it: a signal whose bar\n    closed badly gets up to `defer` further bars to close well, and is dropped\n    only if none of them does.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    w = max(2, int(ctx.p.dc_n))\n    mh = _roll_max(hi, w)\n    ml = _roll_min(lo, w)\n\n    clv = [0.5] * n\n    for i in range(n):\n        r = hi[i] - lo[i]\n        if r > 0:\n            clv[i] = (cl[i] - lo[i]) / r\n\n    up = float(ctx.p.clv_hi)\n    dn = 1.0 - up\n    defer = max(0, int(ctx.p.defer))\n    need_s = bool(int(ctx.p.require_s))\n\n    sig = [0] * n\n    pend = 0        # direction of the signal waiting for a good close\n    left = 0        # deferral bars still available\n\n    for i in range(n):\n        s = 0\n        if mh[i] is not None:\n            if cl[i] > mh[i]:\n                s = 1\n            elif ml[i] is not None and cl[i] < ml[i]:\n                s = -1\n        if s:\n            pend = s            # a fresh S restarts the deferral window\n            left = defer\n        if pend:\n            good = clv[i] > up if pend > 0 else clv[i] < dn\n            still = (s == pend) if need_s else True\n            if good and still:\n                sig[i] = pend\n                pend = 0\n                left = 0\n            elif left > 0:\n                left -= 1\n            else:\n                pend = 0\n\n    ctx.gated = ctx.series(sig, \"clv_gated\")\n\n\ndef signal(ctx, i):\n    return int(ctx.gated[i])\n"
+}

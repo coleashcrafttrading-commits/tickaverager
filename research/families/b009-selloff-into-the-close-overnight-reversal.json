@@ -1,0 +1,34 @@
+{
+ "name": "Selloff-Into-The-Close Overnight Reversal",
+ "note": "The signed late-session return is the order-imbalance proxy: when the last win_min minutes fall more than k_sig times their own trailing standard deviation, dealers have absorbed a sell imbalance and are paid to unwind it overnight. Long only -- the paper's asymmetry says the mirror short should be weaker, and adding it would be a different test. The decision is taken on the 15:50 bar so the shared harness fills it at 15:55 rather than at the 16:00 close, and the position is held with no target and no stop because the trade IS the non-trading window; it is closed on the next session's first bar (or at 10:00 for the variant). With no exchange holiday calendar the only closure detectable a priori is the weekend, exposed as skip_weekend.",
+ "source": "Boyarchenko, Larsen & Whelan, \"The Overnight Drift,\" Federal Reserve Bank of New York Staff Report 917 / CEPR DP14462; published version in Review of Financial Studies",
+ "params": {
+  "win_min": 60,
+  "k_sig": 0.5,
+  "sig_win": 10,
+  "sig_min": 950,
+  "exit_min": 570,
+  "skip_weekend": 0,
+  "side": "long",
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "k_sig": [
+   0.5,
+   0.75,
+   1.25
+  ],
+  "win_min": [
+   30,
+   60,
+   90
+  ],
+  "exit_min": [
+   570,
+   595
+  ]
+ },
+ "code": "import math\n\n\ndef _sess(ctx):\n    \"\"\"Per-bar ET clock, session index and RTH flag, from the timestamps alone.\n\n    The feed carries extended hours (04:00-20:00 ET) and some symbols are\n    missing premarket bars entirely, so nothing here may count bars to find a\n    session -- it all comes off the clock. US DST boundaries are computed from\n    the calendar, which is a priori knowledge, not a peek at the tape.\n    \"\"\"\n    import datetime as _dt\n    etm = []\n    day = []\n    rth = []\n    ri = []\n    cache = {}\n    last = None\n    di = -1\n    nr = 0\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        key = (y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            pv = _dt.date(y, mo, dd) - _dt.timedelta(days=1)\n            key = (pv.year, pv.month, pv.day)\n        if key != last:\n            last = key\n            di += 1\n        r = 570 <= tot < 960\n        etm.append(tot); day.append(di); rth.append(r)\n        if r:\n            nr += 1\n        ri.append(nr)\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ri = ri\n\n\ndef _rth_returns(ctx):\n    \"\"\"RTH-only log returns and the raw bar index each one ends on.\n\n    Overnight and pre/post-market returns are dropped: the intraday moments\n    below estimate an intraday quantity, and a gap return is not a 5-minute\n    return however it is labelled.\n    \"\"\"\n    R = []\n    POS = []\n    prev = None\n    prevday = None\n    for i in range(len(ctx.bars)):\n        if ctx.f_rth[i]:\n            c = float(ctx.bars[i][\"c\"])\n            if prev is not None and prev > 0.0 and c > 0.0 and \\\n                    ctx.f_day[i] == prevday:\n                R.append(math.log(c / prev))\n                POS.append(i)\n            prev = c\n            prevday = ctx.f_day[i]\n    return R, POS\n\n\ndef family_init(ctx):\n    import datetime as _dt\n    _sess(ctx)\n    n = len(ctx.bars)\n    sig = [0] * n\n    byday = {}\n    for i in range(n):\n        if ctx.f_rth[i]:\n            byday.setdefault(ctx.f_day[i], []).append(i)\n    days = sorted(byday)\n    sm = int(ctx.p.sig_min)\n    wm = int(ctx.p.win_min)\n    sw = max(2, int(ctx.p.sig_win))\n    hist = []\n    for d in days:\n        ii = byday[d]\n        sb = None\n        for i in ii:\n            if ctx.f_etm[i] <= sm:\n                sb = i\n            else:\n                break\n        # the decision bar must really be the late-session one, and it must not\n        # be the session's last bar -- otherwise the fill lands at the NEXT\n        # session's open and the overnight window is missed entirely. This also\n        # drops half-day sessions, whose early close is calendar knowledge.\n        if sb is None or sb == ii[-1] or ctx.f_etm[sb] < sm - 10:\n            continue\n        tgt = ctx.f_etm[sb] - wm\n        rb = None\n        for i in ii:\n            if ctx.f_etm[i] <= tgt:\n                rb = i\n            else:\n                break\n        if rb is None or rb == sb:\n            continue\n        a = float(ctx.bars[rb][\"c\"])\n        b = float(ctx.bars[sb][\"c\"])\n        if a <= 0.0 or b <= 0.0:\n            continue\n        L = b / a - 1.0\n        if len(hist) >= sw:\n            w = hist[-sw:]\n            mu = sum(w) / len(w)\n            var = 0.0\n            for x in w:\n                var += (x - mu) * (x - mu)\n            sd = (var / (len(w) - 1)) ** 0.5\n            skip = False\n            if int(ctx.p.skip_weekend):\n                ts = ctx.bars[ii[0]][\"t\"]\n                if _dt.date(int(ts[0:4]), int(ts[5:7]),\n                            int(ts[8:10])).weekday() == 4:\n                    skip = True\n            if sd > 0.0 and L < -float(ctx.p.k_sig) * sd and not skip:\n                sig[sb] = 1\n        hist.append(L)\n        if len(hist) > 4 * sw:\n            hist.pop(0)\n    ctx.f_sig = sig\n\n\ndef signal(ctx, i):\n    return ctx.f_sig[i]\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return ctx.f_day[i] > ctx.f_day[e] and ctx.f_etm[i] >= int(ctx.p.exit_min)\n"
+}

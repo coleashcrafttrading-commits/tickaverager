@@ -1,0 +1,37 @@
+{
+ "name": "Volatility-Targeted Time-Series Momentum",
+ "note": "The sign of the trailing lb-bar return is the entire entry condition, re-evaluated only every hold bars and held untouched in between - the monthly rebalance of the published rule, in bars. Everything else is risk: ex-ante annualised volatility from an EWMA of squared returns with a centre of mass of com_frac*lb bars (0.25*252 = 63, the paper's 60), annualised by the bar rate inferred from the timestamps, gives the target leverage vol_target/sigma capped at lev_cap. LIMITATION, stated plainly: the shared harness sizes every family identically, so the continuously varying vol-inverse NOTIONAL - which is the idea's real content - cannot be expressed. What survives is the part of it that changes the trade decision rather than its size: the book goes FLAT whenever the vol-scaled target leverage falls below min_lev, so exposure is cut by a volatility spike before any price signal moves, plus the paper's optional intramonth overlay that flattens on a drawdown from the position's high-water mark beyond dd_mult*sigma/sqrt(12).",
+ "source": "Moskowitz, T.J., Ooi, Y.H., and Pedersen, L.H., 'Time Series Momentum', Journal of Financial Economics 104(2), 2012, pp. 228-250 - sign of the past 12-month excess return, one-month holding period, position scaled to a 40% annualised volatility target using an exponentially weighted ex-ante volatility estimate with a 60-day centre of mass. (The harvesting agent could not extract text from the hosted PDF; the parameters are the published specification and should be re-checked against the paper.)",
+ "params": {
+  "lb": 252,
+  "hold": 63,
+  "vol_target": 0.4,
+  "com_frac": 0.25,
+  "min_lev": 0.5,
+  "lev_cap": 4.0,
+  "dd_mult": 3.0,
+  "dd_on": 1,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "lb": [
+   126,
+   252,
+   504
+  ],
+  "hold": [
+   21,
+   63
+  ],
+  "min_lev": [
+   0.25,
+   0.5,
+   1.0
+  ]
+ },
+ "code": "import math\n\n\ndef _bars_per_year(ctx):\n    \"\"\"Sampling rate of the feed, from the timestamps' dates alone.\n\n    A count of bars per calendar date, medianed. This is the clock, not the\n    prices -- the timeframe of a backtest is a priori knowledge.\n    \"\"\"\n    cnt = {}\n    for b in ctx.bars:\n        d = b[\"t\"][0:10]\n        cnt[d] = cnt.get(d, 0) + 1\n    vals = sorted(cnt.values())\n    if not vals:\n        return 252.0\n    per_day = vals[len(vals) // 2]\n    return 252.0 * max(1, per_day)\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    cl = [float(x[\"c\"]) for x in b]\n    bpy = _bars_per_year(ctx)\n    lb = max(20, int(ctx.p.lb))\n    hold = max(2, int(ctx.p.hold))\n    com = max(10, int(lb * float(ctx.p.com_frac)))\n    a = 1.0 / (com + 1.0)\n    vt = float(ctx.p.vol_target)\n    cap = float(ctx.p.lev_cap)\n    mlev = float(ctx.p.min_lev)\n\n    ew = None\n    sig = [0] * n\n    sga = [None] * n\n    state = 0\n    for t in range(n):\n        if t >= 1 and cl[t] > 0.0 and cl[t - 1] > 0.0:\n            r = math.log(cl[t] / cl[t - 1])\n            ew = r * r if ew is None else ew + a * (r * r - ew)\n        if ew is not None and ew > 0.0:\n            sga[t] = math.sqrt(bpy * ew)\n        if t >= lb and t % hold == 0 and sga[t] is not None and cl[t - lb] > 0.0:\n            lev = vt / sga[t] if sga[t] > 0.0 else 0.0\n            if lev > cap:\n                lev = cap\n            if lev < mlev:\n                state = 0\n            else:\n                rl = cl[t] / cl[t - lb] - 1.0\n                state = 1 if rl > 0.0 else (-1 if rl < 0.0 else 0)\n        sig[t] = state\n    ctx.f_sig = sig\n    ctx.f_sga = sga\n    ctx._hw = None\n    ctx._hwe = None\n\n\ndef signal(ctx, i):\n    return ctx.f_sig[i]\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or not int(ctx.p.dd_on):\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    c = ctx.c[i]\n    if c is None or c <= 0.0:\n        return False\n    if ctx._hwe != e:\n        ctx._hwe = e\n        ctx._hw = c\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    if d > 0:\n        if c > ctx._hw:\n            ctx._hw = c\n        dd = (ctx._hw - c) / ctx._hw if ctx._hw > 0.0 else 0.0\n    else:\n        if c < ctx._hw:\n            ctx._hw = c\n        dd = (c - ctx._hw) / ctx._hw if ctx._hw > 0.0 else 0.0\n    s = ctx.f_sga[i]\n    if s is None or s <= 0.0:\n        return False\n    return dd > float(ctx.p.dd_mult) * s / math.sqrt(12.0)"
+}

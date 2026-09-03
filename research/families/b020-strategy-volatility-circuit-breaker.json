@@ -1,0 +1,33 @@
+{
+ "name": "Strategy-Volatility Circuit Breaker",
+ "note": "Barroso-Santa-Clara applied as a gate: the volatility that decides whether to trade is the SIGNAL's own, not the price's. A simulated always-on equity curve is maintained for the base rule (long while the trailing base_lb return is positive, short while negative), SV is the rolling stdev of that curve's returns, and SV is ranked against its own trailing distribution. Entries are armed only below p_enter; crossing p_flat forces flat regardless of what the base rule says and latches until the rank falls back under p_rearm. The paper's inverse-vol position SIZING is deliberately not implemented - share count belongs to the shared harness, and faking it here would make this family incomparable with every other one.",
+ "source": "Barroso & Santa-Clara (2015), 'Momentum has its moments', Journal of Financial Economics 116(1), 111-120. Leverage-constrained variant and replication: https://www.garp.org/hubfs/Whitepapers/a1Z1W0000054xSXUAY.pdf",
+ "params": {
+  "base_lb": 126,
+  "sv_win": 126,
+  "pct_win": 756,
+  "p_enter": 80.0,
+  "p_flat": 90.0,
+  "p_rearm": 70.0,
+  "ann_bars": 252.0,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "base_lb": [
+   63,
+   126,
+   252
+  ],
+  "sv_win": [
+   63,
+   126
+  ],
+  "p_enter": [
+   70.0,
+   80.0,
+   90.0
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    \"\"\"The volatility that gates the trade is the SIGNAL's, not the price's.\n\n    A simulated always-on equity curve is run for the base rule (long while\n    the trailing base_lb return is positive, short while it is negative,\n    rebalanced every bar). SV is the rolling stdev of THAT curve's returns.\n    SV is then ranked against its own trailing distribution, and the rank -\n    not the level - drives a three-state gate: arm below p_enter, force flat\n    above p_flat, and stay flat until the rank falls back under p_rearm.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    lb = max(5, int(ctx.p.base_lb))\n    W = max(10, int(ctx.p.sv_win))\n    P = max(50, int(ctx.p.pct_win))\n    ann = math.sqrt(float(ctx.p.ann_bars))\n\n    base = [0] * n\n    for i in range(n):\n        j = i - lb\n        if j < 0 or c[j] <= 0.0 or c[i] <= 0.0:\n            continue\n        base[i] = 1 if c[i] > c[j] else (-1 if c[i] < c[j] else 0)\n\n    # the strategy's own return stream: yesterday's stance times today's move\n    sr = [0.0] * n\n    for i in range(1, n):\n        sr[i] = base[i - 1] * r[i]\n\n    sv = [None] * n\n    s = 0.0\n    ss = 0.0\n    for i in range(n):\n        s += sr[i]\n        ss += sr[i] * sr[i]\n        j = i - W\n        if j >= 0:\n            s -= sr[j]\n            ss -= sr[j] * sr[j]\n        if i >= max(W, lb + 2):\n            v = ss / W - (s / W) ** 2\n            sv[i] = ann * (math.sqrt(v) if v > 0.0 else 0.0)\n\n    # rank of SV in its own trailing window. Sub-sampled so the ranking cost\n    # does not scale with the window: family_init runs once per backtest and\n    # there are hundreds of thousands of backtests.\n    step = max(1, W // 8)\n    keep = max(60, P // step)\n    pct = [None] * n\n    hist = []\n    for i in range(n):\n        x = sv[i]\n        if x is None:\n            continue\n        if len(hist) >= 60:\n            below = 0\n            for hv in hist:\n                if hv < x:\n                    below += 1\n            pct[i] = 100.0 * below / len(hist)\n        if i % step == 0:\n            hist.append(x)\n            if len(hist) > keep:\n                hist.pop(0)\n\n    # the circuit breaker's latch\n    flat = [0] * n\n    tripped = False\n    p_flat = float(ctx.p.p_flat)\n    p_rearm = float(ctx.p.p_rearm)\n    for i in range(n):\n        q = pct[i]\n        if q is not None:\n            if tripped:\n                if q < p_rearm:\n                    tripped = False\n            elif q > p_flat:\n                tripped = True\n        flat[i] = 1 if tripped else 0\n\n    ctx.f_base = ctx.series(base, \"base_signal\")\n    ctx.f_pct = ctx.series(pct, \"SV_percentile\")\n    ctx.f_flat = ctx.series(flat, \"circuit_open\")\n\n\ndef signal(ctx, i):\n    if ctx.f_flat[i]:\n        return 0                       # breaker open: flat, whatever the rule says\n    q = ctx.f_pct[i]\n    if q is None:\n        return 0\n    s = ctx.f_base[i]\n    if not s:\n        return 0\n    if ctx.positions:\n        return s                       # already on: the gate only rations ENTRIES\n    return s if q <= float(ctx.p.p_enter) else 0\n"
+}

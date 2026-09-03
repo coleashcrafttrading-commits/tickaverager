@@ -1,0 +1,32 @@
+{
+ "name": "Heikin-Ashi Shaven-Bottom Streak",
+ "note": "Trades the GEOMETRY of a transformed candle rather than a level: a run of green Heikin-Ashi candles with no lower shadow -- meaning the raw low never traded below the previous HA candle's midpoint -- and an above-average body. Mirrored shaven-top for shorts. Exits on the first HA candle that either turns against the position or grows a shadow larger than shadow_ratio of its own body. HA_close uses the current close, so every signal is a bar-close signal only.",
+ "source": "Heikin-Ashi construction is standard; for its systematic use and noise-reduction properties see 'Smoothed Heikin-Ashi Algorithms Optimized for Automated Trading Systems' (2018), DOI 10.31410/itema.2018.514, and 'Study of Heiken Ashi Candlestick for Noise Reduction' (2022), DOI 10.31730/osf.io/phejd. The shaven-bottom streak rule and the shadow-reappearance exit are the harvester's synthesis.",
+ "params": {
+  "streak": 2,
+  "body_mult": 1.0,
+  "body_win": 20,
+  "shadow_ratio": 0.25,
+  "tol_ticks": 0,
+  "tick": 0.01,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 1.0
+ },
+ "grid": {
+  "streak": [
+   2,
+   3
+  ],
+  "body_mult": [
+   0.8,
+   1.0,
+   1.5
+  ],
+  "shadow_ratio": [
+   0.25,
+   0.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    ho = [0.0] * n\n    hc = [0.0] * n\n    hh = [0.0] * n\n    hl = [0.0] * n\n    body = [0.0] * n\n    prev_o = None\n    prev_c = None\n    for j in range(n):\n        o = float(b[j][\"o\"])\n        h = float(b[j][\"h\"])\n        l = float(b[j][\"l\"])\n        c = float(b[j][\"c\"])\n        cc = (o + h + l + c) / 4.0\n        oo = (o + c) / 2.0 if prev_o is None else (prev_o + prev_c) / 2.0\n        ho[j] = oo\n        hc[j] = cc\n        hh[j] = max(h, oo, cc)\n        hl[j] = min(l, oo, cc)\n        body[j] = abs(cc - oo)\n        prev_o = oo\n        prev_c = cc\n    w = max(1, int(ctx.p.body_win))\n    mb = [None] * n\n    run = 0.0\n    for j in range(n):\n        run += body[j]\n        if j >= w:\n            run -= body[j - w]\n        if j >= w - 1:\n            mb[j] = run / w\n    ctx.ho = ctx.series(ho, \"ha_open\")\n    ctx.hc = ctx.series(hc, \"ha_close\")\n    ctx.hh = ctx.series(hh, \"ha_high\")\n    ctx.hl = ctx.series(hl, \"ha_low\")\n    ctx.body = ctx.series(body, \"ha_body\")\n    ctx.mbody = ctx.series(mb, \"ha_body_mean\")\n\n\ndef signal(ctx, i):\n    k = int(ctx.p.streak)\n    if k < 1 or i < k:\n        return 0\n    mb = ctx.mbody[i]\n    if mb is None or mb <= 0:\n        return 0\n    if ctx.body[i] <= float(ctx.p.body_mult) * mb:\n        return 0\n    tol = float(ctx.p.tol_ticks) * float(ctx.p.tick)\n    up = True\n    dn = True\n    for j in range(i - k + 1, i + 1):\n        o = ctx.ho[j]\n        c = ctx.hc[j]\n        hi = ctx.hh[j]\n        lo = ctx.hl[j]\n        if c <= o or (o - lo) > tol:\n            up = False\n        if c >= o or (hi - o) > tol:\n            dn = False\n        if not up and not dn:\n            return 0\n    if up:\n        return 1\n    if dn:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    o = ctx.ho[i]\n    c = ctx.hc[i]\n    hi = ctx.hh[i]\n    lo = ctx.hl[i]\n    if o is None or c is None:\n        return False\n    bd = abs(c - o)\n    ratio = float(ctx.p.shadow_ratio)\n    if ctx.positions[0][\"side\"] == \"long\":\n        if c < o:\n            return True\n        return bd > 0 and (o - lo) > ratio * bd\n    if c > o:\n        return True\n    return bd > 0 and (hi - o) > ratio * bd"
+}

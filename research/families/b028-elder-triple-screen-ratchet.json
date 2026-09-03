@@ -1,0 +1,30 @@
+{
+ "name": "Elder Triple Screen Ratchet",
+ "note": "Elder's three screens with the screen-3 detail that is usually dropped: the entry is a resting stop one tick beyond the PREVIOUS bar's extreme, re-priced every bar, so while the pullback continues the buy stop walks DOWN with it and only fills at the turn. Tide is the MACD histogram slope on bars resampled to a higher timeframe; the wave is a short EMA of Force Index that must oppose the tide.",
+ "source": "Alexander Elder, 'Trading for a Living' (1993) and 'Come Into My Trading Room' (2002) -- the Triple Screen system. Screen-3 trailing buy-stop rule ('place the buy order one tick above the previous day high... the order also moves down, one point above the high, until a buy opens or the main trend reverses') as documented at mql5.com/en/blogs/post/731016 and asktraders.com's Elder triple screen guide.",
+ "params": {
+  "htf": 10,
+  "fi_ema": 2,
+  "walk_max": 5,
+  "off_atr": 0.05,
+  "trail_atr": 3.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "htf": [
+   5,
+   10,
+   21
+  ],
+  "fi_ema": [
+   2,
+   6,
+   13
+  ],
+  "walk_max": [
+   3,
+   5
+  ]
+ },
+ "code": "def _ema(vals, period):\n    \"\"\"EMA over a list that may contain None; None until it has a value.\"\"\"\n    k = 2.0 / (period + 1.0)\n    out = [None] * len(vals)\n    e = None\n    for i, x in enumerate(vals):\n        if x is None:\n            out[i] = e\n            continue\n        e = x if e is None else e + k * (x - e)\n        out[i] = e\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    htf = max(2, int(ctx.p.htf))\n    walk_max = max(1, int(ctx.p.walk_max))\n    off_atr = float(ctx.p.off_atr)\n\n    # ---- SCREEN 1: the tide. Resample to blocks of `htf` bars, MACD hist. --\n    # block b covers bars [b*htf, (b+1)*htf-1] and is COMPLETE at its last bar,\n    # so a bar i may only read blocks whose last bar is <= i.\n    nb = n // htf\n    hc = [c[(b + 1) * htf - 1] for b in range(nb)]\n    fast = _ema(hc, 12)\n    slow = _ema(hc, 26)\n    macd = [None if (fast[b] is None or slow[b] is None) else fast[b] - slow[b]\n            for b in range(nb)]\n    sig = _ema(macd, 9)\n    hist = [None if (macd[b] is None or sig[b] is None) else macd[b] - sig[b]\n            for b in range(nb)]\n\n    tide = [0] * n\n    for i in range(n):\n        b = (i + 1) // htf - 1          # last completed block at bar i\n        if b >= 1 and hist[b] is not None and hist[b - 1] is not None:\n            if hist[b] > hist[b - 1]:\n                tide[i] = 1\n            elif hist[b] < hist[b - 1]:\n                tide[i] = -1\n\n    # ---- SCREEN 2: the wave. Force Index and its short EMA. ---------------\n    fi = [0.0] * n\n    for i in range(1, n):\n        fi[i] = v[i] * (c[i] - c[i - 1])\n    fi2 = _ema(fi, max(1, int(ctx.p.fi_ema)))\n\n    # ---- Wilder ATR, computed here because family_init cannot read series --\n    per = 22\n    tr = [None] * n\n    for i in range(1, n):\n        pc = c[i - 1]\n        tr[i] = max(h[i] - l[i], abs(h[i] - pc), abs(l[i] - pc))\n    atr = [None] * n\n    acc = 0.0\n    for i in range(1, n):\n        if i <= per:\n            acc += tr[i]\n            if i == per:\n                atr[i] = acc / per\n        else:\n            atr[i] = (atr[i - 1] * (per - 1) + tr[i]) / per\n\n    # ---- SCREEN 3: the resting stop order that walks with the pullback ----\n    out = [0] * n\n    armed = 0          # +1 buy stop resting, -1 sell stop resting, 0 none\n    age = 0\n    for i in range(n):\n        if armed:\n            if tide[i] != armed:                 # the tide turned: cancel\n                armed = 0\n            elif age > walk_max:                 # unfilled too long: cancel\n                armed = 0\n            else:\n                a = atr[i - 1] if i >= 1 else None\n                off = (off_atr * a) if (off_atr > 0 and a) else 0.01\n                if armed > 0 and h[i] >= h[i - 1] + off:\n                    out[i] = 1                   # the walking buy stop filled\n                    armed = 0\n                elif armed < 0 and l[i] <= l[i - 1] - off:\n                    out[i] = -1\n                    armed = 0\n                else:\n                    age += 1                     # re-price against this bar\n        if armed == 0 and out[i] == 0 and fi2[i] is not None:\n            # arm only when the wave OPPOSES the tide\n            if tide[i] > 0 and fi2[i] < 0:\n                armed, age = 1, 0\n            elif tide[i] < 0 and fi2[i] > 0:\n                armed, age = -1, 0\n\n    ctx.sig = ctx.series(out, \"elder_trigger\")\n    ctx.tide = ctx.series(tide, \"weekly_tide\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out on the first completed higher-timeframe bar whose histogram\n    slope turns against the position.\"\"\"\n    if not ctx.positions:\n        return False\n    t = ctx.tide[i]\n    if not t:\n        return False\n    d = -1 if ctx.positions[0][\"side\"] == \"short\" else 1\n    return t != d\n"
+}

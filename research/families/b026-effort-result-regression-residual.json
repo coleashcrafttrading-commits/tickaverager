@@ -1,0 +1,33 @@
+{
+ "name": "Effort Result Regression Residual",
+ "note": "Fits |log return| on log volume over a rolling window and trades the bars whose residual is far NEGATIVE -- enormous volume that produced almost no price change, i.e. someone absorbed the flow at a fixed price. Gated on the bar also being in the top of its own volume distribution and at least median width; the absorber's side is read off where the bar closed in its range.",
+ "source": "Synthesis, built on two cited pillars: Amihud (2002), 'Illiquidity and stock returns: cross-section and time-series effects', Journal of Financial Markets 5, 31-56, https://www.cis.upenn.edu/~mkearns/finread/amihud.pdf , which establishes |return|/dollar-volume as the price response per unit of trading; and Wyckoff's effort-vs-result law as described at https://www.luxalgo.com/library/concept/effort-vs-result/ . The OLS-residual formulation and the clv direction rule are my own.",
+ "params": {
+  "win": 250,
+  "k_sd": 1.0,
+  "vol_p": 0.8,
+  "rng_p": 0.5,
+  "clv_hi": 0.67,
+  "clv_lo": 0.33,
+  "time_stop": 5,
+  "tp_atr": 2.0,
+  "st_atr": 1.0
+ },
+ "grid": {
+  "win": [
+   120,
+   250
+  ],
+  "k_sd": [
+   0.8,
+   1.0,
+   1.2
+  ],
+  "vol_p": [
+   0.7,
+   0.8,
+   0.9
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Rolling OLS of |log return| on log volume, win bars deep, by running\n    sums. The residual says how far this bar's move fell short of what its own\n    volume predicts; dividing by the fit's residual sd makes the threshold\n    comparable across symbols and vol regimes. A large NEGATIVE residual on a\n    heavy, wide bar is Wyckoff absorption expressed as a studentised number.\"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    W = max(30, int(ctx.p.win))\n    ksd = float(ctx.p.k_sd)\n    vq = float(ctx.p.vol_p)\n    rq = float(ctx.p.rng_p)\n    chi = float(ctx.p.clv_hi)\n    clo = float(ctx.p.clv_lo)\n\n    y = [0.0] * m                      # |log return|\n    x = [0.0] * m                      # log volume\n    rng = [0.0] * m                    # (h-l)/c, the bar's own width\n    for i in range(m):\n        vv = v[i]\n        x[i] = math.log(vv) if vv > 1.0 else 0.0\n        if i and c[i] > 0.0 and c[i - 1] > 0.0:\n            y[i] = abs(math.log(c[i] / c[i - 1]))\n        rng[i] = (h[i] - l[i]) / c[i] if c[i] > 0.0 else 0.0\n\n    # prefix sums -> every window statistic in O(1)\n    px = [0.0] * (m + 1)\n    py = [0.0] * (m + 1)\n    pxx = [0.0] * (m + 1)\n    pyy = [0.0] * (m + 1)\n    pxy = [0.0] * (m + 1)\n    for i in range(m):\n        px[i + 1] = px[i] + x[i]\n        py[i + 1] = py[i] + y[i]\n        pxx[i + 1] = pxx[i] + x[i] * x[i]\n        pyy[i + 1] = pyy[i] + y[i] * y[i]\n        pxy[i + 1] = pxy[i] + x[i] * y[i]\n\n    sig = [0] * m\n    n = float(W)\n    for i in range(W, m):\n        a0 = i - W + 1                 # window is [a0 .. i] inclusive\n        b0 = i + 1\n        sx = px[b0] - px[a0]\n        sy = py[b0] - py[a0]\n        sxx = pxx[b0] - pxx[a0]\n        syy = pyy[b0] - pyy[a0]\n        sxy = pxy[b0] - pxy[a0]\n        Sxx = sxx - sx * sx / n\n        if Sxx <= 1e-12:\n            continue\n        Sxy = sxy - sx * sy / n\n        Syy = syy - sy * sy / n\n        b = Sxy / Sxx\n        a = (sy - b * sx) / n\n        sse = Syy - b * Sxy\n        if sse <= 0.0:\n            continue\n        sde = math.sqrt(sse / (n - 2.0))\n        if sde <= 0.0:\n            continue\n        r = y[i] - (a + b * x[i])\n        if r > -ksd * sde:\n            continue                   # not an absorption bar\n        # only now, on the few bars that qualify, pay for the percentiles\n        vi = v[i]\n        ri = rng[i]\n        nv = 0\n        nr = 0\n        for j in range(a0, i + 1):\n            if v[j] <= vi:\n                nv += 1\n            if rng[j] <= ri:\n                nr += 1\n        if nv < vq * n or nr < rq * n:\n            continue\n        d = h[i] - l[i]\n        if d <= 0.0:\n            continue\n        clv = (c[i] - l[i]) / d\n        if clv >= chi:\n            sig[i] = 1\n        elif clv <= clo:\n            sig[i] = -1\n    ctx.sig = ctx.series(sig, \"absorb\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n"
+}

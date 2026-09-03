@@ -1,0 +1,31 @@
+{
+ "name": "Overnight variance share gap regime",
+ "note": "Splits realised variance into an overnight part (open vs prior close) and an intraday part (close vs open) over a rolling window of sessions. A high overnight share means the open is genuine repricing and the gap is traded WITH; a low share means overnight moves are thin-book noise and the same gap is FADED; in between, nothing. Entry is at the close of the confirmation bar N minutes after the open, and only when the gap is at least ov_gap daily ATRs and that bar closed on the required side of the open. Positions are forced flat late in the session.",
+ "source": "Synthesis. The overnight/open-to-close variance split is the decomposition underlying Yang & Zhang (2000), 'Drift-Independent Volatility Estimation Based on High, Low, Open, and Close Prices', Journal of Business 73(3), 477-491. The regime-flip trading rule is the harvester's.",
+ "params": {
+  "ov_win": 10,
+  "ov_hi": 0.5,
+  "ov_lo": 0.3,
+  "ov_gap": 0.3,
+  "ov_conf": 15,
+  "ov_flat": 955,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "ov_win": [
+   10,
+   20,
+   60
+  ],
+  "ov_gap": [
+   0.3,
+   0.5,
+   1.0
+  ],
+  "ov_hi": [
+   0.5,
+   0.6
+  ]
+ },
+ "code": "import datetime as _dt\nimport math as _m\n\n_TZB = {}\n_TZC = {}\n\n\ndef _et(ts):\n    \"\"\"(ET day ordinal, ET minute of day) from a UTC ISO timestamp.\n\n    Cached per date+hour, so the datetime work happens a few hundred times\n    rather than once per bar.\n    \"\"\"\n    k = ts[:13]\n    v = _TZC.get(k)\n    if v is None:\n        u = _dt.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]), int(ts[11:13]))\n        y = u.year\n        b = _TZB.get(y)\n        if b is None:\n            d = _dt.date(y, 3, 1)\n            s = _dt.datetime(y, 3, 1 + (6 - d.weekday()) % 7 + 7, 7, 0)\n            d2 = _dt.date(y, 11, 1)\n            e = _dt.datetime(y, 11, 1 + (6 - d2.weekday()) % 7, 6, 0)\n            b = _TZB[y] = (s, e)\n        x = u - _dt.timedelta(hours=(4 if b[0] <= u < b[1] else 5))\n        v = _TZC[k] = (x.toordinal(), x.hour * 60)\n    return v[0], v[1] + int(ts[14:16])\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    # bar length in minutes, read off the data rather than assumed\n    bar_min = 5\n    for i in range(1, min(n, 60)):\n        d0, m0 = _et(bars[i - 1][\"t\"])\n        d1, m1 = _et(bars[i][\"t\"])\n        if d0 == d1 and m1 > m0:\n            bar_min = m1 - m0\n            break\n    win = max(3, int(ctx.p.ov_win))\n    hi = float(ctx.p.ov_hi)\n    lo = float(ctx.p.ov_lo)\n    gmul = float(ctx.p.ov_gap)\n    conf_min = int(ctx.p.ov_conf)\n    flat_m = int(ctx.p.ov_flat)\n    open_m, close_m = 570, 960\n\n    # ---- walk bars once, cutting them into regular-hours sessions ----\n    day = []                       # per session: [first_i, last_i, O, H, L, C]\n    conf_i = []                    # the confirmation bar of each session\n    cur = None\n    for i in range(n):\n        d, m = _et(bars[i][\"t\"])\n        if m < open_m or m >= close_m:\n            continue\n        o = float(bars[i][\"o\"]); h = float(bars[i][\"h\"])\n        l = float(bars[i][\"l\"]); c = float(bars[i][\"c\"])\n        if cur is None or d != cur:\n            cur = d\n            day.append([i, i, o, h, l, c])\n            conf_i.append(-1)\n        else:\n            r = day[-1]\n            r[1] = i\n            if h > r[3]:\n                r[3] = h\n            if l < r[4]:\n                r[4] = l\n            r[5] = c\n        if conf_i[-1] < 0 and m + bar_min >= open_m + conf_min:\n            conf_i[-1] = i\n\n    sig = [0] * n\n    ns = len(day)\n    ov2 = [0.0] * ns               # squared overnight log return\n    it2 = [0.0] * ns               # squared open-to-close log return\n    tr = [0.0] * ns                # daily true range\n    for s in range(1, ns):\n        pc = day[s - 1][5]\n        o, h, l, c = day[s][2], day[s][3], day[s][4], day[s][5]\n        if pc <= 0 or o <= 0 or c <= 0:\n            continue\n        a = _m.log(o / pc)\n        ov2[s] = a * a\n        b = _m.log(c / o)\n        it2[s] = b * b\n        tr[s] = max(h - l, abs(h - pc), abs(l - pc))\n\n    for s in range(1, ns):\n        ci = conf_i[s]\n        if ci < 0:\n            continue\n        # everything below uses only sessions strictly before s\n        k0 = s - win\n        if k0 < 1:\n            continue\n        VO = sum(ov2[k0:s]) / win\n        VI = sum(it2[k0:s]) / win\n        tot = VO + VI\n        if tot <= 0:\n            continue\n        share = VO / tot\n        mode = 1 if share >= hi else (-1 if share <= lo else 0)\n        if mode == 0:\n            continue                      # the dead zone: no trade either way\n        j0 = max(1, s - 14)\n        m = s - j0\n        if m < 5:\n            continue\n        atr = sum(tr[j0:s]) / m\n        pc = day[s - 1][5]\n        o = day[s][2]\n        if pc <= 0 or atr <= 0:\n            continue\n        gap = o - pc\n        if abs(gap) < gmul * atr:\n            continue\n        gdir = 1 if gap > 0 else -1\n        cc = float(bars[ci][\"c\"])\n        same = 1 if cc > o else (-1 if cc < o else 0)\n        if same == 0:\n            continue\n        if mode > 0 and same == gdir:\n            sig[ci] = gdir            # repricing regime: go with the gap\n        elif mode < 0 and same == -gdir:\n            sig[ci] = -gdir           # noise regime: fade it\n    ctx.ov_sig = ctx.series(sig, \"gap_signal\")\n\n    flat = [0] * n\n    for i in range(n):\n        d, m = _et(bars[i][\"t\"])\n        flat[i] = 1 if m >= flat_m else 0\n    ctx.ov_flat = ctx.series(flat, \"force_flat\")\n\n\ndef signal(ctx, i):\n    s = ctx.ov_sig[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    return bool(ctx.ov_flat[i])"
+}

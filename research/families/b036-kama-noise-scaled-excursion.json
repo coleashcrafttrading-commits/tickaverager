@@ -1,0 +1,33 @@
+{
+ "name": "KAMA noise-scaled excursion filter",
+ "note": "Kaufman's adaptive moving average, then his own percent-of-standard-deviation filter: go long only once KAMA has travelled f x stdev(KAMA differences) up from its running low, short once it has fallen that far from its running high. The reference is a high-water mark that only resets on a signal, so the system cannot flip on one bar's turn, and f = 0 nests the naive slope-sign version.",
+ "source": "Perry J. Kaufman's Adaptive Moving Average. KAMA(10,2,30) formula - ER = Change/Volatility, SC = [ER * (2/3 - 2/31) + 2/31]^2, KAMA = prior KAMA + SC*(Price - prior KAMA), seeded with an SMA - verified from StockCharts ChartSchool 'Kaufman's Adaptive Moving Average (KAMA)' (fetched 2026-09-02). The percent-of-standard-deviation entry filter is Kaufman's own published refinement (Smarter Trading, 1995; Trading Systems and Methods); I pinned the coefficient at 0.1 and left it sweepable.",
+ "params": {
+  "er_n": 10,
+  "kama_fast": 2,
+  "kama_slow": 30,
+  "f_coef": 0.1,
+  "filt_n": 20,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0,
+  "side": "both"
+ },
+ "grid": {
+  "f_coef": [
+   0.0,
+   0.1,
+   0.3,
+   0.5
+  ],
+  "filt_n": [
+   10,
+   20
+  ],
+  "er_n": [
+   10,
+   20
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    er_n = max(2, int(ctx.p.er_n))\n    fsc = 2.0 / (float(ctx.p.kama_fast) + 1.0)\n    ssc = 2.0 / (float(ctx.p.kama_slow) + 1.0)\n    fl = max(2, int(ctx.p.filt_n))\n    fco = float(ctx.p.f_coef)\n\n    absd = [0.0] * n\n    for i in range(1, n):\n        absd[i] = abs(c[i] - c[i - 1])\n\n    kama = [None] * n\n    k = None\n    run = 0.0\n    for i in range(n):\n        run += absd[i]\n        if i > er_n:\n            run -= absd[i - er_n]\n        if i < er_n:\n            continue\n        if k is None:\n            k = sum(c[i - er_n + 1:i + 1]) / float(er_n)\n            kama[i] = k\n            continue\n        er = abs(c[i] - c[i - er_n]) / run if run > 0 else 0.0\n        sc = (er * (fsc - ssc) + ssc) ** 2\n        k = k + sc * (c[i] - k)\n        kama[i] = k\n\n    sig = [0] * n\n    diffs = []\n    st = 0\n    kmin = kmax = None\n    for i in range(n):\n        v = kama[i]\n        if v is None:\n            continue\n        if kama[i - 1] is not None:\n            diffs.append(v - kama[i - 1])\n            if len(diffs) > fl:\n                diffs.pop(0)\n        if kmin is None:\n            kmin = kmax = v\n            continue\n        if v < kmin:\n            kmin = v\n        if v > kmax:\n            kmax = v\n        if len(diffs) < fl:\n            sig[i] = st\n            continue\n        m = sum(diffs) / fl\n        var = sum((x - m) ** 2 for x in diffs) / (fl - 1)\n        filt = fco * (var ** 0.5)\n        if st <= 0 and v - kmin > filt:\n            st = 1\n            kmax = v\n        elif st >= 0 and kmax - v > filt:\n            st = -1\n            kmin = v\n        sig[i] = st\n    ctx.kam = ctx.series(sig, \"kama_state\")\n\n\ndef signal(ctx, i):\n    s = ctx.kam[i]\n    return s if s else 0"
+}

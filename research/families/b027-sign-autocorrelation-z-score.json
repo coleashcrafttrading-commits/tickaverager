@@ -1,0 +1,30 @@
+{
+ "name": "Sign-Autocorrelation z Score",
+ "note": "Estimates whether the SIGN of a bar return persists at lag m, and trades only when that persistence is statistically significant. p_m is the continuation frequency over the last N valid sign pairs (bars with a zero return are dropped from the pairing rather than counted as up), and z_m = (2*p_m - 1)*sqrt(N) against the random-walk null of 0.5. z <= -threshold takes the OPPOSITE side to the last bar's sign, z >= +threshold takes the SAME side, and nothing is taken in between. Magnitude is deliberately absent from the statistic and appears only as an entry filter, |r_t| >= r_min * stdev(r, r_win). The hold is exactly m bars, implemented in exit_signal from the position's own entry bar so that sweeping the lag sweeps the hold with it, which a fixed time_stop could not do.",
+ "source": "arXiv 2606.29591, 'The Bounce Has No Direction' -- the FRI sign test, rho_sign(m) = 2*p_{m,0} - 1 with p_{m,0} the continuation frequency and 0.5 the random-walk null; the paper reports z_sign = -1.59 at lag 1 (insignificant) alongside rho(1) = -0.081 with z* = -7.39, and z_sign = -2.32 at lag 3 where rho(3) is insignificant.",
+ "params": {
+  "lag": 1,
+  "n_samp": 250,
+  "z_thr": 2.0,
+  "r_min": 0.5,
+  "r_win": 60,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "lag": [
+   1,
+   3,
+   5
+  ],
+  "z_thr": [
+   1.65,
+   2.0,
+   2.5
+  ],
+  "n_samp": [
+   125,
+   250
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    m = max(1, int(ctx.p.lag))\n    N = max(20, int(ctx.p.n_samp))\n    rw = max(10, int(ctx.p.r_win))\n\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    ps = [0.0] * (n + 1)\n    p2 = [0.0] * (n + 1)\n    for i in range(n):\n        ps[i + 1] = ps[i] + r[i]\n        p2[i + 1] = p2[i] + r[i] * r[i]\n    sd = [None] * n\n    for i in range(n):\n        if i + 1 < rw:\n            continue\n        mu = (ps[i + 1] - ps[i + 1 - rw]) / rw\n        var = (p2[i + 1] - p2[i + 1 - rw]) / rw - mu * mu\n        if var > 0.0:\n            sd[i] = math.sqrt(var)\n\n    # the sign-pair sequence: only bars with a non-zero return at BOTH ends\n    match = []\n    midx = []\n    for i in range(m, n):\n        if r[i] != 0.0 and r[i - m] != 0.0:\n            match.append(1 if (r[i] > 0.0) == (r[i - m] > 0.0) else 0)\n            midx.append(i)\n    cps = [0] * (len(match) + 1)\n    for k in range(len(match)):\n        cps[k + 1] = cps[k] + match[k]\n\n    z = [None] * n\n    root = math.sqrt(float(N))\n    for k in range(len(match)):\n        if k + 1 < N:\n            continue\n        p = (cps[k + 1] - cps[k + 1 - N]) / float(N)\n        z[midx[k]] = (2.0 * p - 1.0) * root\n\n    ctx.z = ctx.series(z, \"z_sign\")\n    ctx.r = ctx.series(r, \"ret\")\n    ctx.sd = ctx.series(sd, \"ret_sd\")\n\n\ndef signal(ctx, i):\n    z = ctx.z[i]\n    if z is None:\n        return 0\n    r = ctx.r[i]\n    if r == 0.0:\n        return 0\n    s = ctx.sd[i]\n    if s is None or s <= 0.0:\n        return 0\n    if abs(r) < float(ctx.p.r_min) * s:\n        return 0\n    thr = float(ctx.p.z_thr)\n    d = 1 if r > 0.0 else -1\n    if z <= -thr:\n        return -d\n    if z >= thr:\n        return d\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Held exactly `lag` bars -- the horizon the statistic was measured over.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return (i - e) >= max(1, int(ctx.p.lag))\n"
+}

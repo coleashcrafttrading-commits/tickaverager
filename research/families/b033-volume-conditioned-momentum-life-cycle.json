@@ -1,0 +1,30 @@
+{
+ "name": "Volume-conditioned momentum life cycle",
+ "note": "Lee & Swaminathan's momentum life cycle: the two diagonal cells of a return x volume double sort. RET is 12-1 momentum, close[t-skip] over close[t-mom] - 1; RVOL is mean volume over the last vol_n bars divided by the mean over the vol_n bars before that, the OHLCV proxy for turnover. Long only quiet winners (top RET tercile AND bottom RVOL tercile), short only loud losers (bottom RET AND top RVOL); the other seven cells are flat -- the LONG leg requiring LOW relative volume is the opposite of a volume-confirmation filter and is the whole point. HONEST LIMIT: the harness is single-symbol, so a cross-sectional tercile cannot be computed. The terciles are taken against the symbol's OWN trailing rank_n-bar distribution of RET and of RVOL, which keeps the double sort and the diagonal-cell rule but makes it a time-series rather than a cross-sectional strategy. The overlapping six-vintage book becomes the harness's single position with a bar-count hold.",
+ "source": "Lee & Swaminathan (2000), 'Price Momentum and Trading Volume', Journal of Finance 55(5), 2017-2069 -- the momentum life cycle hypothesis and the RET x turnover double sort. RVOL is the stated OHLCV substitution for turnover.",
+ "params": {
+  "mom_n": 252,
+  "skip_n": 21,
+  "vol_n": 252,
+  "rank_n": 500,
+  "q": 0.3333,
+  "side": "both",
+  "time_stop": 126
+ },
+ "grid": {
+  "q": [
+   0.25,
+   0.3333,
+   0.4
+  ],
+  "mom_n": [
+   126,
+   252
+  ],
+  "vol_n": [
+   126,
+   252
+  ]
+ },
+ "code": "def family_init(ctx):\n    from bisect import insort, bisect_left\n    bars = ctx.bars\n    N = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    mn = max(20, int(ctx.p.mom_n))\n    sk = max(0, int(ctx.p.skip_n))\n    vn = max(20, int(ctx.p.vol_n))\n    W = max(100, int(ctx.p.rank_n))\n\n    cum = [0.0] * (N + 1)\n    for j in range(N):\n        cum[j + 1] = cum[j] + v[j]\n\n    ret = [None] * N\n    rvl = [None] * N\n    for j in range(N):\n        if j - mn >= 0 and j - sk >= 0 and c[j - mn] > 0:\n            ret[j] = c[j - sk] / c[j - mn] - 1.0\n        if j + 1 - 2 * vn >= 0:\n            a = (cum[j + 1] - cum[j + 1 - vn]) / vn\n            b = (cum[j + 1 - vn] - cum[j + 1 - 2 * vn]) / vn\n            if b > 0:\n                rvl[j] = a / b\n\n    def ranks(x):\n        out = [None] * N\n        buf = []\n        seq = []\n        head = 0\n        for j in range(N):\n            xv = x[j]\n            if xv is None:\n                continue\n            n = len(buf)\n            if n >= 60:\n                out[j] = bisect_left(buf, xv) / float(n)\n            insort(buf, xv)\n            seq.append(xv)\n            if len(buf) > W:\n                old = seq[head]\n                head += 1\n                del buf[bisect_left(buf, old)]\n        return out\n\n    ctx.rr = ctx.series(ranks(ret), \"ret_rank\")\n    ctx.rv = ctx.series(ranks(rvl), \"rvol_rank\")\n\n\ndef signal(ctx, i):\n    a = ctx.rr[i]\n    b = ctx.rv[i]\n    if a is None or b is None:\n        return 0\n    q = float(ctx.p.q)\n    if a >= 1.0 - q and b <= q:\n        return 1\n    if a <= q and b >= 1.0 - q:\n        return -1\n    return 0"
+}

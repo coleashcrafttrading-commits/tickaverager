@@ -1,0 +1,34 @@
+{
+ "name": "ICSS variance break restart",
+ "note": "Inclan-Tiao cumulative-sum-of-squares test on a rolling T-bar window of demeaned log returns: D_k = C_k/C_T - k/T, IT = sqrt(T/2)*max|D_k|, a break declared at the argmax when IT clears the critical value. A trade is taken only on a NEWLY located break that is recent (within rec_frac of the window) and where the post-break mean square is below vratio times the pre-break one -- the volatility regime just CONTRACTED. Direction is the drift measured only since the break, never across it. Exit on the next declared break, either direction, or the time stop. DEVIATION, stated plainly: the harvested rule asked for a break inside the last 3 bars, which this statistic cannot produce -- D_k -> 0 as k -> T by construction, so an edge break is undetectable at any critical value. Recency is therefore a fraction of the window, the smallest change that leaves the test able to fire at all. Measured on real bars: a contraction break is first locatable roughly 20-30% of the window after it happens, so rec_frac lives there; crit and vratio are left as tunables but are not swept because on real data the argmax break is either an obvious contraction (ratio ~0.35) or an expansion (ratio > 2.5), with nothing in between for them to separate.",
+ "source": "Inclan & Tiao (1994), 'Use of Cumulative Sums of Squares for Retrospective Detection of Changes of Variance', JASA 89(427), 913-923; critical values 1.358 (5%) and 1.628 (1%). GARCH-robust kappa_2 variant: Sanso, Arago & Carrion (2004). R reference implementation: CRAN package ICSS.",
+ "params": {
+  "T": 250,
+  "crit": 1.358,
+  "vratio": 0.6,
+  "rec_frac": 0.3,
+  "step": 3,
+  "side": "both",
+  "exit_signal_on": 1,
+  "time_stop": 30,
+  "st_atr": 2.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "T": [
+   150,
+   250,
+   400
+  ],
+  "rec_frac": [
+   0.3,
+   0.5
+  ],
+  "time_stop": [
+   15,
+   30,
+   60
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    from itertools import accumulate\n    bars = ctx.bars\n    N = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    T = int(ctx.p.T)\n    crit = float(ctx.p.crit)\n    vratio = float(ctx.p.vratio)\n    rec = max(2, int(round(float(ctx.p.rec_frac) * T)))\n    step = max(1, int(ctx.p.step))\n    log = math.log\n\n    # --- demeaned log returns. The centring uses a slow causal EWMA; at bar\n    #     frequency the mean is a rounding error next to the squares. ---\n    r = [0.0] * N\n    for j in range(1, N):\n        a = c[j - 1]\n        b = c[j]\n        if a > 0.0 and b > 0.0:\n            r[j] = log(b / a)\n    mu = 0.0\n    am = 2.0 / (T + 1.0)\n    sq = [0.0] * N\n    for j in range(N):\n        d = r[j] - mu\n        sq[j] = d * d\n        mu += am * (r[j] - mu)\n    pref = [0.0] * (N + 1)\n    s = 0.0\n    for j in range(N):\n        s += sq[j]\n        pref[j + 1] = s\n\n    invT = 1.0 / T\n    lin = [(m + 1) * invT for m in range(T)]\n    scale = math.sqrt(T * 0.5)\n\n    sig = [0] * N          # qualifying contraction break -> direction\n    anyb = [0] * N         # any newly located break, used by the exit\n    last_k = -10 ** 9\n    for j in range(T, N, step):\n        s0 = j - T + 1\n        CT = pref[j + 1] - pref[s0]\n        if CT <= 0.0:\n            continue\n        inv = 1.0 / CT\n        cs = list(accumulate(sq[s0:j + 1]))\n        vals = [abs(x * inv - y) for x, y in zip(cs, lin)]\n        best = max(vals)\n        if best * scale <= crit:\n            continue\n        kstar = s0 + vals.index(best)          # absolute bar index of the break\n        if kstar == last_k:\n            continue                           # same break, already reported\n        last_k = kstar\n        anyb[j] = 1\n        n_post = j - kstar\n        n_pre = kstar - s0 + 1\n        if n_post < 3 or n_pre < 10 or n_post > rec:\n            continue\n        v_post = (pref[j + 1] - pref[kstar + 1]) / n_post\n        v_pre = (pref[kstar + 1] - pref[s0]) / n_pre\n        if v_pre <= 0.0 or v_post >= vratio * v_pre:\n            continue                           # not a CONTRACTION -- ignore\n        a = c[kstar]\n        b = c[j]\n        if a <= 0.0 or b <= 0.0:\n            continue\n        drift = log(b / a)                     # drift since the break only\n        if drift > 0.0:\n            sig[j] = 1\n        elif drift < 0.0:\n            sig[j] = -1\n    ctx.sig = ctx.series(sig, \"icss_sig\")\n    ctx.anyb = ctx.series(anyb, \"icss_break\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    return 0 if s is None else int(s)\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    return bool(ctx.anyb[i])"
+}

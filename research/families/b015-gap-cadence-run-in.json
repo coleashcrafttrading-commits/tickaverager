@@ -1,0 +1,41 @@
+{
+ "name": "Gap-Cadence Event Calendar Run-In",
+ "note": "Reconstructs a recurring event calendar from the symbol's OWN bars: take the largest |open/prev-close - 1| jumps in a trailing window, keep the longest subset whose consecutive spacings all fall inside an admissible band, and forecast the next event at last + median spacing. Go long from entry_off bars before that forecast and exit exit_off bars before it -- always flat across the event itself. Self-falsifying: a forecast date that passes without a jump of stale_mult times the typical detected-event jump retires the symbol until a new event is observed. Spacings are in BARS, not sessions, because the probe data is far shorter than a quarterly cycle; on daily bars the band should be set to the 55-70 session spacing the source specifies, and the staleness reference is the median jump of the events the fit itself found rather than a 250-session median. Candidates are chosen with non-maximum suppression (min_sep bars apart, defaulting to half the low end of the spacing band) so that one violent event cannot occupy several candidate slots with its own neighbouring bars -- the source picks the 12 largest gap SESSIONS, which are distinct by construction.",
+ "source": "Beaver (1968) on announcement-period return variance and trading volume, cited in Kothari & Warner (2006) footnote 1. Frazzini & Lamont (2007) 'The Earnings Announcement Premium and Trading Volume' (NBER WP 13090) for the run-in premium. The gap-cadence reconstruction device itself is a synthesis -- no earnings calendar is available on this feed, so the event dates are inferred from the periodicity of the symbol's own overnight gaps, and the estimator is falsifiable.",
+ "params": {
+  "look_n": 1600,
+  "cand_n": 12,
+  "span_lo": 100,
+  "span_hi": 260,
+  "min_dates": 5,
+  "drift_tol": 40,
+  "refit_every": 40,
+  "entry_off": 30,
+  "exit_off": 5,
+  "slack": 10,
+  "stale_mult": 0.5,
+  "side": "long",
+  "exit_on_zero": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0,
+  "min_sep": 0
+ },
+ "grid": {
+  "entry_off": [
+   15,
+   30,
+   60
+  ],
+  "exit_off": [
+   1,
+   5,
+   12
+  ],
+  "min_dates": [
+   4,
+   5,
+   7
+  ]
+ },
+ "code": "import heapq\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    o = [float(x[\"o\"]) for x in b]\n    c = [float(x[\"c\"]) for x in b]\n    gap = [0.0] * n\n    for j in range(1, n):\n        if c[j - 1] > 0:\n            gap[j] = abs(o[j] / c[j - 1] - 1.0)\n\n    W = int(ctx.p.look_n)\n    K = int(ctx.p.cand_n)\n    lo = int(ctx.p.span_lo)\n    hi = int(ctx.p.span_hi)\n    need = int(ctx.p.min_dates)\n    drift = int(ctx.p.drift_tol)\n    step = max(5, int(ctx.p.refit_every))\n    eoff = int(ctx.p.entry_off)\n    xoff = int(ctx.p.exit_off)\n    slack = int(ctx.p.slack)\n    smult = float(ctx.p.stale_mult)\n    sep = int(ctx.p.min_sep) if int(ctx.p.min_sep) > 0 else max(1, lo // 2)\n\n    inwin = [0] * n\n    pred = None\n    A = None\n    ref = 0.0\n    blocked = False\n    blocked_A = None\n    checked = True\n\n    j = W\n    nxt = W\n    while j < n:\n        if j >= nxt:\n            nxt = j + step\n            s = j - W\n            # one candidate per event, not per bar: the source picks the 12\n            # largest gap SESSIONS, so suppress neighbours of a chosen bar\n            pool = heapq.nlargest(K * 8, range(s, j + 1), key=lambda q: gap[q])\n            picked = []\n            for q in pool:\n                if gap[q] <= 0.0:\n                    continue\n                if all(abs(q - z) >= sep for z in picked):\n                    picked.append(q)\n                    if len(picked) >= K:\n                        break\n            cand = sorted(picked)\n            m_ = len(cand)\n            best = None\n            if m_ >= need:\n                # longest chain of candidate dates whose consecutive spacings\n                # all sit inside the admissible band -- the calendar\n                dp = [1] * m_\n                par = [-1] * m_\n                for aa in range(m_):\n                    for bb in range(aa):\n                        d = cand[aa] - cand[bb]\n                        if lo <= d <= hi and dp[bb] + 1 > dp[aa]:\n                            dp[aa] = dp[bb] + 1\n                            par[aa] = bb\n                bi = 0\n                for q in range(m_):\n                    if dp[q] > dp[bi]:\n                        bi = q\n                if dp[bi] >= need:\n                    chain = []\n                    q = bi\n                    while q >= 0:\n                        chain.append(cand[q])\n                        q = par[q]\n                    chain.reverse()\n                    best = chain\n            if best:\n                sp = [best[q + 1] - best[q] for q in range(len(best) - 1)]\n                if len(sp) >= 2 and abs(sp[-1] - sp[-2]) > drift:\n                    pred = None          # the cadence has drifted; do not forecast\n                else:\n                    ss = sorted(sp)\n                    md = ss[len(ss) // 2]\n                    newA = best[-1]\n                    if blocked and blocked_A is not None and newA > blocked_A:\n                        blocked = False\n                    if newA != A:\n                        checked = False\n                    A = newA\n                    pred = A + md\n                    gs = sorted(gap[q] for q in best)\n                    ref = gs[len(gs) // 2]\n            else:\n                pred = None\n\n        if pred is not None:\n            if not checked and j > pred + slack:\n                checked = True\n                a0 = max(0, pred - slack)\n                a1 = min(j - 1, pred + slack)\n                mx = 0.0\n                for q in range(a0, a1 + 1):\n                    if gap[q] > mx:\n                        mx = gap[q]\n                if mx < smult * ref:\n                    # the forecast date came and went without an event:\n                    # the cadence is stale, sit out until a new one is observed\n                    blocked = True\n                    blocked_A = A\n            if (not blocked and A is not None and j > A\n                    and (pred - eoff) <= j <= (pred - xoff)):\n                inwin[j] = 1\n        j += 1\n\n    ctx.win = ctx.series(inwin, \"run_in_window\")\n\n\ndef signal(ctx, i):\n    return 1 if ctx.win[i] else 0"
+}

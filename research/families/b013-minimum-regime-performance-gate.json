@@ -1,0 +1,35 @@
+{
+ "name": "Minimum regime performance gate",
+ "note": "Gates a sub-strategy on the worst annualised Sharpe it has ever produced over ANY admissible one-split partition of its own history -- Alexander & Fabozzi's MRP1, a minimax over split points rather than a mean or a rolling window -- recomputed every recheck bars over the trailing history. No new entries while MRP1 is below the floor, and everything is flattened and the strategy retired for three recheck periods whenever MRP1 has deteriorated by more than drop_t against its reading three periods earlier, which is the paper's early-warning signal. The floor and the deterioration trigger are quoted in units of one segment's Sharpe standard error rather than the paper's raw -0.10 and 0.25: on multi-decade daily data one 500-bar segment's Sharpe has a standard error near 0.7, on this study's windows it is near 10, so the raw numbers would be a threshold no real window reaches. The gated rule is the study's own EMA-cross floor family, so what is measured is the gate. Only the s=1 split is computed; s>=2 is quadratic in window length and would dominate the run.",
+ "source": "Alexander, N. & Fabozzi, F.J., 'Measuring Strategy-Decay Risk: Minimum Regime Performance and the Durability of Systematic Investing', arXiv:2604.08356, Eqs. 3-4 and Exhibits 3-4. Code repository cited by the authors: github.com/nolanalexander/minimum_regime_performance",
+ "params": {
+  "exit_on_flip": 1,
+  "exit_signal_on": 1,
+  "base_f": 9,
+  "base_s": 30,
+  "min_seg": 500,
+  "hist": 3000,
+  "recheck": 250,
+  "floor_t": -1.0,
+  "drop_t": 0.35,
+  "drop_lag": 3,
+  "retire_mult": 3
+ },
+ "grid": {
+  "min_seg": [
+   250,
+   500,
+   1000
+  ],
+  "floor_t": [
+   -1.5,
+   -1.0,
+   -0.5
+  ],
+  "drop_t": [
+   0.35,
+   0.6
+  ]
+ },
+ "code": "\nimport math as _m\n\ndef _ema(c, n):\n    a = 2.0 / (n + 1.0)\n    out = [None] * len(c)\n    s = None\n    for i, x in enumerate(c):\n        s = x if s is None else s + a * (x - s)\n        if i >= n:\n            out[i] = s\n    return out\n\ndef _bars_per_year(bars):\n    \"\"\"252 sessions of however many bars this symbol actually prints a day.\"\"\"\n    days = set()\n    for b in bars:\n        days.add(str(b[\"t\"])[:10])\n    d = max(1, len(days))\n    return (len(bars) / float(d)) * 252.0\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    bpy = _bars_per_year(bars)\n    ann = _m.sqrt(bpy)\n\n    # ---- the sub-strategy being gated: the study's own floor rule, so what\n    # ---- is being measured is the gate and not a new signal\n    ef = _ema(c, int(ctx.p.base_f))\n    es = _ema(c, int(ctx.p.base_s))\n    pos = [0] * n\n    ev = [0] * n\n    for i in range(n):\n        if ef[i] is not None and es[i] is not None:\n            pos[i] = 1 if ef[i] > es[i] else -1\n            if i and pos[i - 1] and pos[i] != pos[i - 1]:\n                ev[i] = pos[i]\n    ctx.ev = ev\n\n    # its per-bar return series, and prefix sums so any segment's Sharpe is O(1)\n    ps = [0.0] * (n + 1)\n    pq = [0.0] * (n + 1)\n    for i in range(n):\n        r = 0.0\n        if i and pos[i - 1] and c[i - 1] > 0:\n            r = pos[i - 1] * (c[i] / c[i - 1] - 1.0)\n        ps[i + 1] = ps[i] + r\n        pq[i + 1] = pq[i] + r * r\n\n    def sr(a, b):\n        m = b - a\n        if m < 30:\n            return None\n        s1 = ps[b] - ps[a]\n        s2 = pq[b] - pq[a]\n        mu = s1 / m\n        var = (s2 - m * mu * mu) / (m - 1)\n        if var <= 0.0:\n            return None\n        return mu / _m.sqrt(var) * ann\n\n    d = int(ctx.p.min_seg)\n    hist = int(ctx.p.hist)\n    every = max(1, int(ctx.p.recheck))\n    # the floor and the deterioration trigger are quoted in units of one\n    # segment's own Sharpe standard error, so they mean the same thing at any\n    # bar size: sqrt(bars_per_year / d) annualised Sharpe points\n    seg_se = _m.sqrt(bpy / d)\n    floor = float(ctx.p.floor_t) * seg_se\n    dropby = float(ctx.p.drop_t) * seg_se\n    look = int(ctx.p.drop_lag)\n    retire_n = int(ctx.p.retire_mult) * every\n\n    elig = [False] * n\n    hold = [False] * n          # retired: flatten and take nothing\n    seen = []                   # (bar, MRP1) at each recheck\n    ok = False\n    retired_until = -1\n    for t in range(n):\n        if t % every == 0:\n            lo = max(0, t - hist)\n            best = None\n            if t - lo >= 2 * d:\n                for tau in range(lo + d, t - d + 1):\n                    a = sr(lo, tau)\n                    b = sr(tau, t)\n                    if a is None or b is None:\n                        continue\n                    v = a if a < b else b\n                    if best is None or v < best:\n                        best = v\n            if best is not None:\n                ok = best >= floor\n                # a worsening worst regime is the paper's early warning\n                if len(seen) >= look:\n                    prev = seen[-look]\n                    if prev is not None and (prev - best) > dropby:\n                        retired_until = t + retire_n\n                seen.append(best)\n            else:\n                ok = False\n                seen.append(None)\n        hold[t] = t < retired_until\n        elig[t] = ok and not hold[t]\n    ctx.elig = ctx.series(elig, \"eligible\")\n    ctx.hold = ctx.series(hold, \"retired\")\n\n\ndef signal(ctx, i):\n    if not ctx.elig[i]:\n        return 0\n    s = ctx.ev[i]\n    return 1 if s > 0 else (-1 if s < 0 else 0)\n\n\ndef exit_signal(ctx, i):\n    return bool(ctx.hold[i])\n"
+}

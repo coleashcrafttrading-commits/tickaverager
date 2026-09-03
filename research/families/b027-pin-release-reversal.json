@@ -1,0 +1,31 @@
+{
+ "name": "Pin Release Reversal",
+ "note": "A dated, mechanically-caused distortion faded the session after it expires. On an expiration Friday the close is compared with the nearest listed strike K on a hardcoded grid ($1 below $25, $2.50 to $200, $5 above); the name must have PINNED (within pin_frac of the half-interval, which is the largest distance to a strike that can exist) and must have been DRAGGED there (its close lb sessions earlier at least drag*G away from K). The trade is entered market-on-open the next session in the direction the stock came FROM -- long if it was above K, short if below -- and closed at the close of the hold-th session after. Two honest notes. The band is a fraction of the half-interval rather than of G itself, because 0.05*G is a 10%-of-the-possible-range window that fires about once per symbol per quarter; the literal version is pin_frac=0.1 and it is in the sweep. And expiry defaults to WEEKLY Fridays (monthly_only is swept) because a 120-day study window contains five monthly cycles, which cannot reach the per-symbol trade minimum -- the monthly-only variant is included so the sweep can say what it is worth, not because it can clear the bar.",
+ "source": "Ni, Pearson & Poteshman (2005), JFE 78(1), 49-87 -- Figure 1 panels (clustering by trade date -10..+10) and the reversion-to-non-manipulated-level argument in Section 5.",
+ "params": {
+  "pin_frac": 0.7,
+  "drag": 0.4,
+  "lb": 5,
+  "hold": 3,
+  "monthly_only": 0,
+  "entry_min": 955,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "pin_frac": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "lb": [
+   3,
+   5,
+   10
+  ],
+  "monthly_only": [
+   0,
+   1
+  ]
+ },
+ "code": "def _et(bars):\n    \"\"\"Minute-of-day, session index, weekday and day-of-month, in New York.\n\n    Bars carry UTC timestamps; every calendar rule here is a New York rule, so\n    the offset has to be resolved per bar rather than assumed.\"\"\"\n    import datetime\n    mins = []\n    sess = []\n    dow = []\n    dom = []\n    last = None\n    s = -1\n    for b in bars:\n        ts = str(b[\"t\"])\n        y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        if mo < 3 or mo > 11:\n            dst = False\n        elif 3 < mo < 11:\n            dst = True\n        elif mo == 3:\n            w = datetime.date(y, 3, 1).weekday()\n            dst = d >= 1 + ((6 - w) % 7) + 7\n        else:\n            w = datetime.date(y, 11, 1).weekday()\n            dst = d < 1 + ((6 - w) % 7)\n        t = (datetime.datetime(y, mo, d, hh, mi)\n             - datetime.timedelta(minutes=240 if dst else 300))\n        key = (t.year, t.month, t.day)\n        if key != last:\n            last = key\n            s += 1\n        mins.append(t.hour * 60 + t.minute)\n        sess.append(s)\n        dow.append(t.weekday())\n        dom.append(t.day)\n    return mins, sess, dow, dom\n\n\ndef _strike(px):\n    inc = 1.0 if px < 25.0 else (2.5 if px < 200.0 else 5.0)\n    return round(px / inc) * inc, inc\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    mins, sess, dow, dom = _et(bars)\n    daily = len(set(str(b[\"t\"])[:10] for b in bars)) == n\n    if daily:\n        mins = [955] * n\n\n    emin = int(ctx.p.entry_min)\n    frac = float(ctx.p.pin_frac)\n    drag = float(ctx.p.drag)\n    lb = max(1, int(ctx.p.lb))\n    monthly = int(ctx.p.monthly_only)\n\n    order = []\n    sclose = {}\n    swd = {}\n    sdom = {}\n    first_rth = {}\n    for j in range(n):\n        if not (570 <= mins[j] < 960):\n            continue\n        s = sess[j]\n        if s not in sclose:\n            order.append(s)\n            swd[s] = dow[j]\n            sdom[s] = dom[j]\n            first_rth[s] = j\n        sclose[s] = float(bars[j][\"c\"])\n    pos = dict((s, k) for k, s in enumerate(order))\n\n    ev = [False] * n\n    seen = set()\n    for j in range(n):\n        s = sess[j]\n        if s in pos and mins[j] >= emin and s not in seen:\n            seen.add(s)\n            ev[j] = True\n\n    sig = [0] * n\n    for k, s in enumerate(order):\n        if swd[s] != 4:\n            continue\n        if monthly and not (15 <= sdom[s] <= 21):\n            continue\n        if k - lb < 0 or k + 1 >= len(order):\n            continue\n        p = sclose[s]\n        kk, g = _strike(p)\n        if abs(p - kk) > frac * (g / 2.0):\n            continue\n        p5 = sclose[order[k - lb]]\n        if abs(p5 - kk) < drag * g:\n            continue\n        j = first_rth[order[k + 1]] - 1        # fills at the next session's open\n        if j < 0 or j <= first_rth[s]:\n            continue\n        sig[j] = 1 if p5 > kk else -1\n\n    sidx = [-1] * n\n    for j in range(n):\n        s = sess[j]\n        if s in pos:\n            sidx[j] = pos[s]\n\n    ctx.sig = ctx.series(sig, \"pin_rel\")\n    ctx.ev = ctx.series(ev, \"pr_eval\")\n    ctx.sk = ctx.series(sidx, \"pr_session\")\n\n\ndef signal(ctx, i):\n    return int(ctx.sig[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The distortion is a dated thing: out at the close of the hold-th session.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    k = ctx.sk[i]\n    ke = ctx.sk[e]\n    if k < 0 or ke < 0:\n        return False\n    return (k - ke) >= int(ctx.p.hold) and bool(ctx.ev[i])\n"
+}

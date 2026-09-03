@@ -1,0 +1,37 @@
+{
+ "name": "Closing-Bell Round Number Pin",
+ "note": "At 15:30 ET, trade TOWARD the nearest price-grid level when price is already close to it, the last half hour has been quieter than usual, and the name's own closes demonstrably cluster on the grid. The clustering intensity CI -- the share of past closes whose cents land on {00,25,50,75}, divided by the 0.04 a uniform digit distribution would give -- is the gate that makes this per-ticker rather than universal. Measured on the probe names it runs 1.1 to 1.6, so the default threshold sits inside the real range.",
+ "source": "Synthesis. Grounded in two verified/established sources: (a) Osler, FRBNY Staff Report (VERIFIED above) for round-number limit-order clustering; (b) Lawrence Harris, 'Stock Price Clustering and Discreteness', Review of Financial Studies 4(3), 1991, 389-415, for the equity price-clustering evidence - I was NOT able to open this paper in this session, so treat the Harris citation as from background knowledge rather than verified here. The end-of-day timing, the CI statistic and the trade construction are my own synthesis.",
+ "params": {
+  "entry_min": 930,
+  "exit_min": 955,
+  "band_lo": 0.02,
+  "band_hi": 0.25,
+  "ci_min": 1.15,
+  "digit_win": 1500,
+  "digit_mod": 25,
+  "vol_bars": 6,
+  "vol_lb": 20,
+  "fail_g": 0.3,
+  "g_mult": 1.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "band_hi": [
+   0.15,
+   0.25,
+   0.35
+  ],
+  "ci_min": [
+   1.0,
+   1.15,
+   1.3
+  ],
+  "digit_win": [
+   800,
+   1500
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    import datetime as _dt\n    m1 = _dt.date(y, 3, 1)\n    ms = 1 + ((6 - m1.weekday()) % 7) + 7\n    n1 = _dt.date(y, 11, 1)\n    ne = 1 + ((6 - n1.weekday()) % 7)\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        return d >= ms\n    return d < ne\n\n\ndef _et_minutes(bars):\n    \"\"\"Minute-of-day in America/New_York for every bar. UTC in, ET out.\"\"\"\n    off = {}\n    out = []\n    for b in bars:\n        ts = str(b[\"t\"])\n        day = ts[:10]\n        o = off.get(day)\n        if o is None:\n            o = -4 if _dst(int(ts[0:4]), int(ts[5:7]), int(ts[8:10])) else -5\n            off[day] = o\n        out.append((int(ts[11:13]) + o) * 60 + int(ts[14:16]))\n    return out\n\n\ndef _grid_of(px, mult):\n    \"\"\"The salient price grid for a name, by price tier.\"\"\"\n    if px < 25.0:\n        g = 0.25\n    elif px < 100.0:\n        g = 0.50\n    elif px < 250.0:\n        g = 1.00\n    elif px < 1000.0:\n        g = 5.00\n    else:\n        g = 10.00\n    return g * mult\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    ctx.et = _et_minutes(bars)\n    ctx.day = [str(b[\"t\"])[:10] for b in bars]\n\n    # ---- clustering intensity: a rolling digit histogram of past closes ----\n    # hit_j is 1 when bar j's close lands exactly on the cents grid\n    mod = int(ctx.p.digit_mod)\n    hit = [1 if (int(round(x * 100.0)) % 100) % mod == 0 else 0 for x in c]\n    base = (100 // mod) / 100.0          # 4/100 for the {00,25,50,75} set\n    # use the requested window, or as much history as the series has --\n    # a fixed 1500-bar histogram simply never forms on a short series\n    W = min(int(ctx.p.digit_win), max(200, n // 3))\n    ci = [None] * n\n    run = 0\n    for j in range(n):\n        run += hit[j]\n        if j >= W:\n            run -= hit[j - W]\n        if j >= W - 1 and base > 0:\n            ci[j] = (run / float(W)) / base\n    ctx.ci = ctx.series(ci, \"clustering_intensity\")\n\n    # ---- realised vol of the last k bars, only where it is needed ----\n    k = int(ctx.p.vol_bars)\n    entry_min = int(ctx.p.entry_min)\n    rv = [None] * n\n    hist = []                 # prior sessions' 15:30 readings, in order\n    med_at = [None] * n\n    for i in range(n):\n        if ctx.et[i] != entry_min or i < k:\n            continue\n        r = []\n        for j in range(i - k + 1, i + 1):\n            if c[j - 1] > 0:\n                r.append(math.log(c[j] / c[j - 1]))\n        if len(r) < 2:\n            continue\n        m = sum(r) / len(r)\n        v = math.sqrt(sum((x - m) ** 2 for x in r) / len(r))\n        rv[i] = v\n        h = hist[-int(ctx.p.vol_lb):]\n        if len(h) >= 5:\n            s = sorted(h)\n            q = len(s) // 2\n            med_at[i] = s[q] if len(s) % 2 else 0.5 * (s[q - 1] + s[q])\n        hist.append(v)\n    ctx.rv = ctx.series(rv, \"rvol\")\n    ctx.rvmed = ctx.series(med_at, \"rvol_median\")\n    ctx._pin = None\n\n\ndef signal(ctx, i):\n    if ctx.et[i] != int(ctx.p.entry_min):\n        return 0\n    ci = ctx.ci[i]\n    v = ctx.rv[i]\n    med = ctx.rvmed[i]\n    if ci is None or v is None or med is None:\n        return 0\n    if ci < ctx.p.ci_min:\n        return 0\n    if v >= med:                       # only into a quiet close\n        return 0\n    px = ctx.c[i]\n    G = _grid_of(px, ctx.p.g_mult)\n    if G <= 0:\n        return 0\n    R = round(px / G) * G\n    d = abs(px - R) / G\n    if not (ctx.p.band_lo <= d <= ctx.p.band_hi):\n        return 0\n    if px == R:\n        return 0\n    ctx._pin = (R, G, ctx.day[i])\n    return 1 if px < R else -1\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or ctx._pin is None:\n        return False\n    R, G, day = ctx._pin\n    if ctx.day[i] != day:\n        return True                    # never carry a pin overnight\n    if ctx.et[i] >= int(ctx.p.exit_min):\n        return True\n    long_ = ctx.positions[0][\"side\"] == \"long\"\n    if long_:\n        if ctx.h[i] >= R:              # pinned\n            return True\n        if ctx.l[i] <= R - ctx.p.fail_g * G:\n            return True\n    else:\n        if ctx.l[i] <= R:\n            return True\n        if ctx.h[i] >= R + ctx.p.fail_g * G:\n            return True\n    return False"
+}

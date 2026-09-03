@@ -1,0 +1,37 @@
+{
+ "name": "Fitted Trend Factor",
+ "note": "Eight normalised moving averages A_L = SMA_L/close are used as REGRESSORS in a fitted forward-return forecast rather than as signals. The slopes are re-estimated on a sliding window every `refit` bars, smoothed with the paper's EWMA (lam), and the forecast ER = sum_L b_L*A_L is cut at its own trailing q / 1-q quantiles; the position holds until the next rebalance re-ranks it, and the forecast is the only exit. The published regression is cross-sectional across a universe -- this harness sees one symbol, so the fit is in the time series and the tercile is against ER's own history; what is preserved is that the weight and SIGN on each horizon is estimated and time-varying rather than hard-coded.",
+ "source": "Han, Zhou & Zhu, 'A trend factor: Any economic gains from using information over investment horizons?', Journal of Financial Economics 122(2), 2016, 352-375. Construction reproduced verbatim in Liu & Zhou, 'Trend Factor in China', equations (1)-(2) (MA of the last L closes, normalised by the closing price on the last trading day), (5) (cross-sectional forecasting regression) and (7) (EWMA coefficient forecast, lambda = 0.02, giving a roughly 4-year effective memory). PDF: https://wrds-www.wharton.upenn.edu/documents/1119/WARSP_TrendChina.pdf",
+ "params": {
+  "lag_set": 0,
+  "hor": 78,
+  "fit_win": 1500,
+  "refit": 78,
+  "lam_ew": 0.02,
+  "ridge": 0.01,
+  "q": 0.3,
+  "rank_n": 600,
+  "min_obs": 200,
+  "atr_n": 14,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "lam_ew": [
+   0.01,
+   0.02,
+   0.05
+  ],
+  "q": [
+   0.2,
+   0.3
+  ],
+  "lag_set": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Moving averages as REGRESSORS, not as signals.\n\n    A_L(t) = SMA_L(close)/close_t for L in the lag set -- dividing by the\n    current close is what makes the term stationary and comparable across\n    price levels. The weight on each horizon is FITTED, refreshed every\n    `refit` bars on a sliding window of past (A_L, forward return) pairs, and\n    then smoothed with the paper's EWMA, E_t(b) = (1-lam)E_{t-1}(b) + lam*b_t.\n    The forecast is ER = sum_L E_t(b_L) * A_L(t); the position is long in the\n    top q of ER's own recent distribution and short in the bottom q, held\n    until the next rebalance re-ranks it. The forecast is the exit -- no\n    single moving average has authority to close anything.\n\n    SUBSTITUTION, stated plainly: the published regression is CROSS-SECTIONAL\n    across the universe and the cut is a cross-sectional tercile. This harness\n    sees one symbol at a time, so the regression is run in the TIME SERIES on\n    the same symbol and the tercile is taken against ER's own trailing\n    distribution. What survives is the load-bearing part -- which horizon is\n    paid, and with what sign, is estimated rather than hard-coded, so the same\n    price path can be long in one regime and short in another. What is lost is\n    the cross-sectional pooling of the estimate.\n    \"\"\"\n    import math\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    sets = ([3, 5, 10, 20, 50, 100, 200, 400],\n            [3, 5, 10, 20, 50, 100, 200],\n            [3, 5, 10, 20, 50, 100, 200, 400, 800])\n    lags = sets[int(ctx.p.lag_set) % 3]\n    k = len(lags)\n\n    X = [[None] * m for _ in range(k)]\n    for a in range(k):\n        L = lags[a]\n        row = X[a]\n        s = 0.0\n        for i in range(m):\n            s += c[i]\n            if i >= L:\n                s -= c[i - L]\n            if i >= L - 1 and c[i] > 0.0:\n                row[i] = (s / L) / c[i] - 1.0\n\n    H = max(1, int(ctx.p.hor))\n    win = max(50, int(ctx.p.fit_win))\n    refit = max(5, int(ctx.p.refit))\n    lam = float(ctx.p.lam_ew)\n    ridge = float(ctx.p.ridge)\n    q = min(0.49, max(0.02, float(ctx.p.q)))\n    rn = max(50, int(ctx.p.rank_n))\n    need = max(k * 5, int(ctx.p.min_obs))\n\n    Sx = [0.0] * k\n    Sxx = [[0.0] * k for _ in range(k)]\n    Sxy = [0.0] * k\n    Sy = 0.0\n    n = 0\n    queue = []                      # observations still inside the window\n    bhat = None\n    sig = [0] * m\n    er_hist = []\n    cur = 0\n\n    for i in range(m):\n        t = i - H\n        if t >= 0 and c[t] > 0.0 and c[i] > 0.0:\n            xs = [X[a][t] for a in range(k)]\n            if None not in xs:\n                y = math.log(c[i] / c[t])\n                queue.append((xs, y))\n                for a in range(k):\n                    Sx[a] += xs[a]\n                    Sxy[a] += xs[a] * y\n                    ra = Sxx[a]\n                    for b in range(a, k):\n                        ra[b] += xs[a] * xs[b]\n                Sy += y\n                n += 1\n                if n > win:\n                    xs0, y0 = queue.pop(0)\n                    for a in range(k):\n                        Sx[a] -= xs0[a]\n                        Sxy[a] -= xs0[a] * y0\n                        ra = Sxx[a]\n                        for b in range(a, k):\n                            ra[b] -= xs0[a] * xs0[b]\n                    Sy -= y0\n                    n -= 1\n\n        er = None\n        xs = [X[a][i] for a in range(k)]\n        if bhat is not None and None not in xs:\n            er = 0.0\n            for a in range(k):\n                er += bhat[a] * xs[a]\n            er_hist.append(er)\n            if len(er_hist) > rn:\n                er_hist.pop(0)\n\n        if i % refit == 0 and n >= need:\n            A = [[0.0] * (k + 1) for _ in range(k)]\n            dsum = 0.0\n            for a in range(k):\n                for b in range(k):\n                    v = Sxx[a][b] if b >= a else Sxx[b][a]\n                    A[a][b] = v - Sx[a] * Sx[b] / n\n                A[a][k] = Sxy[a] - Sx[a] * Sy / n\n                dsum += A[a][a]\n            r = ridge * (dsum / k if dsum > 0.0 else 1e-12)\n            for a in range(k):\n                A[a][a] += r\n            bnew = _solve(A, k)\n            if bnew is not None:\n                bhat = bnew if bhat is None else \\\n                    [(1.0 - lam) * bhat[a] + lam * bnew[a] for a in range(k)]\n\n        if i % refit == 0 and er is not None and len(er_hist) >= rn // 2:\n            srt = sorted(er_hist)\n            nn = len(srt)\n            lo = srt[int(q * (nn - 1))]\n            hi = srt[int((1.0 - q) * (nn - 1))]\n            cur = 1 if er >= hi else (-1 if er <= lo else 0)\n        sig[i] = cur\n\n    ctx.sg = ctx.series(sig, \"trend_factor\")\n\n\ndef _solve(A, k):\n    \"\"\"Gaussian elimination with partial pivoting on the augmented k x (k+1).\"\"\"\n    for col in range(k):\n        p = col\n        best = abs(A[col][col])\n        for r in range(col + 1, k):\n            v = abs(A[r][col])\n            if v > best:\n                best = v\n                p = r\n        if best < 1e-18:\n            return None\n        if p != col:\n            A[col], A[p] = A[p], A[col]\n        pv = A[col][col]\n        for r in range(col + 1, k):\n            f = A[r][col] / pv\n            if f:\n                for cc in range(col, k + 1):\n                    A[r][cc] -= f * A[col][cc]\n    out = [0.0] * k\n    for r in range(k - 1, -1, -1):\n        s = A[r][k]\n        for cc in range(r + 1, k):\n            s -= A[r][cc] * out[cc]\n        out[r] = s / A[r][r]\n    return out\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0\n"
+}

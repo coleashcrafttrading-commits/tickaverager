@@ -1,0 +1,28 @@
+{
+ "name": "TD Sequential nine-count setup",
+ "note": "Counts consecutive bars closing on the wrong side of the close four bars earlier -- no average, no band, no ratio -- and enters when the run reaches nine AND the geometric perfection condition holds on the lows of the last two setup bars against bars six and seven. Exits on the mirrored count. Purely ordinal, exactly as published.",
+ "source": "freqtrade-strategies, user_data/strategies/berlinguyinca/TDSequentialStrategy.py - https://github.com/freqtrade/freqtrade-strategies/blob/main/user_data/strategies/berlinguyinca/TDSequentialStrategy.py (implements Tom DeMark's TD Sequential setup)",
+ "params": {
+  "lag": 4,
+  "count": 9,
+  "perfect": 1,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "lag": [
+   2,
+   4,
+   6
+  ],
+  "count": [
+   7,
+   9,
+   13
+  ],
+  "perfect": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    lag = int(ctx.p.lag)\n    sb = [0] * n\n    ss = [0] * n\n    for t in range(n):\n        if t < lag:\n            continue\n        if c[t] < c[t - lag]:\n            sb[t] = sb[t - 1] + 1\n        if c[t] > c[t - lag]:\n            ss[t] = ss[t - 1] + 1\n    ctx.sb = ctx.series(sb, \"seq_buy\")\n    ctx.ss = ctx.series(ss, \"seq_sell\")\n\n\ndef signal(ctx, i):\n    if i < 3:\n        return 0\n    cnt = int(ctx.p.count)\n    want = int(ctx.p.perfect)\n    b, s = ctx.sb[i], ctx.ss[i]\n    if b is not None and b >= cnt:\n        if not want:\n            return 1\n        l0, l1 = ctx.l[i], ctx.l[i - 1]\n        l2, l3 = ctx.l[i - 2], ctx.l[i - 3]\n        if (l0 < l2 and l0 < l3) or (l1 < l2 and l1 < l3):\n            return 1\n        return 0\n    if s is not None and s >= cnt:\n        if not want:\n            return -1\n        h0, h1 = ctx.h[i], ctx.h[i - 1]\n        h2, h3 = ctx.h[i - 2], ctx.h[i - 3]\n        if (h0 > h2 and h0 > h3) or (h1 > h2 and h1 > h3):\n            return -1\n        return 0\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    cnt = int(ctx.p.count)\n    if ctx.positions[0][\"side\"] == \"long\":\n        v = ctx.ss[i]\n    else:\n        v = ctx.sb[i]\n    return v is not None and v >= cnt"
+}

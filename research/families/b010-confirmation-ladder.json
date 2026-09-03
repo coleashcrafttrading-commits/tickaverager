@@ -1,0 +1,29 @@
+{
+ "name": "Confirmation Ladder",
+ "note": "Base state S = close above EMA(20) with ADX(14) over 25 (mirrored for short). Enters only on the FIRST bar of an N-bar unbroken run of that state, so N=1 and N=3 trade disjoint populations rather than being a threshold tweak. Holding period H is swept independently of N via time_stop -- the N-by-H response surface is the deliverable, and tying the two together is the error the source paper names.",
+ "source": "Moskowitz, Ooi & Pedersen (2012), 'Time Series Momentum', Journal of Financial Economics 104:228-250. Read directly from the published PDF; the argument that forcing lookback to equal holding period masks predictability is in the literature-review section.",
+ "params": {
+  "ema_n": 20,
+  "adx_n": 14,
+  "adx_min": 25,
+  "n_confirm": 3,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "time_stop": 10
+ },
+ "grid": {
+  "n_confirm": [
+   1,
+   2,
+   3,
+   5
+  ],
+  "time_stop": [
+   5,
+   10,
+   20,
+   40
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n    ctx.dx = ctx.indicator(\"adx\", period=int(ctx.p.adx_n))\n\n\ndef _state(ctx, j):\n    \"\"\"The base state on bar j: +1 long-state, -1 short-state, 0 neither.\"\"\"\n    if j < 0:\n        return 0\n    e = ctx.e[j]\n    a = ctx.dx.adx[j]\n    if e is None or a is None:\n        return 0\n    if a < ctx.p.adx_min:\n        return 0\n    c = ctx.c[j]\n    if c > e:\n        return 1\n    if c < e:\n        return -1\n    return 0\n\n\ndef signal(ctx, i):\n    n = int(ctx.p.n_confirm)\n    if n < 1 or i < n:\n        return 0\n    s = _state(ctx, i)\n    if s == 0:\n        return 0\n    for k in range(1, n):\n        if _state(ctx, i - k) != s:\n            return 0\n    if _state(ctx, i - n) == s:\n        return 0\n    return s"
+}

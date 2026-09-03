@@ -1,0 +1,31 @@
+{
+ "name": "Self-Adjusting RSI Bands",
+ "note": "Replaces the fixed 70/30 pair with 50 +/- mult times the dispersion of the RSI itself, recomputed every bar, so 'extreme' means the same statistical thing on every ticker and in every regime. est=0 uses the RSI's rolling standard deviation, est=1 its mean absolute deviation. mode=0 is the breakout reading (buy the cross ABOVE the upper band), mode=1 the fade (buy the cross back above the lower band).",
+ "source": "TradingView open-source: 'Self-Adjusting RSI (SARSI)' by everget. Exact Pine read from github.com/everget/tradingview-pinescript-indicators/blob/master/oscillators/self_adjusting_rsi.pine",
+ "params": {
+  "rsi_n": 14,
+  "band_n": 14,
+  "mult": 2.0,
+  "est": 0,
+  "mode": 0,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "rsi_n": [
+   7,
+   14,
+   21
+  ],
+  "mult": [
+   1.0,
+   2.0
+  ],
+  "mode": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.r = ctx.indicator(\"rsi\", period=int(ctx.p.rsi_n))\n\n\ndef _band(ctx, j):\n    \"\"\"(upper, lower) = 50 +/- mult * dispersion of the RSI over band_n bars.\"\"\"\n    n = int(ctx.p.band_n)\n    if n < 2 or j < n - 1:\n        return None, None\n    vals = []\n    for k in range(n):\n        x = ctx.r[j - k]\n        if x is None:\n            return None, None\n        vals.append(x)\n    m = sum(vals) / n\n    if int(ctx.p.est) == 0:\n        dev = (sum((x - m) ** 2 for x in vals) / n) ** 0.5\n    else:\n        dev = sum(abs(x - m) for x in vals) / n\n    adj = float(ctx.p.mult) * dev\n    return 50.0 + adj, 50.0 - adj\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    r = ctx.r[i]\n    pr = ctx.r[i - 1]\n    if r is None or pr is None:\n        return 0\n    ob, os_ = _band(ctx, i)\n    pob, pos_ = _band(ctx, i - 1)\n    if ob is None or pob is None:\n        return 0\n    if int(ctx.p.mode) == 0:\n        if pr <= pob and r > ob:\n            return 1\n        if pr >= pos_ and r < os_:\n            return -1\n        return 0\n    if pr <= pos_ and r > os_:\n        return 1\n    if pr >= pob and r < ob:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    r = ctx.r[i]\n    if r is None:\n        return False\n    ob, os_ = _band(ctx, i)\n    if ob is None:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return r < 50.0 or r < os_\n    return r > 50.0 or r > ob"
+}

@@ -1,0 +1,37 @@
+{
+ "name": "Turnover-Penalised Sharpe Position",
+ "note": "The Deep Momentum Network feature set (volatility-normalised returns at five horizons plus three normalised MACD timescale pairs) driving a RECURRENT unit with a tanh output, trained online by gradient ascent on the differential Sharpe ratio of the COST-ADJUSTED return R_t = (X_{t-1}/sigma)*r_t - c*|X_t/sigma - X_{t-1}/sigma|. Note that the 1/sigma which scales the return scales the TURNOVER TERM too, exactly as the paper writes it - drop it and the penalty comes out three orders of magnitude too small to move anything, which is the silent way this idea turns into a plain momentum net. Cost sits inside the objective, not outside the backtest, so the unit learns not to move for signal changes too small to pay for the round trip and the position path goes sticky by itself. Position is taken when |X_t| > dead and goes flat inside the dead band, so the exit is emergent exactly as specified. SUBSTITUTION, stated plainly: the paper's LSTM is replaced by a single recurrent linear-tanh unit trained by the Moody-Saffell online differential-Sharpe update. A per-backtest LSTM fit is not affordable in family_init, and the objective, the turnover penalty, the feature set and the emergent exit structure - the parts the idea says are the novelty - are all preserved.",
+ "source": "Lim, Zohren & Roberts (2019), arXiv:1904.04912, turnover regularisation section - the cost-adjusted return formula with the c*|X_t/sigma_t - X_{t-1}/sigma_{t-1}| penalty is quoted from the paper's full text (ar5iv). Raising c to retail equity levels and selecting it on net out-of-sample Sharpe is my adaptation. Online differential-Sharpe gradient ascent on a recurrent tanh unit: Moody & Saffell, 'Learning to Trade via Direct Reinforcement', IEEE Trans. Neural Networks 12(4), 2001.",
+ "params": {
+  "cost": 0.001,
+  "dead": 0.05,
+  "lr": 0.05,
+  "adapt": 0.01,
+  "wd": 0.002,
+  "w0": 0.1,
+  "u0": 0.1,
+  "warm": 300,
+  "burn": 200,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "cost": [
+   0.0005,
+   0.001,
+   0.003
+  ],
+  "dead": [
+   0.02,
+   0.05,
+   0.1
+  ],
+  "lr": [
+   0.02,
+   0.1
+  ]
+ },
+ "code": "import math\n\n_HOR = (1, 21, 63, 126, 252)\n_MACD = ((8, 24), (16, 48), (32, 96))\n\n\ndef family_init(ctx):\n    ctx.nf = len(_HOR) + len(_MACD)\n    w0 = float(ctx.p.w0)\n    ctx.w = [w0] * ctx.nf\n    ctx.u = float(ctx.p.u0)\n    ctx.b = 0.0\n    ctx.dw = [0.0] * ctx.nf\n    ctx.du = 0.0\n    ctx.db = 0.0\n    ctx.F = 0.0\n    ctx.A = 0.0\n    ctx.B = 0.0\n    ctx.rst = [[], 0.0, 0.0]            # trailing 1-bar log returns\n    ctx.pst = [[], 0.0, 0.0]            # trailing closes for the MACD scaler\n    ctx.qst = [[[], 0.0, 0.0] for _ in _MACD]   # trailing q, second scaler\n    ctx.scale = float(ctx.nf) ** 0.5\n    ctx.ema = [None] * (2 * len(_MACD))\n    ctx.alpha = []\n    for (s, l) in _MACD:\n        ctx.alpha.append(1.0 - math.exp(-math.log(2.0) / float(s)))\n        ctx.alpha.append(1.0 - math.exp(-math.log(2.0) / float(l)))\n    ctx.nseen = 0\n\n\ndef _add(st, x, cap):\n    \"\"\"Push x into a rolling window and return its sd, in O(1).\n\n    st is [window, sum, sumsq]. Recomputing three 252-long standard\n    deviations every bar was most of this family's wall clock, and there are\n    hundreds of thousands of backtests.\n    \"\"\"\n    st[0].append(x)\n    st[1] += x\n    st[2] += x * x\n    if len(st[0]) > cap:\n        y = st[0].pop(0)\n        st[1] -= y\n        st[2] -= y * y\n    n = len(st[0])\n    if n < 2:\n        return 0.0\n    v = (st[2] - st[1] * st[1] / n) / (n - 1)\n    return v ** 0.5 if v > 0.0 else 0.0\n\n\ndef signal(ctx, i):\n    c = ctx.c[i]\n    pc = ctx.c[i - 1] if i >= 1 else None\n    if c is None or pc is None or c <= 0.0 or pc <= 0.0:\n        return 0\n\n    lr1 = math.log(c / pc)\n    sd1 = _add(ctx.rst, lr1, 60)\n    sdp = _add(ctx.pst, c, 63)\n    for k in range(len(ctx.ema)):\n        a = ctx.alpha[k]\n        ctx.ema[k] = c if ctx.ema[k] is None else ctx.ema[k] + a * (c - ctx.ema[k])\n    ctx.nseen += 1\n    if len(ctx.rst[0]) < 20 or sd1 <= 1e-12:\n        return 0\n\n    x = [0.0] * ctx.nf\n    for k, n in enumerate(_HOR):\n        cn = ctx.c[i - n] if i >= n else None\n        if cn is None or cn <= 0.0:\n            return 0\n        z = math.log(c / cn) / (sd1 * (float(n) ** 0.5))\n        x[k] = 5.0 if z > 5.0 else (-5.0 if z < -5.0 else z)\n    base = len(_HOR)\n    for k in range(len(_MACD)):\n        if sdp <= 1e-12:\n            return 0\n        q = (ctx.ema[2 * k] - ctx.ema[2 * k + 1]) / sdp\n        sq = _add(ctx.qst[k], q, 252)\n        if sq <= 1e-12:\n            return 0\n        z = q / sq\n        x[base + k] = 5.0 if z > 5.0 else (-5.0 if z < -5.0 else z)\n\n    Fp = ctx.F\n    z = ctx.b + ctx.u * Fp\n    for j in range(ctx.nf):\n        z += ctx.w[j] * x[j]\n    z /= ctx.scale\n    F = math.tanh(z)\n\n    # ---- cost-adjusted reward and the online differential-Sharpe gradient ----\n    # the paper's penalty is c*|X_t/sigma_t - X_{t-1}/sigma_{t-1}|, so the\n    # 1/sigma that scales the return scales the COST too. Dropping it makes\n    # the turnover term a thousand times too small to change anything.\n    cst = float(ctx.p.cost) / sd1\n    if cst > 50.0:\n        cst = 50.0\n    rsc = lr1 / sd1\n    if rsc > 10.0:\n        rsc = 10.0\n    elif rsc < -10.0:\n        rsc = -10.0\n    dF = F - Fp\n    sgn = 1.0 if dF > 0.0 else (-1.0 if dF < 0.0 else 0.0)\n    R = Fp * rsc - cst * abs(dF)\n    dA = R - ctx.A\n    dB = R * R - ctx.B\n    den = ctx.B - ctx.A * ctx.A\n    dDdR = 0.0\n    if den > 1e-14:\n        dDdR = (ctx.B - ctx.A * R) / (den ** 1.5)\n        if dDdR > 10.0:\n            dDdR = 10.0\n        elif dDdR < -10.0:\n            dDdR = -10.0\n    g = (1.0 - F * F) / ctx.scale\n    ndw = [0.0] * ctx.nf\n    for j in range(ctx.nf):\n        ndw[j] = g * (x[j] + ctx.u * ctx.dw[j])\n    ndu = g * (Fp + ctx.u * ctx.du)\n    ndb = g * (1.0 + ctx.u * ctx.db)\n    dRdF = -cst * sgn\n    dRdFp = rsc + cst * sgn\n    lr = float(ctx.p.lr)\n    wd = float(ctx.p.wd)\n    if dDdR != 0.0 and ctx.nseen > int(ctx.p.burn):\n        for j in range(ctx.nf):\n            gr = dDdR * (dRdF * ndw[j] + dRdFp * ctx.dw[j])\n            nw = ctx.w[j] * (1.0 - lr * wd) + lr * gr\n            ctx.w[j] = 2.0 if nw > 2.0 else (-2.0 if nw < -2.0 else nw)\n        gu = dDdR * (dRdF * ndu + dRdFp * ctx.du)\n        nu = ctx.u * (1.0 - lr * wd) + lr * gu\n        ctx.u = 1.0 if nu > 1.0 else (-1.0 if nu < -1.0 else nu)\n        gb = dDdR * (dRdF * ndb + dRdFp * ctx.db)\n        nb = ctx.b * (1.0 - lr * wd) + lr * gb\n        ctx.b = 1.0 if nb > 1.0 else (-1.0 if nb < -1.0 else nb)\n    ctx.dw = ndw\n    ctx.du = ndu\n    ctx.db = ndb\n    ad = float(ctx.p.adapt)\n    ctx.A += ad * dA\n    ctx.B += ad * dB\n    ctx.F = F\n\n    if ctx.nseen < int(ctx.p.warm):\n        return 0\n    d = float(ctx.p.dead)\n    if F > d:\n        return 1\n    if F < -d:\n        return -1\n    return 0"
+}

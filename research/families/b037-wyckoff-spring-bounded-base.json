@@ -1,0 +1,38 @@
+{
+ "name": "Wyckoff spring in a bounded base",
+ "note": "A spring only counts inside a base that is genuinely bounded: over the base_n bars ending at bar[-1] the range must be at most width_atr x ATR, and support must have been tested at least `touches` times by bars at least touch_gap apart. The spring bar then needs a shallow undercut - deeper than min_pen ATR but NO DEEPER than max_pen ATR - a close back inside the base, a close in the top 1-close_frac of its own range, and volume at or under vol_cap x the 20-bar average. The depth BAND is the structural difference from a liquidity sweep, where deeper is stronger: a deep flush disqualifies the setup here because it is a real breakdown, not a test. Upthrust is the exact mirror at the range top. The objective is the opposite edge of the base, not an R multiple, and the trade is abandoned on a close fail_atr beyond the broken edge. GRID NOTE: the harvested idea asks for a base_n sweep of 20/30/40 against a fixed ATR width cap, and that cross product is empty by arithmetic, not by market behaviour - a 40-bar range is naturally about sqrt(2) wider than a 20-bar one, so at base_n=40 a 2.5-ATR cap admits nothing (measured: 0 setups across SPY/XLU/SOXL at any cap up to 3.0). base_n is therefore left at the 20 the inequality was written for and the sweep runs the axes that do discriminate; the cap range is shifted one step up to 2.5-3.5 because 2.0 also admits almost nothing (3 setups across the three symbols).",
+ "source": "Wyckoff method literature - Pruden, 'The Three Skills of Top Trading' (2007), chapters on the spring/shakeout and upthrust-after-distribution; Wyckoff Analytics material on spring types 1/2/3 classified by penetration depth and volume; volume tiers (<=0.8x, 0.8-1.5x, >1.5x average) consistent with published detection implementations. The ATR-normalised inequalities, the base-width cap and the depth band are the harvested idea's quantification of a qualitative method.",
+ "params": {
+  "base_n": 20,
+  "atr_n": 20,
+  "width_atr": 2.5,
+  "min_pen": 0.05,
+  "max_pen": 0.5,
+  "close_frac": 0.6,
+  "vol_cap": 1.2,
+  "touches": 2,
+  "touch_gap": 3,
+  "touch_atr": 0.25,
+  "fail_atr": 0.5,
+  "tp_atr": 0.0,
+  "st_atr": 1.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "width_atr": [
+   2.5,
+   3.0,
+   3.5
+  ],
+  "vol_cap": [
+   0.8,
+   1.2,
+   2.0
+  ],
+  "touches": [
+   2,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    w = max(5, int(ctx.p.base_n))\n    rh = [None] * n\n    rl = [None] * n\n    for i in range(w, n):\n        # the base is the w bars ENDING at i-1: the current bar is the spring\n        seg_h = hi[i - w:i]\n        seg_l = lo[i - w:i]\n        rh[i] = max(seg_h)\n        rl[i] = min(seg_l)\n\n    av = [None] * n\n    run = 0.0\n    for i in range(n):\n        run += vo[i]\n        if i >= 20:\n            run -= vo[i - 20]\n        if i >= 19:\n            av[i] = run / 20.0\n\n    ctx.rh = rh\n    ctx.rl = rl\n    ctx.av = av\n    ctx.hi = hi\n    ctx.lo = lo\n    ctx.a = ctx.indicator(\"atr\", period=int(ctx.p.atr_n))\n\n\ndef _touches(vals, lim, gap, want, low_side):\n    \"\"\"At least `want` bars at the level, each at least `gap` bars apart.\"\"\"\n    n = 0\n    last = -10 ** 9\n    for k, v in enumerate(vals):\n        hit = (v <= lim) if low_side else (v >= lim)\n        if hit and (k - last) >= gap:\n            n += 1\n            last = k\n            if n >= want:\n                return True\n    return False\n\n\ndef signal(ctx, i):\n    w = int(ctx.p.base_n)\n    if i < w + 1:\n        return 0\n    a = ctx.a[i - 1]\n    rh, rl = ctx.rh[i], ctx.rl[i]\n    av = ctx.av[i - 1]\n    if a is None or a <= 0.0 or rh is None or rl is None or av is None:\n        return 0\n    if (rh - rl) > float(ctx.p.width_atr) * a:\n        return 0                                  # base is not bounded\n\n    o, h, l, c = ctx.o[i], ctx.h[i], ctx.l[i], ctx.c[i]\n    rng = h - l\n    if rng <= 0.0:\n        return 0\n    v = ctx.v[i]\n    if av > 0.0 and v > float(ctx.p.vol_cap) * av:\n        return 0                                  # supply came in\n\n    lo_pen = float(ctx.p.min_pen) * a\n    hi_pen = float(ctx.p.max_pen) * a\n    near = float(ctx.p.touch_atr) * a\n    gap = int(ctx.p.touch_gap)\n    want = int(ctx.p.touches)\n\n    # SPRING: shallow undercut of a twice-tested support that closes back in\n    if l < rl - lo_pen and l >= rl - hi_pen and c > rl \\\n            and c >= l + float(ctx.p.close_frac) * rng:\n        if _touches(ctx.lo[i - w:i], rl + near, gap, want, True):\n            return 1\n\n    # UPTHRUST: the exact mirror at the top of the base\n    if h > rh + lo_pen and h <= rh + hi_pen and c < rh \\\n            and c <= h - float(ctx.p.close_frac) * rng:\n        if _touches(ctx.hi[i - w:i], rh - near, gap, want, False):\n            return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    j = e - 1                       # the bar the signal was decided on\n    if j < 1:\n        return False\n    rh, rl = ctx.rh[j], ctx.rl[j]\n    a = ctx.a[j - 1]\n    if rh is None or rl is None or a is None:\n        return False\n    c = ctx.c[i]\n    if ctx.positions[0][\"side\"] == \"long\":\n        if c >= rh:\n            return True             # the objective is the top of the base\n        return c < rl - float(ctx.p.fail_atr) * a\n    if c <= rl:\n        return True\n    return c > rh + float(ctx.p.fail_atr) * a"
+}

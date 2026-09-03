@@ -1,0 +1,31 @@
+{
+ "name": "Information discreteness momentum gate",
+ "note": "Da-Gurun-Warachka frog-in-the-pan. ID = sgn(PRET)*(%neg - %pos) over the formation window, skipping the most recent month - a statistic about the PATH, not the outcome. Takes the momentum trade in the direction of PRET only when ID sits in the bottom quintile of the ticker's own trailing ID history (continuous information), and holds long, with no reversal exit.",
+ "source": "Zhi Da, Umit G. Gurun and Mitch Warachka, 'Frog in the Pan: Continuous Information and Momentum', Review of Financial Studies 27(7), 2014, 2171-2218 - VERIFIED by reading the PDF at https://academicweb.nd.edu/~zda/Frog.pdf. p.7, equation (1): 'ID = sgn(PRET) x [%neg - %pos]', where '%pos and %neg' are 'the percentage of days during the formation period with positive and negative returns' and 'PRET is defined as a firm's cumulative return over the past twelve months after skipping the most recent month'. Abstract: 'Momentum decreases monotonically from 5.94% for stocks with continuous information during their formation period to -2.07% for stocks with discrete information but similar cumulative formation-period returns.'",
+ "params": {
+  "form": 252,
+  "skip": 21,
+  "hist_win": 250,
+  "id_pct": 0.2,
+  "time_stop": 126,
+  "atr_n": 20,
+  "st_atr": 3.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "form": [
+   126,
+   252
+  ],
+  "id_pct": [
+   0.2,
+   0.3,
+   0.4
+  ],
+  "hist_win": [
+   250,
+   500
+  ]
+ },
+ "code": "def family_init(ctx):\n    import bisect\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    F = int(ctx.p.form)\n    K = int(ctx.p.skip)\n    if K >= F:\n        K = max(1, F // 12)\n\n    up = [0] * (n + 1)\n    dn = [0] * (n + 1)\n    for t in range(n):\n        d = 0\n        if t >= 1 and c[t - 1] > 0.0:\n            d = c[t] - c[t - 1]\n        up[t + 1] = up[t] + (1 if d > 0.0 else 0)\n        dn[t + 1] = dn[t] + (1 if d < 0.0 else 0)\n\n    ID = [None] * n\n    PR = [None] * n\n    for t in range(n):\n        a = t - F\n        b = t - K\n        if a < 0 or b <= a or c[a] <= 0.0:\n            continue\n        pret = c[b] / c[a] - 1.0\n        m = float(b - a)\n        fp = (up[b + 1] - up[a + 1]) / m\n        fn = (dn[b + 1] - dn[a + 1]) / m\n        sg = 1.0 if pret > 0.0 else (-1.0 if pret < 0.0 else 0.0)\n        ID[t] = sg * (fn - fp)\n        PR[t] = pret\n\n    H = int(ctx.p.hist_win)\n    idx = [t for t in range(n) if ID[t] is not None]\n    vals = [ID[t] for t in idx]\n    rk = [None] * n\n    w = []\n    for k in range(len(idx)):\n        bisect.insort(w, vals[k])\n        if len(w) > H:\n            old = vals[k - H]\n            j = bisect.bisect_left(w, old)\n            if j < len(w) and w[j] == old:\n                del w[j]\n        if len(w) >= H:\n            rk[idx[k]] = bisect.bisect_left(w, vals[k]) / float(len(w))\n    ctx.rk = rk\n    ctx.PR = PR\n    ctx.start = F + H + 2\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    q = ctx.rk[i]\n    p = ctx.PR[i]\n    if q is None or p is None:\n        return 0\n    if q > float(ctx.p.id_pct):\n        return 0\n    if p > 0.0:\n        return 1\n    if p < 0.0:\n        return -1\n    return 0"
+}

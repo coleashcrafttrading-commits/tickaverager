@@ -1,0 +1,35 @@
+{
+ "name": "Netted Value-Momentum Combination",
+ "note": "Two rank signals at deliberately opposite horizons on one symbol -- a long-horizon VALUE measure (today's price against a price average lifted from deep in the past) and a 2-to-12-month style MOMENTUM measure that skips the freshest window -- each converted to a percentile rank and NETTED into a single weight before any order exists. Cheap-and-rising gets roughly double weight; cheap-but-still-falling cancels to inside the no-trade band and is never traded. AMP rank the cross-section of an ETF universe; this feed is single-symbol, so the rank is against the measure's own trailing history instead, which keeps the netting structure and the opposite horizons and drops only the cross-sectional part. Horizons are in BARS, scaled so value stays several times longer than momentum.",
+ "source": "Asness, Moskowitz & Pedersen, 'Value and Momentum Everywhere' (Journal of Finance 2013), equation (3): r_COMBO = 0.5*r_VALUE + 0.5*r_MOM; equation (1) for rank weights; p. 938 for the 5-year value proxy and the choice of MOM2-12 as the momentum measure (the paper explicitly defends 2-12 over 7-12, citing Novy-Marx 2012 and Goyal & Wahal 2012).",
+ "params": {
+  "mom_lb": 500,
+  "mom_skip": 40,
+  "val_lb": 900,
+  "val_w": 400,
+  "rank_n": 400,
+  "blend": 0.5,
+  "band": 0.2,
+  "side": "both",
+  "exit_on_zero": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0
+ },
+ "grid": {
+  "blend": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "band": [
+   0.1,
+   0.2,
+   0.35
+  ],
+  "val_lb": [
+   600,
+   900
+  ]
+ },
+ "code": "import math\nimport bisect\n\n\ndef _pct_rank(vals, w, minw):\n    \"\"\"Trailing percentile rank of each value against its own last w values.\"\"\"\n    n = len(vals)\n    out = [None] * n\n    win = []\n    idxs = []\n    for j in range(n):\n        x = vals[j]\n        if x is None:\n            continue\n        bisect.insort(win, x)\n        idxs.append(j)\n        if len(win) > w:\n            old = vals[idxs[0]]\n            del idxs[0]\n            k = bisect.bisect_left(win, old)\n            del win[k]\n        m = len(win)\n        if m >= minw:\n            a = bisect.bisect_left(win, x)\n            b = bisect.bisect_right(win, x)\n            out[j] = (a + b) / (2.0 * m) - 0.5\n    return out\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n    lc = [math.log(x) if x > 0 else 0.0 for x in c]\n    mlb = int(ctx.p.mom_lb)\n    msk = int(ctx.p.mom_skip)\n    vlb = int(ctx.p.val_lb)\n    vw = int(ctx.p.val_w)\n    rn = int(ctx.p.rank_n)\n    cs = [0.0] * (n + 1)\n    for j in range(n):\n        cs[j + 1] = cs[j] + c[j]\n    V = [None] * n\n    M = [None] * n\n    for j in range(n):\n        if j - mlb >= 0 and j - msk >= 0:\n            # MOM(skip..lb): the long-horizon return that skips the freshest part\n            M[j] = lc[j - msk] - lc[j - mlb]\n        a0 = j - vlb - vw\n        a1 = j - vlb\n        if a0 >= 0 and c[j] > 0:\n            # VALUE: how far today's price sits below a price average from\n            # deep in the past -- the paper's 5-year-lagged price proxy\n            mean = (cs[a1] - cs[a0]) / float(vw)\n            if mean > 0:\n                V[j] = math.log(mean / c[j])\n    minw = max(30, rn // 4)\n    rv = _pct_rank(V, rn, minw)\n    rm = _pct_rank(M, rn, minw)\n    bl = float(ctx.p.blend)\n    wv = [None] * n\n    for j in range(n):\n        if rv[j] is None or rm[j] is None:\n            continue\n        # rank weights, centred, then NETTED at the position level before any\n        # order exists: cheap-and-falling cancels to nothing and is not traded\n        wv[j] = 2.0 * (bl * rv[j] + (1.0 - bl) * rm[j])\n    ctx.w = ctx.series(wv, \"netted_weight\")\n    ctx.rv = ctx.series(rv, \"value_rank\")\n    ctx.rm = ctx.series(rm, \"mom_rank\")\n\n\ndef signal(ctx, i):\n    w = ctx.w[i]\n    if w is None:\n        return 0\n    band = float(ctx.p.band)\n    if w > band:\n        return 1\n    if w < -band:\n        return -1\n    return 0"
+}

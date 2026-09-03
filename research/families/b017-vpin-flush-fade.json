@@ -1,0 +1,38 @@
+{
+ "name": "VPIN Toxicity Flush Fade",
+ "note": "Volume bars of (median daily volume / 78), each classified by bulk volume classification -- buy volume V*Phi(dP/sigma) with sigma from the last 50 volume bars -- and VPIN as the mean absolute imbalance over the last 50 of them. The entry needs BOTH halves: VPIN crossing UP through its 250-bar percentile, and the cumulative return over those same 50 volume bars below -ret_sig sigma. High toxicity alone is not a signal; toxicity plus a flush is forced selling, and forced sellers are price-insensitive. Long only. Exits when toxicity falls back under its median, after max_vb volume bars, or on the ATR stop -- a toxicity spike that keeps going is exactly what this loses to.",
+ "source": "Bulk volume classification and VPIN: Easley, Lopez de Prado & O'Hara, 'The Volume Clock: Insights into the High-Frequency Paradigm', Journal of Portfolio Management 39(1), 2012, and 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies 25(5), 2012. BVC is explicitly the authors' own OHLCV-level substitute for signed tick data, which is why this stays ohlcv_only. The flush-fade conditioning is my synthesis.",
+ "params": {
+  "vpin_n": 50,
+  "sig_n": 50,
+  "pct_lb": 250,
+  "min_hist": 100,
+  "ent_pct": 0.9,
+  "exit_pct": 0.5,
+  "ret_sig": 1.0,
+  "max_vb": 40,
+  "bars_per_day": 78,
+  "vol_days": 20,
+  "min_days": 3,
+  "side": "long",
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 1.5
+ },
+ "grid": {
+  "vpin_n": [
+   25,
+   50,
+   100
+  ],
+  "ent_pct": [
+   0.9,
+   0.95
+  ],
+  "ret_sig": [
+   1.0,
+   1.5
+  ]
+ },
+ "code": "import math\n\n_S2 = math.sqrt(2.0)\n\n\ndef _pct(sorted_vals, q):\n    if not sorted_vals:\n        return None\n    k = int(q * (len(sorted_vals) - 1))\n    if k < 0:\n        k = 0\n    if k >= len(sorted_vals):\n        k = len(sorted_vals) - 1\n    return sorted_vals[k]\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n    v = [float(x.get(\"v\") or 0.0) for x in b]\n    day = [str(x[\"t\"])[:10] for x in b]\n\n    # ---- the volume-bar clock: one bar per (median daily volume / bpd)\n    dvol = {}\n    order = []\n    for j in range(n):\n        if day[j] not in dvol:\n            dvol[day[j]] = 0.0\n            order.append(day[j])\n        dvol[day[j]] += v[j]\n    VD = int(ctx.p.vol_days)\n    MD = int(ctx.p.min_days)\n    bpd = float(ctx.p.bars_per_day)\n    thr = {}\n    for k, dd in enumerate(order):\n        prev = sorted(dvol[x] for x in order[max(0, k - VD):k])\n        thr[dd] = (prev[len(prev) // 2] / bpd) if len(prev) >= MD else None\n\n    NS = int(ctx.p.sig_n)\n    NV = int(ctx.p.vpin_n)\n    PL = int(ctx.p.pct_lb)\n    MINH = int(ctx.p.min_hist)\n    ent_q = float(ctx.p.ent_pct)\n    ex_q = float(ctx.p.exit_pct)\n    rsig = float(ctx.p.ret_sig)\n\n    ent = [0] * n\n    lowtox = [0] * n\n    vbc = [0] * n\n\n    px = []          # volume-bar closes\n    imb = []         # |2*Vb - V| / V for each volume bar\n    vp = []          # VPIN per volume bar\n    dps = []         # close-to-close change per volume bar\n    prev_hot = False\n    acc = 0.0\n    lo = 0\n    for j in range(n):\n        t = thr.get(day[j])\n        if t is None or t <= 0:\n            vbc[j] = len(px)\n            lowtox[j] = lowtox[j - 1] if j else 0\n            continue\n        acc += v[j]\n        made = 0\n        while acc >= t and made < 40:\n            acc -= t\n            made += 1\n            px.append(c[j])\n            k = len(px) - 1\n            if k == 0:\n                imb.append(0.0)\n                dps.append(0.0)\n                vp.append(None)\n                continue\n            dp = px[k] - px[k - 1]\n            dps.append(dp)\n            w = dps[max(1, k - NS):k + 1]\n            if len(w) >= 10:\n                mu = sum(w) / len(w)\n                var = sum((x - mu) ** 2 for x in w) / len(w)\n                sd = math.sqrt(var) if var > 0 else 0.0\n            else:\n                sd = 0.0\n            if sd <= 0:\n                imb.append(0.0)\n            else:\n                f = 0.5 * (1.0 + math.erf((dp / sd) / _S2))\n                imb.append(abs(2.0 * f - 1.0))\n            if len(imb) >= NV:\n                vp.append(sum(imb[-NV:]) / NV)\n            else:\n                vp.append(None)\n        vbc[j] = len(px)\n\n        k = len(px) - 1\n        if k < 1 or not vp or vp[k] is None:\n            lowtox[j] = lowtox[j - 1] if j else 0\n            continue\n        hist = [x for x in vp[max(0, k - PL):k] if x is not None]\n        if len(hist) < MINH:\n            lowtox[j] = 0\n            prev_hot = False\n            continue\n        sh = sorted(hist)\n        hi_q = _pct(sh, ent_q)\n        md_q = _pct(sh, ex_q)\n        lowtox[j] = 1 if vp[k] < md_q else 0\n        hot = vp[k] > hi_q\n        if made and hot and not prev_hot:\n            # ---- the flush: a big NEGATIVE move over the same window the\n            # toxicity was measured on. High VPIN alone is not the trade.\n            if k - NV >= 0 and px[k - NV] > 0:\n                cr = math.log(px[k] / px[k - NV])\n                sam = []\n                for q in range(max(NV, k - PL), k):\n                    if px[q - NV] > 0:\n                        sam.append(math.log(px[q] / px[q - NV]))\n                if len(sam) >= MINH:\n                    m = sum(sam) / len(sam)\n                    var = sum((x - m) ** 2 for x in sam) / len(sam)\n                    sd = math.sqrt(var) if var > 0 else 0.0\n                    if sd > 0 and cr < -rsig * sd:\n                        ent[j] = 1\n        if made:\n            prev_hot = hot\n\n    ctx.ent = ctx.series(ent, \"entry\")\n    ctx.lt = ctx.series(lowtox, \"lowtox\")\n    ctx.vbc = ctx.series(vbc, \"vbcount\")\n\n\ndef signal(ctx, i):\n    e = ctx.ent[i]\n    return 1 if e else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.lt[i]:\n        return True\n    k = ctx.vbc[i]\n    e0 = min(p[\"entry_i\"] for p in ctx.positions)\n    k0 = ctx.vbc[e0]\n    if k is None or k0 is None:\n        return False\n    return (k - k0) >= int(ctx.p.max_vb)"
+}

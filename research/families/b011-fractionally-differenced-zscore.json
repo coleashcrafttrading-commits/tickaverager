@@ -1,0 +1,40 @@
+{
+ "name": "Fractionally differenced z-score",
+ "note": "Lopez de Prado fractional differencing of log close. The weight recursion w_k = -w_{k-1}*(d-k+1)/k is truncated at |w_k| < tol; d is the SMALLEST value on the {0, 0.05, ... 1.00} grid at which an augmented Dickey-Fuller test on the transformed series rejects the unit root at 95%, fitted once on the leading in-sample block and then held fixed. Trades fresh crossings of a +/- z threshold on the standardised series. NOTE ON THE TRUNCATION THRESHOLD: the source specifies 1e-5, which on these sample lengths demands 2000-4000 taps - longer than the usable history, so every low d would be skipped and the 'smallest d' would be decided by the window length rather than by the data. tol is therefore swept at 1e-3/1e-4; 1e-4 needs ~500 taps and retains ~95% of the total weight mass. On the probe symbols the ADF t-statistic is strictly monotone in d, so the upward scan finds a genuine minimum, and the selected d differs by symbol (0.10 to 0.25).",
+ "source": "Lopez de Prado, 'Advances in Financial Machine Learning', ch.5 sections 5.4.2 and 5.5 (pp.78-83), implemented as FractionalDifferentiation.get_weights and frac_diff in mlfinlab/features/fracdiff.py, with the exact recursion weights_ = -weights[-1]*(diff_amt - k + 1)/k and the threshold-based truncation - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB. Referenced there to Hosking (1981), https://wwwf.imperial.ac.uk/~ejm/M3S8/Problems/hosking81.pdf",
+ "params": {
+  "z_in": 2.0,
+  "z_out": 0.5,
+  "z_win": 252,
+  "d_min": 0.0,
+  "d_max": 1.0,
+  "d_step": 0.05,
+  "w_tol": 0.0001,
+  "w_max": 800,
+  "sel": 1500,
+  "adf_n": 500,
+  "adf_lags": 1,
+  "adf_crit": -2.86,
+  "exit_signal_on": 1,
+  "time_stop": 20,
+  "st_atr": 2.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "z_in": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "z_out": [
+   0.0,
+   0.5,
+   1.0
+  ],
+  "w_tol": [
+   0.001,
+   0.0001
+  ]
+ },
+ "code": "def _fd_weights(d, tol, wmax):\n    w = [1.0]\n    for k in range(1, int(wmax)):\n        nw = -w[-1] * (d - k + 1.0) / k\n        if abs(nw) < tol:\n            break\n        w.append(nw)\n    return w\n\n\ndef _solve(A, b):\n    \"\"\"Gauss-Jordan on [A|b|I]; returns (beta, diag of A^-1) or None.\"\"\"\n    m = len(A)\n    aug = [list(A[r]) + [b[r]] + [1.0 if r == q else 0.0 for q in range(m)]\n           for r in range(m)]\n    for col in range(m):\n        piv = max(range(col, m), key=lambda r: abs(aug[r][col]))\n        if abs(aug[piv][col]) < 1e-14:\n            return None\n        aug[col], aug[piv] = aug[piv], aug[col]\n        pv = aug[col][col]\n        aug[col] = [x / pv for x in aug[col]]\n        for r in range(m):\n            if r == col:\n                continue\n            f = aug[r][col]\n            if f:\n                aug[r] = [x - f * y for x, y in zip(aug[r], aug[col])]\n    beta = [aug[r][m] for r in range(m)]\n    inv = [aug[r][m + 1 + r] for r in range(m)]\n    return beta, inv\n\n\ndef _adf_t(y, lags):\n    \"\"\"t-statistic on the level coefficient of an ADF regression with drift.\"\"\"\n    L = int(lags)\n    m = 2 + L\n    rows = []\n    for t in range(L + 1, len(y)):\n        x = [1.0, y[t - 1]]\n        for j in range(1, L + 1):\n            x.append(y[t - j] - y[t - j - 1])\n        rows.append((x, y[t] - y[t - 1]))\n    if len(rows) < m + 20:\n        return 0.0\n    A = [[0.0] * m for _ in range(m)]\n    bb = [0.0] * m\n    for x, yv in rows:\n        for a in range(m):\n            xa = x[a]\n            bb[a] += xa * yv\n            for c in range(a, m):\n                A[a][c] += xa * x[c]\n    for a in range(m):\n        for c in range(a):\n            A[a][c] = A[c][a]\n    got = _solve(A, bb)\n    if got is None:\n        return 0.0\n    beta, inv = got\n    rss = 0.0\n    for x, yv in rows:\n        p = 0.0\n        for a in range(m):\n            p += beta[a] * x[a]\n        e = yv - p\n        rss += e * e\n    dof = len(rows) - m\n    if dof <= 0 or rss <= 0.0 or inv[1] <= 0.0:\n        return 0.0\n    se = ((rss / dof) * inv[1]) ** 0.5\n    if se <= 0.0:\n        return 0.0\n    return beta[1] / se\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    lp = []\n    for b in bars:\n        x = float(b[\"c\"])\n        lp.append(math.log(x) if x > 0.0 else 0.0)\n\n    tol = float(ctx.p.w_tol)\n    wmax = int(ctx.p.w_max)\n    sel = int(ctx.p.sel)\n    if sel > n // 3:\n        sel = max(200, n // 3)\n    an = int(ctx.p.adf_n)\n    if an > sel - 100:\n        an = max(80, sel - 100)\n    lo = sel - an\n\n    # smallest d on the grid whose transform rejects the unit root. The scan\n    # runs upward and stops at the first rejection, so it finds the MINIMUM\n    # differencing that achieves stationarity -- the whole point of the method\n    # is to spend no more memory than that.\n    d = float(ctx.p.d_max)\n    dmax = float(ctx.p.d_max)\n    step = max(1e-9, float(ctx.p.d_step))\n    dd = float(ctx.p.d_min)\n    while dd <= dmax + 1e-9:\n        w = _fd_weights(dd, tol, wmax)\n        W = len(w)\n        if lo >= W - 1:\n            seg = []\n            for t in range(lo, sel):\n                s = 0.0\n                for k in range(W):\n                    s += w[k] * lp[t - k]\n                seg.append(s)\n            if _adf_t(seg, ctx.p.adf_lags) < float(ctx.p.adf_crit):\n                d = dd\n                break\n        dd += step\n    ctx.d = d\n\n    w = _fd_weights(d, tol, wmax)\n    W = len(w)\n    ctx.W = W\n    F = [None] * n\n    for t in range(W - 1, n):\n        s = 0.0\n        for k in range(W):\n            s += w[k] * lp[t - k]\n        F[t] = s\n\n    zw = int(ctx.p.z_win)\n    z = [None] * n\n    s1 = 0.0\n    s2 = 0.0\n    cnt = 0\n    for t in range(n):\n        v = F[t]\n        if v is None:\n            continue\n        s1 += v\n        s2 += v * v\n        cnt += 1\n        if cnt > zw:\n            old = F[t - zw]\n            s1 -= old\n            s2 -= old * old\n            cnt -= 1\n        if cnt >= zw:\n            mu = s1 / cnt\n            var = s2 / cnt - mu * mu\n            if var > 1e-18:\n                z[t] = (v - mu) / (var ** 0.5)\n    ctx.z = z\n    ctx.start = max(sel, W - 1 + zw) + 1\n    ctx.log(\"frac-diff d=%.2f taps=%d (tol=%g) start=%d\"\n            % (d, W, tol, ctx.start))\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    a, b = ctx.z[i], ctx.z[i - 1]\n    if a is None or b is None:\n        return 0\n    k = float(ctx.p.z_in)\n    if a < -k and b >= -k:\n        return 1\n    if a > k and b <= k:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    a = ctx.z[i]\n    if a is None:\n        return False\n    k = float(ctx.p.z_out)\n    d = ctx._dir\n    if d > 0:\n        return a > -k\n    if d < 0:\n        return a < k\n    return False"
+}

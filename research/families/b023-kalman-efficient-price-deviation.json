@@ -1,0 +1,34 @@
+{
+ "name": "Kalman Efficient-Price Deviation",
+ "note": "Roll's model written as a state space: observed log price = latent efficient price (a random walk) + c times the trade direction. c2 is calibrated as the NEGATIVE first autocovariance of log returns over a trailing window and sw2 as Var(dy) - 2*c2, refreshed every reest bars; a scalar Kalman filter then tracks the efficient price and the trade is the bounce-normalised gap between the print and that latent state. Bars whose calibration window shows a POSITIVE first autocovariance are hard-vetoed - no bounce, no trade. One correction to the idea as written: the deviation is divided by sqrt(c2 * (1 - K)), the model's own standard deviation of the FILTERED residual, not by sqrt(c2). Under Roll's measurement equation y - m_true = c*q is bounded by c, so two sqrt(c2) units is unreachable by construction - measured on real 5-minute bars the raw quantity crossed |d| >= 2 on six bars in six thousand. The normalised form is what 'two noise standard deviations' denotes.",
+ "source": "Synthesis. The measurement equation and the two-moment calibration are the standard state-space form of Richard Roll's 1984 model (Journal of Finance, 'A simple implicit measure of the effective bid-ask spread in an efficient market'), which underlies the Roll estimator; the Kalman filtering of the efficient price and the deviation-based entry/exit are my construction. Related in spirit to Hasbrouck's Gibbs-sampler estimation of effective costs from daily data.",
+ "params": {
+  "cal_win": 500,
+  "reest": 100,
+  "d_in": 2.0,
+  "d_out": 0.5,
+  "p0": 1e-06,
+  "time_stop": 10,
+  "st_atr": 1.5,
+  "tp_atr": 0.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "cal_win": [
+   250,
+   500,
+   1000
+  ],
+  "d_in": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "d_out": [
+   0.25,
+   0.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    y = []\n    for b in bars:\n        px = float(b[\"c\"])\n        y.append(math.log(px) if px > 0 else None)\n    dy = [None] * n\n    for j in range(1, n):\n        if y[j] is not None and y[j - 1] is not None:\n            dy[j] = y[j] - y[j - 1]\n\n    W = int(ctx.p.cal_win)\n    EV = max(1, int(ctx.p.reest))\n    dev = [None] * n\n    ok = [False] * n\n    m = None\n    P = float(ctx.p.p0)\n    c2 = None\n    sw2 = None\n    valid = False\n    for j in range(n):\n        if y[j] is None:\n            continue\n        # ---- recalibrate on a schedule, from the trailing window only ----\n        if j >= W and (c2 is None or j % EV == 0):\n            seg = [dy[k] for k in range(j - W + 1, j + 1) if dy[k] is not None]\n            if len(seg) > 20:\n                mu = sum(seg) / len(seg)\n                var = sum((x - mu) ** 2 for x in seg) / len(seg)\n                cov = 0.0\n                for k in range(1, len(seg)):\n                    cov += (seg[k] - mu) * (seg[k - 1] - mu)\n                cov /= float(len(seg) - 1)\n                # Roll: the NEGATIVE first autocovariance IS the bounce. A\n                # window with a positive one has no bounce to trade.\n                valid = cov < 0.0\n                c2 = max(1e-12, -cov)\n                sw2 = max(1e-12, var - 2.0 * c2)\n        if m is None or c2 is None:\n            m = y[j]\n            continue\n        Pp = P + sw2\n        K = Pp / (Pp + c2)\n        m = m + K * (y[j] - m)\n        P = (1.0 - K) * Pp\n        # The filtered residual is NOT c*q: the filter has already followed\n        # part of the bounce, and the model gives Var(y - m) = c2 * (1 - K)\n        # exactly. Dividing by sqrt(c2) alone bounds |d| by 1 under the\n        # measurement equation, so \"two noise standard deviations\" would name\n        # a region the model can never enter. Normalising by the model's own\n        # residual standard deviation makes d unit-variance and the published\n        # thresholds mean what they say.\n        s2 = c2 * (1.0 - K)\n        if s2 > 1e-30:\n            dev[j] = (y[j] - m) / math.sqrt(s2)\n            ok[j] = valid\n    ctx.d = ctx.series(dev, \"efficient_price_deviation\")\n    ctx.okz = ctx.series(ok, \"roll_bounce_present\")\n\n\ndef signal(ctx, i):\n    d = ctx.d[i]\n    if d is None or not ctx.okz[i]:\n        return 0\n    e = float(ctx.p.d_in)\n    if d <= -e:\n        return 1\n    if d >= e:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    d = ctx.d[i]\n    if d is None or not ctx.positions:\n        return False\n    return abs(d) < float(ctx.p.d_out)"
+}

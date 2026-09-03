@@ -1,0 +1,30 @@
+{
+ "name": "Accumulative Swing Index Lead",
+ "note": "Wilder's Swing Index scores the QUALITY of each bar from its close against its own open and against the previous bar's open and close, divided by the largest bar-to-bar gap. Buys when the cumulative quality series (ASI) makes a new N-bar high while raw price has NOT taken out its N-bar high - buyers winning the bars without yet winning the level - and mirrors for shorts. The price leg is the published one (close vs the prior N-bar highest high), so it removes only the already-confirmed breakouts; the family therefore fires often and lives or dies on the ASI leg.",
+ "source": "TradingView open-source: 'Accumulative Swing Index' by everget (original: J. Welles Wilder, 'New Concepts in Technical Trading Systems'). Exact Pine read from github.com/everget/tradingview-pinescript-indicators/blob/master/oscillators/accumulative_swing_index.pine . The ASI-leads-price entry condition is my specification of Wilder's ASI-breakout concept.",
+ "params": {
+  "swing_lb": 20,
+  "price_lb": 20,
+  "exit_lb": 10,
+  "limit_t": 10000.0,
+  "time_stop": 25,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "swing_lb": [
+   10,
+   20,
+   40
+  ],
+  "price_lb": [
+   10,
+   20,
+   40
+  ],
+  "exit_lb": [
+   5,
+   10
+  ]
+ },
+ "code": "def _roll_max(v, w):\n    from collections import deque\n    n = len(v)\n    out = [None] * n\n    dq = deque()\n    for j in range(n):\n        x = v[j]\n        while dq and v[dq[-1]] <= x:\n            dq.pop()\n        dq.append(j)\n        while dq[0] <= j - w:\n            dq.popleft()\n        if j >= w - 1:\n            out[j] = v[dq[0]]\n    return out\n\n\ndef _roll_min(v, w):\n    from collections import deque\n    n = len(v)\n    out = [None] * n\n    dq = deque()\n    for j in range(n):\n        x = v[j]\n        while dq and v[dq[-1]] >= x:\n            dq.pop()\n        dq.append(j)\n        while dq[0] <= j - w:\n            dq.popleft()\n        if j >= w - 1:\n            out[j] = v[dq[0]]\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    t = float(ctx.p.limit_t)\n    if t <= 0:\n        t = 10000.0\n\n    asi = [0.0] * n\n    for j in range(1, n):\n        c1, o1 = c[j - 1], o[j - 1]\n        a = abs(h[j] - c1)\n        b = abs(l[j] - c1)\n        e = h[j] - l[j]\n        k = a if a > b else b\n        q = 0.25 * abs(c1 - o1)\n        if a >= b and a >= e:\n            rr = a - 0.5 * b + q\n        elif b >= a and b >= e:\n            rr = b - 0.5 * a + q\n        else:\n            rr = e + q\n        if rr <= 0:\n            si = 0.0\n        else:\n            si = 50.0 * ((c[j] - c1 + 0.5 * (c[j] - o[j]) + 0.25 * (c1 - o1))\n                         / rr) * (k / t)\n        asi[j] = asi[j - 1] + si\n\n    sl = max(2, int(ctx.p.swing_lb))\n    pl = max(2, int(ctx.p.price_lb))\n    el = max(2, int(ctx.p.exit_lb))\n    ctx.asi = ctx.series(asi, \"asi\")\n    ctx.amax = ctx.series(_roll_max(asi, sl), \"asi_max\")\n    ctx.amin = ctx.series(_roll_min(asi, sl), \"asi_min\")\n    ctx.hmax = ctx.series(_roll_max(h, pl), \"price_max\")\n    ctx.lmin = ctx.series(_roll_min(l, pl), \"price_min\")\n    ctx.xmax = ctx.series(_roll_max(asi, el), \"asi_exit_max\")\n    ctx.xmin = ctx.series(_roll_min(asi, el), \"asi_exit_min\")\n\n\ndef signal(ctx, i):\n    if i < 2:\n        return 0\n    a = ctx.asi[i]\n    am, an = ctx.amax[i - 1], ctx.amin[i - 1]\n    hm, lm = ctx.hmax[i - 1], ctx.lmin[i - 1]\n    c = ctx.c[i]\n    if None in (a, am, an, hm, lm, c):\n        return 0\n    # ASI leads: quality accumulation breaks out, price has not\n    if a > am and c <= hm:\n        return 1\n    if a < an and c >= lm:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or i < 2:\n        return False\n    a = ctx.asi[i]\n    if a is None:\n        return False\n    long_ = ctx.positions[0][\"side\"] == \"long\"\n    if long_:\n        x = ctx.xmin[i - 1]\n        if x is not None and a < x:\n            return True\n        hm = ctx.hmax[i - 1]\n        h, c = ctx.h[i], ctx.c[i]\n        # thesis realised: price finally makes the high, then closes back under\n        if None not in (hm, h, c) and h > hm and c < hm:\n            return True\n        return False\n    x = ctx.xmax[i - 1]\n    if x is not None and a > x:\n        return True\n    lm = ctx.lmin[i - 1]\n    l, c = ctx.l[i], ctx.c[i]\n    if None not in (lm, l, c) and l < lm and c > lm:\n        return True\n    return False"
+}

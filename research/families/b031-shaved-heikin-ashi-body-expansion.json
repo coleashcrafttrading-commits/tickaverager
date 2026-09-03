@@ -1,0 +1,30 @@
+{
+ "name": "Shaved Heikin-Ashi body expansion",
+ "note": "Trades the GEOMETRY of a Heikin-Ashi candle rather than its colour. A shaved HA bar -- one whose HAopen equals its HAlow (long) or its HAhigh (short) -- means that across the whole averaging window every attempt to trade back through the open failed. Pairing that with a body strictly larger than the previous bar's by body_exp, and with a same-direction predecessor, isolates the part of a trend where participation is accelerating rather than merely continuing. The exit is the mirror shape with the body-expansion clause dropped, exactly as in the source. The 'within one tick' shaved test is expressed as tick_tol times the HA bar's own range so it is symbol-agnostic; tick_tol=0 is the exact equality. mode=-1 inverts the reading (a shaved expanding up bar is exhaustion, not thrust) so the sweep can tell whether the geometry is a continuation or a reversal object. The source's pyramiding on repeated entries is NOT implemented: the shared harness only averages into adverse moves, which is the opposite of what the source does, so faking it with max_adds would be a different rule. No stop and no target: the source has neither, the structural exit is the whole exit.",
+ "source": "je-suis-tm/quant-trading, file 'Heikin-Ashi backtest.py' -- the four-condition entry block (HA up bar, HAopen equal to the HA extreme, body larger than the prior body, prior bar the same direction) and the three-condition mirror exit.",
+ "params": {
+  "body_exp": 1.0,
+  "tick_tol": 0.0,
+  "mode": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "body_exp": [
+   0.8,
+   1.0,
+   1.3
+  ],
+  "tick_tol": [
+   0.0,
+   0.02,
+   0.05
+  ],
+  "mode": [
+   1,
+   -1
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Heikin-Ashi bars, and the two candle SHAPES the rule trades.\n\n    HAclose = (O+H+L+C)/4, HAopen = (HAopen[-1] + HAclose[-1]) / 2 seeded with\n    (O[0]+C[0])/2, HAhigh = max(H, HAopen, HAclose), HAlow = min(...).\n\n    bull shape: HA up bar, HAopen sits on HAlow (no lower shadow -- across the\n                whole averaging window price never traded back through the\n                open), and the previous HA bar was also up.\n    bear shape: the exact mirror.\n\n    An ENTRY additionally requires the body to be strictly larger than the\n    previous bar's body by body_exp, which is what turns 'the trend continued'\n    into 'participation accelerated'. The EXIT drops that requirement, exactly\n    as in the source: the first opposite shape closes everything.\n\n    The 'within one tick' test is expressed as tick_tol * the HA bar's own\n    range so it means the same thing on a $12 stock and a $740 index; 0.0 is\n    the exact test.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n\n    hc = [0.0] * n\n    ho = [0.0] * n\n    hh = [0.0] * n\n    hl = [0.0] * n\n    for i in range(n):\n        hc[i] = (o[i] + h[i] + l[i] + c[i]) / 4.0\n        ho[i] = (o[0] + c[0]) / 2.0 if i == 0 else (ho[i - 1] + hc[i - 1]) / 2.0\n        hh[i] = h[i] if h[i] > ho[i] else ho[i]\n        if hc[i] > hh[i]:\n            hh[i] = hc[i]\n        hl[i] = l[i] if l[i] < ho[i] else ho[i]\n        if hc[i] < hl[i]:\n            hl[i] = hc[i]\n\n    tol = float(ctx.p.tick_tol)\n    exp = float(ctx.p.body_exp)\n    mode = 1 if float(ctx.p.mode) >= 0 else -1\n\n    ent = [0] * n\n    xit = [0] * n          # +1 = an opposite-shape bar for a long, -1 for a short\n\n    for i in range(1, n):\n        rng = hh[i] - hl[i]\n        t = tol * rng if rng > 0 else 0.0\n        up = hc[i] > ho[i]\n        dnb = hc[i] < ho[i]\n        pup = hc[i - 1] > ho[i - 1]\n        pdn = hc[i - 1] < ho[i - 1]\n        bull = up and pup and (ho[i] - hl[i]) <= t\n        bear = dnb and pdn and (hh[i] - ho[i]) <= t\n        if not (bull or bear):\n            continue\n        body = abs(hc[i] - ho[i])\n        pbody = abs(hc[i - 1] - ho[i - 1])\n        big = body > exp * pbody\n        d = (1 if bull else -1) * mode        # which side this shape wants\n        if big:\n            ent[i] = d\n        xit[i] = d                            # shape alone is enough to exit\n\n    ctx.ha_e = ctx.series(ent, \"ha_entry\")\n    ctx.ha_x = ctx.series(xit, \"ha_shape\")\n\n\ndef signal(ctx, i):\n    return int(ctx.ha_e[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"A long dies on the first bar carrying the shape that would open a short,\n    and vice versa. No price stop: the source has none.\"\"\"\n    if not ctx.positions:\n        return False\n    s = int(ctx.ha_x[i])\n    if not s:\n        return False\n    return s < 0 if ctx.positions[0][\"side\"] == \"long\" else s > 0\n"
+}

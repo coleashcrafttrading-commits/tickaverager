@@ -1,0 +1,34 @@
+{
+ "name": "Spread Regime Passive-Aggressive Switch",
+ "note": "An entry-side execution regime switch wrapped around a plain EMA-cross primary. The effective spread is estimated from OHLC alone (Abdi-Ranaldo form, the estimator EDGE generalises) over `edge_win` bars and ranked against its own trailing `rank_win` values; participation is the order size over the 20-bar average bar volume. Wide spread AND small order: post a limit half a spread inside and wait `wait` bars -- if no bar trades through it the TRADE IS SKIPPED, never converted to a market order. Otherwise cross at once. Two honest limits of the harness: the shared runner owns fills, so a touched limit is taken at the next open rather than at the limit price (a conservative version of the same trade), and the mirrored exit branch cannot be expressed because exits belong to the runner -- which matches the rule anyway, since exits always complete.",
+ "source": "Synthesis grounded in Ardia, D., Guidotti, E. & Kroencke, T.A. (2024), 'Efficient Estimation of Bid-Ask Spreads from Open, High, Low, and Close Prices', Journal of Financial Economics 161:103916 (OHLC-only effective spread; EDGE nests Abdi & Ranaldo 2017 and Corwin & Schultz 2012), plus the Roll (1984)/Hasbrouck (2009) effective-spread cost measure used in Novy-Marx & Velikov (RFS 2016), which caveats that it is 'the costs faced by a small liquidity demander' -- exactly the condition under which posting passively is viable.",
+ "params": {
+  "edge_win": 60,
+  "rank_win": 252,
+  "vol_win": 20,
+  "qty": 100,
+  "pct_thresh": 0.7,
+  "part_max": 0.02,
+  "off_frac": 0.5,
+  "wait": 3,
+  "fast": 9,
+  "slow": 30
+ },
+ "grid": {
+  "pct_thresh": [
+   0.5,
+   0.7,
+   0.9
+  ],
+  "wait": [
+   1,
+   3,
+   5
+  ],
+  "part_max": [
+   0.01,
+   0.03
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Estimate the effective spread from OHLC, rank it against its own past,\n    and branch the ENTRY on the spread regime crossed with our own\n    participation rate.\n\n    Wide spread + small order  -> supply liquidity: post a passive limit\n    half a spread inside, wait `wait` bars, and if it is never touched\n    CANCEL AND SKIP THE TRADE.  Anything else -> cross immediately.\n    \"\"\"\n    import math\n    import bisect\n\n    n = len(ctx.bars)\n    h = [b[\"h\"] for b in ctx.bars]\n    l = [b[\"l\"] for b in ctx.bars]\n    c = [b[\"c\"] for b in ctx.bars]\n    v = [float(b.get(\"v\") or 0.0) for b in ctx.bars]\n\n    # ---- Abdi-Ranaldo style OHLC spread: s^2 = 4 E[(c_t - eta_t)(c_t - eta_t+1)]\n    # with eta = the mid of the log high and log low.  The product for the pair\n    # (t, t+1) is only known once bar t+1 has closed, so it is stored at t+1 --\n    # nothing here reads a bar before it exists.\n    eta = [None] * n\n    lc = [None] * n\n    for i in range(n):\n        if h[i] > 0 and l[i] > 0:\n            eta[i] = 0.5 * (math.log(h[i]) + math.log(l[i]))\n        if c[i] > 0:\n            lc[i] = math.log(c[i])\n    prod = [None] * n\n    for t in range(n - 1):\n        if eta[t] is None or eta[t + 1] is None or lc[t] is None:\n            continue\n        prod[t + 1] = 4.0 * (lc[t] - eta[t]) * (lc[t] - eta[t + 1])\n\n    ew = max(10, int(ctx.p.edge_win))\n    sp = [None] * n\n    buf = []\n    tot = 0.0\n    for i in range(n):\n        x = prod[i]\n        if x is None:\n            continue\n        buf.append(x)\n        tot += x\n        if len(buf) > ew:\n            tot -= buf.pop(0)\n        if len(buf) == ew:\n            m = tot / ew\n            sp[i] = math.sqrt(m) if m > 0.0 else 0.0\n\n    # ---- percentile rank of the spread within its own trailing history ----\n    rw = max(20, int(ctx.p.rank_win))\n    pct = [None] * n\n    order = []\n    seen = []\n    for i in range(n):\n        s = sp[i]\n        if s is None:\n            continue\n        if len(order) >= 20:\n            pct[i] = bisect.bisect_left(order, s) / float(len(order))\n        bisect.insort(order, s)\n        seen.append(s)\n        if len(seen) > rw:\n            old = seen.pop(0)\n            j = bisect.bisect_left(order, old)\n            if j < len(order) and order[j] == old:\n                order.pop(j)\n\n    # ---- average volume per bar, for the participation rate ----\n    vw = max(2, int(ctx.p.vol_win))\n    vb = [None] * n\n    tot = 0.0\n    for i in range(n):\n        tot += v[i]\n        if i >= vw:\n            tot -= v[i - vw]\n        if i >= vw - 1:\n            vb[i] = tot / vw\n\n    ctx.sp = ctx.series(sp, \"spread\")\n    ctx.pct = ctx.series(pct, \"spread_pct\")\n    ctx.vb = ctx.series(vb, \"avg_vol\")\n\n    # the primary signal the execution branch wraps\n    ctx.f = ctx.indicator(\"ema\", period=max(2, int(ctx.p.fast)))\n    ctx.s = ctx.indicator(\"ema\", period=max(3, int(ctx.p.slow)))\n    ctx.pend = None          # (direction, limit price, cancel-by bar)\n\n\ndef _primary(ctx, i):\n    f, s = ctx.f[i], ctx.s[i]\n    pf, ps = ctx.f[i - 1], ctx.s[i - 1]\n    if None in (f, s, pf, ps):\n        return 0\n    if pf <= ps and f > s:\n        return 1\n    if pf >= ps and f < s:\n        return -1\n    return 0\n\n\ndef signal(ctx, i):\n    # ---- 1. a passive order posted earlier is either filled or cancelled ----\n    if ctx.pend is not None:\n        d, lim, expiry = ctx.pend\n        if d > 0 and ctx.l[i] <= lim:\n            ctx.pend = None\n            return 1                      # touched: the passive entry filled\n        if d < 0 and ctx.h[i] >= lim:\n            ctx.pend = None\n            return -1\n        if i >= expiry:\n            ctx.pend = None               # never touched: the trade is SKIPPED,\n        return 0                          # not converted to a market order\n\n    # ---- 2. a fresh primary signal, branched on the execution regime ----\n    sig = _primary(ctx, i)\n    if not sig:\n        return 0\n    s, pc, vbar = ctx.sp[i], ctx.pct[i], ctx.vb[i]\n    if s is None or pc is None or vbar is None or vbar <= 0:\n        return 0\n    part = float(ctx.p.qty) / vbar\n    if pc > float(ctx.p.pct_thresh) and part < float(ctx.p.part_max):\n        # spread unusually wide AND our order is small: supply liquidity\n        lim = ctx.c[i] * (1.0 - sig * s * float(ctx.p.off_frac))\n        ctx.pend = (sig, lim, i + max(1, int(ctx.p.wait)))\n        return 0\n    # spread normal or tight, or the order is big relative to the bar: cross\n    return sig"
+}

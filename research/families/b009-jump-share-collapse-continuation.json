@@ -1,0 +1,32 @@
+{
+ "name": "Jump Share Collapse Continuation",
+ "note": "Per session, RV = sum r^2 and bipower variation BPV = (pi/2)*(n/(n-1))*sum|r_t||r_t-1| over the RTH returns; the jump share J = max(0,(RV-BPV)/RV) is the discontinuous part of quadratic variation. It trades the RETURN of a diffusive tape: the trailing mean jump share has collapsed to j_lo having been at j_hi within the last back sessions, taken in the direction of the multi-session drift. Thresholds are calibrated to what session-level J actually reaches on 5-minute bars (median ~0.01, 90th pct ~0.15); the paper's 0.08/0.20 pair belongs to a coarser aggregation and never fires here.",
+ "source": "Barndorff-Nielsen & Shephard (2004), 'Power and Bipower Variation with Stochastic Volatility and Jumps', Journal of Financial Econometrics 2(1), 1-37; and (2006), 'Econometrics of Testing for Jumps in Financial Economics Using Bipower Variation', Journal of Financial Econometrics 4(1), 1-30. Overview: https://www.researchgate.net/publication/5213484_Econometrics_of_Testing_for_Jumps_in_Financial_Economics_Using_Bipower_Variation ; threshold-bipower refinement for finite-sample bias: https://www.researchgate.net/publication/314836310_Threshold_Bipower_Variation_and_the_Impact_of_Jumps_on_Volatility_Forecasting",
+ "params": {
+  "jw": 3,
+  "back": 10,
+  "j_lo": 0.05,
+  "j_hi": 0.075,
+  "drift": 10,
+  "max_hold": 10,
+  "st_atr": 2.5,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "j_lo": [
+   0.04,
+   0.05,
+   0.07
+  ],
+  "j_hi": [
+   0.075,
+   0.1,
+   0.15
+  ],
+  "jw": [
+   3,
+   5
+  ]
+ },
+ "code": "import math\n\n\ndef _sess(ctx):\n    \"\"\"Per-bar ET clock, session index and RTH flag, from the timestamps alone.\n\n    The feed carries extended hours (04:00-20:00 ET) and some symbols are\n    missing premarket bars entirely, so nothing here may count bars to find a\n    session -- it all comes off the clock. US DST boundaries are computed from\n    the calendar, which is a priori knowledge, not a peek at the tape.\n    \"\"\"\n    import datetime as _dt\n    etm = []\n    day = []\n    rth = []\n    ri = []\n    cache = {}\n    last = None\n    di = -1\n    nr = 0\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        key = (y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            pv = _dt.date(y, mo, dd) - _dt.timedelta(days=1)\n            key = (pv.year, pv.month, pv.day)\n        if key != last:\n            last = key\n            di += 1\n        r = 570 <= tot < 960\n        etm.append(tot); day.append(di); rth.append(r)\n        if r:\n            nr += 1\n        ri.append(nr)\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ri = ri\n\n\ndef _rth_returns(ctx):\n    \"\"\"RTH-only log returns and the raw bar index each one ends on.\n\n    Overnight and pre/post-market returns are dropped: the intraday moments\n    below estimate an intraday quantity, and a gap return is not a 5-minute\n    return however it is labelled.\n    \"\"\"\n    R = []\n    POS = []\n    prev = None\n    prevday = None\n    for i in range(len(ctx.bars)):\n        if ctx.f_rth[i]:\n            c = float(ctx.bars[i][\"c\"])\n            if prev is not None and prev > 0.0 and c > 0.0 and \\\n                    ctx.f_day[i] == prevday:\n                R.append(math.log(c / prev))\n                POS.append(i)\n            prev = c\n            prevday = ctx.f_day[i]\n    return R, POS\n\n\ndef family_init(ctx):\n    _sess(ctx)\n    R, POS = _rth_returns(ctx)\n    n = len(ctx.bars)\n    jw = max(1, int(ctx.p.jw))\n    back = max(1, int(ctx.p.back))\n    dr = max(1, int(ctx.p.drift))\n    # --- one J and one closing price per COMPLETED session ---\n    J = []\n    SC = []\n    cur = []\n    lastd = None\n    lastc = None\n    dayof = []                      # session-day index of each completed J\n    for j in range(len(R)):\n        d = ctx.f_day[POS[j]]\n        if lastd is None:\n            lastd = d\n        if d != lastd:\n            if len(cur) > 10:\n                rv = 0.0\n                bp = 0.0\n                for z in range(len(cur)):\n                    rv += cur[z] * cur[z]\n                    if z:\n                        bp += abs(cur[z]) * abs(cur[z - 1])\n                bp *= (math.pi / 2.0) * (len(cur) / float(len(cur) - 1))\n                J.append(max(0.0, (rv - bp) / rv) if rv > 0.0 else 0.0)\n                SC.append(lastc)\n                dayof.append(lastd)\n            cur = []\n            lastd = d\n        cur.append(R[j])\n        lastc = float(ctx.bars[POS[j]][\"c\"])\n    # rolling mean of J over jw sessions, one value per completed session\n    JB = []\n    for z in range(len(J)):\n        a = max(0, z - jw + 1)\n        JB.append(sum(J[a:z + 1]) / float(z + 1 - a))\n    sig = [0] * n\n    jb = [None] * n\n    m = 0                            # completed sessions strictly before bar i\n    for i in range(n):\n        d = ctx.f_day[i]\n        while m < len(dayof) and dayof[m] < d:\n            m += 1\n        if m < jw + back or m < dr + 1:\n            continue\n        cur_jb = JB[m - 1]\n        jb[i] = cur_jb\n        hi = 0.0\n        for z in range(m - 1 - back, m - 1):\n            if JB[z] > hi:\n                hi = JB[z]\n        if cur_jb <= ctx.p.j_lo and hi >= ctx.p.j_hi:\n            a = SC[m - 1]\n            b = SC[m - 1 - dr]\n            if a and b and a > 0.0 and b > 0.0:\n                dd = math.log(a / b)\n                sig[i] = 1 if dd > 0 else (-1 if dd < 0 else 0)\n    ctx.f_sig = sig\n    ctx.f_jb = jb\n\n\ndef signal(ctx, i):\n    if not ctx.f_rth[i]:\n        return 0\n    return ctx.f_sig[i]\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    if ctx.f_day[i] - ctx.f_day[e] >= int(ctx.p.max_hold):\n        return True\n    v = ctx.f_jb[i]\n    return v is not None and v >= ctx.p.j_hi\n"
+}

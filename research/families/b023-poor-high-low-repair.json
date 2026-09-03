@@ -1,0 +1,40 @@
+{
+ "name": "Poor High / Poor Low Repair",
+ "note": "Builds a real TPO profile from each completed RTH session - rows row_frac * daily ATR wide, every 30-minute period marking every row between its own low and high - and records a POOR extreme when the top two occupied rows each carry min_tpo periods and at least flat_n periods have their high within one row of the session high (a flat, tail-less top). Unrepaired extremes are carried for reg_depth sessions; the trade is TOWARD the level, taken when price comes within approach * ATRd of it on a bar that closes in the direction of the level, targeting repair * ATRd BEYOND it. A level leaves the register once the auction has traded through it.",
+ "source": "Dalton, Jones & Dalton, 'Mind Over Markets' (1993). Operational definition as documented by marketcalls.in ('Poor High and Poor Low Market Profile Structure Explained': lack of excess or a single TPO at the tail) and the ShadowTrader glossary ('a poor high will have less than two TPOs of excess with at least 2-3 columns of TPOs lining up to form a flat top').",
+ "params": {
+  "row_frac": 0.05,
+  "min_tpo": 2,
+  "flat_n": 2,
+  "reg_depth": 10,
+  "approach": 0.2,
+  "repair": 0.15,
+  "stop_f": 0.35,
+  "hold_sess": 3,
+  "atr_days": 10,
+  "per_min": 30,
+  "rth_open": 570,
+  "rth_close": 960,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "side": "both"
+ },
+ "grid": {
+  "row_frac": [
+   0.03,
+   0.05,
+   0.08
+  ],
+  "approach": [
+   0.1,
+   0.2,
+   0.35
+  ],
+  "min_tpo": [
+   2,
+   3
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    import datetime as _dt\n    m1 = _dt.date(y, 3, 1)\n    ms = 1 + ((6 - m1.weekday()) % 7) + 7\n    n1 = _dt.date(y, 11, 1)\n    ne = 1 + ((6 - n1.weekday()) % 7)\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        return d >= ms\n    return d < ne\n\n\ndef _et_minutes(bars):\n    \"\"\"Minute-of-day in America/New_York for every bar. UTC in, ET out.\"\"\"\n    off = {}\n    out = []\n    for b in bars:\n        ts = str(b[\"t\"])\n        day = ts[:10]\n        o = off.get(day)\n        if o is None:\n            o = -4 if _dst(int(ts[0:4]), int(ts[5:7]), int(ts[8:10])) else -5\n            off[day] = o\n        out.append((int(ts[11:13]) + o) * 60 + int(ts[14:16]))\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    et = _et_minutes(bars)\n    day = [str(b[\"t\"])[:10] for b in bars]\n    R0 = int(ctx.p.rth_open)\n    R1 = int(ctx.p.rth_close)\n    PER = int(ctx.p.per_min)\n\n    sess = []\n    pos = {}\n    for j in range(n):\n        if not (R0 <= et[j] < R1):\n            continue\n        d = day[j]\n        k = pos.get(d)\n        if k is None:\n            pos[d] = len(sess)\n            k = len(sess)\n            sess.append({\"d\": d, \"h\": h[j], \"l\": l[j], \"c\": c[j], \"per\": {}})\n        s = sess[k]\n        if h[j] > s[\"h\"]:\n            s[\"h\"] = h[j]\n        if l[j] < s[\"l\"]:\n            s[\"l\"] = l[j]\n        s[\"c\"] = c[j]\n        q = (et[j] - R0) // PER\n        pr = s[\"per\"].get(q)\n        if pr is None:\n            s[\"per\"][q] = [l[j], h[j]]\n        else:\n            if l[j] < pr[0]:\n                pr[0] = l[j]\n            if h[j] > pr[1]:\n                pr[1] = h[j]\n\n    sidx = [0] * n\n    cur = -1\n    for j in range(n):\n        k = pos.get(day[j])\n        if k is not None:\n            cur = k\n        sidx[j] = cur\n    ctx.sidx = sidx\n\n    # ---- daily ATR from COMPLETED prior sessions only ----\n    wd = int(ctx.p.atr_days)\n    atrd = {}\n    atrk = [None] * len(sess)\n    trs = []\n    for k in range(len(sess)):\n        s = sess[k]\n        if k > 0:\n            hist = trs[-wd:]\n            if len(hist) >= 2:\n                atrd[s[\"d\"]] = sum(hist) / float(len(hist))\n                atrk[k] = atrd[s[\"d\"]]\n            pc = sess[k - 1][\"c\"]\n        else:\n            pc = s[\"c\"]\n        trs.append(max(s[\"h\"] - s[\"l\"], abs(s[\"h\"] - pc), abs(s[\"l\"] - pc)))\n    ctx.atrd = atrd\n\n    # ---- the TPO profile of each completed session, and its poor extremes ----\n    mt = int(ctx.p.min_tpo)\n    fn = int(ctx.p.flat_n)\n    found = {}\n    for k in range(len(sess)):\n        A = atrk[k]\n        if A is None or A <= 0:\n            continue\n        s = sess[k]\n        wrow = float(ctx.p.row_frac) * A\n        if wrow <= 0:\n            continue\n        counts = {}\n        for pr in s[\"per\"].values():\n            r0 = int(pr[0] // wrow)\n            r1 = int(pr[1] // wrow)\n            if r1 - r0 > 400:\n                continue\n            for r in range(r0, r1 + 1):\n                counts[r] = counts.get(r, 0) + 1\n        if len(counts) < 3:\n            continue\n        top = max(counts)\n        bot = min(counts)\n        hi_flat = sum(1 for pr in s[\"per\"].values() if s[\"h\"] - pr[1] <= wrow)\n        lo_flat = sum(1 for pr in s[\"per\"].values() if pr[0] - s[\"l\"] <= wrow)\n        ev = []\n        if counts.get(top, 0) >= mt and counts.get(top - 1, 0) >= mt \\\n                and hi_flat >= fn:\n            ev.append((1, s[\"h\"]))       # a poor HIGH -- buy toward it\n        if counts.get(bot, 0) >= mt and counts.get(bot + 1, 0) >= mt \\\n                and lo_flat >= fn:\n            ev.append((-1, s[\"l\"]))      # a poor LOW -- sell toward it\n        if ev:\n            found[k] = ev\n    ctx.found = found\n    ctx._reg = []\n    ctx._sess = -1\n    ctx._t0 = None\n    ctx._tgt = None\n    ctx._stp = None\n\n\ndef signal(ctx, i):\n    s = ctx.sidx[i]\n    if s < 1:\n        return 0\n    if s != ctx._sess:\n        # a session closed: register whatever it left unfinished, and age out\n        for ev in ctx.found.get(s - 1, ()):\n            ctx._reg.append({\"dir\": ev[0], \"px\": ev[1], \"s\": s - 1, \"used\": -1})\n        dep = int(ctx.p.reg_depth)\n        ctx._reg = [r for r in ctx._reg if s - r[\"s\"] <= dep]\n        ctx._sess = s\n    if not ctx._reg:\n        return 0\n    A = ctx.atrd.get(str(ctx.t[i])[:10])\n    if A is None or A <= 0:\n        return 0\n    rep = float(ctx.p.repair) * A\n    app = float(ctx.p.approach) * A\n    keep = []\n    out = 0\n    for r in ctx._reg:\n        if r[\"dir\"] > 0:\n            if ctx.h[i] > r[\"px\"] + rep:\n                continue                 # repaired: the auction finished the job\n        else:\n            if ctx.l[i] < r[\"px\"] - rep:\n                continue\n        keep.append(r)\n        if out or r[\"used\"] == s or ctx.positions:\n            continue\n        if r[\"dir\"] > 0:\n            if ctx.h[i] >= r[\"px\"] - app and ctx.c[i] < r[\"px\"] \\\n                    and ctx.c[i] > ctx.o[i]:\n                r[\"used\"] = s\n                ctx._t0 = s\n                ctx._tgt = r[\"px\"] + rep\n                ctx._stp = float(ctx.p.stop_f) * A\n                out = 1\n        else:\n            if ctx.l[i] <= r[\"px\"] + app and ctx.c[i] > r[\"px\"] \\\n                    and ctx.c[i] < ctx.o[i]:\n                r[\"used\"] = s\n                ctx._t0 = s\n                ctx._tgt = r[\"px\"] - rep\n                ctx._stp = float(ctx.p.stop_f) * A\n                out = -1\n    ctx._reg = keep\n    return out\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or ctx._t0 is None:\n        return False\n    if ctx.sidx[i] - ctx._t0 >= int(ctx.p.hold_sess):\n        return True\n    p = ctx.positions[0]\n    if p[\"side\"] == \"long\":\n        if ctx._tgt is not None and ctx.h[i] >= ctx._tgt:\n            return True\n        return ctx.c[i] <= p[\"entry\"] - ctx._stp\n    if ctx._tgt is not None and ctx.l[i] <= ctx._tgt:\n        return True\n    return ctx.c[i] >= p[\"entry\"] + ctx._stp"
+}

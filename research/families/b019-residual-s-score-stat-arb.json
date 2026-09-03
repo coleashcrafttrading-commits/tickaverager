@@ -1,0 +1,36 @@
+{
+ "name": "Residual s-score stat arb",
+ "note": "The Avellaneda-Lee OU s-score: cumulative residual over a rolling window, an AR(1) fit, a kappa gate that REJECTS the day when reversion is slower than `kap_win` reversion times per window (exp(-2/60) = 0.9672, the paper's number, so the gate is scale-free), and entry only on large excursions of s with deliberately asymmetric closes. Reduced honestly for a single-symbol harness: the factor leg cannot be read, so beta is 0 and the residual is the log return in excess of its own window mean - the OU machinery, the kappa rejection and the thresholds are the paper's, the market-neutral hedge is not representable.",
+ "source": "Avellaneda & Lee (2010), 'Statistical Arbitrage in the US Equities Market', Courant Institute NYU working paper, https://math.nyu.edu/~avellane/AvellanedaLeeStatArb20090616.pdf - equations (15), (16), (21), (22), Section 4.1 and Appendix.",
+ "params": {
+  "win": 60,
+  "kap_win": 2.0,
+  "sbo": 1.25,
+  "sso": 1.25,
+  "sbc": 0.5,
+  "ssc": 0.75,
+  "n_tau": 3.0,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "win": [
+   40,
+   60,
+   90
+  ],
+  "sbo": [
+   1.0,
+   1.25,
+   1.5
+  ],
+  "kap_win": [
+   1.0,
+   2.0,
+   4.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Avellaneda-Lee: an OU model fitted to the CUMULATIVE residual, a kappa\n    gate that refuses to trade when reversion is too slow for the estimation\n    window to mean anything, and an s-score measured in units of the OU\n    stationary standard deviation.\n\n    THE HONEST REDUCTION. The paper's residual is what is left of the stock's\n    return after regressing it on a factor (SPY or a sector ETF). A family here\n    sees ONE symbol's bars and cannot read a second series, so the factor leg is\n    dropped: beta is 0 and the regression is on an intercept alone, which makes\n    e_t = r_t - mean(r) over the window and X_k the detrended cumulative log\n    return. Everything downstream - X_60 = 0 by construction, the AR(1) fit, the\n    kappa rejection, sigma_eq, and the deliberately asymmetric open/close\n    thresholds - is the paper's and is what is being tested. What is NOT tested\n    is the market-neutrality of the residual, and the -beta dollars of SPY per\n    dollar of stock simply cannot be placed from here.\n\n    The kappa gate translates exactly and needs no annualisation. The paper\n    rejects b >= 0.9672 on a 60-day window, which is precisely the statement\n    that the mean-reversion time 1/kappa must fit at least `kap_win` = 2 times\n    inside the window: b_max = exp(-kap_win / win), and exp(-2/60) = 0.9672.\n    So the same gate applies on any bar size.\n    \"\"\"\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    w = max(20, int(ctx.p.win))\n    bmax = math.exp(-float(ctx.p.kap_win) / float(w))\n\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    pre = [0.0] * (n + 1)\n    for i in range(n):\n        pre[i + 1] = pre[i] + r[i]\n\n    s_sc = [None] * n\n    tau = [None] * n\n    for i in range(w + 1, n):\n        s0 = i - w + 1                      # first return index in the window\n        mu = (pre[i + 1] - pre[s0]) / float(w)\n\n        # cumulative residual X_k, k = 1..w  (X_w = 0 by construction)\n        x = [0.0] * (w + 1)\n        acc = 0.0\n        for k in range(w):\n            acc += r[s0 + k] - mu\n            x[k + 1] = acc\n\n        m = w - 1                            # AR(1) pairs X_n -> X_{n+1}\n        sx = 0.0\n        sy = 0.0\n        sxx = 0.0\n        sxy = 0.0\n        for k in range(1, w):\n            a = x[k]\n            b = x[k + 1]\n            sx += a\n            sy += b\n            sxx += a * a\n            sxy += a * b\n        den = m * sxx - sx * sx\n        if den <= 0.0:\n            continue\n        bb = (m * sxy - sx * sy) / den\n        aa = (sy - bb * sx) / m\n        if bb <= 0.0 or bb >= bmax:          # kappa gate: too slow, or degenerate\n            continue\n        ss = 0.0\n        for k in range(1, w):\n            z = x[k + 1] - (aa + bb * x[k])\n            ss += z * z\n        dof = m - 2\n        if dof <= 0:\n            continue\n        vz = ss / float(dof)\n        if vz <= 0.0:\n            continue\n        seq2 = vz / (1.0 - bb * bb)\n        if seq2 <= 0.0:\n            continue\n        seq = math.sqrt(seq2)\n        mm = aa / (1.0 - bb)\n        s_sc[i] = -mm / seq\n        tau[i] = 1.0 / (-math.log(bb))       # mean-reversion time, in bars\n\n    ctx.s = ctx.series(s_sc, \"s_score\")\n    ctx.tau = ctx.series(tau, \"tau\")\n    ctx._sbo = float(ctx.p.sbo)\n    ctx._sso = float(ctx.p.sso)\n    ctx._sbc = float(ctx.p.sbc)\n    ctx._ssc = float(ctx.p.ssc)\n    ctx._ktau = float(ctx.p.n_tau)\n\n\ndef signal(ctx, i):\n    s = ctx.s[i]\n    if s is None:\n        return 0\n    if s < -ctx._sbo:\n        return 1\n    if s > ctx._sso:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Asymmetric closes, plus the paper's hard clock of n_tau reversion times.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    t = ctx.tau[e]\n    if t is not None and (i - e) >= ctx._ktau * t:\n        return True\n    s = ctx.s[i]\n    if s is None:\n        return False\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    if d > 0:\n        return s > -ctx._sbc\n    return s < ctx._ssc"
+}

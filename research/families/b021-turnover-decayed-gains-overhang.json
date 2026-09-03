@@ -1,0 +1,29 @@
+{
+ "name": "Turnover-Decayed Capital Gains Overhang",
+ "note": "Grinblatt-Han's reference price, exactly: the weight on each past price is the probability a share bought then is still held, V_s * PROD(1-V) over everything since. That sum has a closed recursion, R_t = V_{t-1}*P_{t-1} + (1-V_{t-1})*R_{t-1}, which is what this computes -- so one heavy-volume bar really does wipe the anchor on everything before it. Turnover V uses a rolling volume-share proxy because shares outstanding is not in OHLCV. Overhang g = (C-R)/C; long on gain, short on loss, unwind when g decays back toward zero.",
+ "source": "Mark Grinblatt and Bing Han, 'The Disposition Effect and Momentum', NBER Working Paper 8734 (published as 'Prospect theory, mental accounting, and momentum', Journal of Financial Economics 78, 2005) - VERIFIED via https://www.nber.org/papers/w8734 (abstract) and the full PDF. Equation (15): g_t = P_t - R_t. Equation (19) gives the recursive reference price R_t = w*nu_{t-1}*F_{t-1} + (1-w*nu_{t-1})*w*nu_{t-2}*F_{t-2} + ... , the turnover-decayed weighted average this implements. Foundational: Shefrin and Statman (1985); Odean (1998).",
+ "params": {
+  "turn_win": 400,
+  "g_in": 0.01,
+  "g_out_frac": 0.2,
+  "time_stop": 60,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "turn_win": [
+   200,
+   400,
+   800
+  ],
+  "g_in": [
+   0.005,
+   0.01,
+   0.02
+  ],
+  "time_stop": [
+   30,
+   60
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"The survival-weighted reference price, and the overhang against it.\n\n    R_t = SUM_n V_{t-n} * PROD_{tau<n} (1 - V) * P_{t-n} collapses exactly to\n    R_t = V_{t-1} P_{t-1} + (1 - V_{t-1}) R_{t-1}. That is not a smoothing\n    constant: the decay is the bar's own turnover, so two symbols with the same\n    price path and different volume paths get different anchors.\n    \"\"\"\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    tw = max(20, int(ctx.p.turn_win))\n\n    V = [0.0] * m\n    s = 0.0\n    for i in range(m):\n        s += v[i]\n        if i >= tw:\n            s -= v[i - tw]\n        if s > 0.0 and i >= tw // 4:\n            x = v[i] / s\n            V[i] = x if x < 1.0 else 1.0\n\n    g = [None] * m\n    warm = 3 * tw          # let the initialisation of R decay out\n    r = c[0] if m else 0.0\n    for i in range(m):\n        if i > 0:\n            w = V[i - 1]\n            r = w * c[i - 1] + (1.0 - w) * r\n        if i >= warm and c[i] > 0.0:\n            g[i] = (c[i] - r) / c[i]\n    ctx._g = g\n\n\ndef signal(ctx, i):\n    x = ctx._g[i]\n    if x is None:\n        return 0\n    t = abs(float(ctx.p.g_in))\n    if t <= 0.0:\n        return 0\n    if x >= t:\n        return 1\n    if x <= -t:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    x = ctx._g[i]\n    if x is None:\n        return False\n    out = abs(float(ctx.p.g_in)) * abs(float(ctx.p.g_out_frac))\n    return abs(x) < out\n"
+}

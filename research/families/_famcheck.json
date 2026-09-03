@@ -1,0 +1,8450 @@
+[
+ {
+  "name": "Diurnal Volume-Pace Day Typing",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 10,
+    "pl": 95.12,
+    "exposure": 1.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 6,
+    "pl": 154.26,
+    "exposure": 1.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": -8.32,
+    "exposure": 0.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": -70.3,
+    "exposure": 0.8
+   }
+  },
+  "total_trades": 29,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Dunnigan thrust after a held retest",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 191,
+    "pl": -1372.78,
+    "exposure": 8.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 179,
+    "pl": -403.49,
+    "exposure": 10.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 107,
+    "pl": -199.96,
+    "exposure": 8.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 187,
+    "pl": 838.81,
+    "exposure": 10.0
+   }
+  },
+  "total_trades": 664,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Expiration-Week Strike Pin and Monday Release",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 10,
+    "pl": -1901.49,
+    "exposure": 22.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 6,
+    "pl": 421.73,
+    "exposure": 11.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 4,
+    "pl": -13.5,
+    "exposure": 8.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 7,
+    "pl": 1638.55,
+    "exposure": 18.5
+   }
+  },
+  "total_trades": 27,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Low Volume Node Acceleration",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": 455.49,
+    "exposure": 0.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": -6.5,
+    "exposure": 0.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": -49.73,
+    "exposure": 3.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": 705.8,
+    "exposure": 1.0
+   }
+  },
+  "total_trades": 19,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Sequential Probability Ratio Kill Switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 366,
+    "pl": 19.46,
+    "exposure": 44.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 59,
+    "pl": -1196.2,
+    "exposure": 7.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 136,
+    "pl": -80.4,
+    "exposure": 26.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 174,
+    "pl": -4513.64,
+    "exposure": 21.5
+   }
+  },
+  "total_trades": 735,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "VNET Depth Surprise",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 11,
+    "pl": 248.5,
+    "exposure": 2.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 22,
+    "pl": -274.06,
+    "exposure": 5.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": -7.65,
+    "exposure": 3.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 7,
+    "pl": -401.61,
+    "exposure": 2.2
+   }
+  },
+  "total_trades": 48,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volatility Contraction Pattern",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 9,
+    "pl": -218.82,
+    "exposure": 2.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": -98.4,
+    "exposure": 0.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": 5.86,
+    "exposure": 0.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -14.49,
+    "exposure": 0.4
+   }
+  },
+  "total_trades": 19,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "VPIN Toxicity Exhaustion Fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 3,
+    "pl": 341.55,
+    "exposure": 0.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": -114.98,
+    "exposure": 2.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -28.51,
+    "exposure": 0.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": -358.01,
+    "exposure": 1.0
+   }
+  },
+  "total_trades": 17,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Haircut Sharpe Position Sizing",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 43,
+    "pl": 41.24,
+    "exposure": 0.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 62,
+    "pl": 109.01,
+    "exposure": 1.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 303,
+    "pl": 138.26,
+    "exposure": 14.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 408,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Nine Buying Tests Composite Score",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 69,
+    "pl": 345.91,
+    "exposure": 6.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 81,
+    "pl": -2135.55,
+    "exposure": 9.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 45,
+    "pl": 50.21,
+    "exposure": 4.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 83,
+    "pl": 46.94,
+    "exposure": 10.1
+   }
+  },
+  "total_trades": 278,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Point-and-figure triple-top breakout on ATR-scaled boxes",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 194,
+    "pl": -63.54,
+    "exposure": 62.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 206,
+    "pl": 2024.92,
+    "exposure": 60.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 102,
+    "pl": -324.7,
+    "exposure": 64.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 175,
+    "pl": -5764.75,
+    "exposure": 60.4
+   }
+  },
+  "total_trades": 677,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Sum-of-the-Parts Multiple Reversion",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": -180.16,
+    "exposure": 39.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": -250.75,
+    "exposure": 47.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -60.0,
+    "exposure": 16.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 18,
+    "pl": 1684.94,
+    "exposure": 37.9
+   }
+  },
+  "total_trades": 35,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "TPO Count Control Ratio",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": 118.19,
+    "exposure": 2.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 6,
+    "pl": -717.49,
+    "exposure": 2.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 2,
+    "pl": 4.5,
+    "exposure": 2.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 6,
+    "pl": -1091.23,
+    "exposure": 3.7
+   }
+  },
+  "total_trades": 21,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Characteristic Pure Play (partial slope)",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 231,
+    "pl": -647.76,
+    "exposure": 22.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 251,
+    "pl": -7.24,
+    "exposure": 29.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 139,
+    "pl": -233.77,
+    "exposure": 23.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 269,
+    "pl": 1068.34,
+    "exposure": 24.6
+   }
+  },
+  "total_trades": 890,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Decay-Matched Scale-In",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 294,
+    "pl": -867.21,
+    "exposure": 16.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 330,
+    "pl": -1848.74,
+    "exposure": 19.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 171,
+    "pl": -140.55,
+    "exposure": 15.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 315,
+    "pl": -3902.4,
+    "exposure": 17.8
+   }
+  },
+  "total_trades": 1110,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Full-Range Gap Continuation with a Gap-Fill Stop",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 60,
+    "pl": -931.22,
+    "exposure": 10.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 33,
+    "pl": 55.07,
+    "exposure": 9.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 74,
+    "pl": -150.7,
+    "exposure": 15.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 28,
+    "pl": -1147.64,
+    "exposure": 11.0
+   }
+  },
+  "total_trades": 195,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Garleanu-Pedersen Aim Portfolio",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 352,
+    "pl": -682.65,
+    "exposure": 29.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 335,
+    "pl": -1092.55,
+    "exposure": 28.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 232,
+    "pl": -21.16,
+    "exposure": 27.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 314,
+    "pl": -157.92,
+    "exposure": 31.3
+   }
+  },
+  "total_trades": 1233,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Meta-Labelled Primary Signal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 25,
+    "pl": -111.32,
+    "exposure": 1.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 43,
+    "pl": 55.38,
+    "exposure": 1.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 17,
+    "pl": -49.99,
+    "exposure": 1.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 31,
+    "pl": 89.33,
+    "exposure": 1.2
+   }
+  },
+  "total_trades": 116,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Multinomial Four-Level VaR Shape Monitor",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 783,
+    "pl": -3149.74,
+    "exposure": 79.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 752,
+    "pl": -5066.04,
+    "exposure": 80.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 635,
+    "pl": -883.16,
+    "exposure": 69.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 836,
+    "pl": -14523.72,
+    "exposure": 77.4
+   }
+  },
+  "total_trades": 3006,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Spread Regime Passive-Aggressive Switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 161,
+    "pl": -225.93,
+    "exposure": 24.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 169,
+    "pl": -621.24,
+    "exposure": 26.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 114,
+    "pl": 46.39,
+    "exposure": 26.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 164,
+    "pl": -3105.03,
+    "exposure": 23.7
+   }
+  },
+  "total_trades": 608,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Adaptive bandpass trough cross",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 221,
+    "pl": -2033.75,
+    "exposure": 33.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 198,
+    "pl": -1419.3,
+    "exposure": 29.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 138,
+    "pl": -131.64,
+    "exposure": 33.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 175,
+    "pl": -4896.1,
+    "exposure": 30.6
+   }
+  },
+  "total_trades": 732,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Deflated Sharpe arming gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 150,
+    "pl": -1225.16,
+    "exposure": 16.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 171,
+    "pl": -1172.42,
+    "exposure": 20.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 191,
+    "pl": -3030.01,
+    "exposure": 28.6
+   }
+  },
+  "total_trades": 512,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Kagi yin-yang thickness flip",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 60,
+    "pl": 407.67,
+    "exposure": 9.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 52,
+    "pl": -1275.1,
+    "exposure": 8.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 42,
+    "pl": -121.13,
+    "exposure": 8.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 59,
+    "pl": -796.86,
+    "exposure": 13.1
+   }
+  },
+  "total_trades": 213,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Length-of-night exposure tilt",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 672,
+    "pl": -1281.98,
+    "exposure": 89.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 652,
+    "pl": 1330.66,
+    "exposure": 89.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 428,
+    "pl": -666.99,
+    "exposure": 88.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 648,
+    "pl": -7574.43,
+    "exposure": 89.2
+   }
+  },
+  "total_trades": 2400,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Overnight variance share gap regime",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": -173.23,
+    "exposure": 0.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 1,
+    "pl": 112.63,
+    "exposure": 0.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": 15.71,
+    "exposure": 0.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 6,
+    "pl": -226.98,
+    "exposure": 0.7
+   }
+  },
+  "total_trades": 15,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Two-speed Wald sentinel",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 75,
+    "pl": 1210.37,
+    "exposure": 10.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 109,
+    "pl": 76.81,
+    "exposure": 15.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 116,
+    "pl": -4.96,
+    "exposure": 17.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 83,
+    "pl": -820.92,
+    "exposure": 11.4
+   }
+  },
+  "total_trades": 383,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Weis Wave swing volume divergence",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 33,
+    "pl": -367.51,
+    "exposure": 4.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 34,
+    "pl": 74.72,
+    "exposure": 4.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 26,
+    "pl": -22.59,
+    "exposure": 3.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 23,
+    "pl": -575.7,
+    "exposure": 3.0
+   }
+  },
+  "total_trades": 116,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "BVC-VPIN Toxicity Continuation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 41,
+    "pl": -650.36,
+    "exposure": 6.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 50,
+    "pl": 2067.34,
+    "exposure": 6.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 41,
+    "pl": -140.04,
+    "exposure": 4.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 37,
+    "pl": -499.19,
+    "exposure": 4.2
+   }
+  },
+  "total_trades": 169,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Closing-Bell Round Number Pin",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": -167.22,
+    "exposure": 0.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": -78.01,
+    "exposure": 0.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 9,
+    "pl": -59.39,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 22,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Gamma Regime Router",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 243,
+    "pl": -261.05,
+    "exposure": 13.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 231,
+    "pl": -178.41,
+    "exposure": 13.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 197,
+    "pl": -311.0,
+    "exposure": 16.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 231,
+    "pl": -28.15,
+    "exposure": 13.6
+   }
+  },
+  "total_trades": 902,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Order-Sign Long-Memory Follow",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 28,
+    "pl": 422.33,
+    "exposure": 3.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 33,
+    "pl": -589.47,
+    "exposure": 5.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 13,
+    "pl": -1.8,
+    "exposure": 2.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 38,
+    "pl": 344.72,
+    "exposure": 4.5
+   }
+  },
+  "total_trades": 112,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Overnight vs Intraday Amihud Gap Fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": 20.39,
+    "exposure": 0.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": -38.04,
+    "exposure": 0.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 6,
+    "pl": 29.02,
+    "exposure": 0.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": 236.43,
+    "exposure": 0.5
+   }
+  },
+  "total_trades": 23,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Close-Location Absorption Run",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 9,
+    "pl": -10.52,
+    "exposure": 0.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 9,
+    "pl": -54.0,
+    "exposure": 0.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 11,
+    "pl": -41.67,
+    "exposure": 0.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": 242.95,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 34,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Rogers-Satchell Drift Detector",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 349,
+    "pl": -512.17,
+    "exposure": 27.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 249,
+    "pl": 776.62,
+    "exposure": 20.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 297,
+    "pl": -548.79,
+    "exposure": 35.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 293,
+    "pl": -367.28,
+    "exposure": 24.5
+   }
+  },
+  "total_trades": 1188,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Turn-of-Month Flow Window",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 105,
+    "pl": 2054.53,
+    "exposure": 20.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 85,
+    "pl": 2898.74,
+    "exposure": 19.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 68,
+    "pl": -151.34,
+    "exposure": 20.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 96,
+    "pl": 1111.07,
+    "exposure": 20.0
+   }
+  },
+  "total_trades": 354,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume-Profile Max-Pain Wall",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 62,
+    "pl": 349.53,
+    "exposure": 9.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 54,
+    "pl": 228.27,
+    "exposure": 6.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 19,
+    "pl": -56.89,
+    "exposure": 3.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 85,
+    "pl": -1549.98,
+    "exposure": 10.2
+   }
+  },
+  "total_trades": 220,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Bayesian Run-Length Collapse",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 65,
+    "pl": 163.31,
+    "exposure": 6.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 71,
+    "pl": -168.83,
+    "exposure": 5.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 46,
+    "pl": -39.25,
+    "exposure": 3.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 70,
+    "pl": 650.87,
+    "exposure": 5.1
+   }
+  },
+  "total_trades": 252,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Corwin-Schultz Spread Shock Fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 112,
+    "pl": -15.34,
+    "exposure": 5.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 109,
+    "pl": 315.27,
+    "exposure": 5.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 69,
+    "pl": -119.78,
+    "exposure": 6.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 119,
+    "pl": -1418.22,
+    "exposure": 6.0
+   }
+  },
+  "total_trades": 409,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Kernel-Regression Smoothed Extremum",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 906,
+    "pl": -2729.05,
+    "exposure": 6.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 947,
+    "pl": -2887.22,
+    "exposure": 7.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 514,
+    "pl": -456.0,
+    "exposure": 7.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 953,
+    "pl": -4669.72,
+    "exposure": 7.6
+   }
+  },
+  "total_trades": 3320,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Kyle Lambda Shock",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 30,
+    "pl": -148.52,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 18,
+    "pl": -190.06,
+    "exposure": 1.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 12,
+    "pl": -21.35,
+    "exposure": 1.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 16,
+    "pl": 1018.66,
+    "exposure": 1.6
+   }
+  },
+  "total_trades": 76,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Model Confidence Set Volatility Ensemble",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 422,
+    "pl": 549.66,
+    "exposure": 47.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 382,
+    "pl": 958.51,
+    "exposure": 48.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 214,
+    "pl": -284.51,
+    "exposure": 40.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 414,
+    "pl": -3383.46,
+    "exposure": 49.9
+   }
+  },
+  "total_trades": 1432,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Strike Magnet Drift Into Expiration",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": -2166.5,
+    "exposure": 48.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 8,
+    "pl": -126.24,
+    "exposure": 25.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": 79.41,
+    "exposure": 12.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 23,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Conditional precision meta-gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 54,
+    "pl": -364.11,
+    "exposure": 3.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 24,
+    "pl": 132.6,
+    "exposure": 2.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 20,
+    "pl": -80.98,
+    "exposure": 4.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 25,
+    "pl": -1205.18,
+    "exposure": 2.2
+   }
+  },
+  "total_trades": 123,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Corwin-Schultz spread spike fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 60,
+    "pl": -81.09,
+    "exposure": 6.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 72,
+    "pl": 803.93,
+    "exposure": 7.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 54,
+    "pl": -103.61,
+    "exposure": 7.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 59,
+    "pl": 125.84,
+    "exposure": 6.7
+   }
+  },
+  "total_trades": 245,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Fade the close-on-the-low candle in an uptrend",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 156,
+    "pl": 147.73,
+    "exposure": 20.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 117,
+    "pl": 323.83,
+    "exposure": 16.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 85,
+    "pl": -32.47,
+    "exposure": 18.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 112,
+    "pl": -2486.62,
+    "exposure": 15.1
+   }
+  },
+  "total_trades": 470,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Levered ETF close rebalance drift",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": -86.6,
+    "exposure": 0.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 10,
+    "pl": -206.38,
+    "exposure": 1.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": -30.49,
+    "exposure": 1.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": -569.92,
+    "exposure": 0.6
+   }
+  },
+  "total_trades": 31,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Realized GARCH measurement-equation surprise",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 48,
+    "pl": 425.12,
+    "exposure": 4.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 57,
+    "pl": 48.86,
+    "exposure": 2.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 38,
+    "pl": -15.02,
+    "exposure": 2.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 52,
+    "pl": 745.07,
+    "exposure": 4.2
+   }
+  },
+  "total_trades": 195,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Reflex versus Trendflex",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 69,
+    "pl": -24.64,
+    "exposure": 6.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 55,
+    "pl": -759.99,
+    "exposure": 4.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 33,
+    "pl": -71.22,
+    "exposure": 3.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 36,
+    "pl": -645.81,
+    "exposure": 3.2
+   }
+  },
+  "total_trades": 193,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "V-shaped selling pressure overhang",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 198,
+    "pl": -329.34,
+    "exposure": 18.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 199,
+    "pl": -904.84,
+    "exposure": 18.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 143,
+    "pl": -29.7,
+    "exposure": 21.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 195,
+    "pl": -2261.78,
+    "exposure": 19.8
+   }
+  },
+  "total_trades": 735,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Hill-vs-EPD bias gap reliability gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 57,
+    "pl": -64.55,
+    "exposure": 9.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 64,
+    "pl": 454.61,
+    "exposure": 10.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 23,
+    "pl": -35.85,
+    "exposure": 5.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 75,
+    "pl": -1497.2,
+    "exposure": 12.8
+   }
+  },
+  "total_trades": 219,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Leveraged ETF rebalance front-run",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 4,
+    "pl": 76.78,
+    "exposure": 0.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 21,
+    "pl": 30.73,
+    "exposure": 2.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": -14.68,
+    "exposure": 2.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 28,
+    "pl": -1827.52,
+    "exposure": 3.8
+   }
+  },
+  "total_trades": 62,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Return-volatility hedge breakdown",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 113,
+    "pl": -714.36,
+    "exposure": 11.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 103,
+    "pl": -860.94,
+    "exposure": 10.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 65,
+    "pl": 98.66,
+    "exposure": 9.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 78,
+    "pl": -806.9,
+    "exposure": 7.9
+   }
+  },
+  "total_trades": 359,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Signal horizon migration detector",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 147,
+    "pl": -450.09,
+    "exposure": 14.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 83,
+    "pl": 363.83,
+    "exposure": 7.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 62,
+    "pl": -63.41,
+    "exposure": 8.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 170,
+    "pl": -3156.71,
+    "exposure": 13.3
+   }
+  },
+  "total_trades": 462,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "TD Sequential nine-count setup",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 177,
+    "pl": -501.68,
+    "exposure": 25.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 169,
+    "pl": 822.81,
+    "exposure": 26.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 85,
+    "pl": -104.93,
+    "exposure": 20.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 188,
+    "pl": 71.83,
+    "exposure": 32.9
+   }
+  },
+  "total_trades": 619,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "White Reality Check benchmark gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 34,
+    "pl": -274.77,
+    "exposure": 3.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 1,
+    "pl": 63.57,
+    "exposure": 0.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": 4.51,
+    "exposure": 0.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 54,
+    "pl": -3456.15,
+    "exposure": 4.9
+   }
+  },
+  "total_trades": 97,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Bertram Cost-Aware OU Band Optimization",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 27,
+    "pl": -1174.69,
+    "exposure": 73.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 27,
+    "pl": 56.63,
+    "exposure": 71.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 35,
+    "pl": -26.28,
+    "exposure": 75.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 38,
+    "pl": 6743.0,
+    "exposure": 70.5
+   }
+  },
+  "total_trades": 127,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Halloween Exposure Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 161,
+    "pl": 1454.34,
+    "exposure": 16.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 148,
+    "pl": 708.66,
+    "exposure": 16.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 128,
+    "pl": -223.18,
+    "exposure": 26.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 124,
+    "pl": -2644.44,
+    "exposure": 16.5
+   }
+  },
+  "total_trades": 561,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Jump Share Collapse Continuation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 54,
+    "pl": -722.1,
+    "exposure": 16.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 49,
+    "pl": -1462.51,
+    "exposure": 14.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 30,
+    "pl": -29.34,
+    "exposure": 12.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 41,
+    "pl": -2447.71,
+    "exposure": 15.4
+   }
+  },
+  "total_trades": 174,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Microstructure Noise Ratio Collapse",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": -296.21,
+    "exposure": 1.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 11,
+    "pl": -80.56,
+    "exposure": 1.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": -8.23,
+    "exposure": 2.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 10,
+    "pl": -1759.43,
+    "exposure": 0.8
+   }
+  },
+  "total_trades": 35,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Ordinal-Pattern Continuation under Low Entropy",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 45,
+    "pl": -976.31,
+    "exposure": 3.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 29,
+    "pl": 337.31,
+    "exposure": 1.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 20,
+    "pl": 56.82,
+    "exposure": 3.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 15,
+    "pl": -99.74,
+    "exposure": 1.7
+   }
+  },
+  "total_trades": 109,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Realized Skewness Percentile Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 12,
+    "pl": 1906.69,
+    "exposure": 23.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 20,
+    "pl": -2976.72,
+    "exposure": 30.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 18,
+    "pl": -53.42,
+    "exposure": 40.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 11,
+    "pl": 2869.78,
+    "exposure": 22.7
+   }
+  },
+  "total_trades": 61,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Selloff-Into-The-Close Overnight Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": 278.09,
+    "exposure": 10.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": 2129.94,
+    "exposure": 12.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": -16.5,
+    "exposure": 10.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -384.15,
+    "exposure": 7.3
+   }
+  },
+  "total_trades": 26,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Turn-Of-Month Cash Cycle Window",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 161,
+    "pl": 1454.34,
+    "exposure": 16.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 148,
+    "pl": 708.66,
+    "exposure": 16.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 128,
+    "pl": -223.18,
+    "exposure": 26.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 124,
+    "pl": -2644.44,
+    "exposure": 16.5
+   }
+  },
+  "total_trades": 561,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Consecutive Close-Above-Prior-High Exhaustion",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 46,
+    "pl": -222.78,
+    "exposure": 1.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 52,
+    "pl": -184.51,
+    "exposure": 1.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 27,
+    "pl": -19.16,
+    "exposure": 1.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 66,
+    "pl": 1070.99,
+    "exposure": 2.0
+   }
+  },
+  "total_trades": 191,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Confirmation Ladder",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 191,
+    "pl": -491.15,
+    "exposure": 24.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 180,
+    "pl": -547.09,
+    "exposure": 23.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 71,
+    "pl": -206.88,
+    "exposure": 14.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 190,
+    "pl": -1946.72,
+    "exposure": 24.6
+   }
+  },
+  "total_trades": 632,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Fractal Dimension Regime Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 342,
+    "pl": -761.16,
+    "exposure": 38.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 344,
+    "pl": -3637.34,
+    "exposure": 39.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 204,
+    "pl": -296.02,
+    "exposure": 33.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 352,
+    "pl": -5145.1,
+    "exposure": 39.1
+   }
+  },
+  "total_trades": 1242,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Heikin-Ashi Shaven-Bottom Streak",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 553,
+    "pl": 718.68,
+    "exposure": 16.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 541,
+    "pl": -325.49,
+    "exposure": 14.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 403,
+    "pl": -654.57,
+    "exposure": 13.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 570,
+    "pl": -4058.93,
+    "exposure": 16.0
+   }
+  },
+  "total_trades": 2067,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Kalman Local-Linear-Trend Slope t-Statistic",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 166,
+    "pl": -1711.86,
+    "exposure": 54.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 174,
+    "pl": -2101.65,
+    "exposure": 52.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 149,
+    "pl": -376.09,
+    "exposure": 58.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 160,
+    "pl": -1305.06,
+    "exposure": 56.7
+   }
+  },
+  "total_trades": 649,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Self-Adjusting RSI Bands",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 244,
+    "pl": -3248.83,
+    "exposure": 54.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 249,
+    "pl": -1847.41,
+    "exposure": 54.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 161,
+    "pl": -488.9,
+    "exposure": 47.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 232,
+    "pl": -3656.0,
+    "exposure": 52.4
+   }
+  },
+  "total_trades": 886,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Strong Close Into a New Low",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 73,
+    "pl": 628.25,
+    "exposure": 2.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 58,
+    "pl": -228.29,
+    "exposure": 2.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 51,
+    "pl": 112.03,
+    "exposure": 2.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 82,
+    "pl": 1710.66,
+    "exposure": 2.3
+   }
+  },
+  "total_trades": 264,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Attention U-shape fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 25,
+    "pl": 352.47,
+    "exposure": 1.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 33,
+    "pl": 623.39,
+    "exposure": 1.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 12,
+    "pl": -13.12,
+    "exposure": 0.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 58,
+    "pl": 4795.35,
+    "exposure": 2.2
+   }
+  },
+  "total_trades": 128,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Causal a-trous scale disagreement",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 181,
+    "pl": -876.23,
+    "exposure": 15.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 186,
+    "pl": -1856.33,
+    "exposure": 13.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 109,
+    "pl": -291.67,
+    "exposure": 13.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 178,
+    "pl": -2242.31,
+    "exposure": 13.5
+   }
+  },
+  "total_trades": 654,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "CMF sign run exhaustion",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 50,
+    "pl": -919.44,
+    "exposure": 4.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 57,
+    "pl": 127.4,
+    "exposure": 6.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 32,
+    "pl": -32.86,
+    "exposure": 5.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 44,
+    "pl": -2247.28,
+    "exposure": 6.0
+   }
+  },
+  "total_trades": 183,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Fractionally differenced z-score",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 78,
+    "pl": 882.12,
+    "exposure": 11.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 62,
+    "pl": 435.81,
+    "exposure": 11.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 28,
+    "pl": 59.92,
+    "exposure": 9.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 76,
+    "pl": 933.07,
+    "exposure": 12.1
+   }
+  },
+  "total_trades": 244,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Information discreteness momentum gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 64,
+    "pl": -587.08,
+    "exposure": 52.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 59,
+    "pl": -2621.54,
+    "exposure": 50.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 29,
+    "pl": -83.91,
+    "exposure": 42.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 58,
+    "pl": -901.13,
+    "exposure": 52.1
+   }
+  },
+  "total_trades": 210,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Lottery MAX fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 139,
+    "pl": 1842.67,
+    "exposure": 32.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 140,
+    "pl": 224.03,
+    "exposure": 31.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 87,
+    "pl": 85.46,
+    "exposure": 33.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 132,
+    "pl": 5894.46,
+    "exposure": 30.8
+   }
+  },
+  "total_trades": 498,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Stop-cascade band above round",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 29,
+    "pl": 437.49,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 54,
+    "pl": 314.04,
+    "exposure": 1.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 51,
+    "pl": -112.64,
+    "exposure": 4.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 51,
+    "pl": -336.32,
+    "exposure": 0.7
+   }
+  },
+  "total_trades": 185,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Alpha-threshold smoothed label",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 138,
+    "pl": -1182.59,
+    "exposure": 17.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 123,
+    "pl": -610.87,
+    "exposure": 18.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 74,
+    "pl": -141.75,
+    "exposure": 16.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 113,
+    "pl": -505.74,
+    "exposure": 16.4
+   }
+  },
+  "total_trades": 448,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Ariel semi-month exposure split",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 678,
+    "pl": 1005.5,
+    "exposure": 89.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 660,
+    "pl": 684.28,
+    "exposure": 88.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 411,
+    "pl": -99.24,
+    "exposure": 89.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 607,
+    "pl": -76.1,
+    "exposure": 89.8
+   }
+  },
+  "total_trades": 2356,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Conditional Monday by week-of-month",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 58,
+    "pl": 236.1,
+    "exposure": 8.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 44,
+    "pl": -745.44,
+    "exposure": 5.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 35,
+    "pl": 11.63,
+    "exposure": 6.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 50,
+    "pl": -1416.38,
+    "exposure": 8.3
+   }
+  },
+  "total_trades": 187,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Distribution into strength",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 33,
+    "pl": 268.33,
+    "exposure": 2.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 34,
+    "pl": -572.36,
+    "exposure": 2.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 16,
+    "pl": -28.53,
+    "exposure": 1.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 40,
+    "pl": 1142.94,
+    "exposure": 3.0
+   }
+  },
+  "total_trades": 123,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Inventory retracement bar",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 68,
+    "pl": -249.03,
+    "exposure": 5.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 67,
+    "pl": -124.74,
+    "exposure": 5.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 30,
+    "pl": -78.85,
+    "exposure": 3.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 66,
+    "pl": -1075.87,
+    "exposure": 5.5
+   }
+  },
+  "total_trades": 231,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "TD sequential setup nine with perfection",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 132,
+    "pl": -463.68,
+    "exposure": 13.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 124,
+    "pl": 698.85,
+    "exposure": 14.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 65,
+    "pl": -110.78,
+    "exposure": 10.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 146,
+    "pl": -2277.6,
+    "exposure": 16.2
+   }
+  },
+  "total_trades": 467,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "BOCPD run length gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 17,
+    "pl": -949.27,
+    "exposure": 3.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 10,
+    "pl": -21.74,
+    "exposure": 0.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 12,
+    "pl": -18.31,
+    "exposure": 3.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 9,
+    "pl": -485.1,
+    "exposure": 0.7
+   }
+  },
+  "total_trades": 48,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Clark-West nested admission test",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 103,
+    "pl": 300.31,
+    "exposure": 0.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 16,
+    "pl": -329.92,
+    "exposure": 0.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 247,
+    "pl": -259.09,
+    "exposure": 2.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 17,
+    "pl": -368.92,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 383,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Pre-averaged drift burst entry",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": 268.04,
+    "exposure": 0.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": 398.82,
+    "exposure": 0.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": -47.54,
+    "exposure": 1.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 9,
+    "pl": -527.65,
+    "exposure": 0.6
+   }
+  },
+  "total_trades": 33,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "MinBTL trial budget with 1/e stopping",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 106,
+    "pl": 646.53,
+    "exposure": 12.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 95,
+    "pl": -284.7,
+    "exposure": 10.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 54,
+    "pl": -47.55,
+    "exposure": 7.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 103,
+    "pl": -3422.53,
+    "exposure": 11.4
+   }
+  },
+  "total_trades": 358,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Minimum regime performance gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 51,
+    "pl": -96.33,
+    "exposure": 6.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 29,
+    "pl": -589.33,
+    "exposure": 3.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 38,
+    "pl": -421.45,
+    "exposure": 3.7
+   }
+  },
+  "total_trades": 118,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Optimiser permutation test on shuffled bars",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 56,
+    "pl": -892.35,
+    "exposure": 5.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 38,
+    "pl": 673.48,
+    "exposure": 3.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 46,
+    "pl": -55.26,
+    "exposure": 9.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 140,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Time-series spanning-alpha residual book",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 562,
+    "pl": -539.96,
+    "exposure": 25.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 239,
+    "pl": -390.26,
+    "exposure": 11.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 651,
+    "pl": -176.94,
+    "exposure": 46.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 231,
+    "pl": 1003.25,
+    "exposure": 14.3
+   }
+  },
+  "total_trades": 1683,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Extremal index cluster switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 81,
+    "pl": -445.02,
+    "exposure": 3.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 44,
+    "pl": 116.77,
+    "exposure": 2.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 25,
+    "pl": 21.83,
+    "exposure": 1.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 34,
+    "pl": -2242.3,
+    "exposure": 1.6
+   }
+  },
+  "total_trades": 184,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Parkinson efficiency reversion gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": 940.24,
+    "exposure": 3.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 5,
+    "pl": -80.0,
+    "exposure": 4.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 4,
+    "pl": 44.0,
+    "exposure": 6.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 3,
+    "pl": 2.48,
+    "exposure": 3.0
+   }
+  },
+  "total_trades": 18,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Pre-registered revival trial",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 109,
+    "pl": 636.43,
+    "exposure": 74.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 79,
+    "pl": -315.84,
+    "exposure": 50.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 32,
+    "pl": -196.03,
+    "exposure": 28.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 69,
+    "pl": -4899.73,
+    "exposure": 37.1
+   }
+  },
+  "total_trades": 289,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Two-frequency noise share switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": 614.0,
+    "exposure": 4.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": -10.09,
+    "exposure": 7.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": -57.01,
+    "exposure": 10.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 3,
+    "pl": 337.42,
+    "exposure": 2.1
+   }
+  },
+  "total_trades": 23,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Vol-scaled time-series momentum",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 11,
+    "pl": -1707.91,
+    "exposure": 67.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 14,
+    "pl": 1041.23,
+    "exposure": 56.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 10,
+    "pl": 81.01,
+    "exposure": 56.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 19,
+    "pl": -3602.56,
+    "exposure": 62.1
+   }
+  },
+  "total_trades": 54,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume clock variance ratio",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 23,
+    "pl": 612.39,
+    "exposure": 2.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 34,
+    "pl": -207.12,
+    "exposure": 3.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 26,
+    "pl": -91.0,
+    "exposure": 4.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 26,
+    "pl": -1216.8,
+    "exposure": 2.1
+   }
+  },
+  "total_trades": 109,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume-conditioned autocorrelation switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 24,
+    "pl": -364.29,
+    "exposure": 0.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 9,
+    "pl": -317.85,
+    "exposure": 0.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 19,
+    "pl": -13.58,
+    "exposure": 0.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 6,
+    "pl": -260.43,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 58,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Aim-Portfolio Partial Rebalancing",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 83,
+    "pl": -1011.91,
+    "exposure": 41.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 83,
+    "pl": -781.33,
+    "exposure": 30.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 56,
+    "pl": -162.23,
+    "exposure": 43.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 26,
+    "pl": -394.6,
+    "exposure": 7.1
+   }
+  },
+  "total_trades": 248,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Creek Jump and Back-Up",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": -276.0,
+    "exposure": 0.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": -58.42,
+    "exposure": 1.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -0.14,
+    "exposure": 1.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": 145.65,
+    "exposure": 1.1
+   }
+  },
+  "total_trades": 23,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Developing POC Ratchet",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": -82.5,
+    "exposure": 2.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 12,
+    "pl": -1139.27,
+    "exposure": 4.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": 46.01,
+    "exposure": 5.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -261.71,
+    "exposure": 1.5
+   }
+  },
+  "total_trades": 30,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Gap-Cadence Event Calendar Run-In",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 23,
+    "pl": 349.23,
+    "exposure": 7.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 15,
+    "pl": 343.67,
+    "exposure": 5.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": 11.12,
+    "exposure": 3.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 20,
+    "pl": 611.28,
+    "exposure": 6.5
+   }
+  },
+  "total_trades": 66,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Netted Value-Momentum Combination",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 212,
+    "pl": -1856.9,
+    "exposure": 33.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 177,
+    "pl": -492.06,
+    "exposure": 37.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 120,
+    "pl": 5.4,
+    "exposure": 34.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 202,
+    "pl": 4961.24,
+    "exposure": 37.1
+   }
+  },
+  "total_trades": 711,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Stambaugh-Corrected Augmented Predictive Regression",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 30,
+    "pl": -1470.0,
+    "exposure": 62.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 16,
+    "pl": 423.52,
+    "exposure": 11.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 6,
+    "pl": -1053.11,
+    "exposure": 3.4
+   }
+  },
+  "total_trades": 52,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Turtle System 1 loser-filtered breakout",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 244,
+    "pl": -1630.11,
+    "exposure": 48.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 236,
+    "pl": 107.43,
+    "exposure": 47.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 149,
+    "pl": -183.03,
+    "exposure": 48.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 228,
+    "pl": 668.27,
+    "exposure": 47.7
+   }
+  },
+  "total_trades": 857,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Rolling AdaBoost Stump Margin",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 601,
+    "pl": 1585.8,
+    "exposure": 38.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 575,
+    "pl": -1939.69,
+    "exposure": 36.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 381,
+    "pl": -368.34,
+    "exposure": 35.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 545,
+    "pl": -5682.75,
+    "exposure": 38.1
+   }
+  },
+  "total_trades": 2102,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Conservative Formula Vol Screen",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 178,
+    "pl": -323.5,
+    "exposure": 15.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 63,
+    "pl": 310.44,
+    "exposure": 8.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 23,
+    "pl": -10.09,
+    "exposure": 6.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 104,
+    "pl": -2128.93,
+    "exposure": 11.3
+   }
+  },
+  "total_trades": 368,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Correlated Cohort Decay Contagion",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 43,
+    "pl": 369.91,
+    "exposure": 5.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 82,
+    "pl": 939.85,
+    "exposure": 10.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 36,
+    "pl": 1.39,
+    "exposure": 6.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 80,
+    "pl": -1706.92,
+    "exposure": 10.3
+   }
+  },
+  "total_trades": 241,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Gap Already Paid",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 12,
+    "pl": -22.34,
+    "exposure": 4.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 16,
+    "pl": -328.24,
+    "exposure": 4.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 11,
+    "pl": 70.96,
+    "exposure": 4.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 7,
+    "pl": -1023.96,
+    "exposure": 0.2
+   }
+  },
+  "total_trades": 46,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Implementation Shortfall Abort",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 205,
+    "pl": -1516.56,
+    "exposure": 42.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 185,
+    "pl": -1832.87,
+    "exposure": 40.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 126,
+    "pl": 87.01,
+    "exposure": 45.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 206,
+    "pl": -998.29,
+    "exposure": 44.9
+   }
+  },
+  "total_trades": 722,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Net-Edge Admission Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 98,
+    "pl": -868.86,
+    "exposure": 21.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 100,
+    "pl": 2725.56,
+    "exposure": 23.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 28,
+    "pl": -161.41,
+    "exposure": 7.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 91,
+    "pl": 2783.29,
+    "exposure": 21.9
+   }
+  },
+  "total_trades": 317,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Tug-of-War Session Split",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 27,
+    "pl": -1768.5,
+    "exposure": 48.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 30,
+    "pl": -3560.22,
+    "exposure": 53.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 28,
+    "pl": 26.4,
+    "exposure": 34.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 28,
+    "pl": 4412.66,
+    "exposure": 49.9
+   }
+  },
+  "total_trades": 113,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Anniversary Volume Concentration",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 26,
+    "pl": 788.44,
+    "exposure": 23.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 24,
+    "pl": -341.48,
+    "exposure": 33.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 15,
+    "pl": 131.7,
+    "exposure": 40.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 13,
+    "pl": 332.57,
+    "exposure": 36.2
+   }
+  },
+  "total_trades": 78,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Bai-Perron Last-Segment Allocator",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 28,
+    "pl": 1104.14,
+    "exposure": 82.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 44,
+    "pl": -1863.75,
+    "exposure": 85.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 21,
+    "pl": -168.54,
+    "exposure": 62.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 27,
+    "pl": 886.38,
+    "exposure": 76.5
+   }
+  },
+  "total_trades": 120,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Ehlers Autocorrelation Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 113,
+    "pl": 1046.54,
+    "exposure": 25.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 115,
+    "pl": 1809.59,
+    "exposure": 26.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 72,
+    "pl": -228.77,
+    "exposure": 20.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 113,
+    "pl": 6983.39,
+    "exposure": 24.1
+   }
+  },
+  "total_trades": 413,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "High Volume Churn Bar Failure",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 33,
+    "pl": -78.26,
+    "exposure": 2.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 35,
+    "pl": -295.34,
+    "exposure": 1.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 22,
+    "pl": -18.22,
+    "exposure": 2.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 26,
+    "pl": 130.03,
+    "exposure": 1.7
+   }
+  },
+  "total_trades": 116,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Novy-Marx Confluence Critical Value",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 39,
+    "pl": 432.44,
+    "exposure": 2.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 11,
+    "pl": -92.79,
+    "exposure": 0.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 52,
+    "pl": 32.78,
+    "exposure": 5.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 1,
+    "pl": -94.89,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 103,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Three-Bar Play",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 11,
+    "pl": -178.34,
+    "exposure": 0.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": 59.63,
+    "exposure": 0.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": 5.87,
+    "exposure": 0.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -375.38,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 22,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Three-Line Strike Traded Against Its Name",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 16,
+    "pl": 550.7,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 2,
+    "pl": 86.43,
+    "exposure": 0.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 6,
+    "pl": -18.52,
+    "exposure": 1.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 11,
+    "pl": 598.64,
+    "exposure": 1.1
+   }
+  },
+  "total_trades": 35,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "VPIN Toxicity Flush Fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 2,
+    "pl": -180.29,
+    "exposure": 0.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 5,
+    "pl": -311.43,
+    "exposure": 2.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": -1.98,
+    "exposure": 4.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": 850.13,
+    "exposure": 2.7
+   }
+  },
+  "total_trades": 20,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Accumulative Swing Index Lead",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 482,
+    "pl": -2350.61,
+    "exposure": 25.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 464,
+    "pl": -1662.25,
+    "exposure": 23.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 283,
+    "pl": -527.08,
+    "exposure": 25.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 433,
+    "pl": -1925.17,
+    "exposure": 20.8
+   }
+  },
+  "total_trades": 1662,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Amihud Illiquidity Spike Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 48,
+    "pl": 24.83,
+    "exposure": 2.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 49,
+    "pl": 79.16,
+    "exposure": 2.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 51,
+    "pl": -112.43,
+    "exposure": 3.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 68,
+    "pl": -1517.56,
+    "exposure": 2.5
+   }
+  },
+  "total_trades": 216,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "BVC Absorption Fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 54,
+    "pl": 393.98,
+    "exposure": 1.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 45,
+    "pl": 458.76,
+    "exposure": 1.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 35,
+    "pl": -52.31,
+    "exposure": 2.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 36,
+    "pl": -186.1,
+    "exposure": 1.0
+   }
+  },
+  "total_trades": 170,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Deferred Jump Hedge",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": 191.82,
+    "exposure": 0.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 5,
+    "pl": 137.96,
+    "exposure": 0.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 13,
+    "pl": -45.02,
+    "exposure": 0.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": 82.03,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 30,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Take-Profit Cluster Rejection",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 110,
+    "pl": -854.57,
+    "exposure": 4.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 110,
+    "pl": 1470.13,
+    "exposure": 4.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 22,
+    "pl": -88.62,
+    "exposure": 2.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 132,
+    "pl": 295.83,
+    "exposure": 3.2
+   }
+  },
+  "total_trades": 374,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume-Clock Duration Collapse",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": 149.99,
+    "exposure": 0.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": 440.53,
+    "exposure": 1.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 18,
+    "pl": 7.23,
+    "exposure": 2.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 30,
+    "pl": -1208.12,
+    "exposure": 2.1
+   }
+  },
+  "total_trades": 67,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Extreme-Bar Two-Day Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 2,
+    "pl": -111.0,
+    "exposure": 0.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 15,
+    "pl": -632.13,
+    "exposure": 11.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 6,
+    "pl": -38.78,
+    "exposure": 2.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 9,
+    "pl": 1402.54,
+    "exposure": 8.3
+   }
+  },
+  "total_trades": 32,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Factor Valuation Percentile Timing",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 103,
+    "pl": -2554.72,
+    "exposure": 49.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 95,
+    "pl": -435.86,
+    "exposure": 50.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 57,
+    "pl": -134.65,
+    "exposure": 38.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 137,
+    "pl": -112.47,
+    "exposure": 50.6
+   }
+  },
+  "total_trades": 392,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Quantified Pin Bar at a 20-Bar Extreme",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 25,
+    "pl": -195.88,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 27,
+    "pl": 73.84,
+    "exposure": 1.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 15,
+    "pl": -47.97,
+    "exposure": 1.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 17,
+    "pl": 256.38,
+    "exposure": 1.4
+   }
+  },
+  "total_trades": 84,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Residual s-score stat arb",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 212,
+    "pl": -1814.16,
+    "exposure": 30.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 215,
+    "pl": -880.35,
+    "exposure": 29.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 179,
+    "pl": 94.01,
+    "exposure": 28.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 198,
+    "pl": -2632.81,
+    "exposure": 29.4
+   }
+  },
+  "total_trades": 804,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Semi-Monthly Payday Window",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": -426.84,
+    "exposure": 2.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 1,
+    "pl": -15.78,
+    "exposure": 3.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -21.36,
+    "exposure": 2.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 1,
+    "pl": 620.7,
+    "exposure": 3.0
+   }
+  },
+  "total_trades": 13,
+  "symbols_trading": "2 of 4"
+ },
+ {
+  "name": "Strike Grid Pin",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": -71.0,
+    "exposure": 1.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 8,
+    "pl": -201.68,
+    "exposure": 0.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 2,
+    "pl": 3.0,
+    "exposure": 0.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 13,
+    "pl": -511.47,
+    "exposure": 0.8
+   }
+  },
+  "total_trades": 29,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Abdi-Ranaldo Negative-Product Run",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 454,
+    "pl": -1512.09,
+    "exposure": 4.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 466,
+    "pl": 21.73,
+    "exposure": 4.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 197,
+    "pl": -218.55,
+    "exposure": 3.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 470,
+    "pl": -4582.41,
+    "exposure": 4.7
+   }
+  },
+  "total_trades": 1587,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Lee-Mykland No-News Jump Fade",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 4,
+    "pl": -201.0,
+    "exposure": 0.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": -326.56,
+    "exposure": 0.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": -7.01,
+    "exposure": 0.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -955.86,
+    "exposure": 0.6
+   }
+  },
+  "total_trades": 18,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "OPEX Week Hedge Unwind",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 33,
+    "pl": -1087.87,
+    "exposure": 13.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 30,
+    "pl": 162.96,
+    "exposure": 13.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 38,
+    "pl": -243.13,
+    "exposure": 20.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 24,
+    "pl": 1309.27,
+    "exposure": 13.2
+   }
+  },
+  "total_trades": 125,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Percentile-Band Spread with Median Exit",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 190,
+    "pl": -1100.93,
+    "exposure": 9.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 189,
+    "pl": 213.79,
+    "exposure": 9.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 116,
+    "pl": -58.77,
+    "exposure": 7.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 189,
+    "pl": 291.27,
+    "exposure": 7.9
+   }
+  },
+  "total_trades": 684,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Strategy-Volatility Circuit Breaker",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 579,
+    "pl": -2316.09,
+    "exposure": 60.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 565,
+    "pl": -2038.68,
+    "exposure": 56.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 253,
+    "pl": -331.69,
+    "exposure": 49.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 536,
+    "pl": -8976.09,
+    "exposure": 57.8
+   }
+  },
+  "total_trades": 1933,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Temporary vs Permanent Impact Switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 111,
+    "pl": 1160.58,
+    "exposure": 4.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 65,
+    "pl": -688.89,
+    "exposure": 2.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 243,
+    "pl": 165.75,
+    "exposure": 16.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 92,
+    "pl": 2627.51,
+    "exposure": 3.8
+   }
+  },
+  "total_trades": 511,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volatility-Scaled Symmetric CUSUM Event",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 200,
+    "pl": -1208.73,
+    "exposure": 24.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 196,
+    "pl": 681.01,
+    "exposure": 23.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 119,
+    "pl": -195.19,
+    "exposure": 24.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 176,
+    "pl": 2167.9,
+    "exposure": 22.0
+   }
+  },
+  "total_trades": 691,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Alpha Half-Life Surface",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 396,
+    "pl": -1354.21,
+    "exposure": 30.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 374,
+    "pl": -1773.92,
+    "exposure": 29.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 231,
+    "pl": -160.0,
+    "exposure": 29.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 399,
+    "pl": -5046.18,
+    "exposure": 29.6
+   }
+  },
+  "total_trades": 1400,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Amihud Illiquidity Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 56,
+    "pl": 787.74,
+    "exposure": 2.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 28,
+    "pl": 563.83,
+    "exposure": 2.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 31,
+    "pl": 63.33,
+    "exposure": 2.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 56,
+    "pl": -300.77,
+    "exposure": 4.2
+   }
+  },
+  "total_trades": 171,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Closing-Imbalance Window Momentum",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": 122.0,
+    "exposure": 0.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": 17.25,
+    "exposure": 0.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": 11.0,
+    "exposure": 0.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 7,
+    "pl": 159.4,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 28,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "CPCV Purged-Path Lower Bound",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 39,
+    "pl": -478.29,
+    "exposure": 4.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 49,
+    "pl": -801.38,
+    "exposure": 5.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 22,
+    "pl": -10.32,
+    "exposure": 3.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 135,
+    "pl": -4283.72,
+    "exposure": 11.5
+   }
+  },
+  "total_trades": 245,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Prior-Peak Reclaim With Volume Ramp",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": 665.67,
+    "exposure": 2.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 57,
+    "pl": 219.64,
+    "exposure": 7.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 16,
+    "pl": -11.88,
+    "exposure": 4.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 46,
+    "pl": -1911.33,
+    "exposure": 6.5
+   }
+  },
+  "total_trades": 124,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Realized Skewness Session Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": 440.84,
+    "exposure": 2.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 16,
+    "pl": -238.35,
+    "exposure": 0.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 16,
+    "pl": -53.9,
+    "exposure": 2.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 13,
+    "pl": -940.11,
+    "exposure": 0.6
+   }
+  },
+  "total_trades": 60,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Turnover-Decayed Capital Gains Overhang",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 105,
+    "pl": 259.15,
+    "exposure": 11.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 420,
+    "pl": -1078.0,
+    "exposure": 54.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 119,
+    "pl": -184.29,
+    "exposure": 26.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 475,
+    "pl": -6205.54,
+    "exposure": 67.0
+   }
+  },
+  "total_trades": 1119,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Ehlers Voss Predictive Filter Cross",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 608,
+    "pl": -2813.14,
+    "exposure": 40.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 608,
+    "pl": -3033.46,
+    "exposure": 39.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 433,
+    "pl": -528.07,
+    "exposure": 40.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 585,
+    "pl": -966.09,
+    "exposure": 40.2
+   }
+  },
+  "total_trades": 2234,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Duration-hazard phase reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 34,
+    "pl": -184.04,
+    "exposure": 7.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 97,
+    "pl": 1042.34,
+    "exposure": 16.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 51,
+    "pl": -59.88,
+    "exposure": 9.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 92,
+    "pl": -1777.76,
+    "exposure": 16.1
+   }
+  },
+  "total_trades": 274,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Expectile-quantile tail heaviness",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 226,
+    "pl": -1934.26,
+    "exposure": 31.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 224,
+    "pl": 470.53,
+    "exposure": 31.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 169,
+    "pl": -187.77,
+    "exposure": 29.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 239,
+    "pl": -1446.68,
+    "exposure": 33.5
+   }
+  },
+  "total_trades": 858,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Hansen SPA arming gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 18,
+    "pl": -562.21,
+    "exposure": 1.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 57,
+    "pl": -648.32,
+    "exposure": 5.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": -23.89,
+    "exposure": 1.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 3,
+    "pl": -286.36,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 86,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Midpoint reversal with spread hurdle",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 209,
+    "pl": -1612.77,
+    "exposure": 10.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 214,
+    "pl": -622.54,
+    "exposure": 10.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 130,
+    "pl": 88.03,
+    "exposure": 9.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 210,
+    "pl": -2122.54,
+    "exposure": 9.8
+   }
+  },
+  "total_trades": 763,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Variance-ratio trend gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 90,
+    "pl": 310.41,
+    "exposure": 9.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 77,
+    "pl": -620.03,
+    "exposure": 8.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 60,
+    "pl": -1719.75,
+    "exposure": 6.1
+   }
+  },
+  "total_trades": 227,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Volume-clock compression breakout",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 37,
+    "pl": 1064.25,
+    "exposure": 3.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 32,
+    "pl": -758.37,
+    "exposure": 3.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 22,
+    "pl": -55.79,
+    "exposure": 2.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 38,
+    "pl": -130.7,
+    "exposure": 3.4
+   }
+  },
+  "total_trades": 129,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume share crowding brake",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 66,
+    "pl": -433.15,
+    "exposure": 11.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 65,
+    "pl": -155.89,
+    "exposure": 9.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 41,
+    "pl": 53.52,
+    "exposure": 14.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 51,
+    "pl": -424.92,
+    "exposure": 7.7
+   }
+  },
+  "total_trades": 223,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "VPIN toxicity burst",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": -170.19,
+    "exposure": 0.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 10,
+    "pl": 427.78,
+    "exposure": 1.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 16,
+    "pl": -72.89,
+    "exposure": 2.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 8,
+    "pl": -190.24,
+    "exposure": 0.5
+   }
+  },
+  "total_trades": 41,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "ACD A-level breakout with time confirmation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 14,
+    "pl": 437.19,
+    "exposure": 8.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": 178.75,
+    "exposure": 2.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 2,
+    "pl": 37.5,
+    "exposure": 2.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": 166.65,
+    "exposure": 3.3
+   }
+  },
+  "total_trades": 24,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Kalman Efficient-Price Deviation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 177,
+    "pl": 91.02,
+    "exposure": 4.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 88,
+    "pl": -1745.35,
+    "exposure": 2.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 113,
+    "pl": 54.12,
+    "exposure": 5.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 138,
+    "pl": -688.44,
+    "exposure": 3.5
+   }
+  },
+  "total_trades": 516,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Kendall NET rank oscillator",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 400,
+    "pl": -1299.88,
+    "exposure": 37.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 408,
+    "pl": -1003.66,
+    "exposure": 42.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 244,
+    "pl": -199.86,
+    "exposure": 35.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 401,
+    "pl": -2169.17,
+    "exposure": 40.5
+   }
+  },
+  "total_trades": 1453,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Momentum Life Cycle Turnover Interaction",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 30,
+    "pl": 523.25,
+    "exposure": 29.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 31,
+    "pl": -2972.99,
+    "exposure": 30.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 20,
+    "pl": -73.34,
+    "exposure": 31.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 33,
+    "pl": -2761.6,
+    "exposure": 32.8
+   }
+  },
+  "total_trades": 114,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Pattern-to-Pattern Variable Holding Period",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 729,
+    "pl": -3357.76,
+    "exposure": 49.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 672,
+    "pl": -1689.85,
+    "exposure": 51.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 325,
+    "pl": -429.15,
+    "exposure": 50.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 660,
+    "pl": -9456.14,
+    "exposure": 48.7
+   }
+  },
+  "total_trades": 2386,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Poor High / Poor Low Repair",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 11,
+    "pl": 692.98,
+    "exposure": 14.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 19,
+    "pl": 589.33,
+    "exposure": 13.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 21,
+    "pl": -18.67,
+    "exposure": 20.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 12,
+    "pl": 1541.11,
+    "exposure": 11.4
+   }
+  },
+  "total_trades": 63,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Rolling Half-Kelly Ledger Sizing",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 50,
+    "pl": -5770.29,
+    "exposure": 14.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 50,
+    "pl": -6456.29,
+    "exposure": 12.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 38,
+    "pl": -4039.54,
+    "exposure": 14.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 49,
+    "pl": -3859.66,
+    "exposure": 11.0
+   }
+  },
+  "total_trades": 187,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Campbell-Yogo Bonferroni Q Predictor Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 20,
+    "pl": -973.67,
+    "exposure": 6.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 27,
+    "pl": -134.97,
+    "exposure": 30.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 34,
+    "pl": 2140.23,
+    "exposure": 30.7
+   }
+  },
+  "total_trades": 81,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Composite Operator Anchored VWAP Reclaim",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 38,
+    "pl": -964.25,
+    "exposure": 3.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 35,
+    "pl": -40.38,
+    "exposure": 8.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 18,
+    "pl": -90.88,
+    "exposure": 5.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 41,
+    "pl": -1602.43,
+    "exposure": 9.5
+   }
+  },
+  "total_trades": 132,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Cumulative-Violation Severity Clustering",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 54,
+    "pl": -22.66,
+    "exposure": 8.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 47,
+    "pl": 513.98,
+    "exposure": 7.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 40,
+    "pl": -152.77,
+    "exposure": 7.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 57,
+    "pl": 337.76,
+    "exposure": 9.6
+   }
+  },
+  "total_trades": 198,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Oops Gap Reversal at the Recovered Level",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 3,
+    "pl": 361.0,
+    "exposure": 8.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 2,
+    "pl": 199.96,
+    "exposure": 11.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 4,
+    "pl": -165.88,
+    "exposure": 27.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": 6151.29,
+    "exposure": 23.7
+   }
+  },
+  "total_trades": 14,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "RLS Adaptive Autocorrelation Sign",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 48,
+    "pl": -105.41,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 48,
+    "pl": -171.92,
+    "exposure": 2.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 96,
+    "pl": -113.63,
+    "exposure": 6.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 28,
+    "pl": 2053.32,
+    "exposure": 1.0
+   }
+  },
+  "total_trades": 220,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Alpha Half-Life vs Cost-Recovery Admission",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 133,
+    "pl": -2097.56,
+    "exposure": 15.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 47,
+    "pl": -802.31,
+    "exposure": 7.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 28,
+    "pl": -35.61,
+    "exposure": 6.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 24,
+    "pl": -1238.94,
+    "exposure": 3.1
+   }
+  },
+  "total_trades": 232,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "CSCV Overfit Probability Gate with Median-Rank Parameter Choice",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 142,
+    "pl": -1170.0,
+    "exposure": 16.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 94,
+    "pl": -559.68,
+    "exposure": 3.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 98,
+    "pl": -286.38,
+    "exposure": 16.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 132,
+    "pl": -5387.62,
+    "exposure": 9.1
+   }
+  },
+  "total_trades": 466,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Fitted Trend Factor",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 16,
+    "pl": -313.52,
+    "exposure": 51.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 12,
+    "pl": -1040.28,
+    "exposure": 56.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 17,
+    "pl": -86.76,
+    "exposure": 42.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 21,
+    "pl": -817.03,
+    "exposure": 48.8
+   }
+  },
+  "total_trades": 66,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Half-N Pyramid with Shared Ratcheting Stop",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 294,
+    "pl": -2983.21,
+    "exposure": 64.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 296,
+    "pl": 182.76,
+    "exposure": 67.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 183,
+    "pl": -391.73,
+    "exposure": 62.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 300,
+    "pl": -2907.69,
+    "exposure": 62.4
+   }
+  },
+  "total_trades": 1073,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Inventory Absorption Overnight",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": -755.9,
+    "exposure": 9.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 8,
+    "pl": 1412.62,
+    "exposure": 14.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 10,
+    "pl": 29.56,
+    "exposure": 12.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -784.19,
+    "exposure": 7.2
+   }
+  },
+  "total_trades": 27,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Quarterly Reaction Sign Ladder",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 6,
+    "pl": -153.21,
+    "exposure": 1.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": -116.48,
+    "exposure": 0.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": -8.28,
+    "exposure": 1.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 12,
+    "pl": 367.15,
+    "exposure": 2.1
+   }
+  },
+  "total_trades": 29,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Universal Zero-Shot Bar-Flow Classifier",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 641,
+    "pl": -709.35,
+    "exposure": 67.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 613,
+    "pl": -3607.57,
+    "exposure": 66.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 348,
+    "pl": -725.19,
+    "exposure": 64.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 604,
+    "pl": -3187.12,
+    "exposure": 68.9
+   }
+  },
+  "total_trades": 2206,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume Run-Bar Polarity Flip",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 13,
+    "pl": -226.88,
+    "exposure": 4.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 8,
+    "pl": 1019.0,
+    "exposure": 9.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 10,
+    "pl": -41.52,
+    "exposure": 3.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 13,
+    "pl": -137.78,
+    "exposure": 9.7
+   }
+  },
+  "total_trades": 44,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "52-Week-High Recency Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 180,
+    "pl": -3.85,
+    "exposure": 25.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 137,
+    "pl": -1824.92,
+    "exposure": 21.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 112,
+    "pl": -282.05,
+    "exposure": 23.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 196,
+    "pl": -1056.83,
+    "exposure": 26.3
+   }
+  },
+  "total_trades": 625,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Close-Auction Hedging Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": -243.95,
+    "exposure": 0.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": 47.3,
+    "exposure": 0.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -9.51,
+    "exposure": 0.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": -633.59,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 21,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Cumulative Delta Extreme Break",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 186,
+    "pl": -1687.23,
+    "exposure": 12.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 160,
+    "pl": -1686.28,
+    "exposure": 13.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 178,
+    "pl": -369.54,
+    "exposure": 18.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 179,
+    "pl": -5102.98,
+    "exposure": 10.5
+   }
+  },
+  "total_trades": 703,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Effort Result Regression Residual",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 58,
+    "pl": -422.4,
+    "exposure": 2.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 91,
+    "pl": 664.91,
+    "exposure": 4.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 17,
+    "pl": -40.18,
+    "exposure": 1.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 101,
+    "pl": -795.66,
+    "exposure": 4.5
+   }
+  },
+  "total_trades": 267,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Even Better Sinewave Saturation Exit",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 393,
+    "pl": -310.96,
+    "exposure": 34.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 384,
+    "pl": -69.44,
+    "exposure": 35.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 272,
+    "pl": -350.75,
+    "exposure": 31.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 376,
+    "pl": 1104.17,
+    "exposure": 35.5
+   }
+  },
+  "total_trades": 1425,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Ross Hook After a Closing-Channel Breakout",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 238,
+    "pl": -2234.37,
+    "exposure": 25.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 223,
+    "pl": -2867.24,
+    "exposure": 23.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 104,
+    "pl": 28.65,
+    "exposure": 19.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 240,
+    "pl": -530.74,
+    "exposure": 23.6
+   }
+  },
+  "total_trades": 805,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Body-Dominant Engulfing with Close-Strength Exit",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 110,
+    "pl": -1112.9,
+    "exposure": 6.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 101,
+    "pl": -168.82,
+    "exposure": 5.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 62,
+    "pl": -72.62,
+    "exposure": 4.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 103,
+    "pl": -441.85,
+    "exposure": 9.0
+   }
+  },
+  "total_trades": 376,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Liquidity Vacuum Depth Collapse",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 12,
+    "pl": 333.87,
+    "exposure": 0.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 16,
+    "pl": -183.27,
+    "exposure": 0.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 15,
+    "pl": -44.4,
+    "exposure": 0.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 21,
+    "pl": 512.77,
+    "exposure": 1.7
+   }
+  },
+  "total_trades": 64,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Pin Release Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 2,
+    "pl": 6.0,
+    "exposure": 0.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": 126.97,
+    "exposure": 0.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": -11.36,
+    "exposure": 0.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -225.35,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 12,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Range-Bar Flip Count Regime",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 24,
+    "pl": 626.63,
+    "exposure": 2.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 14,
+    "pl": 8.41,
+    "exposure": 2.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": -30.08,
+    "exposure": 1.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -13.24,
+    "exposure": 0.3
+   }
+  },
+  "total_trades": 49,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "RSRS High-on-Low Regression Beta",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 195,
+    "pl": -189.19,
+    "exposure": 18.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 158,
+    "pl": -62.28,
+    "exposure": 16.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 111,
+    "pl": -171.82,
+    "exposure": 15.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 169,
+    "pl": 2791.56,
+    "exposure": 15.4
+   }
+  },
+  "total_trades": 633,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Sign-Autocorrelation z Score",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 166,
+    "pl": 67.06,
+    "exposure": 2.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 86,
+    "pl": -242.51,
+    "exposure": 1.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 299,
+    "pl": -184.9,
+    "exposure": 7.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 90,
+    "pl": -681.19,
+    "exposure": 1.4
+   }
+  },
+  "total_trades": 641,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Turnaround Tuesday",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 3,
+    "pl": -66.01,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": 144.09,
+    "exposure": 1.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": 12.45,
+    "exposure": 0.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 3,
+    "pl": -187.16,
+    "exposure": 1.2
+   }
+  },
+  "total_trades": 13,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Vol-of-Vol Collapse",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 29,
+    "pl": -380.66,
+    "exposure": 2.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 31,
+    "pl": 410.95,
+    "exposure": 4.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 26,
+    "pl": -71.42,
+    "exposure": 5.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 35,
+    "pl": 162.03,
+    "exposure": 4.8
+   }
+  },
+  "total_trades": 121,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "ARCH-LM Clustering Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 260,
+    "pl": 112.82,
+    "exposure": 16.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 242,
+    "pl": -1266.82,
+    "exposure": 14.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 144,
+    "pl": -63.19,
+    "exposure": 13.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 207,
+    "pl": 478.19,
+    "exposure": 11.4
+   }
+  },
+  "total_trades": 853,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Elder Triple Screen Ratchet",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 494,
+    "pl": -4434.74,
+    "exposure": 57.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 477,
+    "pl": -2426.48,
+    "exposure": 56.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 323,
+    "pl": -542.64,
+    "exposure": 58.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 457,
+    "pl": -12497.28,
+    "exposure": 57.7
+   }
+  },
+  "total_trades": 1751,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Factor Momentum on OHLCV Factors",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 510,
+    "pl": -3010.06,
+    "exposure": 55.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 508,
+    "pl": -1890.75,
+    "exposure": 60.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 329,
+    "pl": -2.14,
+    "exposure": 55.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 502,
+    "pl": 1067.12,
+    "exposure": 60.1
+   }
+  },
+  "total_trades": 1849,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Jump-Penalised Regime Path",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 31,
+    "pl": 3330.87,
+    "exposure": 55.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 37,
+    "pl": 990.36,
+    "exposure": 62.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 26,
+    "pl": -288.81,
+    "exposure": 57.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 36,
+    "pl": 1111.12,
+    "exposure": 53.3
+   }
+  },
+  "total_trades": 130,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "No Supply No Demand Bar",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 31,
+    "pl": 8.63,
+    "exposure": 2.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 28,
+    "pl": -163.48,
+    "exposure": 2.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 6,
+    "pl": -13.87,
+    "exposure": 0.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 37,
+    "pl": -365.22,
+    "exposure": 3.6
+   }
+  },
+  "total_trades": 102,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Pastor-Stambaugh Gamma Reversal",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 56,
+    "pl": -488.19,
+    "exposure": 1.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 38,
+    "pl": 299.12,
+    "exposure": 1.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 29,
+    "pl": 64.38,
+    "exposure": 1.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 60,
+    "pl": -1723.66,
+    "exposure": 1.5
+   }
+  },
+  "total_trades": 183,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Dual-timeframe KST trigger",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 77,
+    "pl": 614.42,
+    "exposure": 17.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 80,
+    "pl": -1186.6,
+    "exposure": 19.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 41,
+    "pl": -32.06,
+    "exposure": 11.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 80,
+    "pl": -2532.51,
+    "exposure": 20.8
+   }
+  },
+  "total_trades": 278,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Excess tail fade to POC",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": 726.41,
+    "exposure": 11.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 18,
+    "pl": 504.38,
+    "exposure": 16.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 14,
+    "pl": 69.99,
+    "exposure": 19.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 18,
+    "pl": 3084.84,
+    "exposure": 7.6
+   }
+  },
+  "total_trades": 65,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "MedRV jump-fraction breakout split",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 117,
+    "pl": -15.89,
+    "exposure": 30.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 102,
+    "pl": -2835.62,
+    "exposure": 21.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 73,
+    "pl": -200.81,
+    "exposure": 24.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 128,
+    "pl": -4042.12,
+    "exposure": 23.3
+   }
+  },
+  "total_trades": 420,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "MRR Adverse-Selection Share",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 414,
+    "pl": 810.33,
+    "exposure": 29.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 387,
+    "pl": -637.52,
+    "exposure": 21.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 247,
+    "pl": -310.59,
+    "exposure": 27.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 378,
+    "pl": -165.2,
+    "exposure": 26.1
+   }
+  },
+  "total_trades": 1426,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Sector-ETF residual s-score",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 211,
+    "pl": -2373.01,
+    "exposure": 30.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 229,
+    "pl": -821.09,
+    "exposure": 28.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 175,
+    "pl": 75.42,
+    "exposure": 28.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 200,
+    "pl": -3162.99,
+    "exposure": 29.1
+   }
+  },
+  "total_trades": 815,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Stationary bootstrap lower-bound Kelly",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 322,
+    "pl": -2087.26,
+    "exposure": 24.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 200,
+    "pl": -1391.76,
+    "exposure": 14.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 110,
+    "pl": 77.5,
+    "exposure": 4.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 120,
+    "pl": -5999.35,
+    "exposure": 9.8
+   }
+  },
+  "total_trades": 752,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "BVC Imbalance at Range Edge",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": 4.16,
+    "exposure": 1.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 14,
+    "pl": -60.7,
+    "exposure": 1.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": 12.83,
+    "exposure": 1.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 3,
+    "pl": -305.48,
+    "exposure": 0.8
+   }
+  },
+  "total_trades": 28,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Forecast Combination Timer",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 14,
+    "pl": 548.97,
+    "exposure": 72.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": 108.64,
+    "exposure": 59.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -95.34,
+    "exposure": 8.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 23,
+    "pl": -7584.76,
+    "exposure": 20.5
+   }
+  },
+  "total_trades": 49,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "FZ-Loss GAS Tail State",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 80,
+    "pl": 1080.02,
+    "exposure": 49.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 72,
+    "pl": 547.33,
+    "exposure": 50.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 58,
+    "pl": -336.26,
+    "exposure": 40.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 75,
+    "pl": -288.22,
+    "exposure": 47.3
+   }
+  },
+  "total_trades": 285,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Own-Footprint Decay Gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 14,
+    "pl": 235.43,
+    "exposure": 3.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 190,
+    "pl": 103.04,
+    "exposure": 26.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 29,
+    "pl": -60.16,
+    "exposure": 7.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 269,
+    "pl": -4340.63,
+    "exposure": 36.7
+   }
+  },
+  "total_trades": 502,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Split-Conformal Zero Exclusion",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 236,
+    "pl": 176.33,
+    "exposure": 8.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 283,
+    "pl": 414.42,
+    "exposure": 10.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 122,
+    "pl": -135.54,
+    "exposure": 6.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 218,
+    "pl": 678.66,
+    "exposure": 8.3
+   }
+  },
+  "total_trades": 859,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Weekday-Normalized Gap Fill",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": -158.0,
+    "exposure": 2.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": -282.31,
+    "exposure": 1.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 7,
+    "pl": 83.5,
+    "exposure": 3.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 1,
+    "pl": -65.3,
+    "exposure": 0.5
+   }
+  },
+  "total_trades": 16,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Bar location gate on a Donchian breakout",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 199,
+    "pl": -1149.09,
+    "exposure": 52.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 206,
+    "pl": -855.84,
+    "exposure": 53.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 123,
+    "pl": 17.32,
+    "exposure": 50.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 209,
+    "pl": -1994.98,
+    "exposure": 55.8
+   }
+  },
+  "total_trades": 737,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Diurnal relative volume thrust",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 9,
+    "pl": -291.01,
+    "exposure": 0.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 11,
+    "pl": 306.94,
+    "exposure": 1.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 12,
+    "pl": -18.28,
+    "exposure": 1.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 13,
+    "pl": -1305.47,
+    "exposure": 1.2
+   }
+  },
+  "total_trades": 45,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Live deflated Sharpe re-gate",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 598,
+    "pl": -3330.88,
+    "exposure": 74.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 578,
+    "pl": -5156.04,
+    "exposure": 63.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 329,
+    "pl": -198.52,
+    "exposure": 46.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 281,
+    "pl": -5554.63,
+    "exposure": 39.1
+   }
+  },
+  "total_trades": 1786,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Net-the-book internal crossing",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 259,
+    "pl": -3679.98,
+    "exposure": 85.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 240,
+    "pl": -2331.41,
+    "exposure": 86.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 161,
+    "pl": -399.5,
+    "exposure": 87.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 248,
+    "pl": -6806.88,
+    "exposure": 85.8
+   }
+  },
+  "total_trades": 908,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Point-and-figure triple top with vertical count target",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 127,
+    "pl": -2052.83,
+    "exposure": 57.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 219,
+    "pl": -1305.95,
+    "exposure": 55.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 90,
+    "pl": -468.91,
+    "exposure": 60.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 112,
+    "pl": -7121.13,
+    "exposure": 57.1
+   }
+  },
+  "total_trades": 548,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Principal-component SDF on the signal set",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 214,
+    "pl": -822.29,
+    "exposure": 2.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 537,
+    "pl": -899.54,
+    "exposure": 14.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 508,
+    "pl": -27.75,
+    "exposure": 16.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 701,
+    "pl": -3676.71,
+    "exposure": 17.4
+   }
+  },
+  "total_trades": 1960,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Shaved Heikin-Ashi body expansion",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 488,
+    "pl": -3215.25,
+    "exposure": 62.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 471,
+    "pl": -740.9,
+    "exposure": 64.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 318,
+    "pl": -822.27,
+    "exposure": 58.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 486,
+    "pl": -1104.96,
+    "exposure": 64.5
+   }
+  },
+  "total_trades": 1763,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "52-week high proximity level",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 88,
+    "pl": -103.91,
+    "exposure": 71.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 77,
+    "pl": 994.15,
+    "exposure": 77.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 51,
+    "pl": -339.1,
+    "exposure": 70.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 55,
+    "pl": -1847.1,
+    "exposure": 44.4
+   }
+  },
+  "total_trades": 271,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Ease of movement air pocket",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 88,
+    "pl": 566.28,
+    "exposure": 19.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 78,
+    "pl": 360.51,
+    "exposure": 24.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 49,
+    "pl": -35.86,
+    "exposure": 13.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 87,
+    "pl": 1804.77,
+    "exposure": 22.7
+   }
+  },
+  "total_trades": 302,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "ICSS variance break restart",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": 652.51,
+    "exposure": 2.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 12,
+    "pl": 188.27,
+    "exposure": 2.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 16,
+    "pl": -87.83,
+    "exposure": 4.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 9,
+    "pl": 1379.0,
+    "exposure": 2.2
+   }
+  },
+  "total_trades": 52,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Reflex displacement inside a TrendFlex regime",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": -251.67,
+    "exposure": 0.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 13,
+    "pl": -261.0,
+    "exposure": 0.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 11,
+    "pl": -41.81,
+    "exposure": 0.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 13,
+    "pl": -874.39,
+    "exposure": 0.5
+   }
+  },
+  "total_trades": 52,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Rest-of-day hedging momentum",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 28,
+    "pl": 134.49,
+    "exposure": 2.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 31,
+    "pl": -410.48,
+    "exposure": 2.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 29,
+    "pl": -15.46,
+    "exposure": 3.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 32,
+    "pl": 1946.01,
+    "exposure": 2.5
+   }
+  },
+  "total_trades": 120,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume clock versus wall clock volatility ratio",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 41,
+    "pl": -1028.98,
+    "exposure": 14.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 43,
+    "pl": 1237.61,
+    "exposure": 20.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 31,
+    "pl": -191.2,
+    "exposure": 19.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 42,
+    "pl": 2062.96,
+    "exposure": 18.6
+   }
+  },
+  "total_trades": 157,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "BinHV45 Bollinger break with candle anatomy",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 39,
+    "pl": -345.82,
+    "exposure": 4.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 36,
+    "pl": 697.86,
+    "exposure": 4.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 20,
+    "pl": -32.0,
+    "exposure": 3.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 44,
+    "pl": 431.3,
+    "exposure": 4.7
+   }
+  },
+  "total_trades": 139,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Darvas box with three-day confirmed walls",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": -132.54,
+    "exposure": 0.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": 99.37,
+    "exposure": 0.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": -29.96,
+    "exposure": 1.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 6,
+    "pl": 623.26,
+    "exposure": 1.4
+   }
+  },
+  "total_trades": 24,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "EMD cycle-versus-trend mode switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 150,
+    "pl": -1062.86,
+    "exposure": 10.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 141,
+    "pl": -1101.07,
+    "exposure": 8.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 101,
+    "pl": -133.65,
+    "exposure": 11.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 119,
+    "pl": 1621.45,
+    "exposure": 9.5
+   }
+  },
+  "total_trades": 511,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Five-condition pivot reversal bar",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 169,
+    "pl": -1765.57,
+    "exposure": 23.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 163,
+    "pl": -186.08,
+    "exposure": 22.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 96,
+    "pl": -166.82,
+    "exposure": 17.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 146,
+    "pl": -3289.82,
+    "exposure": 25.0
+   }
+  },
+  "total_trades": 574,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Momentum burst out of a tight base",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 62,
+    "pl": -1161.04,
+    "exposure": 1.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 60,
+    "pl": -46.59,
+    "exposure": 1.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 39,
+    "pl": -85.48,
+    "exposure": 1.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 71,
+    "pl": 514.38,
+    "exposure": 2.5
+   }
+  },
+  "total_trades": 232,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Sharpe-loss momentum network",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 1083,
+    "pl": -4959.76,
+    "exposure": 53.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 626,
+    "pl": -2745.26,
+    "exposure": 64.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 764,
+    "pl": -254.09,
+    "exposure": 39.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 821,
+    "pl": -13014.81,
+    "exposure": 56.8
+   }
+  },
+  "total_trades": 3294,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volume-conditioned momentum life cycle",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 224,
+    "pl": -1072.92,
+    "exposure": 26.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 164,
+    "pl": 179.36,
+    "exposure": 25.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 201,
+    "pl": 24.12,
+    "exposure": 45.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 222,
+    "pl": 101.35,
+    "exposure": 35.1
+   }
+  },
+  "total_trades": 811,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Effort-versus-Result Absorption Bar",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 11,
+    "pl": -36.12,
+    "exposure": 1.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 7,
+    "pl": 70.52,
+    "exposure": 0.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": 0.4,
+    "exposure": 0.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 8,
+    "pl": 618.48,
+    "exposure": 0.8
+   }
+  },
+  "total_trades": 31,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "IB Retracement-Depth Continuation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": 49.96,
+    "exposure": 1.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 9,
+    "pl": 691.6,
+    "exposure": 1.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 6,
+    "pl": 60.33,
+    "exposure": 1.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 7,
+    "pl": -802.92,
+    "exposure": 1.8
+   }
+  },
+  "total_trades": 30,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "PLS Supervised Predictor Alignment",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 477,
+    "pl": -1926.73,
+    "exposure": 52.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 383,
+    "pl": -1088.75,
+    "exposure": 49.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 194,
+    "pl": -348.45,
+    "exposure": 34.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 382,
+    "pl": -10503.0,
+    "exposure": 43.2
+   }
+  },
+  "total_trades": 1436,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Analogue forecast with distance abstention",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 81,
+    "pl": 1471.6,
+    "exposure": 12.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 96,
+    "pl": 2030.1,
+    "exposure": 15.0
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 38,
+    "pl": -31.89,
+    "exposure": 9.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 70,
+    "pl": -3455.58,
+    "exposure": 10.8
+   }
+  },
+  "total_trades": 285,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Auction blackout breakout",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 144,
+    "pl": 1311.72,
+    "exposure": 24.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 141,
+    "pl": -1122.72,
+    "exposure": 23.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 119,
+    "pl": -75.76,
+    "exposure": 32.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 138,
+    "pl": -2594.53,
+    "exposure": 26.6
+   }
+  },
+  "total_trades": 542,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Benjamini-Yekutieli false discovery allocator",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 11,
+    "pl": -17.9,
+    "exposure": 0.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 22,
+    "pl": 22.06,
+    "exposure": 0.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 314,
+    "pl": -153.91,
+    "exposure": 11.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 0,
+    "pl": 0.0,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 347,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Out-of-range gap retest",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": -118.35,
+    "exposure": 5.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": 186.0,
+    "exposure": 2.6
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 2,
+    "pl": -25.0,
+    "exposure": 1.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 7,
+    "pl": -1981.26,
+    "exposure": 4.9
+   }
+  },
+  "total_trades": 20,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Overnight-only holding",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 7,
+    "pl": 314.0,
+    "exposure": 12.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 5,
+    "pl": 694.0,
+    "exposure": 8.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 2,
+    "pl": -1.0,
+    "exposure": 1.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": -1930.5,
+    "exposure": 8.9
+   }
+  },
+  "total_trades": 19,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Three-fifths power execution horizon",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 273,
+    "pl": -356.46,
+    "exposure": 25.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 338,
+    "pl": -2345.98,
+    "exposure": 32.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 288,
+    "pl": -539.55,
+    "exposure": 35.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 276,
+    "pl": -2792.07,
+    "exposure": 24.0
+   }
+  },
+  "total_trades": 1175,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Turnover budget greedy queue",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 103,
+    "pl": 453.2,
+    "exposure": 14.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 86,
+    "pl": -2220.39,
+    "exposure": 13.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 88,
+    "pl": -132.42,
+    "exposure": 16.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 102,
+    "pl": -2578.36,
+    "exposure": 12.2
+   }
+  },
+  "total_trades": 379,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Diurnal-Scaled Range Breakout",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 111,
+    "pl": 1855.85,
+    "exposure": 8.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 109,
+    "pl": 1182.89,
+    "exposure": 7.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 112,
+    "pl": -87.66,
+    "exposure": 9.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 95,
+    "pl": 341.23,
+    "exposure": 7.5
+   }
+  },
+  "total_trades": 427,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "FLOSS Arc-Curve Segmentation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 16,
+    "pl": -230.41,
+    "exposure": 5.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 20,
+    "pl": -257.49,
+    "exposure": 7.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 13,
+    "pl": -53.89,
+    "exposure": 6.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 17,
+    "pl": -2201.44,
+    "exposure": 4.4
+   }
+  },
+  "total_trades": 66,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "KAMA noise-scaled excursion filter",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 477,
+    "pl": -2746.93,
+    "exposure": 85.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 470,
+    "pl": -295.62,
+    "exposure": 85.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 341,
+    "pl": -950.29,
+    "exposure": 82.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 468,
+    "pl": -900.55,
+    "exposure": 85.4
+   }
+  },
+  "total_trades": 1756,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Laguerre RSI Unpinning",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 353,
+    "pl": -1996.99,
+    "exposure": 22.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 336,
+    "pl": 803.27,
+    "exposure": 23.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 210,
+    "pl": -317.98,
+    "exposure": 19.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 344,
+    "pl": 5888.27,
+    "exposure": 24.4
+   }
+  },
+  "total_trades": 1243,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Renko Brick Velocity Burst",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 106,
+    "pl": 472.89,
+    "exposure": 4.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 144,
+    "pl": -223.29,
+    "exposure": 2.4
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 53,
+    "pl": -162.28,
+    "exposure": 2.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 132,
+    "pl": 2088.62,
+    "exposure": 2.9
+   }
+  },
+  "total_trades": 435,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Roughness Index of Log-Volatility",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 103,
+    "pl": 810.56,
+    "exposure": 16.4
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 78,
+    "pl": 1053.84,
+    "exposure": 21.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 45,
+    "pl": 36.22,
+    "exposure": 17.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 95,
+    "pl": 3016.36,
+    "exposure": 17.8
+   }
+  },
+  "total_trades": 321,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Value Area Overlap Regime Switch",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 12,
+    "pl": 271.69,
+    "exposure": 2.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 12,
+    "pl": -61.2,
+    "exposure": 2.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 15,
+    "pl": 62.51,
+    "exposure": 4.6
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 11,
+    "pl": 610.21,
+    "exposure": 1.2
+   }
+  },
+  "total_trades": 50,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Corrado rank event trigger",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 68,
+    "pl": -95.63,
+    "exposure": 9.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 63,
+    "pl": 1729.21,
+    "exposure": 9.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 41,
+    "pl": 118.27,
+    "exposure": 8.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 70,
+    "pl": -5148.46,
+    "exposure": 10.5
+   }
+  },
+  "total_trades": 242,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "GARCH-POT conditional-EVT regime",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 17,
+    "pl": 3754.25,
+    "exposure": 60.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 25,
+    "pl": 181.19,
+    "exposure": 49.9
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 17,
+    "pl": -169.69,
+    "exposure": 54.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 25,
+    "pl": 1300.46,
+    "exposure": 42.3
+   }
+  },
+  "total_trades": 84,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Hasbrouck VAR flow forecast",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 29,
+    "pl": 0.45,
+    "exposure": 0.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 37,
+    "pl": 590.25,
+    "exposure": 0.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 48,
+    "pl": -63.13,
+    "exposure": 0.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 14,
+    "pl": 114.29,
+    "exposure": 0.0
+   }
+  },
+  "total_trades": 128,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Homing pigeon / descending hawk",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 19,
+    "pl": -47.22,
+    "exposure": 1.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 12,
+    "pl": -226.43,
+    "exposure": 0.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 5,
+    "pl": -37.81,
+    "exposure": 0.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 1,
+    "pl": 158.31,
+    "exposure": 0.1
+   }
+  },
+  "total_trades": 37,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Ornstein-Uhlenbeck residual s-score",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 210,
+    "pl": -2431.01,
+    "exposure": 30.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 227,
+    "pl": -927.19,
+    "exposure": 28.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 175,
+    "pl": 75.42,
+    "exposure": 28.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 199,
+    "pl": -3272.32,
+    "exposure": 29.3
+   }
+  },
+  "total_trades": 811,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Sign-count z-score TSMOM",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 78,
+    "pl": 3147.5,
+    "exposure": 61.1
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 82,
+    "pl": -1200.72,
+    "exposure": 53.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 50,
+    "pl": -116.36,
+    "exposure": 55.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 76,
+    "pl": 1499.56,
+    "exposure": 60.7
+   }
+  },
+  "total_trades": 286,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Wyckoff spring in a bounded base",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 8,
+    "pl": -15.65,
+    "exposure": 0.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 6,
+    "pl": 64.39,
+    "exposure": 0.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 2,
+    "pl": -16.56,
+    "exposure": 0.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 6,
+    "pl": 910.09,
+    "exposure": 1.1
+   }
+  },
+  "total_trades": 22,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Automatic Rally Ratio Secondary Test",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 5,
+    "pl": -221.44,
+    "exposure": 2.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 4,
+    "pl": -365.54,
+    "exposure": 1.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 9,
+    "pl": -23.49,
+    "exposure": 6.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 2,
+    "pl": -280.76,
+    "exposure": 0.7
+   }
+  },
+  "total_trades": 20,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "In-Range Opening Gap Fade to Prior Close",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 2,
+    "pl": -305.49,
+    "exposure": 0.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 3,
+    "pl": 277.5,
+    "exposure": 0.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 4,
+    "pl": 51.44,
+    "exposure": 0.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 4,
+    "pl": -535.07,
+    "exposure": 0.2
+   }
+  },
+  "total_trades": 13,
+  "symbols_trading": "3 of 4"
+ },
+ {
+  "name": "Notional Equity Drawdown Ratchet",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 157,
+    "pl": 132.16,
+    "exposure": 75.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 182,
+    "pl": -2186.45,
+    "exposure": 70.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 111,
+    "pl": -1123.59,
+    "exposure": 67.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 195,
+    "pl": -2358.77,
+    "exposure": 72.7
+   }
+  },
+  "total_trades": 645,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Rotation Factor Midday Continuation",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 9,
+    "pl": -185.84,
+    "exposure": 3.6
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 9,
+    "pl": -235.18,
+    "exposure": 3.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 8,
+    "pl": 30.29,
+    "exposure": 7.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 5,
+    "pl": -592.19,
+    "exposure": 2.2
+   }
+  },
+  "total_trades": 31,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Technical Signal Principal Components Premium Regression",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": 424.77,
+    "exposure": 47.5
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 12,
+    "pl": -1161.71,
+    "exposure": 48.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 3,
+    "pl": -5.5,
+    "exposure": 5.8
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 15,
+    "pl": -5432.17,
+    "exposure": 28.5
+   }
+  },
+  "total_trades": 45,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Unfilled Order Ledger",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 287,
+    "pl": -902.38,
+    "exposure": 61.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 276,
+    "pl": -2657.13,
+    "exposure": 58.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 176,
+    "pl": -141.95,
+    "exposure": 58.9
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 288,
+    "pl": 248.99,
+    "exposure": 64.7
+   }
+  },
+  "total_trades": 1027,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Cube-Root No-Trade Band",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 269,
+    "pl": -559.36,
+    "exposure": 87.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 271,
+    "pl": -3846.55,
+    "exposure": 88.2
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 221,
+    "pl": -707.61,
+    "exposure": 84.1
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 210,
+    "pl": -1790.5,
+    "exposure": 89.9
+   }
+  },
+  "total_trades": 971,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Honest Pullback Test",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 52,
+    "pl": -1888.41,
+    "exposure": 21.2
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 49,
+    "pl": 1214.53,
+    "exposure": 20.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 22,
+    "pl": 6.34,
+    "exposure": 13.5
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 42,
+    "pl": -1290.89,
+    "exposure": 16.8
+   }
+  },
+  "total_trades": 165,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Naked POC Magnet",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 15,
+    "pl": 989.01,
+    "exposure": 14.8
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 16,
+    "pl": 1303.54,
+    "exposure": 15.3
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 18,
+    "pl": 86.81,
+    "exposure": 23.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 16,
+    "pl": -2753.37,
+    "exposure": 16.8
+   }
+  },
+  "total_trades": 65,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Online Logistic Regression with Dead Band",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 571,
+    "pl": -3894.87,
+    "exposure": 40.3
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 547,
+    "pl": -3802.56,
+    "exposure": 37.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 371,
+    "pl": 201.03,
+    "exposure": 43.2
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 479,
+    "pl": 829.4,
+    "exposure": 33.4
+   }
+  },
+  "total_trades": 1968,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Price-Impact Compression (Amihud)",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 65,
+    "pl": -1023.46,
+    "exposure": 10.0
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 64,
+    "pl": -555.08,
+    "exposure": 9.7
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 47,
+    "pl": -2.81,
+    "exposure": 10.7
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 67,
+    "pl": -1460.51,
+    "exposure": 9.8
+   }
+  },
+  "total_trades": 243,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Romano-Wolf Stepdown Multi-Rule Book",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 343,
+    "pl": -2245.47,
+    "exposure": 24.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 155,
+    "pl": 532.45,
+    "exposure": 15.1
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 375,
+    "pl": -153.24,
+    "exposure": 24.4
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 22,
+    "pl": 1892.8,
+    "exposure": 5.4
+   }
+  },
+  "total_trades": 895,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Turnover-Penalised Sharpe Position",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 61,
+    "pl": -1418.51,
+    "exposure": 90.7
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 71,
+    "pl": 798.15,
+    "exposure": 90.5
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 24,
+    "pl": 103.54,
+    "exposure": 88.3
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 86,
+    "pl": 3386.96,
+    "exposure": 90.9
+   }
+  },
+  "total_trades": 242,
+  "symbols_trading": "4 of 4"
+ },
+ {
+  "name": "Volatility-Targeted Time-Series Momentum",
+  "verdict": "ok",
+  "per_symbol": {
+   "SPY": {
+    "ok": true,
+    "trades": 24,
+    "pl": 2458.6,
+    "exposure": 93.9
+   },
+   "NVDA": {
+    "ok": true,
+    "trades": 22,
+    "pl": -3063.22,
+    "exposure": 92.8
+   },
+   "XLU": {
+    "ok": true,
+    "trades": 10,
+    "pl": 270.95,
+    "exposure": 90.0
+   },
+   "SOXL": {
+    "ok": true,
+    "trades": 10,
+    "pl": 910.68,
+    "exposure": 10.8
+   }
+  },
+  "total_trades": 66,
+  "symbols_trading": "4 of 4"
+ }
+]

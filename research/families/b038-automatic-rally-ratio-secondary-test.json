@@ -1,0 +1,43 @@
+{
+ "name": "Automatic Rally Ratio Secondary Test",
+ "note": "Wyckoff Phase A read as a supply-exhaustion test: a selling climax at a 40-bar low on 2.5x volume and a 1.5 ATR spread, an automatic rally worth at least 2 ATR AND at least 1.5x the climax bars own range (the discriminating gate), then a secondary test that holds ABOVE the climax low on under 60% of climax volume, and only then a close back through the test high on 1.2x average volume. Target is the 1x measured move projected off the rally leg, stop the climax low; both are exact prices checked on the close because the shared harness only takes ATR multiples. Mirror for the buying climax. Calibration note: on 5-minute bars the written secondary-test window (3-30 bars) and proximity band (0.75 ATR) almost never both hold after a 2 ATR rally - the whole chain fired once or twice per symbol in 45 days - so the defaults here are a 60-bar window and a 2.0 ATR band, with the band swept back down to 1.0. Every other threshold is as written.",
+ "source": "Wyckoff accumulation schematic Phase A (PS, SC, AR, ST) as codified in the StockCharts ChartSchool 'The Wyckoff Method' article and reproduced in the TradingView 'Wyckoff Accumulation Phase Map' (AGProLabs) and 'Wyckoff Pattern Indicator' (Dr_AtulGoswami) script descriptions. The ARratio gate and all numeric thresholds are the ideas own quantification - the source literature states the sequence qualitatively only.",
+ "params": {
+  "extreme_win": 40,
+  "climax_vol": 2.5,
+  "climax_spread": 1.5,
+  "ar_win": 15,
+  "ar_atr": 2.0,
+  "ar_ratio": 1.5,
+  "st_wait": 3,
+  "st_win": 60,
+  "st_vol_frac": 0.6,
+  "st_band_atr": 2.0,
+  "st_spread_atr": 0.8,
+  "trig_win": 20,
+  "trig_vol": 1.2,
+  "measured_move": 1.0,
+  "stop_pad_atr": 0.25,
+  "exit_signal_on": 1,
+  "time_stop": 40,
+  "tp_atr": 0.0,
+  "st_atr": 3.0
+ },
+ "grid": {
+  "climax_vol": [
+   2.0,
+   2.5,
+   3.0
+  ],
+  "ar_ratio": [
+   1.2,
+   1.5,
+   2.0
+  ],
+  "st_band_atr": [
+   1.0,
+   2.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Wyckoff Phase A: climax -> automatic rally -> secondary test -> trigger.\n\n    Every stage is stamped on the bar that completes it, so the entry bar only\n    ever depends on bars at or before it.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    ex_n = max(5, int(ctx.p.extreme_win))     # bars the climax must be extreme over\n    vmult = float(ctx.p.climax_vol)\n    smult = float(ctx.p.climax_spread)\n    ar_win = max(2, int(ctx.p.ar_win))\n    ar_atr = float(ctx.p.ar_atr)\n    ratio_min = float(ctx.p.ar_ratio)\n    st_lo = max(1, int(ctx.p.st_wait))\n    st_hi = max(st_lo + 1, int(ctx.p.st_win))\n    st_vol = float(ctx.p.st_vol_frac)\n    st_band = float(ctx.p.st_band_atr)\n    st_spread = float(ctx.p.st_spread_atr)\n    trig_win = max(1, int(ctx.p.trig_win))\n    trig_vol = float(ctx.p.trig_vol)\n    mm = float(ctx.p.measured_move)\n    stop_pad = float(ctx.p.stop_pad_atr)\n\n    # --- Wilder ATR(14) and a 20-bar average volume, computed here because\n    #     family_init cannot index a look-ahead-guarded Series -------------\n    per = 14\n    atr = [None] * n\n    tr_sum = 0.0\n    for i in range(n):\n        tr = hi[i] - lo[i] if i == 0 else max(hi[i] - lo[i],\n                                              abs(hi[i] - cl[i - 1]),\n                                              abs(lo[i] - cl[i - 1]))\n        if i < per:\n            tr_sum += tr\n            if i == per - 1:\n                atr[i] = tr_sum / per\n        else:\n            atr[i] = (atr[i - 1] * (per - 1) + tr) / per\n\n    av = [None] * n\n    s = 0.0\n    for i in range(n):\n        s += vo[i]\n        if i >= 20:\n            s -= vo[i - 20]\n        if i >= 19:\n            av[i] = s / 20.0\n\n    # --- rolling extremes over the ex_n bars ending at i ------------------\n    def _extreme(vals, want_min):\n        out = [None] * n\n        dq = []                      # monotonic deque of indices\n        for i in range(n):\n            while dq and dq[0] <= i - ex_n:\n                dq.pop(0)\n            while dq and ((vals[dq[-1]] >= vals[i]) if want_min\n                          else (vals[dq[-1]] <= vals[i])):\n                dq.pop()\n            dq.append(i)\n            if i >= ex_n - 1:\n                out[i] = vals[dq[0]]\n        return out\n\n    ll = _extreme(lo, True)\n    hh = _extreme(hi, False)\n\n    sig = [0] * n\n    tgt = [None] * n\n    stp = [None] * n\n\n    def _trigger(ti, up, base, ext, move, a):\n        \"\"\"First bar closing beyond the test bar on real volume. Returns True\n        when this setup is finished either way.\"\"\"\n        for j in range(ti + 1, min(n, ti + 1 + trig_win)):\n            if (cl[j] < base) if up else (cl[j] > base):\n                return True                  # climax extreme lost: setup dead\n            vv = av[j]\n            if vv is None or vv <= 0:\n                continue\n            if (cl[j] > hi[ti]) if up else (cl[j] < lo[ti]):\n                if vo[j] < trig_vol * vv:\n                    return False             # broke the test, nobody came\n                if sig[j] == 0:\n                    sig[j] = 1 if up else -1\n                    tgt[j] = ext + mm * move if up else ext - mm * move\n                    stp[j] = base - stop_pad * a if up else base + stop_pad * a\n                return True\n        return False\n\n    def _walk(c, up):\n        \"\"\"One climax candidate. up=True is the accumulation (long) case.\"\"\"\n        a = atr[c]\n        rng = hi[c] - lo[c]\n        if a is None or a <= 0 or rng <= 0:\n            return\n        base = lo[c] if up else hi[c]\n        # ---- automatic rally / reaction ----\n        ai = None\n        ext = None\n        for j in range(c + 1, min(n, c + 1 + ar_win)):\n            if (cl[j] < base) if up else (cl[j] > base):\n                return                       # climax extreme broken: dead\n            if ext is None or ((hi[j] > ext) if up else (lo[j] < ext)):\n                ext = hi[j] if up else lo[j]\n                ai = j\n        if ai is None or ext is None:\n            return\n        move = (ext - base) if up else (base - ext)\n        if move < ar_atr * a or move / rng < ratio_min:\n            return                           # the ratio gate: a weak rally\n        # ---- secondary test: any qualifying bar in the window may be it,\n        #      and the first one that produces a trigger is the trade ------\n        for ti in range(ai + st_lo, min(n, ai + st_hi + 1)):\n            if (cl[ti] < base) if up else (cl[ti] > base):\n                return\n            edge = lo[ti] if up else hi[ti]\n            if up:\n                near = base <= edge <= base + st_band * a\n            else:\n                near = base - st_band * a <= edge <= base\n            if not near:\n                continue\n            if vo[ti] > st_vol * vo[c]:\n                continue\n            if (hi[ti] - lo[ti]) > st_spread * a:\n                continue\n            if _trigger(ti, up, base, ext, move, a):\n                return\n\n    for c in range(n):\n        a = atr[c]\n        vv = av[c]\n        if a is None or vv is None or vv <= 0:\n            continue\n        if (hi[c] - lo[c]) < smult * a or vo[c] < vmult * vv:\n            continue\n        if ll[c] is not None and lo[c] <= ll[c]:\n            _walk(c, True)\n        if hh[c] is not None and hi[c] >= hh[c]:\n            _walk(c, False)\n\n    ctx.sig = ctx.series(sig, \"wyckoff_signal\")\n    ctx.tgt = ctx.series(tgt, \"measured_move\")\n    ctx.stp = ctx.series(stp, \"climax_stop\")\n    ctx._lvl = None\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    if s and not ctx.positions:\n        ctx._lvl = (s, ctx.tgt[i], ctx.stp[i])\n    return s\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Measured-move target off the automatic rally, or the climax extreme\n    gives way. Both are checked on the close; the harness time stop does the\n    rest.\n    \"\"\"\n    lv = ctx._lvl\n    if not lv:\n        return False\n    d, t, st = lv\n    px = ctx.c[i]\n    if d > 0:\n        return (t is not None and px >= t) or (st is not None and px <= st)\n    return (t is not None and px <= t) or (st is not None and px >= st)\n"
+}

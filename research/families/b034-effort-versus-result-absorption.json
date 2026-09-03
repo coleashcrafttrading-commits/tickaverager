@@ -1,0 +1,33 @@
+{
+ "name": "Effort-versus-Result Absorption Bar",
+ "note": "Wyckoff's third law made testable: a bar whose VOLUME expands while its RANGE contracts, sitting at a 40-bar extreme with its close on the absorbing side, is a large passive counterparty filling into the flow. Entry is the next bar closing beyond that bar's extreme without taking out its other side. Optional confirmation that the bar's Amihud price-impact ratio sits in the bottom percentile of its own 250-bar history. Deliberately a range-CONTRACTION signal, so it almost never coincides with a band-touch-plus-volume rule.",
+ "source": "StockCharts ChartSchool, 'The Wyckoff Method: A Tutorial' - Law of Effort versus Result: 'High volume with minimal price advance suggests absorption of supply or weakness'. Formalisation via Amihud, Y. (2002), 'Illiquidity and stock returns: cross-section and time-series effects', Journal of Financial Markets: ILLIQ_t = |R_t| / DollarVolume_t.",
+ "params": {
+  "eff_mult": 2.0,
+  "res_cap": 1.0,
+  "cl_thresh": 0.65,
+  "prox_atr": 0.75,
+  "ext_n": 40,
+  "vol_n": 20,
+  "amihud_pct": 0.0,
+  "amihud_win": 250,
+  "time_stop": 10
+ },
+ "grid": {
+  "eff_mult": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "res_cap": [
+   0.8,
+   1.0,
+   1.25
+  ],
+  "amihud_pct": [
+   0.0,
+   40.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Wyckoff effort-vs-result: volume expansion with range CONTRACTION, at a\n    40-bar extreme, close on the absorbing side.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    eff = float(ctx.p.eff_mult)\n    res = float(ctx.p.res_cap)\n    clt = float(ctx.p.cl_thresh)\n    prox = float(ctx.p.prox_atr)\n    extn = max(5, int(ctx.p.ext_n))\n    vn = max(2, int(ctx.p.vol_n))\n    apct = float(ctx.p.amihud_pct)\n    aw = max(50, int(ctx.p.amihud_win))\n\n    # --- Wilder ATR, computed here so family_init never touches a Series\n    # (a Series would refuse every index past bar 0 during init)\n    an = max(2, int(ctx.p.atr_n))\n    atr = [None] * n\n    tr_sum = 0.0\n    prev_c = None\n    for i in range(n):\n        tr = (hi[i] - lo[i]) if prev_c is None else max(\n            hi[i] - lo[i], abs(hi[i] - prev_c), abs(lo[i] - prev_c))\n        prev_c = cl[i]\n        if i < an:\n            tr_sum += tr\n            if i == an - 1:\n                atr[i] = tr_sum / an\n        else:\n            atr[i] = atr[i - 1] + (tr - atr[i - 1]) / an\n\n    # --- effort E = v / SMA(v, vn) --------------------------------------\n    E = [None] * n\n    s = 0.0\n    for i in range(n):\n        s += vo[i]\n        if i >= vn:\n            s -= vo[i - vn]\n        if i >= vn - 1:\n            m = s / vn\n            if m > 0:\n                E[i] = vo[i] / m\n\n    # --- rolling extremes over extn bars (monotonic deques) --------------\n    lo_ext = [None] * n\n    hi_ext = [None] * n\n    dq_lo = []\n    dq_hi = []\n    for i in range(n):\n        while dq_lo and lo[dq_lo[-1]] >= lo[i]:\n            dq_lo.pop()\n        dq_lo.append(i)\n        while dq_hi and hi[dq_hi[-1]] <= hi[i]:\n            dq_hi.pop()\n        dq_hi.append(i)\n        lim = i - extn + 1\n        while dq_lo[0] < lim:\n            dq_lo.pop(0)\n        while dq_hi[0] < lim:\n            dq_hi.pop(0)\n        if i >= extn - 1:\n            lo_ext[i] = lo[dq_lo[0]]\n            hi_ext[i] = hi[dq_hi[0]]\n\n    # --- Amihud illiquidity |ret| / dollar volume ------------------------\n    am = [None] * n\n    if apct > 0:\n        for i in range(1, n):\n            dv = cl[i] * vo[i]\n            if dv > 0 and cl[i - 1] > 0:\n                am[i] = abs(cl[i] / cl[i - 1] - 1.0) / dv\n\n    def amihud_ok(i):\n        \"\"\"Bottom apct-th percentile of its own trailing aw-bar history.\"\"\"\n        if apct <= 0:\n            return True\n        x = am[i]\n        if x is None or i < aw:\n            return False\n        below = 0\n        seen = 0\n        for j in range(i - aw, i):\n            y = am[j]\n            if y is None:\n                continue\n            seen += 1\n            if y <= x:\n                below += 1\n        if seen < 30:\n            return False\n        return (100.0 * below / seen) <= apct\n\n    # --- the absorption bar, then the confirming bar ---------------------\n    # abs_dir[j] = +1 long absorption bar, -1 short, 0 none\n    abs_dir = [0] * n\n    for i in range(n):\n        a = atr[i]\n        e = E[i]\n        if a is None or a <= 0 or e is None or e < eff:\n            continue\n        rng = hi[i] - lo[i]\n        if rng / a > res:\n            continue                       # RESULT must be small: contraction\n        if lo_ext[i] is None:\n            continue\n        loc = (cl[i] - lo[i]) / rng if rng > 0 else 0.5\n        up = loc >= clt and lo[i] <= lo_ext[i] + prox * a\n        dn = (1.0 - loc) >= clt and hi[i] >= hi_ext[i] - prox * a\n        if not (up or dn):\n            continue\n        if not amihud_ok(i):\n            continue\n        if up and dn:\n            continue                       # a doji at both extremes says nothing\n        abs_dir[i] = 1 if up else -1\n\n    ctx.absd = ctx.series(abs_dir, \"absorption_dir\")\n\n\ndef signal(ctx, i):\n    \"\"\"Bar i confirms an absorption bar at i-1: it closes beyond the absorption\n    bar's extreme without taking out the other side of it.\"\"\"\n    if i < 1:\n        return 0\n    d = ctx.absd[i - 1]\n    if not d:\n        return 0\n    if d > 0:\n        if ctx.c[i] > ctx.h[i - 1] and ctx.l[i] >= ctx.l[i - 1]:\n            return 1\n        return 0\n    if ctx.c[i] < ctx.l[i - 1] and ctx.h[i] <= ctx.h[i - 1]:\n        return -1\n    return 0"
+}

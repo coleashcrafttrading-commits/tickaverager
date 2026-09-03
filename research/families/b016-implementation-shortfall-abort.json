@@ -1,0 +1,32 @@
+{
+ "name": "Implementation Shortfall Abort",
+ "note": "Perold's decomposition used as an entry rule rather than an accounting one. At the decision bar the close is recorded as P0 and the expected edge as k_edge*ATR/P0; the order is then worked over n_slice bars, each slice filling at that bar's (H+L+C)/3, and the running shortfall of the fills against P0 is tracked. Three branches: shortfall above phi_abort*edge cancels the remainder and the trade never happens; a favourable shortfall accelerates and takes the position immediately; otherwise the schedule completes and the position is taken on the last slice. The shared harness fills atomically, so 'cancel the remainder' becomes 'do not participate' and the partial-fill sizing of the published rule is not expressible here - that substitution is deliberate and is the one thing lost.",
+ "source": "Perold, A.F. (1988), 'The Implementation Shortfall: Paper versus Reality', Journal of Portfolio Management 14(3), 4-9. Complemented by Almgren & Chriss (2000), which uses expected shortfall and its variance as the objective throughout.",
+ "params": {
+  "dc_n": 20,
+  "n_slice": 5,
+  "phi_abort": 0.5,
+  "k_edge": 1.0,
+  "time_stop": 20,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "n_slice": [
+   3,
+   5,
+   8
+  ],
+  "phi_abort": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "k_edge": [
+   0.5,
+   1.0
+  ]
+ },
+ "code": "def _atr(h, l, c, p):\n    n = len(c)\n    tr = [0.0] * n\n    if n:\n        tr[0] = h[0] - l[0]\n    for j in range(1, n):\n        pc = c[j - 1]\n        a = h[j] - l[j]\n        b = pc - h[j]\n        if b < 0.0:\n            b = -b\n        d = pc - l[j]\n        if d < 0.0:\n            d = -d\n        tr[j] = a if (a >= b and a >= d) else (b if b >= d else d)\n    out = [None] * n\n    if n < p or p < 1:\n        return out\n    s = 0.0\n    for j in range(p):\n        s += tr[j]\n    s /= p\n    out[p - 1] = s\n    for j in range(p, n):\n        s = (s * (p - 1) + tr[j]) / p\n        out[j] = s\n    return out\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    o = [float(x[\"o\"]) for x in b]\n    h = [float(x[\"h\"]) for x in b]\n    l = [float(x[\"l\"]) for x in b]\n    c = [float(x[\"c\"]) for x in b]\n    atr = _atr(h, l, c, max(2, int(ctx.p.atr_n)))\n\n    dc = max(2, int(ctx.p.dc_n))\n    ns = max(1, int(ctx.p.n_slice))\n    phi = float(ctx.p.phi_abort)\n    ke = float(ctx.p.k_edge)\n\n    # ---- the base decision: an N-bar breakout. Any signal would do; this one\n    # fires often enough that the abort branch is what is being measured. ----\n    base = [0] * n\n    for j in range(dc, n):\n        hh = h[j - dc]\n        ll = l[j - dc]\n        for k in range(j - dc + 1, j):\n            if h[k] > hh:\n                hh = h[k]\n            if l[k] < ll:\n                ll = l[k]\n        if c[j] > hh:\n            base[j] = 1\n        elif c[j] < ll:\n            base[j] = -1\n\n    sig = [0] * n\n    filled = [0] * n        # 1 = schedule completed, 2 = accelerated\n    aborts = 0\n    j = 0\n    while j < n:\n        d = base[j]\n        if d == 0:\n            j += 1\n            continue\n        a = atr[j]\n        p0 = c[j]\n        if a is None or a <= 0.0 or p0 <= 0.0:\n            j += 1\n            continue\n        edge = ke * a / p0                 # expected edge, as a fraction\n        acc = 0.0\n        cnt = 0\n        fired = -1\n        why = 0\n        end = j + ns\n        if end >= n:\n            end = n - 1\n        k = j + 1\n        while k <= end:\n            acc += (h[k] + l[k] + c[k]) / 3.0\n            cnt += 1\n            shortfall = d * (acc / cnt - p0) / p0\n            if shortfall > phi * edge:\n                # the market has already taken phi of the edge before the\n                # order is done: cancel the remainder, permanently\n                break\n            if shortfall < 0.0:\n                fired = k          # accelerate -- finish the whole remainder\n                why = 2\n                break\n            if cnt >= ns:\n                fired = k          # schedule completed on time\n                why = 1\n                break\n            k += 1\n        if fired >= 0:\n            sig[fired] = d\n            filled[fired] = why\n            j = fired + 1\n        else:\n            aborts += 1\n            j = end + 1\n    ctx.log(\"aborted %d of the scheduled orders\" % aborts)\n    ctx.sg = ctx.series(sig, \"is_abort_sig\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0"
+}

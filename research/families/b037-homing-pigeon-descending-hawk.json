@@ -1,0 +1,32 @@
+{
+ "name": "Homing pigeon / descending hawk",
+ "note": "Two-bar body containment where BOTH bars are the same colour, which is what separates it from the harami (opposite colours) and from the inside bar (defined on highs and lows, not on the body). Long on Goo/Chen/Chang's O1>O2>C2>C1 with bar1 closing under its EMA(10); short on the mirror C1>C2>O2>O1 above it. Bar1's body must be at least min_body_atr x ATR(14) and bar2's at most body_ratio of it: a second down bar that opens above the prior close and still cannot print a lower close is a failure to extend. Nothing is asked of the highs or lows, so bar2's RANGE may exceed bar1's - that is the set of setups the inside-bar and harami screens both miss. Held `hold` bars, stopped 1 ATR out, no profit target.",
+ "source": "Goo, Chen & Chang (2007) formal definitions - Homing Pigeon: O1 > O2 > C2 > C1 & downtrend; Descending Hawk: C1 > C2 > O2 > O1 & uptrend - reproduced with the full pattern table in Tharavanij, Siraprapasiri & Rajchamaha (2017), SAGE Open, doi:10.1177/2158244017736799. Abnormal-return evidence for two-day harami-family patterns: Shiu & Lu (2011), cited therein.",
+ "params": {
+  "ema_n": 10,
+  "atr_body_n": 14,
+  "min_body_atr": 1.0,
+  "body_ratio": 0.5,
+  "hold": 5,
+  "tp_atr": 0.0,
+  "st_atr": 1.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "min_body_atr": [
+   0.6,
+   1.0,
+   1.4
+  ],
+  "body_ratio": [
+   0.25,
+   0.5,
+   0.75
+  ],
+  "hold": [
+   5,
+   10
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n    ctx.a = ctx.indicator(\"atr\", period=int(ctx.p.atr_body_n))\n\n\ndef signal(ctx, i):\n    if i < 2:\n        return 0\n    a = ctx.a[i - 1]\n    e = ctx.e[i - 1]\n    if a is None or e is None or a <= 0:\n        return 0\n    o1, c1 = ctx.o[i - 1], ctx.c[i - 1]\n    o2, c2 = ctx.o[i], ctx.c[i]\n    minb = float(ctx.p.min_body_atr) * a\n    cap = float(ctx.p.body_ratio)\n\n    # HOMING PIGEON: downtrend, both bars black, body2 strictly inside body1.\n    # Goo/Chen/Chang inequality chain: O1 > O2 > C2 > C1.\n    if c1 < e:\n        b1 = o1 - c1\n        b2 = o2 - c2\n        if b1 >= minb and b2 > 0.0 and o1 > o2 and c2 > c1 and b2 <= cap * b1:\n            return 1\n\n    # DESCENDING HAWK: the exact mirror. C1 > C2 > O2 > O1, both white.\n    if c1 > e:\n        b1 = c1 - o1\n        b2 = c2 - o2\n        if b1 >= minb and b2 > 0.0 and c1 > c2 and o2 > o1 and b2 <= cap * b1:\n            return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    held = i - min(p[\"entry_i\"] for p in ctx.positions)\n    return held >= int(ctx.p.hold)"
+}

@@ -1,0 +1,31 @@
+{
+ "name": "Inventory retracement bar",
+ "note": "Hoffman's IRB. In an uptrend (close above SMA(n) and that SMA rising over slope_n bars) a wide bar whose ENTIRE real body sits in the bottom `wick` of its range is counter-trend inventory; trading through its high proves the selling was absorbed, so the signal fires on the first of the next `valid` bars whose high exceeds the signal bar's high by a tick. Mirror for shorts. Hoffman's unquantifiable '45-degree MA angle' is replaced by an explicit SMA slope test, as the source note requires. The resting stop order is approximated by the harness's next-open fill, which is one bar later than a real stop fill.",
+ "source": "Rob Hoffman's Inventory Retracement Bar. The 45% threshold and the 20-period MA trend filter as implemented in https://github.com/m-marqx/Inventory.Retracement.Bar.APP (signal when the wick reaches 45%, 20-period SMA trend filter, entry on a break of the signal candle's extreme, target as a payoff multiple of the signal candle's amplitude, stop at the signal candle's extreme) and the open-source TradingView implementations (e.g. script khxEdmoy, 'Rob Hoffman Inventory Retracement Bar', which computes x = low + 0.45*(high-low) and signals when open and close are both beyond x). Hoffman's original '45-degree MA angle' filter is unquantifiable and is replaced here with an explicit SMA slope test.",
+ "params": {
+  "ma_n": 20,
+  "slope_n": 5,
+  "wick": 0.45,
+  "min_atr": 0.8,
+  "valid": 2,
+  "tick": 0.01,
+  "time_stop": 10
+ },
+ "grid": {
+  "wick": [
+   0.35,
+   0.45,
+   0.6
+  ],
+  "min_atr": [
+   0.5,
+   0.8,
+   1.2
+  ],
+  "valid": [
+   2,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    import indicators as I\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    at = I.compute(\"atr\", bars, period=int(ctx.p.atr_n))[\"atr\"]\n\n    p = max(2, int(ctx.p.ma_n))\n    ma = [None] * n\n    run = 0.0\n    for i in range(n):\n        run += c[i]\n        if i >= p:\n            run -= c[i - p]\n        if i >= p - 1:\n            ma[i] = run / p\n\n    sl = max(1, int(ctx.p.slope_n))\n    w = float(ctx.p.wick)\n    ka = float(ctx.p.min_atr)\n    kind = [0] * n\n    for i in range(sl, n):\n        m, m0, a = ma[i], ma[i - sl], at[i]\n        if m is None or m0 is None or a is None or a <= 0:\n            continue\n        rng = h[i] - l[i]\n        if rng <= 0 or rng < ka * a:\n            continue\n        bh = c[i] if c[i] > o[i] else o[i]\n        bl = c[i] if c[i] < o[i] else o[i]\n        if c[i] > m and m > m0 and bh <= l[i] + w * rng:\n            kind[i] = 1                      # body pinned to the low, uptrend\n        elif c[i] < m and m < m0 and bl >= h[i] - w * rng:\n            kind[i] = -1\n\n    val = max(1, int(ctx.p.valid))\n    tick = float(ctx.p.tick)\n    sig = [0.0] * n\n    for i in range(1, n):\n        for j in range(i - 1, max(-1, i - val - 1), -1):\n            if kind[j] == 1 and h[i] > h[j] + tick:\n                sig[i] = 1.0\n                break\n            if kind[j] == -1 and l[i] < l[j] - tick:\n                sig[i] = -1.0\n                break\n    ctx.sig = ctx.series(sig, \"irb\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    if not s:\n        return 0\n    return 1 if s > 0 else -1\n"
+}

@@ -1,0 +1,34 @@
+{
+ "name": "Vol-of-Vol Collapse",
+ "note": "Second-order volatility. RV = stdev of the last rv_n log returns; VoV = stdev of ln(RV) over the last vov_n bars; P = the percentile of VoV in its own trailing hist_n distribution. Entry is on the RESOLUTION, not the spike: P crosses down through in_pct having been at or above hot_pct within the previous hot_look bars. Exit when P climbs back above out_pct, or on the shared time stop. The sign is a swept parameter (dirn) because the option-implied version of this effect predicts LOW returns while the mechanical-deleveraging story predicts high ones, and a realized-data proxy cannot settle that a priori. DEVIATION: the unit is the BAR, not the session. The study runs 5- and 15-minute bars over 120 days, in which a 504-SESSION percentile history cannot exist at all, so the 5/20/504 structure is applied to the native bar series -- the statistic is unchanged, its sampling rate is not.",
+ "source": "Synthesis -- a realized-data analogue of the option-implied vol-of-vol effect documented in Baltussen, van Bekkum & van der Grient (2018), 'Unknown Unknowns: Uncertainty About Risk and Stock Returns', Journal of Financial and Quantitative Analysis 53(4). Since no option chain is available, the proxy replaces implied vol-of-vol with the standard deviation of log realized vol; the proxy is noisier and its sign is an empirical question, hence the two-sided parameter sweep.",
+ "params": {
+  "rv_n": 5,
+  "vov_n": 20,
+  "hist_n": 504,
+  "in_pct": 50.0,
+  "hot_pct": 90.0,
+  "hot_look": 10,
+  "out_pct": 80.0,
+  "dirn": 1,
+  "side": "both",
+  "time_stop": 20,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "rv_n": [
+   5,
+   10,
+   21
+  ],
+  "vov_n": [
+   20,
+   40
+  ],
+  "dirn": [
+   1,
+   -1
+  ]
+ },
+ "code": "def family_init(ctx):\n    import bisect\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    rvn = max(2, int(ctx.p.rv_n))\n    vvn = max(3, int(ctx.p.vov_n))\n    hn = max(30, int(ctx.p.hist_n))\n    look = max(1, int(ctx.p.hot_look))\n\n    r = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            r[i] = math.log(c[i] / c[i - 1])\n    ps = [0.0] * (n + 1)\n    p2 = [0.0] * (n + 1)\n    for i in range(n):\n        ps[i + 1] = ps[i] + r[i]\n        p2[i + 1] = p2[i] + r[i] * r[i]\n\n    # ln realized vol. A window of identical prints has zero dispersion and no\n    # logarithm; the last real reading is carried rather than dropped, which is\n    # what \"volatility has not moved\" actually means.\n    lnrv = [None] * n\n    last = None\n    for i in range(n):\n        if i + 1 >= rvn:\n            mu = (ps[i + 1] - ps[i + 1 - rvn]) / rvn\n            var = (p2[i + 1] - p2[i + 1 - rvn]) / rvn - mu * mu\n            if var > 1e-24:\n                last = 0.5 * math.log(var)\n        lnrv[i] = last\n\n    start = 0\n    while start < n and lnrv[start] is None:\n        start += 1\n    vov = [None] * n\n    if start < n:\n        qs = [0.0] * (n + 1)\n        q2 = [0.0] * (n + 1)\n        for i in range(n):\n            x = lnrv[i] if lnrv[i] is not None else 0.0\n            qs[i + 1] = qs[i] + x\n            q2[i + 1] = q2[i] + x * x\n        for i in range(start + vvn - 1, n):\n            mu = (qs[i + 1] - qs[i + 1 - vvn]) / vvn\n            var = (q2[i + 1] - q2[i + 1 - vvn]) / vvn - mu * mu\n            vov[i] = math.sqrt(var) if var > 0.0 else 0.0\n\n    # trailing percentile rank, kept cheap with a sorted window\n    pct = [None] * n\n    win = []\n    srt = []\n    need = max(30, hn // 4)\n    for i in range(n):\n        v = vov[i]\n        if v is None:\n            continue\n        if len(win) >= hn:\n            old = win.pop(0)\n            k = bisect.bisect_left(srt, old)\n            if k < len(srt) and srt[k] == old:\n                srt.pop(k)\n        win.append(v)\n        bisect.insort(srt, v)\n        if len(win) >= need:\n            pct[i] = 100.0 * bisect.bisect_right(srt, v) / len(srt)\n\n    hot = [-1.0] * n\n    for i in range(n):\n        best = -1.0\n        for k in range(max(0, i - look), i):\n            q = pct[k]\n            if q is not None and q > best:\n                best = q\n        hot[i] = best\n\n    ctx.pct = ctx.series(pct, \"vov_pct\")\n    ctx.hot = ctx.series(hot, \"vov_hot\")\n\n\ndef signal(ctx, i):\n    p = ctx.pct[i]\n    q = ctx.pct[i - 1]\n    if p is None or q is None:\n        return 0\n    inp = float(ctx.p.in_pct)\n    if not (q >= inp and p < inp):\n        return 0\n    if ctx.hot[i] < float(ctx.p.hot_pct):\n        return 0\n    return 1 if int(ctx.p.dirn) > 0 else -1\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Uncertainty about risk is climbing again -- the reason to be here is gone.\"\"\"\n    p = ctx.pct[i]\n    return p is not None and p >= float(ctx.p.out_pct)\n"
+}

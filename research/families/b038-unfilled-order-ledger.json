@@ -1,0 +1,33 @@
+{
+ "name": "Unfilled Order Ledger",
+ "note": "Not a signal - an order-type experiment. The signal set is frozen (20-bar Donchian breaks) and only the arm changes: 0 takes the next open, 1 rests a limit k ATR back and simply never trades if it is not touched within n_life bars, 2 rests the same limit and chases at market when it expires. Exits are identical across arms (2 ATR stop, 3 ATR target, 40-bar time stop), so comparing arm 1 with arm 0 over the identical signal dates prices the opportunity cost of the unfilled orders - they are missing from arm 1 and present in arm 0. Honest limitation: the harness fills at the next open, so arm 1 gets the touch bars successor open rather than the limit price itself, which understates the price improvement and leaves only the adverse-selection half of the effect.",
+ "source": "Perold (1988), 'The Implementation Shortfall: Paper versus Reality', Journal of Portfolio Management 14(3):4-9 - the delay/execution/opportunity-cost decomposition. The adverse selection framing of resting limit orders is standard market microstructure.",
+ "params": {
+  "arm": 1,
+  "limit_atr": 0.25,
+  "n_life": 3,
+  "don": 20,
+  "both_sides": 1,
+  "atr_n": 14,
+  "st_atr": 2.0,
+  "tp_atr": 3.0,
+  "time_stop": 40
+ },
+ "grid": {
+  "arm": [
+   0,
+   1,
+   2
+  ],
+  "limit_atr": [
+   0.1,
+   0.25,
+   0.5
+  ],
+  "n_life": [
+   3,
+   5
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"One frozen signal, three order types.\n\n    The signal set is Donchian(20) breakouts and never changes. What changes is\n    HOW the order reaches the market: arm 0 takes the next open, arm 1 rests a\n    limit k*ATR back and simply never trades if it is not touched within N\n    bars, arm 2 rests the same limit and chases at market when it expires.\n    Comparing arm 1 against arm 0 over the identical signal dates is the whole\n    experiment: arm 1 is missing exactly the trades that ran away from it, and\n    that omission is the opportunity cost the study is trying to price.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    arm = int(ctx.p.arm)\n    k = float(ctx.p.limit_atr)\n    life = max(1, int(ctx.p.n_life))\n    w = max(2, int(ctx.p.don))\n    both = int(ctx.p.both_sides) != 0\n\n    # Wilder ATR(14), computed here because family_init cannot index a series\n    per = max(2, int(ctx.p.atr_n))\n    atr = [None] * n\n    s = 0.0\n    for i in range(n):\n        tr = hi[i] - lo[i] if i == 0 else max(hi[i] - lo[i],\n                                              abs(hi[i] - cl[i - 1]),\n                                              abs(lo[i] - cl[i - 1]))\n        if i < per:\n            s += tr\n            if i == per - 1:\n                atr[i] = s / per\n        else:\n            atr[i] = (atr[i - 1] * (per - 1) + tr) / per\n\n    sig = [0] * n\n\n    def _stamp(i, d):\n        if sig[i] == 0:\n            sig[i] = d\n\n    for t in range(w, n):\n        a = atr[t]\n        if a is None or a <= 0:\n            continue\n        up = cl[t] > max(hi[t - w:t])\n        dn = both and cl[t] < min(lo[t - w:t])\n        if not up and not dn:\n            continue\n        d = 1 if up else -1\n        if arm <= 0:                                   # arm A: market\n            _stamp(t, d)\n            continue\n        lim = cl[t] - k * a * d                        # arm B / C: resting limit\n        hit = None\n        for u in range(t + 1, min(n, t + 1 + life)):\n            if (lo[u] <= lim) if d > 0 else (hi[u] >= lim):\n                hit = u\n                break\n        if hit is not None:\n            _stamp(hit, d)\n        elif arm >= 2:                                 # expired: chase\n            u = min(n - 1, t + life)\n            _stamp(u, d)\n\n    ctx.sig = ctx.series(sig, \"arm_signal\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n"
+}

@@ -1,0 +1,37 @@
+{
+ "name": "Volume clock variance ratio",
+ "note": "Two resamplings of the same tape: the bars as they come (clock time) and the same volume repacked into equal-volume buckets of size V = the trailing median bar volume, splitting any bar that overfills a bucket pro rata and interpolating its close linearly to the split point. Q = RV_clock / RV_vol over a rolling window, percentile-ranked against its own trailing history. A high Q means price is travelling per unit of clock time far more than per unit of volume - moving without participation - so the last look bars' move is faded; below the low percentile nothing is taken. Built and traded inside the regular session only, because an extended-hours bar's few hundred shares make the bucket size meaningless.",
+ "source": "Motivated by Easley, Lopez de Prado & O'Hara, 'The Volume Clock: Insights into the High Frequency Paradigm', Journal of Portfolio Management 39(1), 2012 (SSRN 2034858). I attempted to fetch the SSRN page and received HTTP 403, so this is a bibliographic citation, not a verified quotation; the RV_clock / RV_vol ratio and the trading rule are my synthesis.",
+ "params": {
+  "rv_win": 78,
+  "med_win": 390,
+  "re_n": 78,
+  "pct_win": 500,
+  "pct_min": 120,
+  "pct_in": 0.9,
+  "pct_out": 0.5,
+  "look": 6,
+  "t_open": 600,
+  "t_close": 900,
+  "exit_signal_on": 1,
+  "time_stop": 12,
+  "st_atr": 1.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "pct_in": [
+   0.85,
+   0.9,
+   0.95
+  ],
+  "rv_win": [
+   78,
+   156
+  ],
+  "look": [
+   6,
+   12
+  ]
+ },
+ "code": "_TT = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]\n\n\ndef _nth_sunday(y, mo, n):\n    yy = y - (1 if mo < 3 else 0)\n    d1 = (yy + yy // 4 - yy // 100 + yy // 400 + _TT[mo - 1] + 1) % 7\n    return 1 + ((7 - d1) % 7) + 7 * (n - 1)\n\n\ndef _et(ts):\n    \"\"\"(session key, minutes past ET midnight) for a UTC ISO stamp.\"\"\"\n    s = str(ts)\n    y = int(s[0:4])\n    mo = int(s[5:7])\n    d = int(s[8:10])\n    hh = int(s[11:13])\n    mm = int(s[14:16])\n    if 3 < mo < 11:\n        dst = True\n    elif mo == 3:\n        dst = d >= _nth_sunday(y, 3, 2)\n    elif mo == 11:\n        dst = d < _nth_sunday(y, 11, 1)\n    else:\n        dst = False\n    t = hh * 60 + mm - (4 if dst else 5) * 60\n    return (s[:10], t) if t >= 0 else (s[:10], t + 1440)\n\n\ndef family_init(ctx):\n    import math\n    import bisect\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    mins = [0] * n\n    for t in range(n):\n        mins[t] = _et(bars[t][\"t\"])[1]\n    ctx.mins = mins\n\n    # The construction lives entirely inside the regular session. An\n    # extended-hours bar carries a few hundred shares against a few hundred\n    # thousand in the session, and mixing them makes the bucket size\n    # meaningless in both directions at once.\n    reg = [t for t in range(n) if 570 <= mins[t] < 960]\n    pos = {}\n    for k, t in enumerate(reg):\n        pos[t] = k\n    m = len(reg)\n    ctx.pos = pos\n\n    rc = [float(c[reg[k]]) for k in range(m)]\n    rv = [float(v[reg[k]]) for k in range(m)]\n\n    # ---- clock-time squared returns, prefix-summed ----\n    csq = [0.0] * (m + 1)\n    for k in range(1, m):\n        a, b = rc[k - 1], rc[k]\n        x = math.log(b / a) if (a > 0.0 and b > 0.0) else 0.0\n        csq[k + 1] = csq[k] + x * x\n\n    # ---- volume clock: equal-volume buckets, V refreshed causally ----\n    mw = int(ctx.p.med_win)\n    step = max(1, int(ctx.p.re_n))\n    bclose = []\n    bat = []                      # the regular-bar index each bucket closed on\n    acc = 0.0\n    V = None\n    for k in range(m):\n        if k >= mw and (V is None or k % step == 0):\n            w = sorted(rv[k - mw:k])\n            mid = w[len(w) // 2]\n            V = mid if mid > 0.0 else None\n        if V is None:\n            continue\n        prev = rc[k - 1] if k > 0 else rc[k]\n        vol = rv[k]\n        used = 0.0\n        guard = 0\n        while vol - used > 1e-9 and guard < 200:\n            guard += 1\n            need = V - acc\n            if vol - used >= need:\n                used += need\n                acc = 0.0\n                f = used / vol if vol > 0.0 else 1.0\n                bclose.append(prev + (rc[k] - prev) * f)\n                bat.append(k)\n            else:\n                acc += vol - used\n                used = vol\n    nb = len(bclose)\n    vsq = [0.0] * (nb + 1)\n    for j in range(1, nb):\n        a, b = bclose[j - 1], bclose[j]\n        x = math.log(b / a) if (a > 0.0 and b > 0.0) else 0.0\n        vsq[j + 1] = vsq[j] + x * x\n\n    # buckets completed as of each regular bar\n    done = [0] * m\n    j = 0\n    for k in range(m):\n        while j < nb and bat[j] <= k:\n            j += 1\n        done[k] = j\n\n    # ---- Q = RV_clock / RV_vol, and its trailing percentile rank ----\n    W = int(ctx.p.rv_win)\n    pw = int(ctx.p.pct_win)\n    Q = [None] * m\n    for k in range(W, m):\n        K = done[k]\n        if K < W + 1:\n            continue\n        a = csq[k + 1] - csq[k + 1 - W]\n        b = vsq[K] - vsq[K - W]\n        if a > 0.0 and b > 1e-16:\n            Q[k] = a / b\n\n    pct = [None] * n\n    hist = []                     # the trailing window, kept sorted\n    fifo = []                     # the same values in arrival order\n    head = 0\n    for k in range(m):\n        q = Q[k]\n        if q is None:\n            continue\n        if len(hist) >= int(ctx.p.pct_min):\n            lo = bisect.bisect_left(hist, q)\n            hi = bisect.bisect_right(hist, q)\n            pct[reg[k]] = (lo + hi) * 0.5 / len(hist)\n        bisect.insort(hist, q)\n        fifo.append(q)\n        if len(hist) > pw:\n            old = fifo[head]\n            head += 1\n            j = bisect.bisect_left(hist, old)\n            if j < len(hist) and hist[j] == old:\n                hist.pop(j)\n    ctx.pct = pct\n\n    ctx.rk = [None] * n           # regular-session index, for the r30 lookback\n    for k, t in enumerate(reg):\n        ctx.rk[t] = k\n    ctx.rc = rc\n    ctx.start = mw + W + int(ctx.p.pct_min) + 2\n\n\ndef signal(ctx, i):\n    k = ctx.rk[i]\n    if k is None or k < ctx.start:\n        return 0\n    mi = ctx.mins[i]\n    if mi < int(ctx.p.t_open) or mi > int(ctx.p.t_close):\n        return 0\n    p = ctx.pct[i]\n    if p is None or p < float(ctx.p.pct_in):\n        return 0\n    look = int(ctx.p.look)\n    if k - look < 0:\n        return 0\n    a = ctx.rc[k - look]\n    b = ctx.rc[k]\n    if a <= 0.0 or b <= 0.0 or a == b:\n        return 0\n    # price has moved far per unit of clock time and little per unit of\n    # volume: the move is unbacked by participation, so fade it\n    return -1 if b > a else 1\n\n\ndef exit_signal(ctx, i):\n    p = ctx.pct[i]\n    if p is None:\n        return False\n    return p < float(ctx.p.pct_out)"
+}

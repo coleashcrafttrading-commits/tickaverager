@@ -1,0 +1,31 @@
+{
+ "name": "Realized Skewness Percentile Reversal",
+ "note": "Realized skewness of intraday returns, RSk = sqrt(n)*sum(r^3)/(sum(r^2))^1.5, ranked against its OWN trailing history rather than a cross-section, so it runs on one symbol. Buys the low-skew tail and sells the high-skew tail, gated on median dollar volume not having thinned out, and held a fixed number of sessions because the published effect is horizon-bound. Windows are in RTH bars (78 = one session); the paper's 252-session ranking history does not exist in an intraday sample, so the rank is against a trailing window of the same statistic.",
+ "source": "Amaya, Christoffersen, Jacobs & Vasquez (2015), 'Does realized skewness predict the cross-section of equity returns?', Journal of Financial Economics 118(1), 135-167. https://www.sciencedirect.com/science/article/abs/pii/S0304405X15001257 ; working paper version: https://pure.au.dk/ws/files/67739582/rp13_41.pdf",
+ "params": {
+  "win": 195,
+  "rank_win": 600,
+  "cut": 20.0,
+  "hold_sess": 2,
+  "tp_atr": 0.0,
+  "st_atr": 3.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "win": [
+   195,
+   390
+  ],
+  "cut": [
+   10.0,
+   20.0,
+   30.0
+  ],
+  "hold_sess": [
+   1,
+   2,
+   5
+  ]
+ },
+ "code": "import math\n\n\ndef _sess(ctx):\n    \"\"\"Per-bar ET clock, session index and RTH flag, from the timestamps alone.\n\n    The feed carries extended hours (04:00-20:00 ET) and some symbols are\n    missing premarket bars entirely, so nothing here may count bars to find a\n    session -- it all comes off the clock. US DST boundaries are computed from\n    the calendar, which is a priori knowledge, not a peek at the tape.\n    \"\"\"\n    import datetime as _dt\n    etm = []\n    day = []\n    rth = []\n    ri = []\n    cache = {}\n    last = None\n    di = -1\n    nr = 0\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        key = (y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            pv = _dt.date(y, mo, dd) - _dt.timedelta(days=1)\n            key = (pv.year, pv.month, pv.day)\n        if key != last:\n            last = key\n            di += 1\n        r = 570 <= tot < 960\n        etm.append(tot); day.append(di); rth.append(r)\n        if r:\n            nr += 1\n        ri.append(nr)\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ri = ri\n\n\ndef _rth_returns(ctx):\n    \"\"\"RTH-only log returns and the raw bar index each one ends on.\n\n    Overnight and pre/post-market returns are dropped: the intraday moments\n    below estimate an intraday quantity, and a gap return is not a 5-minute\n    return however it is labelled.\n    \"\"\"\n    R = []\n    POS = []\n    prev = None\n    prevday = None\n    for i in range(len(ctx.bars)):\n        if ctx.f_rth[i]:\n            c = float(ctx.bars[i][\"c\"])\n            if prev is not None and prev > 0.0 and c > 0.0 and \\\n                    ctx.f_day[i] == prevday:\n                R.append(math.log(c / prev))\n                POS.append(i)\n            prev = c\n            prevday = ctx.f_day[i]\n    return R, POS\n\n\ndef family_init(ctx):\n    _sess(ctx)\n    R, POS = _rth_returns(ctx)\n    n = len(ctx.bars)\n    W = max(20, int(ctx.p.win))\n    RW = max(100, int(ctx.p.rank_win))\n    step = max(1, W // 40)\n    keep = max(20, RW // step)\n    pct = [None] * n\n    vok = [False] * n\n    s2 = 0.0\n    s3 = 0.0\n    hist = []\n    dvs = []\n    volok = False\n    for j in range(len(R)):\n        r = R[j]\n        s2 += r * r\n        s3 += r * r * r\n        if j >= W:\n            o = R[j - W]\n            s2 -= o * o\n            s3 -= o * o * o\n        if j + 1 < W or s2 <= 0.0:\n            continue\n        rsk = (W ** 0.5) * s3 / (s2 ** 1.5)\n        i = POS[j]\n        if len(hist) >= 50:\n            below = 0\n            for hv in hist:\n                if hv < rsk:\n                    below += 1\n            pct[i] = 100.0 * below / len(hist)\n            vok[i] = volok\n        if j % step == 0:\n            hist.append(rsk)\n            if len(hist) > keep:\n                hist.pop(0)\n            b = ctx.bars[i]\n            dvs.append(float(b[\"c\"]) * float(b.get(\"v\") or 0.0))\n            if len(dvs) > 4 * (W // step) + 2:\n                dvs.pop(0)\n            m1 = max(3, W // step)\n            if len(dvs) >= m1 + 4:\n                a1 = sorted(dvs[-m1:])\n                a2 = sorted(dvs)\n                volok = a1[len(a1) // 2] >= a2[len(a2) // 2]\n    ctx.f_pct = pct\n    ctx.f_vok = vok\n\n\ndef signal(ctx, i):\n    p = ctx.f_pct[i]\n    if p is None or not ctx.f_vok[i]:\n        return 0\n    lo = float(ctx.p.cut)\n    if p <= lo:\n        return 1\n    if p >= 100.0 - lo:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return ctx.f_day[i] - ctx.f_day[e] >= int(ctx.p.hold_sess)\n"
+}

@@ -1,0 +1,32 @@
+{
+ "name": "Kyle Lambda Shock",
+ "note": "Estimates Kyle's price-impact coefficient lambda as the rolling OLS slope of log returns on signed square-root dollar volume, then trades the direction of a large bar that occurs while lambda is both unusually high (z >= 2) and still rising -- the signature of a book that has thinned out ahead of a directional repricing.",
+ "source": "Kyle (1985), Econometrica 53(6); estimation form (returns on signed sqrt dollar volume, rolling window) from OFR Working Paper 15-11, 'Systemwide Commonalities in Market Liquidity', and Hasbrouck (2009).",
+ "params": {
+  "lam_win": 60,
+  "z_win": 250,
+  "z_in": 2.0,
+  "rise_lag": 5,
+  "bar_atr": 1.0,
+  "sqrt_dv": 1,
+  "time_stop": 10,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "lam_win": [
+   30,
+   60,
+   120
+  ],
+  "z_in": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "sqrt_dv": [
+   0,
+   1
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    \"\"\"Rolling Kyle lambda: OLS slope of returns on signed sqrt dollar volume.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    win = max(10, int(ctx.p.lam_win))\n    zwin = max(30, int(ctx.p.z_win))\n    use_sqrt = int(ctx.p.sqrt_dv) != 0\n\n    # --- log returns and signed (sqrt) dollar volume -------------------\n    r = [None] * n\n    x = [None] * n\n    for i in range(1, n):\n        if c[i] > 0 and c[i - 1] > 0:\n            ri = math.log(c[i] / c[i - 1])\n        else:\n            ri = 0.0\n        if ri == 0.0:\n            continue                       # the rule skips zero-return bars\n        dv = c[i] * v[i]\n        if dv <= 0:\n            continue\n        s = 1.0 if ri > 0 else -1.0\n        r[i] = ri\n        x[i] = s * (math.sqrt(dv) if use_sqrt else dv)\n\n    # --- rolling OLS slope with intercept, window = win bars -----------\n    lam = [None] * n\n    sx = sy = sxx = sxy = 0.0\n    k = 0\n    for i in range(n):\n        if r[i] is not None:\n            sx += x[i]; sy += r[i]; sxx += x[i] * x[i]; sxy += x[i] * r[i]\n            k += 1\n        j = i - win\n        if j >= 0 and r[j] is not None:\n            sx -= x[j]; sy -= r[j]; sxx -= x[j] * x[j]; sxy -= x[j] * r[j]\n            k -= 1\n        if k >= 8:\n            den = k * sxx - sx * sx\n            if den > 0:\n                lam[i] = (k * sxy - sx * sy) / den\n\n    # --- z-score of lambda over the trailing zwin bars -----------------\n    z = [None] * n\n    ls = lss = 0.0\n    m = 0\n    for i in range(n):\n        if lam[i] is not None:\n            ls += lam[i]; lss += lam[i] * lam[i]; m += 1\n        j = i - zwin\n        if j >= 0 and lam[j] is not None:\n            ls -= lam[j]; lss -= lam[j] * lam[j]; m -= 1\n        if m >= 20:\n            mu = ls / m\n            var = lss / m - mu * mu\n            if var > 1e-30:\n                z[i] = (lam[i] - mu) / math.sqrt(var) if lam[i] is not None else None\n\n    ctx.lam = ctx.series(lam, \"lambda\")\n    ctx.zl = ctx.series(z, \"z_lambda\")\n    ctx.ret = ctx.series(r, \"logret\")\n    ctx.atr14 = ctx.indicator(\"atr\", period=14)\n\n\ndef signal(ctx, i):\n    z = ctx.zl[i]\n    if z is None or z < ctx.p.z_in:\n        return 0\n    back = i - int(ctx.p.rise_lag)\n    if back < 0:\n        return 0\n    l_now, l_old = ctx.lam[i], ctx.lam[back]\n    if l_now is None or l_old is None or l_now <= l_old:\n        return 0                                   # impact must still be rising\n    rt = ctx.ret[i]\n    a = ctx.atr14[i]\n    px = ctx.c[i]\n    if rt is None or a is None or px <= 0:\n        return 0\n    if abs(rt) < ctx.p.bar_atr * (a / px):\n        return 0                                   # bar must be a real move\n    return 1 if rt > 0 else -1\n\n\ndef exit_signal(ctx, i):\n    z = ctx.zl[i]\n    return z is not None and z <= 0.0\n"
+}

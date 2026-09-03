@@ -1,0 +1,30 @@
+{
+ "name": "RSRS High-on-Low Regression Beta",
+ "note": "An ordinary least squares fit of the bar HIGH on the bar LOW over the last reg_n bars -- the two series regressed against each other rather than against time or against price. Beta is how far the ceiling extends per unit the floor extends: large means buyers are winning the range, small means the high is capped while the low keeps sliding. Raw beta drifts with the instrument, so it is standardised against its own trailing z_n distribution, and z is multiplied by the regression R-squared (use_r2) so a reading taken from a noisy high/low relationship is discounted rather than trusted. Long on a cross up through s_in, short on a cross down through -s_in, out through s_out. Computed with offset prefix sums so the 18-bar cross-products stay numerically clean on a $700 index.",
+ "source": "whchien/ai-trader, file ai_trader/backtesting/strategies/strategies/indicators.py, classes RSRS and NormRSRS (OLS of high on low, z-score over a long window, R2-weighted variant), used by ai_trader/backtesting/strategies/classic/rsrs.py",
+ "params": {
+  "reg_n": 18,
+  "z_n": 600,
+  "s_in": 0.7,
+  "s_out": 0.0,
+  "use_r2": 1,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "reg_n": [
+   12,
+   18,
+   30
+  ],
+  "z_n": [
+   300,
+   600
+  ],
+  "s_in": [
+   0.5,
+   0.7,
+   1.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    N = max(4, int(ctx.p.reg_n))\n    M = max(30, int(ctx.p.z_n))\n    use_r2 = int(ctx.p.use_r2)\n\n    base = float(bars[0][\"c\"])\n    x = [float(b[\"l\"]) - base for b in bars]      # the offset keeps the\n    y = [float(b[\"h\"]) - base for b in bars]      # cross-products conditioned\n\n    sx = [0.0] * (n + 1)\n    sy = [0.0] * (n + 1)\n    sxx = [0.0] * (n + 1)\n    sxy = [0.0] * (n + 1)\n    syy = [0.0] * (n + 1)\n    for i in range(n):\n        sx[i + 1] = sx[i] + x[i]\n        sy[i + 1] = sy[i] + y[i]\n        sxx[i + 1] = sxx[i] + x[i] * x[i]\n        sxy[i + 1] = sxy[i] + x[i] * y[i]\n        syy[i + 1] = syy[i] + y[i] * y[i]\n\n    beta = [None] * n\n    r2 = [0.0] * n\n    for i in range(N - 1, n):\n        j = i + 1 - N\n        mx = (sx[i + 1] - sx[j]) / N\n        my = (sy[i + 1] - sy[j]) / N\n        cxx = (sxx[i + 1] - sxx[j]) - N * mx * mx\n        cxy = (sxy[i + 1] - sxy[j]) - N * mx * my\n        cyy = (syy[i + 1] - syy[j]) - N * my * my\n        if cxx <= 1e-12:\n            continue\n        beta[i] = cxy / cxx\n        if cyy > 1e-12:\n            v = (cxy * cxy) / (cxx * cyy)\n            r2[i] = 0.0 if v < 0.0 else (1.0 if v > 1.0 else v)\n\n    # z of beta against its own trailing M readings\n    vals = []\n    idx = []\n    for i in range(n):\n        if beta[i] is not None:\n            vals.append(beta[i])\n            idx.append(i)\n    m = len(vals)\n    ps = [0.0] * (m + 1)\n    p2 = [0.0] * (m + 1)\n    for k in range(m):\n        ps[k + 1] = ps[k] + vals[k]\n        p2[k + 1] = p2[k] + vals[k] * vals[k]\n    zw = [None] * n\n    for k in range(m):\n        if k + 1 < M:\n            continue\n        mu = (ps[k + 1] - ps[k + 1 - M]) / M\n        var = (p2[k + 1] - p2[k + 1 - M]) / M - mu * mu\n        if var <= 1e-18:\n            continue\n        z = (vals[k] - mu) / math.sqrt(var)\n        i = idx[k]\n        zw[i] = z * r2[i] if use_r2 else z\n\n    ctx.zw = ctx.series(zw, \"rsrs_z\")\n\n\ndef signal(ctx, i):\n    z = ctx.zw[i]\n    p = ctx.zw[i - 1]\n    if z is None or p is None:\n        return 0\n    s = float(ctx.p.s_in)\n    if p <= s and z > s:\n        return 1\n    if p >= -s and z < -s:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Support stopped winning: the standardised slope is back through neutral.\"\"\"\n    z = ctx.zw[i]\n    if z is None or not ctx.positions:\n        return False\n    out = float(ctx.p.s_out)\n    if ctx.positions[0][\"side\"] == \"long\":\n        return z < out\n    return z > -out\n"
+}

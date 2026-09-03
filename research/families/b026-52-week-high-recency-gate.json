@@ -1,0 +1,30 @@
+{
+ "name": "52-Week-High Recency Gate",
+ "note": "Nearness to the running 252-bar extreme AND the age of that extreme: long only when the high was set within the last 21 bars and NEAR sits in the top 30% of its own trailing distribution, short on the mirror. The position is closed when the anchor goes stale (older than `stale` bars) rather than on any price event. Cross-sectional ranking replaced by the symbol's own trailing percentile, since a family sees one symbol.",
+ "source": "Bhootra & Hur, 'The timing of 52-week high price and momentum', Journal of Banking & Finance, 2013 - defines a 'recency ratio' from the number of days since the 52-week high was formed and shows the anchoring effect is far stronger for recent highs.",
+ "params": {
+  "look": 252,
+  "rec": 21,
+  "near_p": 0.7,
+  "stale": 126,
+  "time_stop": 126,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "rec": [
+   10,
+   21,
+   42
+  ],
+  "look": [
+   126,
+   252
+  ],
+  "near_p": [
+   0.6,
+   0.7,
+   0.8
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"NEAR = close / the running `look`-bar high, and AGE = how many bars ago\n    that high was made. Bhootra & Hur's finding is that the anchoring pull only\n    exists while the extreme is RECENT, so both coordinates are required.\n\n    Honest reduction: the paper ranks NEAR cross-sectionally against the whole\n    universe. A family sees one symbol, so the cross-sectional cut is replaced\n    by the symbol's own trailing percentile of NEAR over the same `look` window\n    -- still a rank, still 'top 30%', but against its own history. The time-\n    since-extreme coordinate, which is the actual novelty, is untouched.\"\"\"\n    from collections import deque\n    bars = ctx.bars\n    m = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n\n    look = max(20, int(ctx.p.look))\n    rec = max(1, int(ctx.p.rec))\n    np_ = float(ctx.p.near_p)\n\n    hv = [None] * m\n    hix = [None] * m\n    dq = deque()\n    for i in range(m):\n        a = h[i]\n        while dq and h[dq[-1]] <= a:\n            dq.pop()\n        dq.append(i)\n        if dq[0] <= i - look:\n            dq.popleft()\n        if i >= look - 1:\n            hv[i] = h[dq[0]]\n            hix[i] = dq[0]\n\n    lv = [None] * m\n    lix = [None] * m\n    dq = deque()\n    for i in range(m):\n        a = l[i]\n        while dq and l[dq[-1]] >= a:\n            dq.pop()\n        dq.append(i)\n        if dq[0] <= i - look:\n            dq.popleft()\n        if i >= look - 1:\n            lv[i] = l[dq[0]]\n            lix[i] = dq[0]\n\n    near = [None] * m        # close / 52wk high: 1.0 means sitting on it\n    far = [None] * m         # close / 52wk low:  1.0 means sitting on it\n    for i in range(look - 1, m):\n        if hv[i] and hv[i] > 0.0:\n            near[i] = c[i] / hv[i]\n        if lv[i] and lv[i] > 0.0:\n            far[i] = c[i] / lv[i]\n\n    sig = [0] * m\n    ah = [None] * m\n    al = [None] * m\n    half = look // 2\n    for i in range(2 * look, m):\n        gh = i - hix[i]\n        gl = i - lix[i]\n        ah[i] = gh\n        al[i] = gl\n        if gh <= rec and near[i] is not None:\n            x = near[i]\n            k = 0\n            n = 0\n            for j in range(i - look + 1, i + 1):\n                z = near[j]\n                if z is not None:\n                    n += 1\n                    if z <= x:\n                        k += 1\n            if n >= half and k >= np_ * n:\n                sig[i] = 1\n                continue\n        if gl <= rec and far[i] is not None:\n            x = far[i]\n            k = 0\n            n = 0\n            for j in range(i - look + 1, i + 1):\n                z = far[j]\n                if z is not None:\n                    n += 1\n                    if z <= x:\n                        k += 1\n            if n >= half and k <= (1.0 - np_) * n:\n                sig[i] = -1\n    ctx.sig = ctx.series(sig, \"recency_gate\")\n    ctx.ah = ctx.series(ah, \"age_high\")\n    ctx.al = ctx.series(al, \"age_low\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The exit the paper implies and no price rule can express: the anchor has\n    gone stale. Once the extreme that produced the position is older than\n    `stale` bars, nobody is looking at it any more and the mechanism is gone,\n    whatever the price has done.\"\"\"\n    if not ctx.positions:\n        return False\n    a = ctx.ah[i] if ctx.positions[0][\"side\"] == \"long\" else ctx.al[i]\n    return a is not None and a > int(ctx.p.stale)\n"
+}

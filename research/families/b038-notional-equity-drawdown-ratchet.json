@@ -1,0 +1,36 @@
+{
+ "name": "Notional Equity Drawdown Ratchet",
+ "note": "The Turtle size ratchet, isolated. Position size is taken off a NOTIONAL equity of actual_equity * (1-cut)^k with k = floor(current drawdown / step), restored only on a new all-time equity high, so 30% down leaves about half size on 70% of the capital. The base signal is deliberately plain - a 20-bar Donchian break with a 2 ATR(20) stop and flat on the opposite signal - so the only variable is the size rule. Sizing is applied by setting ctx.p.shares, the one execution lever a family may touch; the ratchet never blocks a trade, it only shrinks one. Size is the Turtle unit itself - risk_frac of the notional equity divided by the 2 ATR(20) stop - capped at max_lev times notional so a low-ATR symbol cannot buy an unbounded position.",
+ "source": "Original Turtle Trading Rules, 'Adjusting Trading Size' - 'when the account dropped 10%, all unit sizes were cut by 20%, with further reductions at every additional 10% drawdown'. https://oxfordstrat.com/coasdfASD32/uploads/2016/01/turtle-rules.pdf",
+ "params": {
+  "don": 20,
+  "start_cap": 12500.0,
+  "dd_step": 0.1,
+  "cut": 0.2,
+  "mult_floor": 0.25,
+  "risk_frac": 0.01,
+  "max_shares": 2000,
+  "max_lev": 2.0,
+  "atr_n": 20,
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "dd_step": [
+   0.05,
+   0.1,
+   0.15
+  ],
+  "cut": [
+   0.1,
+   0.2,
+   0.3
+  ],
+  "mult_floor": [
+   0.25,
+   0.4
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Turtle drawdown ratchet. The signal is a plain 20-bar Donchian break so\n    that the only thing being studied is the SIZE rule sitting on top of it:\n    every 10% of drawdown from the equity peak cuts the notional the position\n    is sized off by 20%, and only a new all-time high restores it.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    w = max(2, int(ctx.p.don))\n    sig = [0] * n\n    for i in range(w, n):\n        ph = max(hi[i - w:i])              # prior w bars, current bar excluded\n        pl = min(lo[i - w:i])\n        if cl[i] > ph:\n            sig[i] = 1\n        elif cl[i] < pl:\n            sig[i] = -1\n\n    ctx.sig = ctx.series(sig, \"donchian_break\")\n    ctx._peak = float(ctx.p.start_cap)\n    ctx._k = 0\n\n\ndef _resize(ctx, i):\n    \"\"\"notional_equity = actual_equity * (1 - cut)^k, k = floor(dd / step).\n\n    Sizing is the one execution lever a family is allowed to touch, and this\n    idea IS a sizing rule, so it is applied by setting ctx.p.shares before the\n    shared harness reads it. It never blocks a trade, it only shrinks one.\n    \"\"\"\n    eq = float(ctx.p.start_cap) + ctx.equity\n    if eq > ctx._peak:\n        ctx._peak = eq                     # new all-time high resets the ladder\n        ctx._k = 0\n    step = float(ctx.p.dd_step)\n    if ctx._peak > 0 and step > 0:\n        dd = (ctx._peak - eq) / ctx._peak\n        ctx._k = int(dd / step) if dd > 0 else 0\n    mult = (1.0 - float(ctx.p.cut)) ** ctx._k\n    fl = float(ctx.p.mult_floor)\n    if mult < fl:\n        mult = fl\n    notional = eq * mult\n    a = ctx.a[i]\n    if a is None or a <= 0 or notional <= 0:\n        ctx.p.shares = 1\n        return\n    risk = float(ctx.p.risk_frac) * notional\n    n = int(risk / (float(ctx.p.st_atr) * a))\n    if n < 1:\n        n = 1\n    cap = int(ctx.p.max_shares)\n    px = ctx.c[i]\n    if px > 0:\n        lev = int(float(ctx.p.max_lev) * notional / px)\n        if lev < cap:\n            cap = lev\n    if n > cap:\n        n = cap\n    if n < 1:\n        n = 1\n    ctx.p.shares = n\n\n\ndef signal(ctx, i):\n    _resize(ctx, i)\n    return ctx.sig[i]\n"
+}

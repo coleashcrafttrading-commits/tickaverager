@@ -1,0 +1,37 @@
+{
+ "name": "Pre-registered revival trial",
+ "note": "A strategy lifecycle, not a setup. A rolling t-stat of the sub-strategy's own per-bar return is the decay monitor; when it drops below kill_t the strategy is retired but NOT deleted - a revival trial opens on terms fixed at that instant: a hard deadline of trial_len bars, a running t-stat hurdle that cannot be claimed before min_k bars, and an abort drawdown of abort_pct of the trial's allocated capital (converted back to the strategy's unlevered return, since the trial runs at trial_size of base size). Clear the hurdle and it is promoted and the monitor restarts; hit the deadline or the abort and it is dead for the rest of the run, with exactly one trial per lifetime. A persistent Donchian state is the stand-in sub-strategy, chosen because it is always in the market and so has a well-defined return on every bar; the structure under test is the retire/trial/promote protocol, not that base. HONEST LIMIT: the size ladder (10% during the trial, 50% for 60 bars on promotion, then 100%) cannot be expressed - the shared harness owns share count - so the trial trades at full size and trial_size survives only where it belongs analytically, in the abort threshold.",
+ "source": "t-stat hurdle of 1.8 from Chen, A.Y. & Zimmermann, T. (2018), 'Publication Bias and the Cross-Section of Stock Returns', FEDS 2018-033 - among predictors that survive journal review, a low t-stat hurdle of 1.8 controls for multiple testing using the statistics of Harvey, Liu & Zhu (2015). The bounded one-shot trial protocol itself is my own synthesis.",
+ "params": {
+  "base_n": 20,
+  "mon_win": 250,
+  "kill_t": -2.0,
+  "trial_len": 250,
+  "hurdle": 1.8,
+  "min_k": 40,
+  "trial_size": 0.1,
+  "abort_pct": 0.03,
+  "max_trials": 1,
+  "exit_on_flip": 1,
+  "exit_on_zero": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "trial_len": [
+   125,
+   250,
+   500
+  ],
+  "hurdle": [
+   1.65,
+   1.8,
+   2.0
+  ],
+  "min_k": [
+   20,
+   40
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n\n    # ---- s: the sub-strategy the protocol is wrapped around --------------\n    # The protocol governs a strategy's LIFECYCLE, so it needs one to govern.\n    # A persistent Donchian state is used as the stand-in because it is\n    # always in the market, which makes \"s's per-bar return\" a well defined\n    # series on every bar rather than only on event bars. What is being\n    # tested here is the retire / trial / promote structure, not this base.\n    N = int(ctx.p.base_n)\n    pos = [0] * n\n    cur = 0\n    for t in range(n):\n        if t >= N:\n            hi = max(h[t - N:t])\n            lo = min(l[t - N:t])\n            if c[t] > hi:\n                cur = 1\n            elif c[t] < lo:\n                cur = -1\n        pos[t] = cur\n    ctx.pos = pos\n\n    # s's own per-bar return: the position it wanted yesterday, marked to\n    # today. This is the series every decision below is made on, and it is a\n    # function of bars up to t only.\n    rs = [0.0] * n\n    for t in range(1, n):\n        a = c[t - 1]\n        if a > 0.0:\n            rs[t] = pos[t - 1] * (c[t] / a - 1.0)\n\n    # ---- the lifecycle -----------------------------------------------------\n    # LIVE     the decay monitor watches a rolling t-stat of s's returns.\n    # TRIAL    opened the bar the monitor retires s, on PRE-REGISTERED terms\n    #          fixed at that instant: a hard deadline, a t-stat hurdle that\n    #          cannot be claimed before min_k bars, and an abort drawdown.\n    # DEAD     the deadline passed or the abort fired. s is deleted and never\n    #          re-trialled; one trial per lifetime.\n    mon = int(ctx.p.mon_win)\n    kill = float(ctx.p.kill_t)\n    L = int(ctx.p.trial_len)\n    hur = float(ctx.p.hurdle)\n    mk = int(ctx.p.min_k)\n    frac = float(ctx.p.trial_size)\n    # -abort_pct of the trial's ALLOCATED capital, converted back to s's own\n    # unlevered return, because the trial runs at trial_size of base size.\n    ab = -abs(float(ctx.p.abort_pct)) / (frac if frac > 0.0 else 1.0)\n    maxt = int(ctx.p.max_trials)\n\n    live = [False] * n\n    state = 0                     # 0 live, 1 trial, 2 dead\n    used = 0\n    s1 = 0.0\n    s2 = 0.0\n    cnt = 0\n    t1 = 0.0\n    t2 = 0.0\n    tk = 0\n    tcum = 0.0\n    warm = max(N + 2, mon)\n    for t in range(n):\n        x = rs[t]\n        if state == 0:\n            s1 += x\n            s2 += x * x\n            cnt += 1\n            if cnt > mon:\n                o = rs[t - mon]\n                s1 -= o\n                s2 -= o * o\n                cnt -= 1\n            live[t] = t >= warm\n            if t >= warm and cnt >= mon:\n                mu = s1 / cnt\n                var = s2 / cnt - mu * mu\n                if var > 1e-24:\n                    tstat = mu / ((var / cnt) ** 0.5)\n                    if tstat < kill:\n                        if used >= maxt:\n                            state = 2\n                        else:\n                            used += 1\n                            state = 1\n                            t1 = 0.0\n                            t2 = 0.0\n                            tk = 0\n                            tcum = 0.0\n        elif state == 1:\n            t1 += x\n            t2 += x * x\n            tk += 1\n            tcum += x\n            live[t] = True        # s keeps taking its own signals in the trial\n            if tcum <= ab:\n                state = 2         # hard abort, well inside the deadline\n            elif tk >= mk:\n                mu = t1 / tk\n                var = t2 / tk - mu * mu\n                if var > 1e-24:\n                    tstat = mu / ((var / tk) ** 0.5)\n                    if tstat >= hur:\n                        state = 0     # promoted\n                        s1 = 0.0\n                        s2 = 0.0\n                        cnt = 0\n            if state == 1 and tk >= L:\n                state = 2         # deadline reached without the hurdle\n        # state 2 leaves live[t] False for the rest of the run\n    ctx.live = live\n\n\ndef signal(ctx, i):\n    if not ctx.live[i]:\n        return 0\n    return ctx.pos[i]"
+}

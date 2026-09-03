@@ -1,0 +1,36 @@
+{
+ "name": "Dual-timeframe KST trigger",
+ "note": "Pring's Know Sure Thing on two timeframes at once. The fast KST (ROC 10/15/20/30 smoothed 10/10/10/15, weights 1:2:3:4, 9-period signal line) fires the trigger on the native bars; the slow KST (ROC 9/12/18/24 smoothed 6/6/6/9) is fitted to the close of every agg-th bar and must be both above its own signal line and above zero before a trigger in that direction is allowed. Entry also requires the fast composite to be rising on the crossing bar. Pring's daily/monthly pairing is preserved as a RATIO (agg, swept) rather than a calendar, because a family here is handed one bar series of unknown size; a slow value is attached only from the bar that closed its block, so no unfinished period is ever read.",
+ "source": "Martin J. Pring's Know Sure Thing. Parameters KST(10,15,20,30,10,10,10,15,9) for the short-term/daily version and KST(9,12,18,24,6,6,6,9,9) for the long-term/monthly version, the 1/2/3/4 weighting, the 9-period signal line, and Pring's preference for signal-line crossovers over centreline crossovers on longer timeframes - all verified from StockCharts ChartSchool 'Pring's Know Sure Thing (KST)' (fetched 2026-09-02).",
+ "params": {
+  "agg": 26,
+  "sig_n": 9,
+  "d_scale": 1.0,
+  "w1": 1.0,
+  "w2": 2.0,
+  "w3": 3.0,
+  "w4": 4.0,
+  "tp_atr": 0.0,
+  "st_atr": 2.5,
+  "trail_atr": 0.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "agg": [
+   13,
+   26,
+   52
+  ],
+  "sig_n": [
+   6,
+   9,
+   12
+  ],
+  "d_scale": [
+   1.0,
+   2.0
+  ]
+ },
+ "code": "def _roc(c, n):\n    \"\"\"100 * (C_t / C_{t-n} - 1).\"\"\"\n    out = [None] * len(c)\n    for i in range(n, len(c)):\n        p = c[i - n]\n        if p:\n            out[i] = 100.0 * (c[i] / p - 1.0)\n    return out\n\n\ndef _sma(v, n):\n    \"\"\"SMA of a series that may be None early. Emits only once the last n\n    values are all formed, so nothing leaks across the warm-up hole.\"\"\"\n    out = [None] * len(v)\n    s = 0.0\n    run = 0\n    for i, x in enumerate(v):\n        if x is None:\n            s = 0.0\n            run = 0\n            continue\n        s += x\n        run += 1\n        if run > n:\n            s -= v[i - n]\n            run = n + 1\n        if run >= n:\n            out[i] = s / n\n            if run > n:\n                run = n\n    return out\n\n\ndef _kst(c, ns, ss, w):\n    \"\"\"KST = sum_k w_k * SMA(ROC(n_k), s_k) -- a weighted SUM of four\n    independently smoothed rates of change, which is what makes it a\n    different animal from MACD (a difference of two EMAs at one horizon)\n    or TRIX (one triple-smoothed ROC).\"\"\"\n    n = len(c)\n    parts = [_sma(_roc(c, ns[k]), ss[k]) for k in range(4)]\n    out = [None] * n\n    for i in range(n):\n        t = 0.0\n        for k in range(4):\n            x = parts[k][i]\n            if x is None:\n                t = None\n                break\n            t += w[k] * x\n        out[i] = t\n    return out\n\n\ndef family_init(ctx):\n    \"\"\"Pring's Know Sure Thing on two timeframes: a fast KST on the native\n    bars supplies the trigger, a slow KST on a coarser resampling of the same\n    closes supplies the permission.\n\n    THE TIMEFRAME MAP. Pring's structure is daily-triggered / monthly-gated,\n    a ratio of roughly 21 trading days to a month. A family here is handed one\n    bar series of unknown size, so the ratio rather than the calendar is what\n    is preserved: the slow series is the close of every agg-th native bar, and\n    Pring's long-term parameter set (9,12,18,24 / 6,6,6,9) is fitted to it\n    while the short-term set (10,15,20,30 / 10,10,10,15) runs on the native\n    bars. agg is swept, so the study gets to find the ratio rather than\n    inherit an assumption.\n\n    A slow value is attached only to native bars at or after the bar that\n    CLOSED its block, which is the 'most recently completed month' in the\n    rule, and is why nothing here can see a period that has not finished.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    agg = max(2, int(ctx.p.agg))\n    sig_n = max(2, int(ctx.p.sig_n))\n    ds = float(ctx.p.d_scale)\n    w = [float(ctx.p.w1), float(ctx.p.w2), float(ctx.p.w3), float(ctx.p.w4)]\n\n    fn = [max(1, int(round(x * ds))) for x in (10, 15, 20, 30)]\n    fs = [max(1, int(round(x * ds))) for x in (10, 10, 10, 15)]\n    kd = _kst(c, fn, fs, w)\n    sd = _sma(kd, sig_n)\n\n    # ---- the slow series: one point per completed block of agg bars ----\n    ends = list(range(agg - 1, n, agg))\n    cc = [c[e] for e in ends]\n    km = _kst(cc, [9, 12, 18, 24], [6, 6, 6, 9], w)\n    sm = _sma(km, sig_n)\n\n    # gate = +1 when the last completed slow period has KST_m > Signal_m and\n    # KST_m > 0, -1 on the mirror, 0 when neither (or not yet formed)\n    gate = [0.0] * n\n    g = 0.0\n    k = 0\n    for i in range(n):\n        while k < len(ends) and ends[k] <= i:\n            a, b = km[k], sm[k]\n            if a is None or b is None:\n                g = 0.0\n            elif a > b and a > 0.0:\n                g = 1.0\n            elif a < b and a < 0.0:\n                g = -1.0\n            else:\n                g = 0.0\n            k += 1\n        gate[i] = g\n\n    ctx.kd = ctx.series(kd, \"kst_fast\")\n    ctx.sd = ctx.series(sd, \"kst_fast_signal\")\n    ctx.gate = ctx.series(gate, \"kst_slow_gate\")\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    k, s = ctx.kd[i], ctx.sd[i]\n    pk, ps = ctx.kd[i - 1], ctx.sd[i - 1]\n    if None in (k, s, pk, ps):\n        return 0\n    g = ctx.gate[i]\n    if g > 0 and pk <= ps and k > s and k > pk:\n        return 1\n    if g < 0 and pk >= ps and k < s and k < pk:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out on the fast signal-line cross back, or the moment the completed\n    slow period stops agreeing. The 2.5*ATR hard stop is the harness's\n    st_atr and never widens because trail_atr stays off.\"\"\"\n    if not ctx.positions or i < 1:\n        return False\n    k, s = ctx.kd[i], ctx.sd[i]\n    pk, ps = ctx.kd[i - 1], ctx.sd[i - 1]\n    if None in (k, s, pk, ps):\n        return False\n    g = ctx.gate[i]\n    if ctx.positions[0][\"side\"] == \"long\":\n        return (pk >= ps and k < s) or g < 0\n    return (pk <= ps and k > s) or g > 0\n"
+}

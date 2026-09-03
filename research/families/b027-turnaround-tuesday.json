@@ -1,0 +1,32 @@
+{
+ "name": "Turnaround Tuesday",
+ "note": "The primary variable is a calendar position, not a price feature. The first trading session of each calendar week -- Monday, or whatever day actually opens the week when Monday is a holiday, detected from the bar timestamps rather than from a holiday table -- is bought at its close if it closed below its own open (req_open) and below the previous session's close (req_prev). The position is sold at the close of the first later session that closes above the session before it, or unconditionally after max_days sessions. On intraday bars the session close is read at entry_min (15:55 ET) because a rule that used the final print would be deciding on a bar it cannot yet have seen; the previous session's close is a completed fact and is used as one. DEVIATION: the optional trend filter is a mean of the last sma_n SESSION closes, not SMA(200) -- 200 sessions cannot form inside the 120-day windows this study runs, so the filter is swept short (sma_gate: 0 off, 1 dip-only below the mean, -1 above it). Known ceiling: one entry per calendar week means at most ~17 trades per symbol in a 120-day window, below the 20-trade minimum the search requires before it will score a symbol. The family fires correctly and is here for its near-zero correlation with everything else in the book, but it will need a longer window than the standard round to be scored at all.",
+ "source": "Oddmund Groette / Quantified Strategies, 'The Turnaround Tuesday trading strategy' -- listed on their public S&P 500 strategies index (verified via the mirrored index text at github.com/taashareef11112/Po3). CAVEAT carried from the idea: the article body and its equity curve are behind a Cloudflare bot wall, so the construction is confirmed but the reported returns are not. Tested from scratch.",
+ "params": {
+  "req_open": 1,
+  "req_prev": 1,
+  "max_days": 5,
+  "entry_min": 955,
+  "sma_gate": 0,
+  "sma_n": 20,
+  "side": "long",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "req_open": [
+   0,
+   1
+  ],
+  "max_days": [
+   3,
+   5,
+   10
+  ],
+  "sma_gate": [
+   0,
+   1,
+   -1
+  ]
+ },
+ "code": "def _et(bars):\n    \"\"\"Minute-of-day, session index, weekday and day-of-month, in New York.\n\n    Bars carry UTC timestamps; every calendar rule here is a New York rule, so\n    the offset has to be resolved per bar rather than assumed.\"\"\"\n    import datetime\n    mins = []\n    sess = []\n    dow = []\n    dom = []\n    last = None\n    s = -1\n    for b in bars:\n        ts = str(b[\"t\"])\n        y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        if mo < 3 or mo > 11:\n            dst = False\n        elif 3 < mo < 11:\n            dst = True\n        elif mo == 3:\n            w = datetime.date(y, 3, 1).weekday()\n            dst = d >= 1 + ((6 - w) % 7) + 7\n        else:\n            w = datetime.date(y, 11, 1).weekday()\n            dst = d < 1 + ((6 - w) % 7)\n        t = (datetime.datetime(y, mo, d, hh, mi)\n             - datetime.timedelta(minutes=240 if dst else 300))\n        key = (t.year, t.month, t.day)\n        if key != last:\n            last = key\n            s += 1\n        mins.append(t.hour * 60 + t.minute)\n        sess.append(s)\n        dow.append(t.weekday())\n        dom.append(t.day)\n    return mins, sess, dow, dom\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    mins, sess, dow, dom = _et(bars)\n    if len(set(str(b[\"t\"])[:10] for b in bars)) == n:\n        mins = [955] * n\n\n    emin = int(ctx.p.entry_min)\n    req_o = int(ctx.p.req_open)\n    req_p = int(ctx.p.req_prev)\n    gate = int(ctx.p.sma_gate)\n    sn = max(2, int(ctx.p.sma_n))\n\n    # ---- session frame, regular hours only ----\n    order = []\n    sopen = {}\n    sclose = {}\n    swd = {}\n    for j in range(n):\n        if not (570 <= mins[j] < 960):\n            continue\n        s = sess[j]\n        if s not in sopen:\n            sopen[s] = float(bars[j][\"o\"])\n            swd[s] = dow[j]\n            order.append(s)\n        sclose[s] = float(bars[j][\"c\"])\n    pos = dict((s, k) for k, s in enumerate(order))\n\n    # the eval bar of each session: the first bar at or after entry_min\n    ev = [False] * n\n    seen = set()\n    for j in range(n):\n        s = sess[j]\n        if s in pos and mins[j] >= emin and s not in seen:\n            seen.add(s)\n            ev[j] = True\n\n    # the first session of each calendar week\n    weekfirst = set()\n    for k, s in enumerate(order):\n        if k == 0:\n            continue\n        if swd[s] <= swd[order[k - 1]]:\n            weekfirst.add(s)\n\n    sig = [0] * n\n    for j in range(n):\n        if not ev[j]:\n            continue\n        s = sess[j]\n        k = pos[s]\n        if s not in weekfirst or k < 1:\n            continue\n        px = float(bars[j][\"c\"])          # the close as it stands at 15:55\n        if req_o and not (px < sopen[s]):\n            continue\n        if req_p and not (px < sclose[order[k - 1]]):\n            continue\n        if gate:\n            if k < sn:\n                continue\n            w = [sclose[order[k - q]] for q in range(1, sn + 1)]\n            mu = sum(w) / len(w)\n            if gate > 0 and not (px < mu):\n                continue\n            if gate < 0 and not (px > mu):\n                continue\n        sig[j] = 1\n\n    # per-bar view of the session frame, for the exit\n    sidx = [-1] * n\n    pclose = [None] * n\n    for j in range(n):\n        s = sess[j]\n        if s in pos:\n            sidx[j] = pos[s]\n            k = pos[s]\n            if k >= 1:\n                pclose[j] = sclose[order[k - 1]]\n\n    ctx.sig = ctx.series(sig, \"tt_entry\")\n    ctx.ev = ctx.series(ev, \"tt_eval\")\n    ctx.sk = ctx.series(sidx, \"tt_session\")\n    ctx.pc = ctx.series(pclose, \"tt_prev_close\")\n\n\ndef signal(ctx, i):\n    return int(ctx.sig[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out on the first session that closes up on the one before it, and out\n    unconditionally after max_days sessions.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    k = ctx.sk[i]\n    ke = ctx.sk[e]\n    if k < 0 or ke < 0:\n        return False\n    if k - ke >= int(ctx.p.max_days):\n        return True\n    if k <= ke or not ctx.ev[i]:\n        return False\n    pc = ctx.pc[i]\n    return pc is not None and ctx.c[i] > pc\n"
+}

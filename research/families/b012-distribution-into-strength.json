@@ -1,0 +1,31 @@
+{
+ "name": "Distribution into strength",
+ "note": "The OHLCV signature of contrarian short flow from Diether, Lee & Werner: a run-up over the prior `lookback` bars, then a heavy-volume bar that makes a new high, closes below its open, and settles in the bottom clv_max of its own range. Short only. The paper's +3% weekly advance is stated in percent of a DAILY bar; here it is carried across timeframes as a multiple of ATR, which keeps 'has advanced meaningfully' the same statement on 1-minute and daily bars instead of a threshold no intraday bar reaches. Every other condition is the rule verbatim.",
+ "source": "Diether, Lee & Werner (2009), 'Short-Sale Strategies and Return Predictability', Review of Financial Studies 22(2), 575-607 - full text read at https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=10102&context=facpub, where relss_t is defined as shorted shares divided by traded shares on day t and the contrarian-then-predictive pattern is shown in their Table 3. Complementary magnitude from Boehmer, Jones & Zhang (2008), 'Which Shorts Are Informed?', Journal of Finance 63(2) - abstract via the OpenAlex works API. The OHLCV bar signature is my own proxy for their short-volume measure, stated explicitly as a proxy.",
+ "params": {
+  "lookback": 5,
+  "adv_atr": 1.5,
+  "vol_n": 20,
+  "vol_mult": 1.5,
+  "clv_max": 0.3,
+  "side": "short",
+  "time_stop": 10
+ },
+ "grid": {
+  "adv_atr": [
+   1.0,
+   1.5,
+   2.5
+  ],
+  "vol_mult": [
+   1.3,
+   1.5,
+   2.0
+  ],
+  "clv_max": [
+   0.25,
+   0.35
+  ]
+ },
+ "code": "def family_init(ctx):\n    v = [float(b.get(\"v\") or 0.0) for b in ctx.bars]\n    n = len(v)\n    p = max(2, int(ctx.p.vol_n))\n    out = [None] * n\n    run = 0.0\n    for i in range(n):\n        run += v[i]\n        if i >= p:\n            run -= v[i - p]\n        if i >= p - 1:\n            out[i] = run / p\n    ctx.vsma = ctx.series(out, \"vol_sma\")\n\n\ndef signal(ctx, i):\n    lb = max(1, int(ctx.p.lookback))\n    if i < lb + 2:\n        return 0\n    a = ctx.a[i]\n    vs = ctx.vsma[i - 1]\n    if a is None or a <= 0 or vs is None or vs <= 0:\n        return 0\n    # (1) the prior advance, measured to the PREVIOUS close, not this one\n    if ctx.c[i - 1] - ctx.c[i - 1 - lb] < float(ctx.p.adv_atr) * a:\n        return 0\n    # (2) volume expansion against the average as of yesterday\n    if ctx.v[i] <= float(ctx.p.vol_mult) * vs:\n        return 0\n    # (3) a new high, (4) reversed below the open\n    if ctx.h[i] <= ctx.h[i - 1] or ctx.c[i] >= ctx.o[i]:\n        return 0\n    rng = ctx.h[i] - ctx.l[i]\n    if rng <= 0:\n        return 0\n    # (5) and closed in the bottom of its own range\n    if (ctx.c[i] - ctx.l[i]) / rng >= float(ctx.p.clv_max):\n        return 0\n    return -1\n"
+}

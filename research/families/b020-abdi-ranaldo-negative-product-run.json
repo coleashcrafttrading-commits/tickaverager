@@ -1,0 +1,30 @@
+{
+ "name": "Abdi-Ranaldo Negative-Product Run",
+ "note": "Trades the SIGN of the Abdi-Ranaldo spread estimator's inner product, which every published implementation throws away by clamping at zero. pi_t = (c_t - eta_t)*(c_t - eta_{t+1}) with eta the log mid-range. Under a pure bid-ask bounce pi is positive in expectation; a run of strictly negative pi means the close is being pinned to one side of the range by directional pressure instead of bouncing, so the estimator's failure mode is itself the signal. Side comes from the sign of the mean close-minus-mid over the same run. pi_t is only known at t+1, which the code carries explicitly as a one-bar publication lag, so with the harness filling at the next open the trade lands at the open of t+2 exactly as the rule asks.",
+ "source": "Abdi & Ranaldo (2017), 'A Simple Estimation of Bid-Ask Spreads from Daily Close, High, and Low Prices', Review of Financial Studies 30(12):4437-4480 (SSRN 2725981). Closed form AR_t = sqrt(2*(C_t - 0.5(H_t+L_t))*(C_t - 0.5(H_{t+1}+L_{t+1}))) as reproduced in Entropy 22(7):783, 'Do Liquidity Proxies Based on Daily Prices and Quotes Really Measure Liquidity?'.",
+ "params": {
+  "run_win": 5,
+  "run_slack": 1,
+  "mean_k": 0.0,
+  "hold": 10,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "run_win": [
+   4,
+   5,
+   8
+  ],
+  "run_slack": [
+   1,
+   2
+  ],
+  "mean_k": [
+   0.0,
+   0.25
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    \"\"\"Abdi-Ranaldo inner product, kept signed instead of clamped at zero.\n\n    c_t = ln C_t, eta_t = (ln H_t + ln L_t)/2, pi_t = (c_t-eta_t)*(c_t-eta_{t+1}).\n    pi_t needs eta_{t+1}, so it is only KNOWN at bar t+1. Everything below is\n    stored on the bar it becomes known on: pav[i] = pi_{i-1}. That keeps the\n    one-bar publication lag explicit rather than buried, and the harness fills\n    at i+1's open, which is the \"act at the open of bar t+2\" the rule asks for.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    cl = [0.0] * n\n    eta = [0.0] * n\n    for i, b in enumerate(bars):\n        c = float(b[\"c\"])\n        h = float(b[\"h\"])\n        l = float(b[\"l\"])\n        cl[i] = math.log(c) if c > 0.0 else 0.0\n        eta[i] = 0.5 * (math.log(h) + math.log(l)) if (h > 0.0 and l > 0.0) else cl[i]\n    d = [cl[i] - eta[i] for i in range(n)]          # c_t - eta_t, known at t\n\n    pav = [None] * n                                 # pav[i] = pi_{i-1}\n    for i in range(1, n):\n        pav[i] = d[i - 1] * (cl[i - 1] - eta[i])\n\n    # trailing stdev of (c - eta), for the \"0.25 sigma\" variant of the mean test\n    S = 100\n    sg = [None] * n\n    s = 0.0\n    ss = 0.0\n    for i in range(n):\n        s += d[i]\n        ss += d[i] * d[i]\n        j = i - S\n        if j >= 0:\n            s -= d[j]\n            ss -= d[j] * d[j]\n        if i >= S:\n            v = ss / S - (s / S) ** 2\n            sg[i] = math.sqrt(v) if v > 0.0 else 0.0\n\n    ctx.f_pav = ctx.series(pav, \"pi_available\")\n    ctx.f_d = ctx.series(d, \"c_minus_eta\")\n    ctx.f_sg = ctx.series(sg, \"sigma_d\")\n\n\ndef _state(ctx, i):\n    \"\"\"(negatives, mean of c-eta, threshold) over the window of KNOWN pi.\"\"\"\n    w = max(2, int(ctx.p.run_win))\n    if i - w < 1:\n        return None\n    neg = 0\n    m = 0.0\n    for j in range(i - w + 1, i + 1):\n        p = ctx.f_pav[j]\n        if p is None:\n            return None\n        if p < 0.0:\n            neg += 1\n        m += ctx.f_d[j - 1]                     # the bar pi_j-1 belongs to\n    m /= w\n    thr = 0.0\n    if ctx.p.mean_k > 0.0:\n        sg = ctx.f_sg[i]\n        if sg is None:\n            return None\n        thr = float(ctx.p.mean_k) * sg\n    return neg, m, thr\n\n\ndef signal(ctx, i):\n    st = _state(ctx, i)\n    if st is None:\n        return 0\n    neg, m, thr = st\n    w = max(2, int(ctx.p.run_win))\n    need = w - max(0, int(ctx.p.run_slack))\n    if neg < need:\n        return 0\n    if m > thr:\n        return 1\n    if m < -thr:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out when the estimator stops failing, when the pinning side flips,\n    or on the hold clock.\"\"\"\n    if not ctx.positions:\n        return False\n    p0 = ctx.positions[0]\n    e = min(q[\"entry_i\"] for q in ctx.positions)\n    if i - e >= max(1, int(ctx.p.hold)):\n        return True\n    pa = ctx.f_pav[i]\n    if pa is not None and pa >= 0.0:\n        return True\n    st = _state(ctx, i)\n    if st is None:\n        return False\n    m = st[1]\n    d = 1.0 if p0[\"side\"] == \"long\" else -1.0\n    return m * d <= 0.0\n"
+}

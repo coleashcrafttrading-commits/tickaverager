@@ -1,0 +1,35 @@
+{
+ "name": "Levered ETF close rebalance drift",
+ "note": "A daily-reset levered or inverse ETF must finish the session holding its multiple times the new NAV, so the required trade is always in the same direction as the day's move, scales with (L^2 - L) * AUM * return, and has to be done near the close. This measures the session move R against the symbol's own recent daily sigma at a bar trig_min minutes before the close and goes WITH the move when |R| > k_sig * sigma, flattening at the close (leg 1); leg2=1 then takes the opposite side into the next session's open to collect the give-back once the mechanical demand stops. The session close is located from the tape - the heaviest-volume bar in the back half of the session, medianed over the previous slot_days sessions - so no timezone table is needed and a DST shift is followed automatically. TWO HONEST DEPARTURES from the idea as written: R is measured on the traded symbol itself rather than on SPY, because a single-symbol harness cannot read another ticker (the same mechanism applies to any underlying with levered products on it), and leg 2 fills at the first bar after the close rather than at the official 16:00 print, because the runner always fills at the next bar's open.",
+ "source": "Synthesis of a documented mechanism. Cheng & Madhavan, 'The Dynamics of Leveraged and Inverse Exchange-Traded Funds' (Barclays Global Investors, 2009), derive the (leverage^2 - leverage) x AUM x return rebalancing formula and its end-of-day concentration; also the subject of SEC/FINRA investor alerts on leveraged ETFs. The idea's author could not re-fetch these in their session, so the thresholds and the two-leg structure are their construction on top of the published mechanics, not a rule lifted from a paper.",
+ "params": {
+  "trig_min": 45,
+  "k_sig": 1.0,
+  "nsig": 10,
+  "leg2": 0,
+  "slot_days": 10,
+  "session_min": 385,
+  "tol_min": 30,
+  "side": "both",
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "k_sig": [
+   0.75,
+   1.0,
+   1.5
+  ],
+  "trig_min": [
+   15,
+   30,
+   45
+  ],
+  "leg2": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    N = len(bars)\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n    mins = [0] * N\n    dts = [\"\"] * N\n    for j in range(N):\n        s = str(bars[j][\"t\"])\n        dts[j] = s[:10]\n        try:\n            mins[j] = int(s[11:13]) * 60 + int(s[14:16])\n        except Exception:\n            mins[j] = 0\n\n    days = []\n    cur = None\n    for j in range(N):\n        if dts[j] != cur:\n            cur = dts[j]\n            days.append([])\n        days[-1].append(j)\n    nd = len(days)\n\n    # The session close is found from the tape, not from a timezone table: on\n    # every session the closing auction bar carries the day's heaviest volume\n    # in its back half. Taking the median of the PAST slot_days sessions makes\n    # the anchor robust to a single odd print and follows a DST shift on its own.\n    cand = [None] * nd\n    for k in range(nd):\n        idx = days[k]\n        half = idx[len(idx) // 2:]\n        if not half:\n            continue\n        best = half[0]\n        for j in half:\n            if vo[j] > vo[best]:\n                best = j\n        cand[k] = mins[best]\n\n    look = int(ctx.p.slot_days)\n    sess = int(ctx.p.session_min)\n    tol = int(ctx.p.tol_min)\n    close_i = [None] * nd\n    open_i = [None] * nd\n    for k in range(nd):\n        past = [c for c in cand[max(0, k - look):k] if c is not None]\n        if len(past) < 2:\n            continue\n        past.sort()\n        ref = past[len(past) // 2]\n        idx = days[k]\n        bi = None\n        bd = 10 ** 9\n        for j in idx:\n            d = mins[j] - ref\n            if d < 0:\n                d = -d\n            if d < bd:\n                bd = d\n                bi = j\n        if bi is None or bd > tol:\n            continue\n        close_i[k] = bi\n        om = ref - sess\n        bo = None\n        bd2 = 10 ** 9\n        for j in idx:\n            d = mins[j] - om\n            if d < 0:\n                d = -d\n            if d < bd2:\n                bd2 = d\n                bo = j\n        open_i[k] = bo if (bo is not None and bd2 <= tol) else idx[0]\n\n    dr = [None] * nd\n    for k in range(1, nd):\n        a = close_i[k - 1]\n        b = close_i[k]\n        if a is None or b is None:\n            continue\n        if cl[a] > 0.0 and cl[b] > 0.0:\n            dr[k] = math.log(cl[b] / cl[a])\n\n    nsig = int(ctx.p.nsig)\n    ksig = float(ctx.p.k_sig)\n    trig = int(ctx.p.trig_min)\n    leg2 = int(ctx.p.leg2)\n    sig = [0] * N\n    for k in range(1, nd):\n        ci = close_i[k]\n        pi = close_i[k - 1]\n        if ci is None or pi is None:\n            continue\n        h = [dr[q] for q in range(max(1, k - nsig), k) if dr[q] is not None]\n        nh = len(h)\n        need = nsig // 2\n        if need < 3:\n            need = 3\n        if nh < need:\n            continue\n        mu = sum(h) / nh\n        var = sum((x - mu) * (x - mu) for x in h) / (nh - 1)\n        if var <= 0.0:\n            continue\n        sd = math.sqrt(var)\n        ref = mins[ci] - trig\n        ti = None\n        bd = 10 ** 9\n        for j in days[k]:\n            if j >= ci:\n                break\n            d = mins[j] - ref\n            if d < 0:\n                d = -d\n            if d < bd:\n                bd = d\n                ti = j\n        if ti is None or bd > tol:\n            continue\n        pc = cl[pi]\n        if pc <= 0.0:\n            continue\n        r = cl[ti] / pc - 1.0\n        s = 0\n        if r > ksig * sd:\n            s = 1\n        elif r < -ksig * sd:\n            s = -1\n        if s == 0:\n            continue\n        sig[ti] = s\n        if leg2 and ci + 1 < N and k + 1 < nd:\n            sig[ci + 1] = -s\n\n    # where a position opened on bar j has to be closed: the session close if\n    # it opened before it, otherwise the next session's opening bar.\n    xat = [-1] * N\n    for k in range(nd):\n        ci = close_i[k]\n        if k + 1 < nd:\n            nxt = open_i[k + 1]\n            if nxt is None:\n                nxt = days[k + 1][-1]\n        else:\n            nxt = days[k][-1]\n        for j in days[k]:\n            if ci is not None and j <= ci:\n                xat[j] = ci\n            else:\n                xat[j] = nxt\n    ctx.sg = ctx.series(sig, \"lev_flow\")\n    ctx.xat = ctx.series(xat, \"exit_at\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    x = ctx.xat[e]\n    if x is None or x < 0:\n        return True\n    return i >= x"
+}

@@ -379,8 +379,12 @@ def report(trades: list[dict], bars: list[dict], *,
         "avg_trade": round(net / len(trades), 2) if trades else 0.0,
         "avg_win": round(gross_win / len(wins), 2) if wins else 0.0,
         "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0.0,
+        # gross_loss can be 0.0 with losses non-empty: a trade that closes at
+        # exactly its entry is booked as a loss of -0.0. Rare, but a sweep of
+        # hundreds of thousands of backtests finds it, and it used to take the
+        # whole run down with a ZeroDivisionError.
         "win_loss_ratio": round((gross_win / len(wins)) / (gross_loss / len(losses)), 2)
-                          if wins and losses else 0.0,
+                          if wins and losses and gross_loss else 0.0,
         "largest_win": round(max(wins), 2) if wins else 0.0,
         "largest_loss": round(min(losses), 2) if losses else 0.0,
         "expectancy": round(net / len(trades), 2) if trades else 0.0,

@@ -1,0 +1,36 @@
+{
+ "name": "Prior-Peak Reclaim With Volume Ramp",
+ "note": "All seven of DoubleTop's conditions, kept as written: a first top measured in a bounded historical window, a quantified pullback between the two peaks, a comparability band so the old peak is not a random old spike, the reclaim itself, both trend MAs, and the short-vs-long volume MA ramp. The depth/band/tolerance fractions are the one thing rescaled: 5% and 10% are daily-equity numbers and no intraday bar reaches them, so the defaults are the intraday-scale equivalents and the grid sweeps them.",
+ "source": "whchien/ai-trader, file ai_trader/backtesting/strategies/strategies/indicators.py class DoubleTop - the seven numbered conditions (cond_1 through cond_7) in its next() method",
+ "params": {
+  "peak_off": 30,
+  "peak_w": 25,
+  "pull_w": 30,
+  "hi_w": 60,
+  "hi_tol": 0.002,
+  "pull_depth": 0.005,
+  "band": 0.02,
+  "ma_fast": 60,
+  "ma_slow": 120,
+  "vol_fast": 5,
+  "vol_slow": 20,
+  "side": "long",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "pull_depth": [
+   0.003,
+   0.005,
+   0.01
+  ],
+  "band": [
+   0.005,
+   0.02
+  ],
+  "hi_tol": [
+   0.001,
+   0.002
+  ]
+ },
+ "code": "def _rext(src, n, want_max):\n    \"\"\"Rolling max/min over the n bars ending at i, inclusive. O(m).\"\"\"\n    from collections import deque\n    m = len(src)\n    out = [None] * m\n    dq = deque()\n    for i in range(m):\n        x = src[i]\n        if want_max:\n            while dq and src[dq[-1]] <= x:\n                dq.pop()\n        else:\n            while dq and src[dq[-1]] >= x:\n                dq.pop()\n        dq.append(i)\n        if dq[0] <= i - n:\n            dq.popleft()\n        if i >= n - 1:\n            out[i] = src[dq[0]]\n    return out\n\n\ndef _sma(src, n):\n    m = len(src)\n    out = [None] * m\n    s = 0.0\n    for i in range(m):\n        s += src[i]\n        if i >= n:\n            s -= src[i - n]\n        if i >= n - 1:\n            out[i] = s / n\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    ctx._maf = _sma(c, max(2, int(ctx.p.ma_fast)))\n    ctx._mas = _sma(c, max(2, int(ctx.p.ma_slow)))\n    ctx._vf = _sma(v, max(2, int(ctx.p.vol_fast)))\n    ctx._vs = _sma(v, max(2, int(ctx.p.vol_slow)))\n    # FirstTop: highest close of the peak_w bars ending peak_off bars ago\n    ctx._topw = _rext(c, max(2, int(ctx.p.peak_w)), True)\n    # PullbackLow: lowest close of the pull_w bars ending on the previous bar\n    ctx._lowp = _rext(c, max(2, int(ctx.p.pull_w)), False)\n    # highest close of the last hi_w bars, inclusive of today\n    ctx._hi = _rext(c, max(2, int(ctx.p.hi_w)), True)\n    ctx._entry_low = None\n\n\ndef signal(ctx, i):\n    off = max(1, int(ctx.p.peak_off))\n    if i - off < 0 or i < 1:\n        return 0\n    top = ctx._topw[i - off]\n    low = ctx._lowp[i - 1]\n    hi = ctx._hi[i]\n    maf = ctx._maf[i]\n    mas = ctx._mas[i]\n    vf = ctx._vf[i]\n    vs = ctx._vs[i]\n    if top is None or low is None or hi is None or maf is None \\\n            or mas is None or vf is None or vs is None:\n        return 0\n    if top <= 0.0 or hi <= 0.0:\n        return 0\n    c = ctx.c[i]\n    if c is None or c <= 0.0:\n        return 0\n    # (1) at / very near the recent high\n    if c < (1.0 - float(ctx.p.hi_tol)) * hi:\n        return 0\n    # (2) a pullback of the required depth actually happened\n    if low >= (1.0 - float(ctx.p.pull_depth)) * top:\n        return 0\n    # (3) the two peaks are comparable, not an unrelated old spike\n    if top < (1.0 - float(ctx.p.band)) * c:\n        return 0\n    # (4) today reclaims the old peak\n    if c < top:\n        return 0\n    # (5) (6) above both trend MAs\n    if c <= maf or c <= mas:\n        return 0\n    # (7) short volume MA above the long one\n    if vf <= vs:\n        return 0\n    ctx._entry_low = low\n    return 1\n\n\ndef exit_signal(ctx, i):\n    c = ctx.c[i]\n    maf = ctx._maf[i]\n    if c is None:\n        return False\n    if maf is not None and c < maf:\n        return True\n    if ctx._entry_low is not None and c < ctx._entry_low:\n        return True\n    return False\n"
+}

@@ -1,0 +1,28 @@
+{
+ "name": "Rest-of-day hedging momentum",
+ "note": "One hard-scheduled decision per session. offset_min before the closing bar, measure rROD = log(price / the PREVIOUS session's closing price) -- a fixed-clock cumulative return that deliberately includes the overnight gap, not a bar-count lookback. Above +thr go long, below -thr go short, otherwise stand aside; the position is closed market-on-close the same session, so entry and exit times are constants rather than signal-driven. The closing bar is found from the data itself as the minute-of-day bucket with the largest median volume inside the plausible US close window, which uses no price information and survives DST and any bar size; close_min pins it manually. No profit target and no stop, because the published rule is a timed hold and a stop would truncate the effect being measured.",
+ "source": "Baltussen, Da, Lammers & Martens (2021), 'Hedging demand and market intraday momentum', Journal of Financial Economics 142(1), 377-403; full text at https://academicweb.nd.edu/~zda/intramom.pdf. Sharpe 0.87-1.73 at asset-class level across 60+ futures markets, 1974-2020, with the negative-dealer-gamma mechanism verified directly in the paper.",
+ "params": {
+  "thr": 0.001,
+  "offset_min": 30,
+  "close_min": -1,
+  "side": "both",
+  "exit_signal_on": 1,
+  "time_stop": 12,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "thr": [
+   0.0,
+   0.001,
+   0.0025
+  ],
+  "offset_min": [
+   25,
+   30,
+   40
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    N = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    ts = [str(b[\"t\"]) for b in bars]\n    day = [x[:10] for x in ts]\n    mod = [int(x[11:13]) * 60 + int(x[14:16]) for x in ts]\n\n    # --- locate the session's closing bar. The closing auction makes it the\n    #     largest-volume minute-of-day bucket by a wide margin; the candidate\n    #     window covers 16:00 ET under either DST rule. No price is used. ---\n    cm = int(ctx.p.close_min)\n    if cm < 0:\n        buck = {}\n        for j in range(N):\n            buck.setdefault(mod[j], []).append(v[j])\n        best_m = None\n        best_v = -1.0\n        for lo, hi in ((18 * 60, 22 * 60), (0, 24 * 60)):\n            for m, xs in buck.items():\n                if len(xs) < 3 or m < lo or m > hi:\n                    continue\n                s = sorted(xs)\n                md = s[len(s) // 2]\n                if md > best_v:\n                    best_v = md\n                    best_m = m\n            if best_m is not None:\n                break\n        cm = best_m if best_m is not None else max(mod)\n\n    off = max(1, int(ctx.p.offset_min))\n    is_close = [0] * N\n    prev_close = [None] * N\n    dec = [0] * N\n    rrod = [None] * N\n\n    last_close_val = None\n    seen_day = None\n    decided = False\n    log = math.log\n    for j in range(N):\n        if day[j] != seen_day:\n            seen_day = day[j]\n            decided = False\n        if not decided and (cm - off) <= mod[j] <= cm:\n            dec[j] = 1\n            decided = True\n            p = last_close_val\n            if p is not None and p > 0.0 and c[j] > 0.0:\n                rrod[j] = log(c[j] / p)\n        if mod[j] == cm:\n            is_close[j] = 1\n            last_close_val = c[j]\n    ctx.dec = ctx.series(dec, \"decision_bar\")\n    ctx.rrod = ctx.series(rrod, \"rest_of_day\")\n    ctx.isc = ctx.series(is_close, \"closing_bar\")\n\n\ndef signal(ctx, i):\n    if not ctx.dec[i]:\n        return 0\n    r = ctx.rrod[i]\n    if r is None:\n        return 0\n    thr = float(ctx.p.thr)\n    if r > thr:\n        return 1\n    if r < -thr:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    return bool(ctx.isc[i])"
+}

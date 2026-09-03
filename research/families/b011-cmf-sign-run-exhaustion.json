@@ -1,0 +1,30 @@
+{
+ "name": "CMF sign run exhaustion",
+ "note": "Chaikin Money Flow zero crossings, but only the ones that terminate a money-flow regime that has already lasted at least as long as the indicator's own averaging window, and only when the newly arriving flow agrees with the SMA(50) trend. The trigger is the DURATION of the preceding flow state, not its magnitude.",
+ "source": "Chaikin Money Flow formula verified from the open-source `ta` library source, https://raw.githubusercontent.com/bukosabino/ta/master/ta/volume.py (ChaikinMoneyFlowIndicator: mfv = ((close-low)-(high-close))/(high-low), filled with 0, times volume, rolling-summed and divided by rolling-summed volume). Indicator originally Marc Chaikin; the run-length entry condition and the sign-flip exit are my synthesis.",
+ "params": {
+  "cmf_n": 21,
+  "min_run": 20,
+  "trend_n": 50,
+  "exit_signal_on": 1,
+  "time_stop": 25,
+  "st_atr": 2.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "cmf_n": [
+   14,
+   21
+  ],
+  "min_run": [
+   10,
+   15,
+   20
+  ],
+  "trend_n": [
+   50,
+   100
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    P = int(ctx.p.cmf_n)\n    mfv = [0.0] * n\n    vol = [0.0] * n\n    for t in range(n):\n        b = bars[t]\n        h = float(b[\"h\"])\n        l = float(b[\"l\"])\n        c = float(b[\"c\"])\n        v = float(b.get(\"v\") or 0.0)\n        vol[t] = v\n        rng = h - l\n        mfv[t] = 0.0 if rng <= 0.0 else (((c - l) - (h - c)) / rng) * v\n\n    cm = [None] * n\n    s1 = 0.0\n    s2 = 0.0\n    for t in range(n):\n        s1 += mfv[t]\n        s2 += vol[t]\n        if t >= P:\n            s1 -= mfv[t - P]\n            s2 -= vol[t - P]\n        if t >= P - 1:\n            cm[t] = (s1 / s2) if s2 > 0.0 else 0.0\n\n    sgn = [0] * n\n    run = [0] * n\n    for t in range(n):\n        x = cm[t]\n        if x is None:\n            continue\n        s = 1 if x > 0.0 else (-1 if x < 0.0 else 0)\n        sgn[t] = s\n        if s != 0 and t > 0 and sgn[t - 1] == s:\n            run[t] = run[t - 1] + 1\n        else:\n            run[t] = 1\n    ctx.cm = cm\n    ctx.sgn = sgn\n    ctx.run = run\n    ctx.sma = ctx.indicator(\"sma\", period=ctx.p.trend_n)\n    ctx.start = P + 2\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    x = ctx.cm[i]\n    px = ctx.cm[i - 1]\n    m = ctx.sma[i]\n    if x is None or px is None or m is None:\n        return 0\n    need = int(ctx.p.min_run)\n    if ctx.run[i - 1] < need:\n        return 0\n    if x > 0.0 and px <= 0.0 and ctx.sgn[i - 1] < 0 and ctx.c[i] > m:\n        return 1\n    if x < 0.0 and px >= 0.0 and ctx.sgn[i - 1] > 0 and ctx.c[i] < m:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    x = ctx.cm[i]\n    if x is None:\n        return False\n    d = ctx._dir\n    if d > 0:\n        return x < 0.0\n    if d < 0:\n        return x > 0.0\n    return False"
+}

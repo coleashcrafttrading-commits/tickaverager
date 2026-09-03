@@ -1,0 +1,28 @@
+{
+ "name": "Five-condition pivot reversal bar",
+ "note": "A demand pivot (fractal low, half-width fw) is broken, then reclaimed within gap bars by a single bar satisfying all five conditions at once: close above the two prior closes, close back above the broken pivot low, close above its own open, close above the midq fraction of its own range, and a range larger than the previous bar's. Short is the exact mirror around a broken supply pivot. The signal is emitted on the reversal bar's close so the shared harness fills at the NEXT open, which is the entry the source specifies.",
+ "source": "https://oxfordstrat.com/trading-strategies/reversal-patterns-part-2/ -- top/bottom reversal around supply/demand pivots: closes beyond the two previous closings, close beyond the pivot, close beyond the opening and the mid-range of the day, daily range exceeding the previous day's range, all within 5 bars of the breakout; entry at the open after the reversal; rating C, 42 US futures markets 1980-2011. Pivot construction follows Kaufman's swing-point definition.",
+ "params": {
+  "fw": 2,
+  "gap": 5,
+  "midq": 0.5,
+  "side": "both"
+ },
+ "grid": {
+  "fw": [
+   1,
+   2,
+   3
+  ],
+  "gap": [
+   3,
+   5,
+   8
+  ],
+  "midq": [
+   0.5,
+   0.65
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    N = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    fw = max(1, int(ctx.p.fw))\n    gap = max(0, int(ctx.p.gap))\n    q = float(ctx.p.midq)\n\n    sig = [0] * N\n    pl = None\n    ph = None\n    bdl = -1\n    bdh = -1\n    start = 2 * fw + 2\n    for i in range(start, N):\n        p = i - fw\n        lo0 = l[p]\n        hi0 = h[p]\n        okl = True\n        okh = True\n        for k in range(1, fw + 1):\n            if okl and not (lo0 < l[p - k] and lo0 < l[p + k]):\n                okl = False\n            if okh and not (hi0 > h[p - k] and hi0 > h[p + k]):\n                okh = False\n            if not okl and not okh:\n                break\n        if okl:\n            pl = lo0\n            bdl = -1\n        if okh:\n            ph = hi0\n            bdh = -1\n\n        if pl is not None and bdl < 0 and l[i] < pl:\n            bdl = i\n        if ph is not None and bdh < 0 and h[i] > ph:\n            bdh = i\n\n        s = 0\n        if bdl >= 0:\n            if i - bdl > gap:\n                bdl = -1\n            else:\n                rng = h[i] - l[i]\n                pr = h[i - 1] - l[i - 1]\n                if (c[i] > c[i - 1] and c[i] > c[i - 2] and c[i] > pl\n                        and c[i] > o[i] and rng > pr\n                        and c[i] >= l[i] + q * rng):\n                    s = 1\n                    bdl = -1\n                    pl = None\n        if s == 0 and bdh >= 0:\n            if i - bdh > gap:\n                bdh = -1\n            else:\n                rng = h[i] - l[i]\n                pr = h[i - 1] - l[i - 1]\n                if (c[i] < c[i - 1] and c[i] < c[i - 2] and c[i] < ph\n                        and c[i] < o[i] and rng > pr\n                        and c[i] <= h[i] - q * rng):\n                    s = -1\n                    bdh = -1\n                    ph = None\n        sig[i] = s\n    ctx.sg = ctx.series(sig, \"reversal_bar\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0"
+}

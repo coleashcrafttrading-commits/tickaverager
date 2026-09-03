@@ -1,0 +1,31 @@
+{
+ "name": "Pastor-Stambaugh Gamma Reversal",
+ "note": "Estimates the Pastor-Stambaugh liquidity coefficient per symbol -- the OLS loading of NEXT bar's return on this bar's signed standardised dollar volume, over a rolling window -- and fades a heavy-volume move only when that symbol's own gamma sits in the most-negative tail of its trailing history. Gamma is the only one of the standard liquidity measures that is predictive rather than contemporaneous, and its sign is the thesis rather than a filter.",
+ "source": "Lubos Pastor and Robert F. Stambaugh, 'Liquidity Risk and Expected Stock Returns', Journal of Political Economy 111(3), 642-685 (2003) -- the liquidity measure is the OLS gamma in a regression of next-period excess return on the current return and signed dollar volume. Their gamma is estimated monthly from daily data for an aggregate factor; the per-symbol rolling timing signal is the harvested idea's adaptation.",
+ "params": {
+  "reg_win": 60,
+  "pct_win": 250,
+  "pct_in": 20.0,
+  "ret_atr": 1.0,
+  "dv_z": 1.0,
+  "time_stop": 2,
+  "st_atr": 1.5
+ },
+ "grid": {
+  "reg_win": [
+   30,
+   60,
+   120
+  ],
+  "pct_in": [
+   20.0,
+   35.0
+  ],
+  "dv_z": [
+   0.5,
+   1.0,
+   1.5
+  ]
+ },
+ "code": "import math\n\n\ndef _solve3(a, b):\n    m = [a[0][:] + [b[0]], a[1][:] + [b[1]], a[2][:] + [b[2]]]\n    for col in range(3):\n        piv = max(range(col, 3), key=lambda r: abs(m[r][col]))\n        if abs(m[piv][col]) < 1e-16:\n            return None\n        m[col], m[piv] = m[piv], m[col]\n        pv = m[col][col]\n        for r in range(col + 1, 3):\n            f = m[r][col] / pv\n            if f:\n                for cc in range(col, 4):\n                    m[r][cc] -= f * m[col][cc]\n    x = [0.0, 0.0, 0.0]\n    for col in (2, 1, 0):\n        s = m[col][3] - sum(m[col][cc] * x[cc] for cc in range(col + 1, 3))\n        x[col] = s / m[col][col]\n    return x\n\n\ndef family_init(ctx):\n    \"\"\"Pastor-Stambaugh gamma: the loading of NEXT bar's return on this bar's\n    signed dollar volume, r_{t+1} = a + phi*r_t + gamma*sign(r_t)*dv_t.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    win = max(20, int(ctx.p.reg_win))\n    pwin = max(40, int(ctx.p.pct_win))\n\n    r = [None] * n\n    for i in range(1, n):\n        if c[i] > 0 and c[i - 1] > 0:\n            r[i] = math.log(c[i] / c[i - 1])\n\n    # dollar volume, standardised against its own trailing window so that the\n    # regressor for bar t is fixed once bar t is closed (no restatement).\n    dv = [None] * n\n    s1 = s2 = 0.0\n    k = 0\n    for i in range(n):\n        x = c[i] * v[i]\n        s1 += x\n        s2 += x * x\n        k += 1\n        if i >= win:\n            y = c[i - win] * v[i - win]\n            s1 -= y\n            s2 -= y * y\n            k -= 1\n        if k >= 20:\n            mu = s1 / k\n            var = s2 / k - mu * mu\n            if var > 1e-18:\n                dv[i] = (x - mu) / math.sqrt(var)\n\n    # rolling OLS on the pairs (regressors at t-1, response at t)\n    gam = [None] * n\n    A = [[0.0] * 3 for _ in range(3)]\n    B = [0.0, 0.0, 0.0]\n    m = 0\n    rows = [None] * n            # rows[t] = (x0,x1,x2, y) contributed at bar t\n\n    def _row(t):\n        if t < 1 or r[t] is None or r[t - 1] is None or dv[t - 1] is None:\n            return None\n        rt = r[t - 1]\n        sgn = 1.0 if rt > 0 else (-1.0 if rt < 0 else 0.0)\n        return (1.0, rt, sgn * dv[t - 1], r[t])\n\n    for i in range(n):\n        rows[i] = _row(i)\n        if rows[i]:\n            x0, x1, x2, y = rows[i]\n            xs = (x0, x1, x2)\n            for a in range(3):\n                B[a] += xs[a] * y\n                for bb in range(3):\n                    A[a][bb] += xs[a] * xs[bb]\n            m += 1\n        j = i - win\n        if j >= 0 and rows[j]:\n            x0, x1, x2, y = rows[j]\n            xs = (x0, x1, x2)\n            for a in range(3):\n                B[a] -= xs[a] * y\n                for bb in range(3):\n                    A[a][bb] -= xs[a] * xs[bb]\n            m -= 1\n        if m >= 20:\n            beta = _solve3(A, B)\n            if beta is not None:\n                gam[i] = beta[2]\n\n    # percentile rank of gamma inside its own trailing pwin estimates\n    pct = [None] * n\n    buf = []\n    for i in range(n):\n        g = gam[i]\n        if g is not None:\n            if len(buf) >= pwin:\n                buf.pop(0)\n            buf.append(g)\n            if len(buf) >= 40:\n                lo = 0\n                for x in buf:\n                    if x <= g:\n                        lo += 1\n                pct[i] = 100.0 * lo / len(buf)\n\n    ctx.gam = ctx.series(gam, \"ps_gamma\")\n    ctx.gpct = ctx.series(pct, \"ps_gamma_pct\")\n    ctx.dvz = ctx.series(dv, \"dollar_volume_z\")\n    ctx.ret = ctx.series(r, \"logret\")\n    ctx.atr14 = ctx.indicator(\"atr\", period=14)\n\n\ndef signal(ctx, i):\n    g, p = ctx.gam[i], ctx.gpct[i]\n    if g is None or p is None:\n        return 0\n    if g >= 0.0:                                  # (b) gamma must be negative\n        return 0\n    if p > ctx.p.pct_in:                          # (a) own most-reversing quantile\n        return 0\n    z = ctx.dvz[i]\n    if z is None or z < ctx.p.dv_z:               # (d) heavy dollar volume\n        return 0\n    rt = ctx.ret[i]\n    a = ctx.atr14[i]\n    px = ctx.c[i]\n    if rt is None or a is None or px <= 0:\n        return 0\n    if abs(rt) < ctx.p.ret_atr * (a / px):        # (c) a real move to reverse\n        return 0\n    if rt > 0:\n        return -1                                 # trade AGAINST sign(r_t)\n    if rt < 0:\n        return 1\n    return 0\n"
+}

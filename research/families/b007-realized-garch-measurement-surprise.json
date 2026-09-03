@@ -1,0 +1,37 @@
+{
+ "name": "Realized GARCH measurement-equation surprise",
+ "note": "Trades the residual of the Realized GARCH MEASUREMENT equation - the part of realized variation that the bar's own return direction and size cannot account for. K bars stand in for a day and the sub-bar returns inside them for the 5-minute returns, so x_t is a genuine realized variance and y_t the return over the same span. log(sig2) follows the model's volatility recursion w + a*log(x_{t-1}) + b*log(sig2_{t-1}); log(x_t) is then regressed on [1, log(sig2_t), z_t, z_t^2 - 1] - the intercept xi, the loading d and the Hermite leverage function tau(z) = e1*z + e2*(z^2-1) - and utilde is the standardised residual. Long the quiet churn (utilde high, |z| small); short the confirmed bad news (utilde high, z very negative). SUBSTITUTION, stated plainly: joint QML estimation of all seven parameters on a rolling 1000-day window is not affordable at hundreds of thousands of backtests, so a and b are fixed parameters (swept) and only the measurement equation is estimated, by rolling OLS on the window ending before the bar scored, which keeps every residual out of sample. What the idea calls novel - a signal orthogonal by construction to both the return and the volatility level - survives that substitution intact.",
+ "source": "Hansen, Huang & Shek (2012), 'Realized GARCH: a joint model for returns and realized measures of volatility', Journal of Applied Econometrics 27, 877-906. Model equations, the quadratic Hermite leverage function tau(z) = e1*z + e2*(z^2 - 1) and the news impact curve nu(z) = d*tau(z) as reproduced in the rugarch vignette 'Introduction to the rugarch package', Section 2.2.9, Eqs. (46)-(53): https://cran.r-project.org/web/packages/rugarch/vignettes/Introduction_to_the_rugarch_package.pdf",
+ "params": {
+  "rm_k": 12,
+  "gv_a": 0.4,
+  "gv_b": 0.55,
+  "rwin": 500,
+  "min_obs": 120,
+  "u_min": 2.0,
+  "z_band": 0.5,
+  "z_bad": -1.5,
+  "hold": 60,
+  "side": "both",
+  "tp_atr": 1.5,
+  "st_atr": 1.5,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "u_min": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "z_band": [
+   0.3,
+   0.5,
+   0.75
+  ],
+  "hold": [
+   30,
+   60
+  ]
+ },
+ "code": "def _ols4(A, b):\n    n = 4\n    M = [[A[r][c] for c in range(n)] + [b[r]] for r in range(n)]\n    tr = 0.0\n    for r in range(n):\n        tr += A[r][r]\n    rg = 1e-10 * (tr if tr > 0.0 else 1.0)\n    for r in range(n):\n        M[r][r] += rg\n    for col in range(n):\n        piv = col\n        best = abs(M[col][col])\n        for r in range(col + 1, n):\n            x = abs(M[r][col])\n            if x > best:\n                best = x\n                piv = r\n        if best < 1e-13:\n            return None\n        if piv != col:\n            M[col], M[piv] = M[piv], M[col]\n        pv = M[col][col]\n        for r in range(col + 1, n):\n            f = M[r][col] / pv\n            if f == 0.0:\n                continue\n            for c in range(col, n + 1):\n                M[r][c] -= f * M[col][c]\n    x = [0.0] * n\n    for r in range(n - 1, -1, -1):\n        s = M[r][n]\n        for c in range(r + 1, n):\n            s -= M[r][c] * x[c]\n        x[r] = s / M[r][r]\n    return x\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    N = len(bars)\n    cl = [float(b[\"c\"]) for b in bars]\n    K = int(ctx.p.rm_k)\n    ga = float(ctx.p.gv_a)\n    gb = float(ctx.p.gv_b)\n    rwin = int(ctx.p.rwin)\n    min_obs = int(ctx.p.min_obs)\n    lg = math.log\n\n    lr = [0.0] * N\n    for j in range(1, N):\n        p0 = cl[j - 1]\n        if p0 > 0.0 and cl[j] > 0.0:\n            lr[j] = lg(cl[j] / p0)\n\n    # x_t = realized variance of the last K sub-bar returns; y_t = the K-bar\n    # return over the same span. K bars stand in for \"a day\", the bars inside\n    # it for the 5-minute returns the realized measure is built from.\n    lx = [None] * N\n    rr = [None] * N\n    rs = 0.0\n    qs = 0.0\n    for j in range(1, N):\n        rs += lr[j]\n        qs += lr[j] * lr[j]\n        if j - K >= 1:\n            rs -= lr[j - K]\n            qs -= lr[j - K] * lr[j - K]\n        if j < K or qs <= 0.0:\n            continue\n        lx[j] = lg(qs)\n        rr[j] = rs\n\n    # volatility equation: log(sig2_t) = w + a*log(x_{t-1}) + b*log(sig2_{t-1})\n    ls = [None] * N\n    zh = [None] * N\n    prev_ls = None\n    prev_lx = None\n    ssum = 0.0\n    cnt = 0\n    for j in range(N):\n        v = lx[j]\n        if v is None:\n            continue\n        if prev_ls is None:\n            prev_ls = v\n            prev_lx = v\n            ssum += v\n            cnt += 1\n            continue\n        w_ = (1.0 - ga - gb) * (ssum / cnt)\n        cur = w_ + ga * prev_lx + gb * prev_ls\n        if cur > 50.0:\n            cur = 50.0\n        elif cur < -50.0:\n            cur = -50.0\n        ls[j] = cur\n        s = math.exp(cur * 0.5)\n        zh[j] = (rr[j] / s) if s > 0.0 else 0.0\n        prev_ls = cur\n        prev_lx = v\n        ssum += v\n        cnt += 1\n\n    # measurement equation, fitted by rolling OLS on the window that ENDS\n    # before the bar whose residual is being taken, so u_t is out of sample.\n    XtX = [[0.0] * 4 for _ in range(4)]\n    Xty = [0.0] * 4\n    yy = 0.0\n    nobs = 0\n    buf = []\n    ut = [None] * N\n    zz = [None] * N\n    for j in range(N):\n        if ls[j] is None:\n            continue\n        z = zh[j]\n        g = (1.0, ls[j], z, z * z - 1.0)\n        y = lx[j]\n        if nobs >= min_obs:\n            beta = _ols4(XtX, Xty)\n            if beta is not None:\n                pred = 0.0\n                bq = 0.0\n                for k in range(4):\n                    pred += beta[k] * g[k]\n                    bq += beta[k] * Xty[k]\n                ssr = yy - bq\n                dof = nobs - 4\n                if ssr > 0.0 and dof > 0:\n                    ut[j] = (y - pred) / math.sqrt(ssr / dof)\n                    zz[j] = z\n        buf.append((g, y))\n        for r in range(4):\n            gr = g[r]\n            Xty[r] += gr * y\n            row = XtX[r]\n            for c in range(4):\n                row[c] += gr * g[c]\n        yy += y * y\n        nobs += 1\n        if nobs > rwin:\n            g0, y0 = buf.pop(0)\n            for r in range(4):\n                gr = g0[r]\n                Xty[r] -= gr * y0\n                row = XtX[r]\n                for c in range(4):\n                    row[c] -= gr * g0[c]\n            yy -= y0 * y0\n            nobs -= 1\n    ctx.ut = ctx.series(ut, \"u_tilde\")\n    ctx.zh = ctx.series(zz, \"z_hat\")\n\n\ndef signal(ctx, i):\n    u = ctx.ut[i]\n    if u is None or u < float(ctx.p.u_min):\n        return 0\n    z = ctx.zh[i]\n    if z is None:\n        return 0\n    if z <= float(ctx.p.z_bad):\n        return -1\n    zb = float(ctx.p.z_band)\n    if -zb <= z <= zb:\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    return (i - e) >= int(ctx.p.hold)"
+}

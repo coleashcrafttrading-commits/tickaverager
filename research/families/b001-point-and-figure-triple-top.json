@@ -1,0 +1,31 @@
+{
+ "name": "Point-and-figure triple-top breakout on ATR-scaled boxes",
+ "note": "A.W. Cohen high/low point-and-figure chart with the box set to box_atr * ATR and refreshed every box_period bars, 3-box reversal. Long on a Triple Top Breakout (the live X column clears the tops of the two preceding X columns), short on the mirror; the exit is a Double Bottom Breakdown, a structural column event rather than a price stop. Time is thrown away: a bar that does not move price by a box does not advance the chart.",
+ "source": "A.W. Cohen's high/low point-and-figure method; Double Top Breakout and Triple Top Breakout definitions verified from StockCharts ChartSchool 'P&F Classic Patterns' (fetched 2026-09-02): a Double Top Breakout is 'an X-column breaks above the high of the prior X-column' with an O-column between; the Triple Top requires two prior X-columns at equal highs and a third exceeding both, spanning five columns. Traditional box scaling from the ChartCraft table popularised by Thomas Dorsey; I substituted ATR-proportional boxes so the rule is symbol-agnostic and sweepable.",
+ "params": {
+  "box_atr": 0.5,
+  "box_atr_n": 20,
+  "box_period": 1000,
+  "rev_boxes": 3,
+  "tops": 3,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "box_atr": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "tops": [
+   2,
+   3
+  ],
+  "rev_boxes": [
+   2,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Build A.W. Cohen high/low point-and-figure columns over the whole bar\n    set in one causal pass, and record the column events the rule trades.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    # Wilder ATR computed here rather than via ctx.indicator: the chart has to\n    # be walked start to finish inside family_init, and an indicator Series\n    # refuses forward reads while ctx is still sitting on bar 0.\n    per = max(2, int(ctx.p.box_atr_n))\n    atr = [None] * n\n    acc = 0.0\n    run = None\n    for i in range(n):\n        if i == 0:\n            tr = hi[0] - lo[0]\n        else:\n            tr = max(hi[i] - lo[i], abs(hi[i] - cl[i - 1]), abs(lo[i] - cl[i - 1]))\n        if i < per:\n            acc += tr\n            if i == per - 1:\n                run = acc / per\n                atr[i] = run\n        else:\n            run = (run * (per - 1) + tr) / per\n            atr[i] = run\n\n    rev = max(1, int(ctx.p.rev_boxes))\n    need = max(1, int(ctx.p.tops) - 1)          # prior columns that must be cleared\n    period = max(1, int(ctx.p.box_period))      # bars between box-size resets\n    k = float(ctx.p.box_atr)\n\n    long_e = [0.0] * n\n    short_e = [0.0] * n\n    exit_l = [0.0] * n\n    exit_s = [0.0] * n\n\n    col = 0            # +1 in an X column, -1 in an O column\n    T = 0.0            # top of the live X column\n    D = 0.0            # bottom of the live O column\n    B = None           # box size, fixed for the current period\n    xtops = []         # tops of completed X columns\n    obots = []         # bottoms of completed O columns\n    fx = fo = False    # entry already fired on this column\n    dtb = dbb = False  # double top / bottom already flagged on this column\n    reset_at = -10 ** 9\n\n    for i in range(n):\n        a = atr[i]\n        if a is None or a <= 0:\n            continue\n        if B is None or (i - reset_at) >= period:\n            B = round(k * a, 2)\n            if B < 0.01:\n                B = 0.01\n            reset_at = i\n        if col == 0:\n            col = 1\n            T = hi[i]\n            fx = dtb = False\n            continue\n\n        adv_x = adv_o = False\n        if col > 0:\n            if hi[i] >= T + B:                       # extension wins over reversal\n                T = T + int((hi[i] - T) / B) * B\n                adv_x = True\n            elif lo[i] <= T - rev * B:\n                xtops.append(T)\n                D = T - int((T - lo[i]) / B) * B\n                col = -1\n                fo = dbb = False\n                adv_o = True\n        else:\n            if lo[i] <= D - B:\n                D = D - int((D - lo[i]) / B) * B\n                adv_o = True\n            elif hi[i] >= D + rev * B:\n                obots.append(D)\n                T = D + int((hi[i] - D) / B) * B\n                col = 1\n                fx = dtb = False\n                adv_x = True\n\n        if adv_x:\n            if xtops and not dtb and T > xtops[-1]:\n                exit_s[i] = 1.0                      # double top breakout\n                dtb = True\n            if not fx and len(xtops) >= need and T > max(xtops[-need:]):\n                long_e[i] = 1.0                      # triple top breakout\n                fx = True\n        if adv_o:\n            if obots and not dbb and D < obots[-1]:\n                exit_l[i] = 1.0                      # double bottom breakdown\n                dbb = True\n            if not fo and len(obots) >= need and D < min(obots[-need:]):\n                short_e[i] = 1.0                     # triple bottom breakdown\n                fo = True\n\n    ctx.pf_long = ctx.series(long_e, \"pf_long\")\n    ctx.pf_short = ctx.series(short_e, \"pf_short\")\n    ctx.pf_xl = ctx.series(exit_l, \"pf_exit_long\")\n    ctx.pf_xs = ctx.series(exit_s, \"pf_exit_short\")\n\n\ndef signal(ctx, i):\n    if ctx.pf_long[i]:\n        return 1\n    if ctx.pf_short[i]:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The whole exit: a long dies on a double bottom breakdown, a short on a\n    double top breakout. No price stop -- the 3-box reversal already embeds\n    one of rev * box_atr * ATR.\"\"\"\n    if not ctx.positions:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return bool(ctx.pf_xl[i])\n    return bool(ctx.pf_xs[i])\n"
+}

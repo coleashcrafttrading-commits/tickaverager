@@ -1,0 +1,32 @@
+{
+ "name": "In-Range Opening Gap Fade to Prior Close",
+ "note": "Fades an opening gap only when it opens INSIDE the prior sessions range - the auction has already accepted two-sided trade at those prices, so the prior close is a genuine magnet - and only after the first 5-minute bar rejects it (closes against its own open and against the days open). Requires the gap to be at least 0.30 daily ATR. Target is yesterdays close, stop the rejection bars extreme plus 0.10 daily ATR, hard flat at 11:30 ET. Prior-day levels and a daily ATR are built from the 5-minute bars using completed prior sessions only; target and stop are checked on the close because the harness takes only ATR multiples, with a wide 3 ATR backstop.",
+ "source": "Gap taxonomy (area/common gaps close inside the prior range and fill; breakaway gaps clear it and run) from Edwards, R. D. and Magee, J., 'Technical Analysis of Stock Trends', chapter on gaps. The harvesting agent noted honestly that it found no peer-reviewed quantified gap-fill study, so the fill probabilities are a hypothesis to be measured here, not a documented effect.",
+ "params": {
+  "gap_atr": 0.3,
+  "rej_bars": 1,
+  "stop_pad_atr": 0.1,
+  "atr_days": 14,
+  "flat_min": 690,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0
+ },
+ "grid": {
+  "gap_atr": [
+   0.2,
+   0.3,
+   0.5
+  ],
+  "rej_bars": [
+   1,
+   2
+  ],
+  "flat_min": [
+   660,
+   690,
+   720
+  ]
+ },
+ "code": "import datetime\n\n_DST = {}\n\n\ndef _dst_span(y):\n    \"\"\"US Eastern DST window in UTC, computed arithmetically so no tz database\n    is needed: 2nd Sunday of March 07:00Z to 1st Sunday of November 06:00Z.\n    \"\"\"\n    b = _DST.get(y)\n    if b is None:\n        d = datetime.date(y, 3, 8)\n        d += datetime.timedelta(days=(6 - d.weekday()) % 7)\n        s = datetime.datetime(y, 3, d.day, 7)\n        e0 = datetime.date(y, 11, 1)\n        e0 += datetime.timedelta(days=(6 - e0.weekday()) % 7)\n        e = datetime.datetime(y, 11, e0.day, 6)\n        b = _DST[y] = (s, e)\n    return b\n\n\ndef _et(stamp):\n    \"\"\"(ET ordinal day, ET minute of day) from a UTC ISO bar stamp.\"\"\"\n    s = str(stamp)\n    dt = datetime.datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]),\n                           int(s[11:13]), int(s[14:16]))\n    a, b = _dst_span(dt.year)\n    loc = dt + datetime.timedelta(hours=(-4 if a <= dt < b else -5))\n    return loc.toordinal(), loc.hour * 60 + loc.minute\n\n\ndef family_init(ctx):\n    \"\"\"Fade an opening gap that lands INSIDE the prior day range, once the\n    first bars of the session reject it. Target is the prior close.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    op = [float(b[\"o\"]) for b in bars]\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    gmin = float(ctx.p.gap_atr)\n    rej = max(1, int(ctx.p.rej_bars))\n    pad = float(ctx.p.stop_pad_atr)\n    ndays = max(2, int(ctx.p.atr_days))\n    RTH0, RTH1 = 570, 960\n\n    day = [0] * n\n    tod = [0] * n\n    for i in range(n):\n        day[i], tod[i] = _et(bars[i][\"t\"])\n\n    order = []\n    idx = {}\n    for i in range(n):\n        if not (RTH0 <= tod[i] < RTH1):\n            continue\n        d = day[i]\n        if d not in idx:\n            idx[d] = []\n            order.append(d)\n        idx[d].append(i)\n\n    sig = [0] * n\n    tgt = [None] * n\n    stp = [None] * n\n\n    trs = []\n    prev = None                      # (high, low, close) of the prior session\n    atr_d = None\n    for d in order:\n        ii = idx[d]\n        dh = max(hi[j] for j in ii)\n        dl = min(lo[j] for j in ii)\n        dc = cl[ii[-1]]\n\n        if prev is not None and atr_d is not None and atr_d > 0:\n            o0 = op[ii[0]]\n            g = o0 - prev[2]\n            inside = prev[1] < o0 < prev[0]\n            if inside and abs(g) >= gmin * atr_d:\n                d0 = -1 if g > 0 else 1          # fade the gap\n                for j in ii[:rej]:\n                    rejected = (cl[j] < op[j] and cl[j] < o0) if d0 < 0 else \\\n                               (cl[j] > op[j] and cl[j] > o0)\n                    if not rejected:\n                        continue\n                    sig[j] = d0\n                    t = prev[2]                  # the gap fill\n                    s = hi[j] + pad * atr_d if d0 < 0 else lo[j] - pad * atr_d\n                    for u in ii:                 # carry the levels for the day\n                        if u >= j:\n                            tgt[u] = t\n                            stp[u] = s\n                    break\n\n        tr = dh - dl if prev is None else max(dh - dl, abs(dh - prev[2]),\n                                              abs(dl - prev[2]))\n        trs.append(tr)\n        if len(trs) >= 3:\n            w = trs[-ndays:]\n            atr_d = sum(w) / len(w)\n        prev = (dh, dl, dc)\n\n    ctx.sig = ctx.series(sig, \"gap_fade\")\n    ctx.tgt = ctx.series(tgt, \"prior_close\")\n    ctx.stp = ctx.series(stp, \"reject_stop\")\n    ctx.tod = tod                    # clock only, no price information\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Prior close reached, the rejection bar extreme given back, or 11:30 ET.\n    Both price exits are checked on the close, which is the closest the shared\n    harness allows to the limit and stop the rule actually names.\n    \"\"\"\n    if ctx.tod[i] >= int(ctx.p.flat_min):\n        return True\n    d = ctx._dir\n    t = ctx.tgt[i]\n    s = ctx.stp[i]\n    px = ctx.c[i]\n    if d < 0:\n        return (t is not None and px <= t) or (s is not None and px >= s)\n    if d > 0:\n        return (t is not None and px >= t) or (s is not None and px <= s)\n    return False\n"
+}

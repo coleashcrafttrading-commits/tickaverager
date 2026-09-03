@@ -1,0 +1,31 @@
+{
+ "name": "Kendall NET rank oscillator",
+ "note": "MyRSI -- the signed (CU-CD)/(CU+CD) oscillator -- passed through Ehlers' Noise Elimination Technology, a Kendall rank concordance of the last M readings against a straight line, so the reading is whether the oscillator has been ORDERING itself upward rather than where its level sits, achieved with no group delay. Long when NET recovers up through -thr, short when it rolls back down through +thr, each closed on the mirror trigger or after hold_mult * M bars. Sign convention follows Ehlers (NET = +1 for a monotonically rising input), which is what makes the paper's own trigger pair coherent.",
+ "source": "John F. Ehlers, 'NET - Noise Elimination Technology: Clarify Your Indicators Using Kendall Correlation', free technical paper at https://www.mesasoftware.com/papers/Noise%20Elimination%20Technology.pdf - including the stated simplification that sgn(y_i - y_j) is always negative because Y is a straight line, and the MyRSI construction (CU, CD, ratio of difference to sum) from Stocks & Commodities May 2018.",
+ "params": {
+  "net_l": 14,
+  "net_m": 10,
+  "thr": 0.5,
+  "hold_mult": 3,
+  "exit_signal_on": 1,
+  "exit_on_flip": 1,
+  "side": "both"
+ },
+ "grid": {
+  "net_l": [
+   10,
+   14,
+   20
+  ],
+  "net_m": [
+   8,
+   10,
+   14
+  ],
+  "thr": [
+   0.4,
+   0.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    L = int(ctx.p.net_l)\n    M = int(ctx.p.net_m)\n\n    # ---- MyRSI: the signed [-1, +1] RSI, (CU - CD) / (CU + CD) ----\n    up = [0.0] * n\n    dn = [0.0] * n\n    for j in range(1, n):\n        d = c[j] - c[j - 1]\n        if d > 0:\n            up[j] = d\n        elif d < 0:\n            dn[j] = -d\n    cu = 0.0\n    cd = 0.0\n    myrsi = [None] * n\n    for j in range(1, n):\n        cu += up[j]\n        cd += dn[j]\n        if j - L >= 1:\n            cu -= up[j - L]\n            cd -= dn[j - L]\n        if j >= L:\n            s = cu + cd\n            myrsi[j] = 0.0 if s <= 0 else (cu - cd) / s\n\n    # ---- NET: Kendall concordance of the last M MyRSI values against a line.\n    # x[a] is the value a bars ago, so a < b means a is the MORE RECENT of the\n    # pair. A monotonically RISING MyRSI gives every pair sgn(x[a] - x[b]) = +1\n    # and therefore NET = +1, which is the polarity Ehlers' own trigger\n    # geometry needs (long coming up off -1, short rolling off +1).\n    den = 0.5 * M * (M - 1)\n    net = [None] * n\n    for j in range(L + M - 1, n):\n        if myrsi[j - M + 1] is None:\n            continue\n        num = 0\n        for b in range(1, M):\n            xb = myrsi[j - b]\n            for a in range(0, b):\n                xa = myrsi[j - a]\n                if xa > xb:\n                    num += 1\n                elif xa < xb:\n                    num -= 1\n        net[j] = num / den if den > 0 else 0.0\n    ctx.net = ctx.series(net, \"net\")\n    ctx.p.time_stop = int(ctx.p.hold_mult * M)\n\n\ndef signal(ctx, i):\n    n0 = ctx.net[i]\n    n1 = ctx.net[i - 1]\n    if n0 is None or n1 is None:\n        return 0\n    t = float(ctx.p.thr)\n    if n1 <= -t and n0 > -t:\n        return 1\n    if n1 >= t and n0 < t:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    n0 = ctx.net[i]\n    n1 = ctx.net[i - 1]\n    if n0 is None or n1 is None or not ctx.positions:\n        return False\n    t = float(ctx.p.thr)\n    if ctx.positions[0][\"side\"] == \"long\":\n        return n1 >= t and n0 < t\n    return n1 <= -t and n0 > -t"
+}

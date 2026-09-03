@@ -1,0 +1,35 @@
+{
+ "name": "Corrado rank event trigger",
+ "note": "Both the entry and the exit are rank percentiles of the symbol's own abnormal-return distribution, so the rule has no volatility-scaling parameter at all and self-calibrates to a 15%-vol utility and a 90%-vol biotech alike. Rank today's abnormal return within the 251-value set formed by the est_win estimation-window ARs plus today's, giving Corrado's K = rank/(est_win+2). Fade the extreme: long when today is among the rank_k most negative and volume clears vol_mult x the 50-bar median, short on the mirror. The exit is a rank state, not a price - out once K has sat inside [band_lo, band_hi] for `consec` bars (the symbol is back in its own normal-return regime), with a hard max_hold and no price stop. DEPARTURE, stated: no SPY series reaches a single-symbol harness, so the abnormal return uses Brown & Warner's mean-adjusted model rather than a market model. For a RANK that is nearly free - AR_j = r_j - mu with the same mu for every j in the window, and rank is invariant to a common location shift, which is the whole reason Corrado reached for a rank statistic. What is lost is the beta hedge, not the score.",
+ "source": "Corrado (1989) rank test, K_i,t = rank(AR_i,t)/(1 + M_i + L_2), z = (K_bar_0 - 0.5)/S_Kbar, documented in full at https://eventstudytools.com/significance-tests. Recommended in Kothari & Warner (2006) footnote 6 for well-specified tests under increased event-period uncertainty.",
+ "params": {
+  "est_win": 250,
+  "rank_k": 2,
+  "vol_mult": 2.0,
+  "vol_win": 50,
+  "band_lo": 0.25,
+  "band_hi": 0.75,
+  "consec": 2,
+  "max_hold": 15,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "rank_k": [
+   1,
+   2,
+   5
+  ],
+  "vol_mult": [
+   1.0,
+   2.0
+  ],
+  "max_hold": [
+   10,
+   15,
+   30
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Corrado's rank score, computed under the mean-adjusted return model.\n\n    The harness serves one symbol, so a market model against SPY cannot be\n    estimated; the abnormal return is taken against the estimation window's\n    own mean (Brown & Warner's mean-adjusted model).  That costs nothing\n    here: AR_j = r_j - mu with the SAME mu for every j in the window, and a\n    RANK is invariant to a common location shift, so the rank of today's AR\n    among the window's ARs is identical to the rank of today's raw return\n    among the window's returns.  That invariance is the whole reason Corrado\n    reached for a rank statistic.\n    \"\"\"\n    import math\n\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    r = [None] * n\n    for k in range(1, n):\n        a, b = c[k - 1], c[k]\n        r[k] = math.log(b / a) if (a > 0.0 and b > 0.0) else 0.0\n\n    win = max(30, int(ctx.p.est_win))\n    kk = [None] * n                       # Corrado K_t in (0, 1)\n    for i in range(win + 1, n):\n        x = r[i]\n        below = 0\n        for j in range(i - win, i):\n            if r[j] < x:\n                below += 1\n        # rank 1 = most negative, out of the win estimation ARs plus today\n        kk[i] = (below + 1) / float(win + 2)\n    ctx.K = kk\n\n    lo_cut = int(ctx.p.rank_k) / float(win + 2)\n    hi_cut = (win + 1 - int(ctx.p.rank_k)) / float(win + 2)\n    mult = float(ctx.p.vol_mult)\n    vw = max(5, int(ctx.p.vol_win))\n\n    sig = [0] * n\n    for i in range(win + 1, n):\n        k = kk[i]\n        if k is None:\n            continue\n        if k > lo_cut and k < hi_cut:\n            continue\n        if mult > 0.0:                    # volume confirmation, computed lazily\n            seg = sorted(v[i - vw + 1:i + 1])\n            if not seg:\n                continue\n            m = len(seg)\n            med = seg[m // 2] if m % 2 else 0.5 * (seg[m // 2 - 1] + seg[m // 2])\n            if med <= 0.0 or v[i] < mult * med:\n                continue\n        sig[i] = 1 if k <= lo_cut else -1\n    ctx.sig = sig\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    if (i - e) >= int(ctx.p.max_hold):\n        return True\n    lo = float(ctx.p.band_lo)\n    hi = float(ctx.p.band_hi)\n    need = int(ctx.p.consec)\n    run = 0\n    for j in range(i, max(e - 1, 0) - 1, -1):\n        k = ctx.K[j]\n        if k is not None and lo <= k <= hi:\n            run += 1\n            if run >= need:\n                return True\n        else:\n            break\n    return False"
+}

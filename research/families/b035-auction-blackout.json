@@ -1,0 +1,28 @@
+{
+ "name": "Auction blackout breakout",
+ "note": "A plain N-bar Donchian breakout, restricted to the regular session, with the first k_open minutes after 09:30 ET and the last k_close minutes before 16:00 ET blacked out for ENTRIES only. Exits are untouched - the harness's stop and target run inside the blackout window exactly as outside it, which is the asymmetry the source asks for. k_open = k_close = 0 is the unmodified base strategy and is the control arm in the grid, so the sweep measures the blackout against its own baseline rather than against another family. The breakout base was chosen because it is the signal the source names directly: a breakout at 09:32 is measured against a range that does not yet exist.",
+ "source": "Boyarchenko, Larsen & Whelan, 'The Overnight Drift', Federal Reserve Bank of New York Staff Reports no. 917, February 2020, revised August 2022. Read directly from newyorkfed.org - the characterisation of the 09:00-10:00 hour as large and negative only in recessions and flat otherwise, in contrast to the consistently significant 02:00-03:00 window, is in the paper's introduction.",
+ "params": {
+  "k_open": 15,
+  "k_close": 0,
+  "don_n": 20
+ },
+ "grid": {
+  "k_open": [
+   0,
+   5,
+   15,
+   30
+  ],
+  "k_close": [
+   0,
+   10,
+   30
+  ],
+  "don_n": [
+   20,
+   40
+  ]
+ },
+ "code": "import datetime as _dt\n\n_DSTB = {}\n_OFF = {}\n\n\ndef _et(ts):\n    \"\"\"(ET day ordinal, ET minute-of-day) for a UTC ISO timestamp.\"\"\"\n    k = ts[:13]\n    off = _OFF.get(k)\n    if off is None:\n        y = int(ts[0:4])\n        u = _dt.datetime(y, int(ts[5:7]), int(ts[8:10]), int(ts[11:13]))\n        b = _DSTB.get(y)\n        if b is None:\n            d = _dt.date(y, 3, 1)\n            s = _dt.datetime(y, 3, 1 + (6 - d.weekday()) % 7 + 7, 7, 0)\n            d2 = _dt.date(y, 11, 1)\n            e = _dt.datetime(y, 11, 1 + (6 - d2.weekday()) % 7, 6, 0)\n            b = _DSTB[y] = (s, e)\n        off = _OFF[k] = (4 if b[0] <= u < b[1] else 5)\n    loc = _dt.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]),\n                       int(ts[11:13]), int(ts[14:16])) - _dt.timedelta(hours=off)\n    return loc.toordinal(), loc.hour * 60 + loc.minute\n\n\n_OPEN = 9 * 60 + 30\n_CLOSE = 16 * 60\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    ko = int(ctx.p.k_open)\n    kc = int(ctx.p.k_close)\n    lo = _OPEN + ko\n    hi = _CLOSE - kc\n\n    ok = [False] * n\n    for i in range(n):\n        _d, m = _et(bars[i][\"t\"])\n        # the base signal only exists inside the regular session; the blackout\n        # then removes the first k_open and last k_close minutes of it\n        ok[i] = (lo <= m < hi)\n    ctx.tradeable = ctx.series(ok, \"outside_blackout\")\n    ctx.don = ctx.indicator(\"donchian\", period=int(ctx.p.don_n))\n\n\ndef signal(ctx, i):\n    if not ctx.tradeable[i]:\n        return 0\n    u = ctx.don.upper[i - 1]\n    d = ctx.don.lower[i - 1]\n    c = ctx.c[i]\n    if u is None or d is None:\n        return 0\n    if c > u:\n        return 1\n    if c < d:\n        return -1\n    return 0"
+}

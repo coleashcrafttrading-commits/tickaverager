@@ -1,0 +1,34 @@
+{
+ "name": "Closing-Imbalance Window Momentum",
+ "note": "Rides the price reaction to the 15:50 ET closing-auction imbalance publication into the print. The regular-session open is located from the data (modal max-volume bar of each session's first half), the close bar is the last bar inside open+390 minutes, and the move over the bars straddling the publication is compared with its own trailing percentile plus a volume-participation test. Entry on the following bar's open, exit at the close bar's close, never overnight. The $50m dollar-volume floor is a universe filter, not a bar rule, so it is left to the study's symbol list. The only sample-wide quantity is the modal regular-session open minute, a clock constant (9:30 ET) inferred from timestamps rather than prices; every price and volume input to the signal is strictly past.",
+ "source": "Synthesis. Grounded in the published exchange mechanics - NYSE and Nasdaq begin disseminating closing-auction imbalance information at 15:50 ET - and in the closing-auction price-discovery literature. The three-minute price-reaction proxy for the unobservable imbalance feed is my construction; no paper states this exact rule.",
+ "params": {
+  "sig_off": 1,
+  "ref": 1,
+  "pctl": 50.0,
+  "vmult": 1.0,
+  "dlook": 60,
+  "vlook": 20,
+  "min_hist": 5,
+  "rth_minutes": 390,
+  "min_bars_day": 20,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "pctl": [
+   50.0,
+   60.0,
+   70.0
+  ],
+  "vmult": [
+   1.0,
+   1.25,
+   1.5
+  ],
+  "sig_off": [
+   1,
+   2
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Locate each session's closing bar, then read the post-15:50 reaction.\"\"\"\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    t = [b[\"t\"] for b in bars]\n    mind = [0] * m\n    day = [\"\"] * m\n    for i in range(m):\n        s = t[i]\n        day[i] = s[:10]\n        try:\n            mind[i] = int(s[11:13]) * 60 + int(s[14:16])\n        except Exception:\n            mind[i] = 0\n\n    days = []\n    idx = {}\n    for i in range(m):\n        d = day[i]\n        if not days or days[-1] != d:\n            days.append(d)\n            idx[d] = []\n        idx[d].append(i)\n\n    # the regular open: per session the heaviest bar of its first half, then\n    # the modal minute across sessions. Robust to DST and to odd sessions.\n    votes = {}\n    for d in days:\n        js = idx[d]\n        half = js[:max(1, len(js) // 2)]\n        oi = half[0]\n        for j in half:\n            if v[j] > v[oi]:\n                oi = j\n        votes[mind[oi]] = votes.get(mind[oi], 0) + 1\n    om = 0\n    best = -1\n    for k in sorted(votes):\n        if votes[k] > best:\n            best = votes[k]\n            om = k\n    span = max(30, int(ctx.p.rth_minutes))\n    minbars = max(5, int(ctx.p.min_bars_day))\n\n    close_i = {}\n    for d in days:\n        cand = [j for j in idx[d] if om <= mind[j] < om + span]\n        if len(cand) >= minbars:\n            close_i[d] = cand[-1]\n\n    flat = [False] * m\n    for d in days:\n        ci = close_i.get(d)\n        if ci is None:\n            for j in idx[d]:\n                flat[j] = True\n        else:\n            for j in idx[d]:\n                if j >= ci:\n                    flat[j] = True\n    ctx._flat = flat\n\n    sig = [0] * m\n    off = max(1, int(ctx.p.sig_off))\n    ref = max(1, int(ctx.p.ref))\n    q = float(ctx.p.pctl) / 100.0\n    if q < 0.05:\n        q = 0.05\n    if q > 0.95:\n        q = 0.95\n    dlook = max(5, int(ctx.p.dlook))\n    vlook = max(5, int(ctx.p.vlook))\n    minh = max(3, int(ctx.p.min_hist))\n    vmult = float(ctx.p.vmult)\n\n    dhist = []\n    vhist = []\n    for d in days:\n        ci = close_i.get(d)\n        if ci is None:\n            continue\n        s = ci - off\n        p1 = s - ref\n        if p1 < 0 or day[p1] != d or day[s] != d:\n            continue\n        if c[p1] <= 0.0:\n            continue\n        mv = c[s] / c[p1] - 1.0\n        vs = 0.0\n        for j in range(s - ref + 1, s + 1):\n            if j >= 0 and day[j] == d:\n                vs += v[j]\n        if len(dhist) >= minh and len(vhist) >= minh:\n            w = sorted(dhist[-dlook:])\n            L = len(w)\n            k = int(q * L)\n            if k >= L:\n                k = L - 1\n            thr = w[k]\n            vw = sorted(vhist[-vlook:])\n            vmed = vw[len(vw) // 2]\n            if abs(mv) > thr and vmed > 0.0 and vs > vmult * vmed:\n                sig[s] = 1 if mv > 0.0 else -1\n        dhist.append(abs(mv))\n        vhist.append(vs)\n    ctx._sig = sig\n\n\ndef signal(ctx, i):\n    s = ctx._sig[i]\n    return int(s) if s else 0\n\n\ndef exit_signal(ctx, i):\n    return bool(ctx._flat[i])\n"
+}

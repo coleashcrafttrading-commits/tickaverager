@@ -1,0 +1,33 @@
+{
+ "name": "Gamma Regime Router",
+ "note": "Lag-1 autocorrelation of intra-session log returns, fixed once per session from prior sessions only, decides WHICH rule runs today: positive rho (short-gamma, amplifying dealers) trades the break of the prior N-bar extreme, negative rho (long-gamma, dampening dealers) fades it and needs the level reclaimed. |rho| below the threshold stands aside. The paper's cross-sectional dollar-volume filter is omitted -- it needs the whole universe, and a family only sees one symbol.",
+ "source": "Barbon & Buraschi (2021), 'Gamma Fragility', working paper. Full text read at https://abarbon.com/assets/Barbon_Buraschi_2021_Gamma_Fragility.pdf - autocorrelation/gamma-imbalance panel regressions, persistence of rho (t=32.17), peak at h=60 minutes, stronger for illiquid stocks.",
+ "params": {
+  "rho_lb": 130,
+  "rho_thr": 0.1,
+  "brk": 8,
+  "h_bars": 1,
+  "time_stop": 6,
+  "st_atr": 1.2,
+  "exit_on_flip": 1,
+  "side": "both"
+ },
+ "grid": {
+  "rho_thr": [
+   0.05,
+   0.1,
+   0.2
+  ],
+  "brk": [
+   5,
+   8,
+   12
+  ],
+  "rho_lb": [
+   78,
+   130,
+   260
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    day = [str(b[\"t\"])[:10] for b in bars]\n\n    # ---- h-bar log returns, never across the overnight gap ----\n    h = max(1, int(ctx.p.h_bars))\n    ret = [None] * n\n    for i in range(h, n):\n        if day[i] == day[i - h] and c[i - h] > 0:\n            ret[i] = math.log(c[i] / c[i - h])\n\n    # non-overlapping return stream, in bar order, with its bar index\n    stream = []\n    last_used = -10 ** 9\n    for i in range(n):\n        if ret[i] is not None and i - last_used >= h:\n            stream.append((i, ret[i]))\n            last_used = i\n\n    # ---- rho, fixed once per session from everything before that session ----\n    lb = int(ctx.p.rho_lb)\n    rho = [None] * n\n    cur = None\n    k = 0                       # how much of `stream` predates this session\n    for i in range(n):\n        if i == 0 or day[i] != day[i - 1]:\n            while k < len(stream) and stream[k][0] < i:\n                k += 1\n            w = [x[1] for x in stream[max(0, k - lb):k]]\n            cur = None\n            if len(w) >= 30:\n                m = sum(w) / len(w)\n                num = sum((w[j] - m) * (w[j - 1] - m) for j in range(1, len(w)))\n                den = sum((x - m) ** 2 for x in w)\n                if den > 0:\n                    cur = num / den\n        rho[i] = cur\n    ctx.rho = ctx.series(rho, \"rho\")\n    ctx.d = ctx.indicator(\"donchian\", period=int(ctx.p.brk))\n\n\ndef signal(ctx, i):\n    r = ctx.rho[i]\n    if r is None:\n        return 0\n    thr = ctx.p.rho_thr\n\n    if r > thr:\n        # SHORT-GAMMA: dealers amplify, so a break of the prior extreme runs\n        u, l = ctx.d.upper[i - 1], ctx.d.lower[i - 1]\n        if u is None or l is None:\n            return 0\n        if ctx.c[i] > u:\n            return 1\n        if ctx.c[i] < l:\n            return -1\n        return 0\n\n    if r < -thr:\n        # LONG-GAMMA: dealers dampen, so the break gets sold back -- require\n        # the previous bar to have broken and THIS bar to reclaim the level\n        u2, l2 = ctx.d.upper[i - 2], ctx.d.lower[i - 2]\n        if u2 is None or l2 is None:\n            return 0\n        if ctx.c[i - 1] < l2 and ctx.c[i] > l2:\n            return 1\n        if ctx.c[i - 1] > u2 and ctx.c[i] < u2:\n            return -1\n    return 0"
+}

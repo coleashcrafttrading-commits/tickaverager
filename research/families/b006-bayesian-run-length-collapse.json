@@ -1,0 +1,34 @@
+{
+ "name": "Bayesian Run-Length Collapse",
+ "note": "Runs Adams-MacKay Bayesian online change-point detection on log returns with a Normal-Inverse-Gamma conjugate prior, and trades the bar on which the MAP run length COLLAPSES instead of incrementing, gated on the posterior putting more than 30% of its mass on a run of five bars or fewer. Direction is read from the new segment, so the rule is agnostic between continuation and reversal.",
+ "source": "Adams & MacKay, 'Bayesian Online Changepoint Detection', arXiv:0710.3742 (2007) -- run-length posterior, message-passing recursion, constant hazard.",
+ "params": {
+  "hazard_lam": 250.0,
+  "rl_cap": 150,
+  "kappa0": 1.0,
+  "alpha0": 1.0,
+  "conf": 0.3,
+  "m_look": 5,
+  "stop_sig": 2.0,
+  "time_stop": 20,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "hazard_lam": [
+   100.0,
+   250.0,
+   500.0
+  ],
+  "conf": [
+   0.2,
+   0.3,
+   0.5
+  ],
+  "m_look": [
+   3,
+   5,
+   10
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    \"\"\"Adams-MacKay BOCPD on log returns; the tradeable object is the\n    run-length posterior, and the event is its MAP collapsing.\"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    x = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0 and c[i - 1] > 0:\n            x[i] = math.log(c[i] / c[i - 1])\n\n    R = max(20, int(ctx.p.rl_cap))\n    H = 1.0 / max(2.0, float(ctx.p.hazard_lam))\n    oneH = 1.0 - H\n    mu0 = 0.0\n    kap0 = float(ctx.p.kappa0)\n    al0 = float(ctx.p.alpha0)\n\n    warm = min(100, max(20, n // 10))\n    seg = x[1:warm + 1]\n    if len(seg) >= 5:\n        mb = sum(seg) / len(seg)\n        b0 = sum((z - mb) ** 2 for z in seg) / len(seg)\n    else:\n        b0 = 1e-8\n    if b0 <= 0:\n        b0 = 1e-10\n    beta0 = b0 * al0                     # so the prior mean of sigma^2 is b0\n\n    # Student-t normalising constant per run length: df = 2*alpha0 + r is a\n    # deterministic function of r, so this is computed once, not per bar.\n    CN = [0.0] * (R + 2)\n    for r in range(R + 2):\n        df = 2.0 * al0 + r\n        CN[r] = math.exp(math.lgamma((df + 1.0) * 0.5) - math.lgamma(df * 0.5)) \\\n            / math.sqrt(df * math.pi)\n\n    probs = [0.0] * (R + 2)\n    mu = [0.0] * (R + 2)\n    bet = [0.0] * (R + 2)\n    probs[0] = 1.0\n    mu[0] = mu0\n    bet[0] = beta0\n    L = 1\n\n    cp = [0] * n                         # 1 where a change point is declared\n    sqrt = math.sqrt\n    prev_map = 0\n    conf = float(ctx.p.conf)\n\n    for i in range(warm + 1, n):\n        xi = x[i]\n        s0 = 0.0\n        for r in range(L - 1, -1, -1):\n            m_r = mu[r]\n            b_r = bet[r]\n            kap = kap0 + r\n            al = al0 + 0.5 * r\n            df = al + al\n            sc2 = b_r * (kap + 1.0) / (al * kap)\n            if sc2 <= 0.0:\n                sc2 = 1e-30\n            d = xi - m_r\n            pred = CN[r] / sqrt(sc2) * (1.0 + d * d / (df * sc2)) ** (-(df + 1.0) * 0.5)\n            pp = probs[r] * pred\n            s0 += pp\n            probs[r + 1] = pp * oneH\n            mu[r + 1] = (kap * m_r + xi) / (kap + 1.0)\n            bet[r + 1] = b_r + kap * d * d / (2.0 * (kap + 1.0))\n        probs[0] = s0 * H\n        mu[0] = mu0\n        bet[0] = beta0\n        L = L + 1\n        if L > R:\n            L = R\n        tot = 0.0\n        for r in range(L):\n            tot += probs[r]\n        if tot <= 0.0:\n            probs[0] = 1.0\n            for r in range(1, L):\n                probs[r] = 0.0\n            L = 1\n            prev_map = 0\n            continue\n        inv = 1.0 / tot\n        best = -1.0\n        arg = 0\n        for r in range(L):\n            probs[r] *= inv\n            if probs[r] > best:\n                best = probs[r]\n                arg = r\n        p_short = 0.0\n        for r in range(min(6, L)):\n            p_short += probs[r]\n        if arg < prev_map - 1 and p_short > conf:\n            cp[i] = 1\n        prev_map = arg\n\n    # --- direction of the NEW segment, and a 20-bar realised vol -------\n    ml = max(2, int(ctx.p.m_look))\n    mdir = [None] * n\n    run = 0.0\n    for i in range(n):\n        run += x[i]\n        if i - ml >= 0:\n            run -= x[i - ml]\n        if i >= ml:\n            mdir[i] = run / ml\n    sig20 = [None] * n\n    s = ss = 0.0\n    for i in range(n):\n        s += x[i]; ss += x[i] * x[i]\n        j = i - 20\n        if j >= 0:\n            s -= x[j]; ss -= x[j] * x[j]\n        if i >= 20:\n            v = ss / 20.0 - (s / 20.0) ** 2\n            sig20[i] = math.sqrt(v) if v > 0 else 0.0\n\n    ctx.cp = ctx.series(cp, \"changepoint\")\n    ctx.mdir = ctx.series(mdir, \"new_segment_drift\")\n    ctx.sig20 = ctx.series(sig20, \"sigma20\")\n\n\ndef signal(ctx, i):\n    if not ctx.cp[i]:\n        return 0\n    m = ctx.mdir[i]\n    if m is None or m == 0.0:\n        return 0\n    return 1 if m > 0 else -1\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out at the next declared break, or on a stop that widens with sqrt(t).\"\"\"\n    if ctx.cp[i]:\n        return True\n    if not ctx.positions:\n        return False\n    p = ctx.positions[0]\n    d = 1.0 if p[\"side\"] == \"long\" else -1.0\n    k = i - p[\"entry_i\"]\n    if k < 1:\n        return False\n    s = ctx.sig20[i]\n    e = p[\"entry\"]\n    if s is None or s <= 0 or e <= 0 or ctx.c[i] <= 0:\n        return False\n    move = math.log(ctx.c[i] / e) * d\n    return move < -ctx.p.stop_sig * s * math.sqrt(k)\n"
+}

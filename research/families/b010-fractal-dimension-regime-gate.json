@@ -1,0 +1,31 @@
+{
+ "name": "Fractal Dimension Regime Gate",
+ "note": "Keeps FRAMA's internal Hausdorff-style dimension estimate and throws away the moving average FRAMA exists to produce. D compares the summed range of two half-windows against the range of the whole: near 1 for a monotone path, near 2 for a space-filling one, so it measures how much of the distance travelled was retraced. D is direction-blind by construction, so the side is supplied separately by close[t] against close[t-N]. Exits when D turns noise-like again or the N-bar price comparison flips against the position.",
+ "source": "John F. Ehlers, 'FRAMA - Fractal Adaptive Moving Average' (mesasoftware.com/papers/FRAMA.pdf). The N1/N2/N3 definitions and D = log((N1+N2)/N3)/log(2) verified against QuantConnect/Lean, Indicators/FractalAdaptiveMovingAverage.cs. Using D alone as a standalone regime gate is the harvester's synthesis.",
+ "params": {
+  "n_win": 16,
+  "d_in": 1.4,
+  "d_out": 1.6,
+  "dir_lb": 0,
+  "fresh_cross": 1,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "n_win": [
+   10,
+   16,
+   32
+  ],
+  "d_in": [
+   1.35,
+   1.45
+  ],
+  "d_out": [
+   1.55,
+   1.7
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    N = int(ctx.p.n_win)\n    if N < 4:\n        N = 4\n    if N % 2:\n        N += 1\n    ctx.N = N\n    half = N // 2\n    ctx.dlb = int(ctx.p.dir_lb) if int(ctx.p.dir_lb) > 0 else N\n    hi = [float(x[\"h\"]) for x in b]\n    lo = [float(x[\"l\"]) for x in b]\n    d = [None] * n\n    ln2 = math.log(2.0)\n    for j in range(N - 1, n):\n        a0 = j - N + 1\n        m0 = a0 + half\n        n1 = (max(hi[m0:j + 1]) - min(lo[m0:j + 1])) / half\n        n2 = (max(hi[a0:m0]) - min(lo[a0:m0])) / half\n        n3 = (max(hi[a0:j + 1]) - min(lo[a0:j + 1])) / N\n        if n3 <= 0 or (n1 + n2) <= 0:\n            continue\n        v = math.log((n1 + n2) / n3) / ln2\n        d[j] = 1.0 if v < 1.0 else (2.0 if v > 2.0 else v)\n    ctx.d = ctx.series(d, \"fractal_dim\")\n\n\ndef signal(ctx, i):\n    lb = ctx.dlb\n    if i < max(ctx.N, lb) + 1:\n        return 0\n    d = ctx.d[i]\n    if d is None:\n        return 0\n    thr = float(ctx.p.d_in)\n    if int(ctx.p.fresh_cross):\n        pd_ = ctx.d[i - 1]\n        if pd_ is None or not (d < thr and pd_ >= thr):\n            return 0\n    elif d >= thr:\n        return 0\n    c = ctx.c[i]\n    r = ctx.c[i - lb]\n    if r is None:\n        return 0\n    if c > r:\n        return 1\n    if c < r:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    d = ctx.d[i]\n    if d is not None and d > float(ctx.p.d_out):\n        return True\n    lb = ctx.dlb\n    if i < lb:\n        return False\n    r = ctx.c[i - lb]\n    if r is None:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return ctx.c[i] < r\n    return ctx.c[i] > r"
+}

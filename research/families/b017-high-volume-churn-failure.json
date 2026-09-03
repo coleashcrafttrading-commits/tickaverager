@@ -1,0 +1,34 @@
+{
+ "name": "High Volume Churn Bar Failure",
+ "note": "A churn bar is effort without result: volume at or above the vol_pct percentile of the SAME time-of-day slot over the prior sessions, a range in the bottom rng_pct of the last 100, and a high or low that is the 20-bar extreme. Enormous volume at a swing extreme that goes nowhere means the aggressor was fully absorbed. The trade is not the churn bar -- churn precedes continuation too -- it is the FAILURE: the first close back through the whole churn bar within `win` bars, short if the churn bar set the high, long if it set the low. A later churn bar cancels and replaces the setup. Selects for range CONTRACTION on record volume, the exact opposite of an ATR-expansion filter.",
+ "source": "The 'High Volume Churn' bar type (high volume, low range) is one of the five classifications in the Better Volume indicator, documented at https://www.motivewave.com/studies/better_volume.htm and in the original description doc at https://c.mql5.com/forextsd/forum/147/better_volume_indicator__description.doc (the indicator originates from emini-watch.com). Those sources define the bar type and describe topping/bottoming sequences qualitatively; the percentile thresholds, the failure trigger and the exits are my specification.",
+ "params": {
+  "vol_pct": 0.9,
+  "rng_pct": 0.4,
+  "rng_n": 100,
+  "ext_n": 20,
+  "win": 8,
+  "slot_sess": 20,
+  "min_slot": 5,
+  "time_stop": 12,
+  "tp_atr": 1.5,
+  "st_atr": 1.0
+ },
+ "grid": {
+  "vol_pct": [
+   0.85,
+   0.9,
+   0.95
+  ],
+  "rng_pct": [
+   0.3,
+   0.4,
+   0.5
+  ],
+  "win": [
+   6,
+   10
+  ]
+ },
+ "code": "def _q(sv, q):\n    k = int(q * (len(sv) - 1))\n    if k < 0:\n        k = 0\n    if k >= len(sv):\n        k = len(sv) - 1\n    return sv[k]\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    h = [float(x[\"h\"]) for x in b]\n    l = [float(x[\"l\"]) for x in b]\n    c = [float(x[\"c\"]) for x in b]\n    v = [float(x.get(\"v\") or 0.0) for x in b]\n    ts = [str(x[\"t\"]) for x in b]\n\n    vq = float(ctx.p.vol_pct)\n    rq = float(ctx.p.rng_pct)\n    RN = int(ctx.p.rng_n)\n    EX = int(ctx.p.ext_n)\n    SS = int(ctx.p.slot_sess)\n    MINS = int(ctx.p.min_slot)\n    WIN = int(ctx.p.win)\n\n    slot = [t[11:16] for t in ts]\n    rng = [h[j] - l[j] for j in range(n)]\n\n    hist = {}\n    ent = [0] * n\n    pend = None\n    for j in range(n):\n        # ---- effort: is this bar's volume extreme for THIS time of day?\n        s = slot[j]\n        prior = hist.get(s)\n        hot = False\n        if prior is not None and len(prior) >= MINS:\n            w = sorted(prior[-SS:])\n            hot = v[j] >= _q(w, vq)\n        if prior is None:\n            hist[s] = [v[j]]\n        else:\n            prior.append(v[j])\n\n        churn = 0\n        if hot and j >= RN and j >= EX:\n            # ---- result: and yet the bar went nowhere\n            wr = sorted(rng[j - RN:j])\n            if rng[j] <= _q(wr, rq):\n                hh = max(h[j - EX + 1:j + 1])\n                ll = min(l[j - EX + 1:j + 1])\n                if h[j] >= hh:\n                    churn = -1          # absorbed at the highs -> short setup\n                elif l[j] <= ll:\n                    churn = 1           # absorbed at the lows  -> long setup\n\n        if churn:\n            pend = {\"d\": churn, \"hi\": h[j], \"lo\": l[j], \"j\": j}\n            continue\n        if pend is None:\n            continue\n        if j - pend[\"j\"] > WIN:\n            pend = None\n            continue\n        # ---- the trade is the FAILURE: price closes clean through the bar\n        if pend[\"d\"] < 0 and c[j] < pend[\"lo\"]:\n            ent[j] = -1\n            pend = None\n        elif pend[\"d\"] > 0 and c[j] > pend[\"hi\"]:\n            ent[j] = 1\n            pend = None\n    ctx.ent = ctx.series(ent, \"entry\")\n\n\ndef signal(ctx, i):\n    e = ctx.ent[i]\n    return 0 if e is None else int(e)"
+}

@@ -1,0 +1,36 @@
+{
+ "name": "Microstructure Noise Ratio Collapse",
+ "note": "Two-scales realized variance: RV on the native bar grid against the average of the k subsampled coarse-grid RVs over the same span, each rescaled to that span. With no microstructure noise the ratio tends to 1; bid-ask bounce inflates the fine grid. The entry is the COLLAPSE -- NR crossing down through nr_in having been above nr_hi within the last back bars -- taken in the direction of the last dir_lb bars, away from the open and the close. The fine scale is the bar the study runs on rather than 1-minute, because that is the finest grid the feed gives; the subsampled-average construction is otherwise the paper's.",
+ "source": "Zhang, Mykland & Ait-Sahalia (2005), 'A Tale of Two Time Scales: Determining Integrated Volatility with Noisy High-Frequency Data', JASA 100(472), 1394-1411 - the two-scales estimator and the subsampled-average construction. Signature-plot diagnostics for noise: Hansen & Lunde, https://public.econ.duke.edu/~get/browse/courses/201/spr11/DOWNLOADS/VolatilityMeasures/SpecificlPapers/hansen_lunde_forecasting_rv_11.pdf",
+ "params": {
+  "win": 60,
+  "kagg": 5,
+  "nr_in": 1.1,
+  "nr_hi": 1.3,
+  "back": 6,
+  "dir_lb": 6,
+  "nr_out": 1.25,
+  "open_min": 45,
+  "last_min": 900,
+  "flat_min": 955,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "nr_in": [
+   1.05,
+   1.1,
+   1.15
+  ],
+  "nr_hi": [
+   1.25,
+   1.3,
+   1.4
+  ],
+  "win": [
+   36,
+   60,
+   90
+  ]
+ },
+ "code": "import math\n\n\ndef _sess(ctx):\n    \"\"\"Per-bar ET clock, session index and RTH flag, from the timestamps alone.\n\n    The feed carries extended hours (04:00-20:00 ET) and some symbols are\n    missing premarket bars entirely, so nothing here may count bars to find a\n    session -- it all comes off the clock. US DST boundaries are computed from\n    the calendar, which is a priori knowledge, not a peek at the tape.\n    \"\"\"\n    import datetime as _dt\n    etm = []\n    day = []\n    rth = []\n    ri = []\n    cache = {}\n    last = None\n    di = -1\n    nr = 0\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        key = (y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            pv = _dt.date(y, mo, dd) - _dt.timedelta(days=1)\n            key = (pv.year, pv.month, pv.day)\n        if key != last:\n            last = key\n            di += 1\n        r = 570 <= tot < 960\n        etm.append(tot); day.append(di); rth.append(r)\n        if r:\n            nr += 1\n        ri.append(nr)\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ri = ri\n\n\ndef _rth_returns(ctx):\n    \"\"\"RTH-only log returns and the raw bar index each one ends on.\n\n    Overnight and pre/post-market returns are dropped: the intraday moments\n    below estimate an intraday quantity, and a gap return is not a 5-minute\n    return however it is labelled.\n    \"\"\"\n    R = []\n    POS = []\n    prev = None\n    prevday = None\n    for i in range(len(ctx.bars)):\n        if ctx.f_rth[i]:\n            c = float(ctx.bars[i][\"c\"])\n            if prev is not None and prev > 0.0 and c > 0.0 and \\\n                    ctx.f_day[i] == prevday:\n                R.append(math.log(c / prev))\n                POS.append(i)\n            prev = c\n            prevday = ctx.f_day[i]\n    return R, POS\n\n\ndef family_init(ctx):\n    _sess(ctx)\n    R, POS = _rth_returns(ctx)\n    n = len(ctx.bars)\n    W = max(12, int(ctx.p.win))\n    k = max(2, int(ctx.p.kagg))\n    dl = max(1, int(ctx.p.dir_lb))\n    cs = [0.0] * (len(R) + 1)\n    for j in range(len(R)):\n        cs[j + 1] = cs[j] + R[j]\n    nr = [None] * n\n    ev = [0] * n\n    prev_nr = None\n    recent = []\n    for j in range(W - 1, len(R)):\n        a = j - W + 1                     # first return in the span\n        rv1 = 0.0\n        for z in range(a, j + 1):\n            rv1 += R[z] * R[z]\n        acc = 0.0\n        cnt = 0\n        for off in range(k):\n            nb = (W - off) // k\n            if nb < 2:\n                continue\n            ssum = 0.0\n            base = a + off\n            for b0 in range(nb):\n                d = cs[base + (b0 + 1) * k] - cs[base + b0 * k]\n                ssum += d * d\n            acc += ssum * (float(W) / float(nb * k))\n            cnt += 1\n        if not cnt or acc <= 0.0:\n            prev_nr = None\n            continue\n        cur = rv1 / (acc / cnt)\n        i = POS[j]\n        nr[i] = cur\n        hi = 0.0\n        for hv in recent:\n            if hv > hi:\n                hi = hv\n        if prev_nr is not None and cur < ctx.p.nr_in <= prev_nr and \\\n                hi >= ctx.p.nr_hi:\n            d = cs[j + 1] - cs[max(0, j + 1 - dl)]\n            ev[i] = 1 if d > 0 else (-1 if d < 0 else 0)\n        recent.append(cur)\n        if len(recent) > int(ctx.p.back):\n            recent.pop(0)\n        prev_nr = cur\n    ctx.f_nr = nr\n    ctx.f_ev = ev\n\n\ndef signal(ctx, i):\n    if not ctx.f_rth[i]:\n        return 0\n    m = ctx.f_etm[i]\n    if m < 570 + int(ctx.p.open_min) or m >= int(ctx.p.last_min):\n        return 0\n    return ctx.f_ev[i]\n\n\ndef exit_signal(ctx, i):\n    if not ctx.f_rth[i] or ctx.f_etm[i] >= int(ctx.p.flat_min):\n        return True\n    v = ctx.f_nr[i]\n    return v is not None and v > ctx.p.nr_out\n"
+}

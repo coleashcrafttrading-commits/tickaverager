@@ -1,0 +1,39 @@
+{
+ "name": "Quantified Pin Bar at a 20-Bar Extreme",
+ "note": "A within-bar auction failure measured, not eyeballed: lower wick at least `wick_f` of the range, opposite wick under `opp_cap`, body under `body_cap`, range at least `atr_k` x ATR, and the bar must set the lowest low of the last `ext_n` bars. The three simultaneous ratio constraints are what exclude the dojis and spinning tops that a loose hammer definition lets through - the negative candlestick literature tests the unconditioned pattern, and this is deliberately the conditioned one. Entry emulates the buy stop above the pin high with a 2-bar order life; the stop, the 2R target, the 1R move to breakeven and the 8-bar give-up are mapped onto the shared execution grid.",
+ "source": "Bulkowski, T., 'Encyclopedia of Candlestick Charts', and the hammer identification guidelines at thepatternsite.com. The filters are a deliberate response to the negative literature: Marshall, B. R., Young, M. R. and Rose, L. C. (2006), 'Candlestick technical trading strategies: Can they create value for investors?', Journal of Banking & Finance 30(8), 2303-2323, find no profitability from unfiltered candlestick patterns on DJIA components 1992-2002, so only the conditioned version is worth testing.",
+ "params": {
+  "wick_f": 0.6,
+  "opp_cap": 0.15,
+  "body_cap": 0.3,
+  "atr_k": 1.2,
+  "ext_n": 20,
+  "valid": 2,
+  "tick": 0.01,
+  "tp_atr": 2.4,
+  "st_atr": 1.2,
+  "tp1_atr": 1.2,
+  "tp1_frac": 0.0,
+  "be_after_tp1": 1,
+  "time_stop": 8,
+  "side": "both"
+ },
+ "grid": {
+  "wick_f": [
+   0.55,
+   0.6,
+   0.7
+  ],
+  "atr_k": [
+   1.0,
+   1.2,
+   1.5
+  ],
+  "ext_n": [
+   10,
+   20,
+   50
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Three simultaneous wick/body ratios, a range floor in ATR, and a\n    positional requirement: the bar must make the extreme of its own recent\n    range. The stop order that follows is emulated - the level is armed by the\n    pin bar and the signal fires on the first of the next `valid` bars whose\n    high (low) trades through it, which the runner then fills at the next open.\n    \"\"\"\n    import indicators as I\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    at = I.compute(\"atr\", bars, period=int(ctx.p.atr_n))[\"atr\"]\n\n    wf = float(ctx.p.wick_f)\n    oc = float(ctx.p.opp_cap)\n    bc = float(ctx.p.body_cap)\n    ak = float(ctx.p.atr_k)\n    en = max(2, int(ctx.p.ext_n))\n    valid = max(1, int(ctx.p.valid))\n    tick = float(ctx.p.tick)\n\n    # rolling extremes over the trailing en bars, inclusive\n    rhi = [None] * n\n    rlo = [None] * n\n    dqh = []\n    dql = []\n    for i in range(n):\n        while dqh and h[dqh[-1]] <= h[i]:\n            dqh.pop()\n        dqh.append(i)\n        while dql and l[dql[-1]] >= l[i]:\n            dql.pop()\n        dql.append(i)\n        lb = i - en + 1\n        while dqh[0] < lb:\n            del dqh[0]\n        while dql[0] < lb:\n            del dql[0]\n        if i >= en - 1:\n            rhi[i] = h[dqh[0]]\n            rlo[i] = l[dql[0]]\n\n    pin = [0] * n\n    for i in range(n):\n        a = at[i]\n        if a is None or a <= 0.0 or rhi[i] is None:\n            continue\n        rng = h[i] - l[i]\n        if rng <= 0.0 or rng < ak * a:\n            continue\n        body = abs(c[i] - o[i])\n        lw = min(o[i], c[i]) - l[i]\n        uw = h[i] - max(o[i], c[i])\n        if body > bc * rng:\n            continue\n        if lw >= wf * rng and uw <= oc * rng and l[i] <= rlo[i]:\n            pin[i] = 1\n        elif uw >= wf * rng and lw <= oc * rng and h[i] >= rhi[i]:\n            pin[i] = -1\n\n    # arm the stop level for `valid` bars, then cancel it\n    sig = [0] * n\n    live = []                      # [expiry_bar, direction, level]\n    for i in range(n):\n        fired = 0\n        for od in reversed(live):\n            if od[1] > 0 and h[i] >= od[2]:\n                fired = 1\n                break\n            if od[1] < 0 and l[i] <= od[2]:\n                fired = -1\n                break\n        sig[i] = fired\n        if fired:\n            live = []\n        else:\n            live = [od for od in live if od[0] > i]\n        if pin[i] > 0:\n            live.append([i + valid, 1, h[i] + tick])\n        elif pin[i] < 0:\n            live.append([i + valid, -1, l[i] - tick])\n    ctx.sig = ctx.series(sig, \"pin_bar\")\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]"
+}

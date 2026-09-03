@@ -1,0 +1,31 @@
+{
+ "name": "BVC Absorption Fade",
+ "note": "Bulk-volume classification turns each bar's volume into signed order flow, OI = V*(2*Phi(dP/sigma)-1). Kyle says price should move in proportion to signed flow; when the trailing 6-bar flow sits in its top decile of 500 bars and the 6-bar price response is under a quarter of an ATR, lambda has locally collapsed - something is absorbing. Fades the flow. Exits when the flow reverts through its own median.",
+ "source": "Kyle (1985), 'Continuous Auctions and Insider Trading', Econometrica 53(6) for the flow-to-price-impact relation; the absorption interpretation is my own synthesis - the testable formulation is flow in the top decile paired with a price response below a quarter of an ATR.",
+ "params": {
+  "oi_lb": 6,
+  "oi_pct": 90,
+  "resp_atr": 0.25,
+  "sigma_win": 50,
+  "pct_win": 500,
+  "time_stop": 8,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "oi_lb": [
+   3,
+   6,
+   12
+  ],
+  "oi_pct": [
+   85,
+   90,
+   95
+  ],
+  "resp_atr": [
+   0.25,
+   0.4
+  ]
+ },
+ "code": "def _roll_q(v, win, qs, min_n=20):\n    \"\"\"Trailing-window quantiles, causal, O(n*win) memmove in C.\n\n    out[j] is a tuple of the requested quantiles of v[j-win+1 .. j].\n    \"\"\"\n    import bisect\n    n = len(v)\n    out = [None] * n\n    s = []\n    need = max(min_n, 1)\n    for j in range(n):\n        bisect.insort(s, v[j])\n        if j >= win:\n            k = bisect.bisect_left(s, v[j - win])\n            s.pop(k)\n        m = len(s)\n        if m >= need:\n            res = []\n            for q in qs:\n                idx = int(q * (m - 1))\n                if idx < 0:\n                    idx = 0\n                elif idx > m - 1:\n                    idx = m - 1\n                res.append(s[idx])\n            out[j] = tuple(res)\n    return out\n\n\ndef _phi(x):\n    import math\n    if x > 8.0:\n        return 1.0\n    if x < -8.0:\n        return 0.0\n    return 0.5 * (1.0 + math.erf(x * 0.7071067811865476))\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    dp = [0.0] * n\n    for j in range(1, n):\n        if c[j - 1] > 0 and c[j] > 0:\n            dp[j] = math.log(c[j] / c[j - 1])\n\n    # trailing stdev of dP, running sums\n    w = max(10, int(ctx.p.sigma_win))\n    sig = [0.0] * n\n    s1 = 0.0\n    s2 = 0.0\n    for j in range(n):\n        s1 += dp[j]\n        s2 += dp[j] * dp[j]\n        if j >= w:\n            s1 -= dp[j - w]\n            s2 -= dp[j - w] * dp[j - w]\n        m = min(j + 1, w)\n        if m >= 10:\n            var = s2 / m - (s1 / m) ** 2\n            sig[j] = math.sqrt(var) if var > 0 else 0.0\n\n    # signed imbalance, bulk-classified\n    oi = [0.0] * n\n    for j in range(n):\n        if sig[j] > 0:\n            oi[j] = v[j] * (2.0 * _phi(dp[j] / sig[j]) - 1.0)\n\n    lb = max(1, int(ctx.p.oi_lb))\n    soi = [0.0] * n\n    run = 0.0\n    for j in range(n):\n        run += oi[j]\n        if j >= lb:\n            run -= oi[j - lb]\n        soi[j] = run\n\n    q = float(ctx.p.oi_pct) / 100.0\n    pw = max(50, int(ctx.p.pct_win))\n    ctx.q = ctx.series(_roll_q(soi, pw, [1.0 - q, 0.5, q], min_n=100), \"soi_q\")\n    ctx.soi = ctx.series(soi, \"sum_oi\")\n    ctx._lb = lb\n\n\ndef signal(ctx, i):\n    lb = ctx._lb\n    if i < lb + 1:\n        return 0\n    q = ctx.q[i]\n    s = ctx.soi[i]\n    a = ctx.a[i]\n    c = ctx.c[i]\n    c0 = ctx.c[i - lb]\n    if q is None or s is None or a is None or not c or not c0:\n        return 0\n    lo, mid, hi = q\n    ceiling = float(ctx.p.resp_atr) * a / c\n    if abs(c / c0 - 1.0) > ceiling:\n        return 0                       # the flow did move price -- no absorption\n    if s >= hi:\n        return -1                      # heavy buying, no advance -> fade it\n    if s <= lo:\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    q = ctx.q[i]\n    s = ctx.soi[i]\n    if q is None or s is None:\n        return False\n    mid = q[1]\n    if ctx.positions[0][\"side\"] == \"long\":\n        return s >= mid\n    return s <= mid"
+}

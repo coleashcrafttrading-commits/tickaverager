@@ -1,0 +1,31 @@
+{
+ "name": "Decay-Matched Scale-In",
+ "note": "Almgren-Chriss slicing with the signal's own decay as the second cost. One entry is split into M tranches taken at consecutive bar closes unconditionally; M=1 is the single-shot benchmark arm. Variant B's front-loaded weights w_i proportional to exp(-i/tau) map exactly onto the runner's geometric add_scale = exp(-1/tau), and total size is held constant across M so the sweep measures the SCHEDULE and not the size. Remaining tranches are cancelled when the signal reverses (exit_on_flip). Two honest gaps: the symmetric scale-OUT arm cannot be expressed -- the runner's only partial exit is ATR-triggered, not time-triggered -- so this file is the single-shot-exit arm only; and the 2-ATR stop is applied per tranche rather than to the average fill, because the runner stops each lot at its own entry.",
+ "source": "Almgren & Chriss (2000), 'Optimal Execution of Portfolio Transactions', Journal of Risk 3(2):5-39 - the impact-versus-timing-risk trade-off and the endogenous slice count. Garleanu & Pedersen, NBER WP 15205, for 'trade partially towards the current aim' as the optimal response to costly trading against a decaying signal.",
+ "params": {
+  "tranches": 3,
+  "tau": 2.0,
+  "hold": 10,
+  "fast": 20,
+  "slow": 50,
+  "shares": 100,
+  "st_atr": 2.0,
+  "tp_atr": 0.0,
+  "exit_on_flip": 1,
+  "time_stop": 13
+ },
+ "grid": {
+  "tranches": [
+   1,
+   2,
+   3,
+   5
+  ],
+  "tau": [
+   1.0,
+   2.0,
+   5.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Split one entry into M tranches taken at consecutive bar closes.\n\n    The shared runner already owns entries and adds, so the schedule is\n    expressed through the knobs it exposes rather than by placing orders:\n\n      max_adds  = M - 1        M-1 further tranches after the first\n      add_atr   = -1e9         so a tranche fires every bar, unconditionally,\n                               rather than only when price moves against us\n      add_scale = exp(-1/tau)  which makes tranche i's size proportional to\n                               exp(-i/tau) -- exactly the front-loaded weight\n                               schedule of variant B\n      shares    = base / sum_k add_scale^k\n\n    That last line is the part that makes the M sweep a fair test: without it\n    a bigger M would simply buy more stock, and the experiment would measure\n    size instead of schedule.\n    \"\"\"\n    import math\n\n    ctx.f = ctx.indicator(\"ema\", period=max(2, int(ctx.p.fast)))\n    ctx.s = ctx.indicator(\"ema\", period=max(3, int(ctx.p.slow)))\n\n    M = max(1, int(ctx.p.tranches))\n    tau = float(ctx.p.tau)\n    sc = 1.0 if tau <= 0 else math.exp(-1.0 / tau)\n    tot = 0.0\n    for k in range(M):\n        tot += sc ** k\n    base = float(ctx.p.shares)\n\n    ctx.p.max_adds = M - 1\n    ctx.p.add_atr = -1e9\n    ctx.p.add_scale = sc\n    ctx.p.shares = max(1, int(round(base / tot)))\n    # single-shot exit: everything closes H bars after the last tranche\n    ctx.p.time_stop = M + max(1, int(ctx.p.hold))\n\n\ndef signal(ctx, i):\n    \"\"\"The primary signal being sliced. Deliberately a plain EMA cross -- the\n    experiment is the entry schedule, not the rule that triggers it.\"\"\"\n    f, s = ctx.f[i], ctx.s[i]\n    pf, ps = ctx.f[i - 1], ctx.s[i - 1]\n    if None in (f, s, pf, ps):\n        return 0\n    if pf <= ps and f > s:\n        return 1\n    if pf >= ps and f < s:\n        return -1\n    return 0"
+}

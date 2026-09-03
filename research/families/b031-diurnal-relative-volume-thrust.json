@@ -1,0 +1,39 @@
+{
+ "name": "Diurnal relative volume thrust",
+ "note": "RVOL against a TIME-OF-DAY baseline rather than a flat moving average: for each intraday slot the expected volume is the median that slot printed over the previous lb sessions, and RVOL is this bar's volume over that. Entry needs three things at once - RVOL at or above rvol_min, the bar closing in the top clv_frac of its own range, and the close clearing the highest high of the preceding brk_n bars (mirrored for shorts). No entries in the first fifteen minutes or the last forty-five. Exit is the earliest of the harness time stop, RVOL under rvol_cold for cold_bars running, price trading back through the thrust bar's opposite extreme, or the session end; nothing is held overnight, and any bar outside 09:30-16:00 ET counts as session end. The slot baseline is built strictly from earlier sessions and the New York offset is derived from the DST rule rather than assumed. Measured on the four probe symbols the default gate fires 11-25 times per symbol over 33 sessions, so rvol_min 3.0 is a real threshold; rvol_min 5.0 in the grid is deliberately near the edge.",
+ "source": "Admati & Pfleiderer, 'A Theory of Intraday Patterns: Volume and Price Variability', Review of Financial Studies 1(1), 1988; Andersen & Bollerslev, 'Intraday periodicity and volatility persistence in financial markets', Journal of Empirical Finance 4(2-3), 1997, 115-158 (Fourier Flexible Form deseasonalization). The trading rule is a synthesis of the two.",
+ "params": {
+  "rvol_min": 3.0,
+  "brk_n": 6,
+  "lb": 20,
+  "min_sess": 5,
+  "clv_frac": 0.25,
+  "rvol_cold": 1.0,
+  "cold_bars": 3,
+  "base_stat": 0,
+  "first_min": 585,
+  "last_min": 915,
+  "flat_min": 945,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "time_stop": 12,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "rvol_min": [
+   2.0,
+   3.0,
+   5.0
+  ],
+  "brk_n": [
+   4,
+   6,
+   12
+  ],
+  "lb": [
+   10,
+   20
+  ]
+ },
+ "code": "import datetime as _dt\nimport statistics as _st\nfrom collections import deque as _deque\n\n\ndef _et(bars):\n    \"\"\"Minute-of-day in New York and a session index for every bar.\n\n    Bars are stamped UTC. US DST runs from the second Sunday in March to the\n    first Sunday in November, so the offset is derived rather than assumed --\n    a hard-coded -4 shifts every winter session by an hour, which would smear\n    the whole point of a time-of-day volume profile.\n    \"\"\"\n    mins = []\n    sess = []\n    last = None\n    s = -1\n    for b in bars:\n        ts = str(b[\"t\"])\n        y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        if mo < 3 or mo > 11:\n            dst = False\n        elif 3 < mo < 11:\n            dst = True\n        elif mo == 3:\n            w = _dt.date(y, 3, 1).weekday()\n            fs = 1 + ((6 - w) % 7)\n            dst = d >= fs + 7\n        else:\n            w = _dt.date(y, 11, 1).weekday()\n            fs = 1 + ((6 - w) % 7)\n            dst = d < fs\n        t = _dt.datetime(y, mo, d, hh, mi) - _dt.timedelta(minutes=240 if dst else 300)\n        key = (t.year, t.month, t.day)\n        if key != last:\n            last = key\n            s += 1\n        mins.append(t.hour * 60 + t.minute)\n        sess.append(s)\n    return mins, sess\n\n\ndef _baseline(vals, how):\n    if not vals:\n        return None\n    if how <= 0:\n        return _st.median(vals)\n    v = sorted(vals)\n    k = int(len(v) * 0.1)\n    if len(v) - 2 * k >= 1:\n        v = v[k:len(v) - k]\n    return sum(v) / len(v)\n\n\ndef family_init(ctx):\n    \"\"\"Relative volume measured against the bar's OWN TIME OF DAY.\n\n    Volume is U-shaped and the shape is stable, so a flat rolling average is\n    mostly a picture of the session clock: a volume-surge filter built on one\n    fires almost only in the first and last half hour. Dividing by the median\n    volume this slot printed over the previous lb sessions removes the diurnal\n    factor, so abnormal participation is detected wherever in the day it\n    happens -- and at an unusual hour it is a much stronger statement.\n    \"\"\"\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n    mins, _sess = _et(bars)\n\n    OPEN = 570                                  # 09:30 ET\n    CLOSE = 960                                 # 16:00 ET\n    first = max(OPEN, int(ctx.p.first_min))\n    last = min(CLOSE, int(ctx.p.last_min))\n    flat_m = int(ctx.p.flat_min)\n    lb = max(2, int(ctx.p.lb))\n    need = max(1, int(ctx.p.min_sess))\n    thr = float(ctx.p.rvol_min)\n    cold_thr = float(ctx.p.rvol_cold)\n    cold_run = max(1, int(ctx.p.cold_bars))\n    top = float(ctx.p.clv_frac)\n    bn = max(1, int(ctx.p.brk_n))\n    how = int(ctx.p.base_stat)\n\n    hist = {}                                   # slot -> earlier sessions volume\n    sig = [0] * n\n    cold = [0] * n\n    eod = [0] * n\n    run = 0\n\n    hq = _deque()                               # rolling max high over bn bars\n    lq = _deque()\n\n    for i in range(n):\n        m = mins[i]\n\n        # extremes of the bn bars ENDING AT i-1\n        while hq and hq[0] < i - bn:\n            hq.popleft()\n        while lq and lq[0] < i - bn:\n            lq.popleft()\n        pmh = hi[hq[0]] if (hq and i >= bn) else None\n        pml = lo[lq[0]] if (lq and i >= bn) else None\n        while hq and hi[hq[-1]] <= hi[i]:\n            hq.pop()\n        hq.append(i)\n        while lq and lo[lq[-1]] >= lo[i]:\n            lq.pop()\n        lq.append(i)\n\n        if m < OPEN or m >= CLOSE:\n            eod[i] = 1                          # never hold outside the session\n            run = 0\n            continue\n        if m >= flat_m:\n            eod[i] = 1\n\n        past = hist.get(m)\n        e = _baseline(past[-lb:], how) if (past and len(past) >= need) else None\n        hist.setdefault(m, []).append(vo[i])    # appended AFTER, so it is causal\n\n        if e is None or e <= 0:\n            run = 0\n            continue\n        r = vo[i] / e\n        run = run + 1 if r < cold_thr else 0\n        if run >= cold_run:\n            cold[i] = 1\n\n        if r < thr or pmh is None or pml is None or m < first or m > last:\n            continue\n        rng = hi[i] - lo[i]\n        loc = 0.5 if rng <= 0 else (cl[i] - lo[i]) / rng\n        if loc >= 1.0 - top and cl[i] > pmh:\n            sig[i] = 1\n        elif loc <= top and cl[i] < pml:\n            sig[i] = -1\n\n    ctx.dv = ctx.series(sig, \"rvol_thrust\")\n    ctx.dv_cold = ctx.series(cold, \"rvol_cold\")\n    ctx.dv_eod = ctx.series(eod, \"session_end\")\n\n\ndef signal(ctx, i):\n    return int(ctx.dv[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Whichever comes first: the session ends, relative volume has been below\n    rvol_cold for cold_bars running, or price trades back through the thrust\n    bar's opposite extreme. The bar-count leg is the harness time stop, and the\n    thrust bar is entry_i - 1 because a decision on bar t fills at t+1's open.\n    \"\"\"\n    if not ctx.positions:\n        return False\n    if ctx.dv_eod[i] or ctx.dv_cold[i]:\n        return True\n    j = ctx.positions[0][\"entry_i\"] - 1\n    if j < 0:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return ctx.c[i] < ctx.l[j]\n    return ctx.c[i] > ctx.h[j]\n"
+}

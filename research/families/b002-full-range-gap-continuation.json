@@ -1,0 +1,27 @@
+{
+ "name": "Full-Range Gap Continuation with a Gap-Fill Stop",
+ "note": "Oxford Strategies 'Gap Pattern Type A'. Enter when a bar's ENTIRE range clears the prior bar's entire range (low[i] > high[i-1], not merely the prior close) AND the bar makes a new `chan`-bar extreme. The exit is the non-fill of the gap itself: a stop one tick inside high[i-1], so the trade is a bet that nobody transacts back at yesterday's extreme. Held long -- the source found longer holds preferred -- with a 6-ATR disaster stop and no profit target. The intraday no-retest variant of the idea is the same rule at a finer bar size, which is what a 5Min/1Min run of this file already is.",
+ "source": "https://oxfordstrat.com/trading-strategies/gap-pattern/ - Gap Pattern Type A: long gap Low[i] > High[i-1], channel filter High[i] > UpperChannel[i-1] lookback 2-100, pattern exit 'one tick below the price gap', time exit 1-50 with longer holds preferred, ATR(20)x6 stop, rated B/C over 42 US futures markets. Type B (https://oxfordstrat.com/trading-strategies/gap-pattern-2/) uses the weaker Low[i] > Close[i-1] and rates C.",
+ "params": {
+  "chan": 20,
+  "hold": 40,
+  "tick": 0.01,
+  "tp_atr": 0.0,
+  "st_atr": 6.0,
+  "exit_signal_on": 1,
+  "time_stop": 40
+ },
+ "grid": {
+  "chan": [
+   5,
+   20,
+   50
+  ],
+  "hold": [
+   10,
+   40,
+   100
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Full-range gaps plus a channel-breakout confirmation.\n\n    A LONG bar is one whose ENTIRE range sits above the prior bar's entire\n    range (low[i] > high[i-1]) and which also takes out the highest high of\n    the previous `chan` bars. The level the gap cleared -- high[i-1] -- is\n    remembered, because the exit is defined against it.\n    \"\"\"\n    n = len(ctx.bars)\n    hi = [b[\"h\"] for b in ctx.bars]\n    lo = [b[\"l\"] for b in ctx.bars]\n    L = max(2, int(ctx.p.chan))\n    up = [None] * n\n    dn = [None] * n\n    for i in range(L, n):\n        up[i] = max(hi[i - L:i])\n        dn[i] = min(lo[i - L:i])\n    ctx.up = ctx.series(up, \"chan_up\")\n    ctx.dn = ctx.series(dn, \"chan_dn\")\n    ctx.gap = None          # the level the gap cleared\n    ctx.gdir = 0\n    ctx.p.time_stop = int(ctx.p.hold)\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    u, d = ctx.up[i], ctx.dn[i]\n    if u is None or d is None:\n        return 0\n    ph, pl = ctx.h[i - 1], ctx.l[i - 1]\n    if ph is None or pl is None:\n        return 0\n    # LONG: the whole bar trades above the whole prior bar, and it is also a\n    # new `chan`-bar high.\n    if ctx.l[i] > ph and ctx.h[i] > u:\n        ctx.gap = ph\n        ctx.gdir = 1\n        return 1\n    # SHORT: mirror.\n    if ctx.h[i] < pl and ctx.l[i] < d:\n        ctx.gap = pl\n        ctx.gdir = -1\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The pattern exit: the trade dies the moment the gap fills.\n\n    One tick inside the level the gap cleared. This is the whole bet -- the\n    gap was information only for as long as nobody traded back into it.\n    \"\"\"\n    if ctx.gap is None or not ctx.positions:\n        return False\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    if d != ctx.gdir:\n        return False\n    if d > 0:\n        return ctx.l[i] <= ctx.gap - ctx.p.tick\n    return ctx.h[i] >= ctx.gap + ctx.p.tick"
+}

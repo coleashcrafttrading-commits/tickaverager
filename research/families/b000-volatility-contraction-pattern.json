@@ -1,0 +1,39 @@
+{
+ "name": "Volatility Contraction Pattern",
+ "note": "Minervini's VCP made mechanical. Three consecutive fractal-confirmed pullbacks of strictly decreasing depth, the third no deeper than half the first, swing highs not rolling over, and mean volume across the tightest leg dried up to 0.65 of the first leg. That arms a buy-stop at the 5-bar pivot high plus 0.05 ATR, good for 20 bars, taken only if the breakout bar's volume is 1.5x the 50-bar average; a close below the third swing low cancels it, and a breakout on thin volume burns the order. The two ABSOLUTE depth bounds in the source (D1<=35%, D3>=3%) are daily-scale numbers, so they are carried here in units of ATR/price, which keeps them meaning the same thing at any bar size. Exit is the family's own: stop at the third swing low, then a 5-bar-low trail once 2R is reached. Long only.",
+ "source": "Mark Minervini (2013), 'Trade Like a Stock Market Wizard: How to Achieve Superperformance in Stocks in Any Market', McGraw-Hill - the Volatility Contraction Pattern (VCP), described there in terms of successive contractions of decreasing depth with diminishing volume. Cited from knowledge (web search budget exhausted). Minervini states the pattern qualitatively; the 5-bar fractal pivot definition, the D3 <= 0.5*D1 ratio, the 0.65 volume dry-up threshold, the 1.5x breakout volume requirement, and all numeric bounds are the harvesting agent's pinning-down of it into something a programmer can implement without judgement calls.",
+ "params": {
+  "win": 120,
+  "frac_k": 2,
+  "ratio": 0.5,
+  "d1_atr": 23.0,
+  "d3_atr": 1.0,
+  "hi_tol": 0.02,
+  "dryup": 0.65,
+  "brk_vol": 1.5,
+  "brk_off": 0.05,
+  "piv_n": 5,
+  "vol_n": 50,
+  "valid": 20,
+  "atr_n": 14,
+  "side": "long",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "win": [
+   60,
+   120,
+   200
+  ],
+  "d3_atr": [
+   0.75,
+   1.0,
+   1.5
+  ],
+  "dryup": [
+   0.65,
+   0.85
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"The whole VCP state machine, precomputed causally bar by bar.\n\n    Nothing reads past the bar it answers for: a fractal pivot only enters the\n    alternating swing sequence on the bar that CONFIRMS it (k bars late), the\n    pivot price PIV is frozen at the arming bar, and the breakout can only be\n    tested on bars strictly after arming.\n    \"\"\"\n    import indicators as I\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n    atr = I.compute(\"atr\", bars, period=int(ctx.p.atr_n))[\"atr\"]\n\n    k = int(ctx.p.frac_k)\n    win = int(ctx.p.win)\n    piv_n = int(ctx.p.piv_n)\n    vol_n = int(ctx.p.vol_n)\n    valid = int(ctx.p.valid)\n    ratio = float(ctx.p.ratio)\n    dry = float(ctx.p.dryup)\n    brk = float(ctx.p.brk_vol)\n    off = float(ctx.p.brk_off)\n    d1cap = float(ctx.p.d1_atr)\n    d3flr = float(ctx.p.d3_atr)\n    hi_tol = float(ctx.p.hi_tol)\n\n    pre = [0.0] * (n + 1)\n    for j in range(n):\n        pre[j + 1] = pre[j] + vo[j]\n    avgv = [None] * n\n    for j in range(n):\n        if j >= vol_n - 1:\n            avgv[j] = (pre[j + 1] - pre[j + 1 - vol_n]) / vol_n\n\n    def meanv(a, b):\n        m = b - a + 1\n        return (pre[b + 1] - pre[a]) / m if m > 0 else None\n\n    # (2k+1)-bar fractal pivots, each stamped with the bar that confirms it\n    pivots = []\n    for j in range(k, n - k):\n        if hi[j] >= max(hi[j - k:j]) and hi[j] > max(hi[j + 1:j + k + 1]):\n            pivots.append((j + k, 1, j, hi[j]))\n        if lo[j] <= min(lo[j - k:j]) and lo[j] < min(lo[j + 1:j + k + 1]):\n            pivots.append((j + k, -1, j, lo[j]))\n    pivots.sort(key=lambda x: (x[0], x[2]))\n\n    sig = [0] * n\n    piv_at = [None] * n\n    low_at = [None] * n\n    alt = []\n    ptr = 0\n    cur = None          # [piv_price, swing_low, armed_at, expiry]\n\n    for t in range(n):\n        while ptr < len(pivots) and pivots[ptr][0] <= t:\n            _, kind, bj, px = pivots[ptr]\n            ptr += 1\n            if alt and alt[-1][0] == kind:\n                if (kind > 0 and px > alt[-1][2]) or (kind < 0 and px < alt[-1][2]):\n                    alt[-1] = [kind, bj, px]\n            else:\n                alt.append([kind, bj, px])\n            if len(alt) > 40:\n                del alt[:len(alt) - 40]\n\n        a = atr[t]\n\n        if cur is not None and a is not None:\n            if cl[t] < cur[1] or t > cur[3]:\n                cur = None                       # broke the low, or timed out\n            elif t > cur[2] and cl[t] > cur[0] + off * a:\n                av = avgv[t]\n                if av and vo[t] >= brk * av:\n                    sig[t] = 1\n                    piv_at[t] = cur[0]\n                    low_at[t] = cur[1]\n                cur = None                       # the order is used up either way\n\n        if cur is None and a is not None and cl[t] > 0:\n            cons = []\n            for x in range(len(alt) - 1):\n                if alt[x][0] > 0 and alt[x + 1][0] < 0:\n                    cons.append((alt[x][1], alt[x][2], alt[x + 1][1], alt[x + 1][2]))\n            if len(cons) >= 3:\n                c1, c2, c3 = cons[-3], cons[-2], cons[-1]\n                if c1[0] >= t - win + 1 and c3[2] + k <= t:\n                    ha1, lb1 = c1[1], c1[3]\n                    ha2, lb2 = c2[1], c2[3]\n                    ha3, lb3 = c3[1], c3[3]\n                    if ha1 > 0 and ha2 > 0 and ha3 > 0:\n                        d1 = (ha1 - lb1) / ha1\n                        d2 = (ha2 - lb2) / ha2\n                        d3 = (ha3 - lb3) / ha3\n                        af = a / cl[t]\n                        if (d3 > 0 and d1 > d2 > d3\n                                and d3 <= ratio * d1\n                                and d1 <= d1cap * af\n                                and d3 >= d3flr * af\n                                and ha1 <= (1.0 + hi_tol) * ha2\n                                and ha2 <= (1.0 + hi_tol) * ha3):\n                            v3 = meanv(c3[0], c3[2])\n                            v1 = meanv(c1[0], c1[2])\n                            if v1 and v3 is not None and v3 <= dry * v1:\n                                cur = [max(hi[max(0, t - piv_n + 1):t + 1]),\n                                       lb3, t, t + valid]\n\n    ctx.sig = ctx.series(sig, \"vcp\")\n    ctx.pivs = ctx.series(piv_at, \"vcp_piv\")\n    ctx.lows = ctx.series(low_at, \"vcp_low\")\n    ctx._piv = None\n    ctx._lb3 = None\n    ctx._trail = None\n    ctx._runner = False\n\n\ndef signal(ctx, i):\n    if ctx.sig[i]:\n        if ctx.positions:\n            # never rewrite the setup an OPEN trade is being managed against\n            return 1\n        ctx._piv = ctx.pivs[i]\n        ctx._lb3 = ctx.lows[i]\n        ctx._trail = ctx.lows[i]\n        ctx._runner = False\n        return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Stop at the third swing low; after 2R, trail the 5-bar low, never down.\"\"\"\n    if ctx._piv is None or ctx._lb3 is None:\n        return False\n    r = ctx._piv - ctx._lb3\n    if r > 0 and ctx.h[i] >= ctx._piv + 2.0 * r:\n        ctx._runner = True\n    if ctx._runner:\n        lows = [ctx.l[j] for j in range(max(0, i - int(ctx.p.piv_n)), i)]\n        lows = [x for x in lows if x is not None]\n        if lows:\n            want = min(lows)\n            ctx._trail = want if ctx._trail is None else max(ctx._trail, want)\n    lvl = ctx._trail if ctx._trail is not None else ctx._lb3\n    return ctx.c[i] < lvl\n"
+}

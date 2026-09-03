@@ -1,0 +1,35 @@
+{
+ "name": "Return-volatility hedge breakdown",
+ "note": "Shorts a new N-bar closing high when the normally negative return/volatility relationship has just broken down: rho over the last cwin bars is above break_thr having been below prior_thr within the last `look` bars, and the position is covered when rho falls back under `restore`. Honest substitution: the rule was written on SPY versus VIXY, and a family sees only the symbol it trades, so the volatility series is the symbol's own realised volatility rather than an implied one. The correlation-breakdown mechanism, the prior-regime requirement and the price-extreme anchor are all intact; what is lost is the option market's disagreement with the equity market, so this tests the leverage-effect breakdown and NOT hedging demand into strength.",
+ "source": "Synthesis. The mechanism rests on the well-documented, strongly negative contemporaneous VIX-SPX return relationship (the leverage/volatility-feedback effect described in the VIX literature and reflected in Cboe's own materials noting implied volatility rises when stocks drop) and on the standard practitioner observation that a positive same-day VIX/index co-movement at a new high reflects hedging demand into strength. I found no single paper that specifies this exact rule, so I have pinned it down myself and flagged it as untested rather than cite something vague.",
+ "params": {
+  "cwin": 10,
+  "vwin": 20,
+  "break_thr": -0.25,
+  "prior_thr": -0.5,
+  "look": 10,
+  "hi_n": 20,
+  "restore": -0.5,
+  "side": "short",
+  "exit_signal_on": 1,
+  "time_stop": 30
+ },
+ "grid": {
+  "cwin": [
+   5,
+   10,
+   21
+  ],
+  "break_thr": [
+   -0.4,
+   -0.25,
+   -0.1
+  ],
+  "hi_n": [
+   10,
+   20,
+   50
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    r = [0.0] * n\n    for t in range(1, n):\n        r[t] = (c[t] / c[t - 1] - 1.0) if c[t - 1] else 0.0\n\n    # realised volatility, and its bar-to-bar change: the observable stand-in\n    # for the volatility instrument the rule was written against\n    vw = int(ctx.p.vwin)\n    rv = [None] * n\n    ss = 0.0\n    for t in range(n):\n        ss += r[t] * r[t]\n        if t - vw >= 0:\n            ss -= r[t - vw] * r[t - vw]\n        if t >= vw:\n            rv[t] = math.sqrt(ss / vw)\n    dv = [None] * n\n    for t in range(1, n):\n        if rv[t] is not None and rv[t - 1] is not None:\n            dv[t] = rv[t] - rv[t - 1]\n\n    cw = int(ctx.p.cwin)\n    rho = [None] * n\n    for t in range(cw, n):\n        sa = sb = saa = sbb = sab = 0.0\n        ok = True\n        for u in range(t - cw + 1, t + 1):\n            b = dv[u]\n            if b is None:\n                ok = False\n                break\n            a = r[u]\n            sa += a\n            sb += b\n            saa += a * a\n            sbb += b * b\n            sab += a * b\n        if not ok:\n            continue\n        va = saa - sa * sa / cw\n        vb = sbb - sb * sb / cw\n        if va <= 1e-24 or vb <= 1e-24:\n            continue\n        rho[t] = (sab - sa * sb / cw) / math.sqrt(va * vb)\n\n    hn = int(ctx.p.hi_n)\n    athigh = [0] * n\n    for t in range(hn - 1, n):\n        m = c[t]\n        hit = True\n        for u in range(t - hn + 1, t):\n            if c[u] > m:\n                hit = False\n                break\n        athigh[t] = 1 if hit else 0\n\n    ctx.rho = ctx.series(rho, \"rho\")\n    ctx.athigh = ctx.series(athigh, \"at_high\")\n\n\ndef signal(ctx, i):\n    x = ctx.rho[i]\n    if x is None or not ctx.athigh[i]:\n        return 0\n    if x <= float(ctx.p.break_thr):\n        return 0\n    # it must be a BREAKDOWN, not a persistently broken regime: the normal\n    # deeply negative reading has to have been there recently\n    look = int(ctx.p.look)\n    seen = False\n    for u in range(max(0, i - look), i):\n        y = ctx.rho[u]\n        if y is not None and y < float(ctx.p.prior_thr):\n            seen = True\n            break\n    if not seen:\n        return 0\n    return -1\n\n\ndef exit_signal(ctx, i):\n    x = ctx.rho[i]\n    return x is not None and x < float(ctx.p.restore)"
+}

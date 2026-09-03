@@ -1,0 +1,32 @@
+{
+ "name": "Pattern-to-Pattern Variable Holding Period",
+ "note": "Enter on a white marubozu (closing or opening variant, the Goo-Chen-Chang one-day inequalities with equality tolerance eps = eps_frac * bar range) while price is above its EMA(10); hold with no target, no time stop and no ordinary stop, and exit only when the opposing black marubozu set prints. mode 0 goes flat on that signal, mode 1 reverses and stays always-in. The only price-based protection is the 4 x ATR catastrophic guard the paper specifies, carried as st_atr.",
+ "source": "Lu, Shiu & Liu (2012), variable-holding-period ('LSL') exit strategy - buy on a bullish signal, liquidate when a bearish pattern occurs - described and contrasted against the MYR and CL exits in Tharavanij, Siraprapasiri & Rajchamaha (2017), SAGE Open, doi:10.1177/2158244017736799. One-day pattern inequalities from Goo, Chen & Chang (2007), reproduced in the same paper.",
+ "params": {
+  "eps_frac": 0.05,
+  "ema_n": 10,
+  "mode": 1,
+  "exit_signal_on": 1,
+  "exit_on_flip": 1,
+  "tp_atr": 0.0,
+  "st_atr": 4.0,
+  "time_stop": 0,
+  "side": "both"
+ },
+ "grid": {
+  "eps_frac": [
+   0.02,
+   0.05,
+   0.1
+  ],
+  "ema_n": [
+   10,
+   20
+  ],
+  "mode": [
+   0,
+   1
+  ]
+ },
+ "code": "def _sets(o, h, l, c, eps):\n    \"\"\"Membership of the Goo-Chen-Chang one-day marubozu sets.\n\n    Returns (bullish, bearish). eps is the equality tolerance in price units.\n    \"\"\"\n    bull = False\n    bear = False\n    if c > o:\n        # closing white marubozu: no upper shadow, a real lower one\n        if abs(h - c) <= eps and (o - l) > eps:\n            bull = True\n        # opening white marubozu: no lower shadow, a real upper one\n        elif abs(o - l) <= eps and (h - c) > eps:\n            bull = True\n    elif c < o:\n        # closing black marubozu: no lower shadow, a real upper one\n        if abs(c - l) <= eps and (h - o) > eps:\n            bear = True\n        # opening black marubozu: no upper shadow, a real lower one\n        elif abs(o - h) <= eps and (c - l) > eps:\n            bear = True\n    return bull, bear\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    f = float(ctx.p.eps_frac)\n    bull = [False] * n\n    bear = [False] * n\n    for j in range(n):\n        b = bars[j]\n        o = float(b[\"o\"]); h = float(b[\"h\"]); l = float(b[\"l\"]); c = float(b[\"c\"])\n        rng = h - l\n        if rng <= 0:\n            continue\n        bu, be = _sets(o, h, l, c, f * rng)\n        bull[j] = bu\n        bear[j] = be\n    ctx.bull = ctx.series(bull, \"bullish_set_B\")\n    ctx.bear = ctx.series(bear, \"bearish_set_S\")\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n\n\ndef signal(ctx, i):\n    e = ctx.e[i]\n    if e is None:\n        return 0\n    if ctx.bull[i] and ctx.c[i] > e:\n        return 1\n    # mode 0 = long only (flat on S); mode 1 = always in (reverse on S)\n    if int(ctx.p.mode) == 1 and ctx.bear[i] and ctx.c[i] < e:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The whole idea: no clock, no level -- the opposing set ends the trade.\"\"\"\n    if not ctx.positions:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return bool(ctx.bear[i])\n    return bool(ctx.bull[i])"
+}

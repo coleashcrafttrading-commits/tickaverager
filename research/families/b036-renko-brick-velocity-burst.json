@@ -1,0 +1,35 @@
+{
+ "name": "Renko Brick Velocity Burst",
+ "note": "Close-only Renko bricks, then the signal is the CLOCK rather than the price: two consecutive same-colour bricks that both printed faster than the 20th percentile of the last 50 brick durations is urgency, and urgency is autocorrelated over the next few price quanta. Brick size is frozen each week at brick_mult x ATR of the trading timeframe (the idea's DAILY ATR makes bricks so large that an intraday run produces a handful of them), and durations are measured in bars, which equals wall-clock inside a session and neutralises the overnight gap.",
+ "source": "Renko construction and its algorithmic-trading properties: 'On Suitability of Renko Charts for Algorithmic Trading' (2024), DOI 10.1007/978-3-031-81261-3_6; 'Performance of Pairs Trading Strategies Based on Renko and Kagi Charts' (2025), DOI 10.33138/2957-0506.2025.20.483 (open access). The brick-duration signal itself is my synthesis -- the papers establish the chart type, not this rule.",
+ "params": {
+  "atr_n": 14,
+  "brick_mult": 1.0,
+  "pct": 20,
+  "streak": 2,
+  "dur_lb": 50,
+  "exit_med": 1.0,
+  "b_week": 1,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "side": "both"
+ },
+ "grid": {
+  "brick_mult": [
+   0.5,
+   1.0,
+   2.0
+  ],
+  "pct": [
+   10,
+   20,
+   30
+  ],
+  "streak": [
+   2,
+   3
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    day = [str(b[\"t\"])[:10] for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n\n    # ---- Wilder ATR on the trading timeframe -> brick size ----\n    an = max(2, int(ctx.p.atr_n))\n    atr = [None] * n\n    prev = None\n    a = None\n    tot = 0.0\n    for i in range(n):\n        tr = hi[i] - lo[i] if prev is None else max(hi[i] - lo[i],\n                                                    abs(hi[i] - prev),\n                                                    abs(lo[i] - prev))\n        prev = c[i]\n        if i < an:\n            tot += tr\n            if i == an - 1:\n                a = tot / an\n        else:\n            a = (a * (an - 1) + tr) / an\n        atr[i] = a\n\n    # brick size is frozen for a whole week (or session) from the ATR of the\n    # last bar before it -- a brick that resizes mid-move is not a Renko chart\n    mult = float(ctx.p.brick_mult)\n    weekly = int(ctx.p.b_week)\n    per = [0] * n\n    if weekly:\n        import datetime as _dt\n        for i in range(n):\n            y, mo, dd = day[i].split(\"-\")\n            per[i] = _dt.date(int(y), int(mo), int(dd)).toordinal() // 7\n    else:\n        k = 0\n        for i in range(n):\n            if i and day[i] != day[i - 1]:\n                k += 1\n            per[i] = k\n\n    # ---- close-only Renko, 2*B reversal ----\n    B = None\n    top = bot = None\n    d_last = 0\n    bdir = []\n    bbar = []\n    for i in range(n):\n        if (i == 0 or per[i] != per[i - 1]) and i > 0 and atr[i - 1]:\n            bs = round(max(0.01, mult * atr[i - 1]), 2)\n            if B is None:\n                B = bs\n                top = bot = c[i]\n            else:\n                B = bs\n        if B is None:\n            continue\n        px = c[i]\n        guard = 0\n        while guard < 60:\n            guard += 1\n            if d_last > 0:\n                if px >= top + B:\n                    bot = top\n                    top = top + B\n                    bdir.append(1)\n                    bbar.append(i)\n                elif px <= bot - B:\n                    top = bot\n                    bot = bot - B\n                    d_last = -1\n                    bdir.append(-1)\n                    bbar.append(i)\n                else:\n                    break\n            elif d_last < 0:\n                if px <= bot - B:\n                    top = bot\n                    bot = bot - B\n                    bdir.append(-1)\n                    bbar.append(i)\n                elif px >= top + B:\n                    bot = top\n                    top = top + B\n                    d_last = 1\n                    bdir.append(1)\n                    bbar.append(i)\n                else:\n                    break\n            else:\n                if px >= top + B:\n                    bot = top\n                    top = top + B\n                    d_last = 1\n                    bdir.append(1)\n                    bbar.append(i)\n                elif px <= bot - B:\n                    top = bot\n                    bot = bot - B\n                    d_last = -1\n                    bdir.append(-1)\n                    bbar.append(i)\n                else:\n                    break\n\n    # ---- brick durations, in bars. Bricks that print inside one bar split\n    #      that bar's elapsed time between them, exactly as the rule states.\n    nb = len(bdir)\n    dur = [0.0] * nb\n    j = 0\n    prev_bar = bbar[0] - 1 if nb else 0\n    while j < nb:\n        k = j\n        while k + 1 < nb and bbar[k + 1] == bbar[j]:\n            k += 1\n        span = max(1.0, float(bbar[j] - prev_bar))\n        each = span / float(k - j + 1)\n        for q in range(j, k + 1):\n            dur[q] = each\n        prev_bar = bbar[j]\n        j = k + 1\n\n    # ---- the burst rule, evaluated brick by brick ----\n    look = max(10, int(ctx.p.dur_lb))\n    pc = float(ctx.p.pct) / 100.0\n    streak = max(2, int(ctx.p.streak))\n    emult = float(ctx.p.exit_med)\n    sig = [0] * n\n    exl = [0] * n\n    exs = [0] * n\n    for q in range(look, nb):\n        w = sorted(dur[q - look:q])\n        idx = int(pc * (len(w) - 1))\n        p_fast = w[idx]\n        med = w[len(w) // 2] if len(w) % 2 else 0.5 * (w[len(w) // 2 - 1] +\n                                                       w[len(w) // 2])\n        b = bbar[q]\n        d0 = bdir[q]\n        run = True\n        for z in range(streak):\n            if bdir[q - z] != d0 or dur[q - z] >= p_fast:\n                run = False\n                break\n        if run:\n            sig[b] = d0\n        # exit: the first opposite brick, or a same-colour brick that has\n        # slowed past the median -- the burst has been spent either way\n        if d0 < 0 or dur[q] > emult * med:\n            exl[b] = 1\n        if d0 > 0 or dur[q] > emult * med:\n            exs[b] = 1\n\n    ctx.rk = ctx.series(sig, \"renko_burst\")\n    ctx.rkxl = ctx.series(exl, \"renko_exit_long\")\n    ctx.rkxs = ctx.series(exs, \"renko_exit_short\")\n\n\ndef signal(ctx, i):\n    s = ctx.rk[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.positions[0][\"side\"] == \"long\":\n        return bool(ctx.rkxl[i])\n    return bool(ctx.rkxs[i])"
+}

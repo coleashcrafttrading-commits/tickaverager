@@ -1,0 +1,35 @@
+{
+ "name": "Close-Location Absorption Run",
+ "note": "A run of bars that keep closing near their high (CLV >= threshold each bar, mean above it) while the net close-to-close change is under a fraction of ATR, on wide bars and heavy volume -- the Volume-Spread-Analysis reading of a large seller being absorbed. Entry is the stop order through the run's extreme; the exit is a decisive close on the wrong end, the run's own low, or 10 bars.",
+ "source": "Synthesis. The CLV statistic is the standard close-location term from the Williams Accumulation/Distribution and Chaikin Accumulation-Distribution Line constructions; the absorption reading (strong closes with no net price change on heavy volume) is the Volume Spread Analysis interpretation from Tom Williams, 'Master the Markets' (1993). The specific inequalities, the flat-price constraint and the CLV-based exit are my own quantification and have not, to my knowledge, been published or tested in this form.",
+ "params": {
+  "run_n": 3,
+  "clv_mean": 0.5,
+  "clv_min": 0.2,
+  "net_atr": 0.45,
+  "rng_atr": 2.0,
+  "vol_mult": 1.0,
+  "vol_n": 20,
+  "valid": 2,
+  "clv_rev": 0.5,
+  "tick": 0.01,
+  "exit_signal_on": 1,
+  "time_stop": 10
+ },
+ "grid": {
+  "run_n": [
+   2,
+   3
+  ],
+  "clv_mean": [
+   0.45,
+   0.55,
+   0.65
+  ],
+  "net_atr": [
+   0.3,
+   0.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"CLV = ((C-L)-(H-C))/(H-L): +1 closing on the high, -1 on the low.\n    A run of strong closes that produces NO net price change, on wide and\n    heavy bars, is the absorption signature. The two constraints together --\n    strong closes AND flat price -- are what separate this from momentum.\"\"\"\n    import indicators as I\n    bars = ctx.bars\n    m = len(bars)\n    r = max(2, int(ctx.p.run_n))\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    vv = [float(b.get(\"v\") or 0.0) for b in bars]\n    at = I.compute(\"atr\", bars, period=int(ctx.p.atr_n))[\"atr\"]\n\n    clv = [0.0] * m\n    for i in range(m):\n        rg = h[i] - l[i]\n        clv[i] = 0.0 if rg <= 0.0 else ((c[i] - l[i]) - (h[i] - c[i])) / rg\n\n    nv = max(2, int(ctx.p.vol_n))\n    av = [None] * m\n    s = 0.0\n    for i in range(m):\n        s += vv[i]\n        if i >= nv:\n            s -= vv[i - nv]\n        if i >= nv - 1:\n            av[i] = s / nv\n\n    th = [None] * m        # long buy-stop trigger armed on this bar\n    tl = [None] * m        # short sell-stop trigger\n    ph = [None] * m        # protective level for a long  (setup low)\n    pl = [None] * m        # protective level for a short (setup high)\n    cm = float(ctx.p.clv_mean)\n    cn = float(ctx.p.clv_min)\n    for i in range(r, m):\n        a = at[i]\n        if a is None or a <= 0.0 or av[i] is None or av[i] <= 0.0:\n            continue\n        if abs(c[i] - c[i - r]) > ctx.p.net_atr * a:\n            continue                       # net progress must be ~zero\n        rs = 0.0\n        vs = 0.0\n        for j in range(i - r + 1, i + 1):\n            rs += h[j] - l[j]\n            vs += vv[j]\n        if rs < ctx.p.rng_atr * a:\n            continue                       # the bars were not quiet\n        if vs < ctx.p.vol_mult * r * av[i]:\n            continue                       # the trade was heavy\n        w = clv[i - r + 1:i + 1]\n        mean = sum(w) / r\n        if mean >= cm and min(w) >= cn:\n            th[i] = max(h[i - r + 1:i + 1])\n            ph[i] = min(l[i - r + 1:i + 1])\n        elif mean <= -cm and max(w) <= -cn:\n            tl[i] = min(l[i - r + 1:i + 1])\n            pl[i] = max(h[i - r + 1:i + 1])\n\n    ctx.th = ctx.series(th, \"trigger_long\")\n    ctx.tl = ctx.series(tl, \"trigger_short\")\n    ctx.ph = ctx.series(ph, \"setup_low\")\n    ctx.pl = ctx.series(pl, \"setup_high\")\n    ctx.clv = ctx.series(clv, \"clv\")\n    ctx._prot = None\n\n\ndef signal(ctx, i):\n    \"\"\"The stop order left above the run: it triggers when a later bar trades\n    through the run's extreme. Valid for `valid` bars, then the setup lapses.\"\"\"\n    tick = float(ctx.p.tick)\n    for k in range(1, max(1, int(ctx.p.valid)) + 1):\n        j = i - k\n        if j < 0:\n            break\n        t = ctx.th[j]\n        if t is not None and ctx.h[i] >= t + tick:\n            if not ctx.positions:\n                ctx._prot = ctx.ph[j]\n            return 1\n        t = ctx.tl[j]\n        if t is not None and ctx.l[i] <= t - tick:\n            if not ctx.positions:\n                ctx._prot = ctx.pl[j]\n            return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    d = 1 if ctx.positions[0][\"side\"] == \"long\" else -1\n    px = ctx.c[i]\n    cl = ctx.clv[i]\n    if cl is not None:\n        # a decisive close on the wrong end reverses the whole premise\n        if d > 0 and cl <= -ctx.p.clv_rev:\n            return True\n        if d < 0 and cl >= ctx.p.clv_rev:\n            return True\n    p = ctx._prot\n    if p is not None:\n        if d > 0 and px < p:\n            return True\n        if d < 0 and px > p:\n            return True\n    r = max(2, int(ctx.p.run_n))\n    if i - r >= 0:\n        if d > 0:\n            lo = None\n            for k in range(1, r + 1):\n                x = ctx.l[i - k]\n                if x is not None and (lo is None or x < lo):\n                    lo = x\n            if lo is not None and px < lo:\n                return True\n        else:\n            hi = None\n            for k in range(1, r + 1):\n                x = ctx.h[i - k]\n                if x is not None and (hi is None or x > hi):\n                    hi = x\n            if hi is not None and px > hi:\n                return True\n    return False\n"
+}

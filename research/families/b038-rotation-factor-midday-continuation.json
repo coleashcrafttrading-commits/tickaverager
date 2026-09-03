@@ -1,0 +1,36 @@
+{
+ "name": "Rotation Factor Midday Continuation",
+ "note": "Daltons rotation factor: the running count of higher-highs and higher-lows across 30-minute auction periods, which measures the days ATTEMPTED direction independently of distance travelled. At the close of the 12:00-12:30 ET period it goes with the attempt when RF is at least +5 and the close is above both the initial balance midpoint and the 11:00-11:30 close, and exits when RF falls back under +3 or at 15:55 ET. Mirror for shorts. The 30-min periods are built from 5-minute bars; the 1.0 ATR(30-min) stop is expressed as 2.5 ATR(14) on 5-minute bars (sqrt(6) scaling), and the breakeven move is tp1_atr with tp1_frac 0 so nothing is scaled out.",
+ "source": "Dalton, Jones & Dalton, 'Mind Over Markets' (1993) - rotation factor; calculation as documented in the mypivots.com dictionary entry 'Rotation Factor' (+1/-1/0 for the high comparison plus the same for the low, summed across TPO periods) and Sierra Charts support board implementation.",
+ "params": {
+  "rf_in": 5.0,
+  "rf_out": 3.0,
+  "dec_period": 5,
+  "ib_periods": 2,
+  "ref_lag": 2,
+  "flat_min": 955,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.5,
+  "tp1_atr": 2.5,
+  "tp1_frac": 0.0,
+  "be_after_tp1": 1
+ },
+ "grid": {
+  "rf_in": [
+   3.0,
+   4.0,
+   5.0
+  ],
+  "rf_out": [
+   1.0,
+   3.0
+  ],
+  "dec_period": [
+   5,
+   6,
+   7
+  ]
+ },
+ "code": "import datetime\n\n_DST = {}\n\n\ndef _dst_span(y):\n    \"\"\"US Eastern DST window in UTC, computed arithmetically so no tz database\n    is needed: 2nd Sunday of March 07:00Z to 1st Sunday of November 06:00Z.\"\"\"\n    b = _DST.get(y)\n    if b is None:\n        d = datetime.date(y, 3, 8)\n        d += datetime.timedelta(days=(6 - d.weekday()) % 7)\n        s = datetime.datetime(y, 3, d.day, 7)\n        e0 = datetime.date(y, 11, 1)\n        e0 += datetime.timedelta(days=(6 - e0.weekday()) % 7)\n        e = datetime.datetime(y, 11, e0.day, 6)\n        b = _DST[y] = (s, e)\n    return b\n\n\ndef _et(stamp):\n    \"\"\"(ET ordinal day, ET minute of day) from a UTC ISO bar stamp.\"\"\"\n    s = str(stamp)\n    dt = datetime.datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]),\n                           int(s[11:13]), int(s[14:16]))\n    a, b = _dst_span(dt.year)\n    loc = dt + datetime.timedelta(hours=(-4 if a <= dt < b else -5))\n    return loc.toordinal(), loc.hour * 60 + loc.minute\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n\n    dec_k = max(2, int(ctx.p.dec_period))     # 30-min period of the decision\n    ibp = max(1, int(ctx.p.ib_periods))       # periods in the initial balance\n    lag = max(1, int(ctx.p.ref_lag))          # decision close vs this many\n    t_in = float(ctx.p.rf_in)                 # periods earlier\n    RTH0, RTH1 = 570, 960                     # 09:30 / 16:00 ET\n\n    day = [0] * n\n    tod = [0] * n\n    for i in range(n):\n        day[i], tod[i] = _et(bars[i][\"t\"])\n\n    order = []\n    idx = {}\n    for i in range(n):\n        if not (RTH0 <= tod[i] < RTH1):\n            continue\n        d = day[i]\n        if d not in idx:\n            idx[d] = []\n            order.append(d)\n        idx[d].append(i)\n\n    sig = [0] * n\n    rf_ff = [None] * n            # RF as of the last COMPLETED 30-min period\n\n    for d in order:\n        ii = idx[d]\n        per = {}                  # period k -> [high, low, close, last bar]\n        for j in ii:\n            k = (tod[j] - RTH0) // 30\n            q = per.get(k)\n            if q is None:\n                per[k] = [hi[j], lo[j], cl[j], j]\n            else:\n                q[0] = max(q[0], hi[j])\n                q[1] = min(q[1], lo[j])\n                q[2] = cl[j]\n                q[3] = j\n        if 0 not in per:\n            continue\n\n        # rotation factor, stamped on the bar that closes each period, then\n        # carried forward: it is only knowable once the period has completed.\n        rf = 0\n        last = None\n        for j in ii:\n            k = (tod[j] - RTH0) // 30\n            if j == per[k][3] and k >= 1 and (k - 1) in per:\n                dh = per[k][0] - per[k - 1][0]\n                dl = per[k][1] - per[k - 1][1]\n                rf += (1 if dh > 0 else (-1 if dh < 0 else 0))\n                rf += (1 if dl > 0 else (-1 if dl < 0 else 0))\n                last = rf\n            rf_ff[j] = last\n\n        # the decision, at the close of period dec_k\n        if dec_k not in per or (dec_k - lag) not in per:\n            continue\n        ibks = [k for k in range(ibp) if k in per]\n        if len(ibks) < ibp:\n            continue\n        ibh = max(per[k][0] for k in ibks)\n        ibl = min(per[k][1] for k in ibks)\n        ibmid = (ibh + ibl) / 2.0\n        j = per[dec_k][3]\n        r = rf_ff[j]\n        if r is None:\n            continue\n        cd = per[dec_k][2]\n        cref = per[dec_k - lag][2]\n        if r >= t_in and cd > ibmid and cd > cref:\n            sig[j] = 1\n        elif r <= -t_in and cd < ibmid and cd < cref:\n            sig[j] = -1\n\n    ctx.sig = ctx.series(sig, \"rf_signal\")\n    ctx.rf = ctx.series(rf_ff, \"rotation_factor\")\n    ctx.tod = tod                       # clock only, not price information\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out at 15:55 ET, or when the rotation factor gives up the attempt.\"\"\"\n    if ctx.tod[i] >= int(ctx.p.flat_min):\n        return True\n    r = ctx.rf[i]\n    if r is None:\n        return False\n    d = ctx._dir\n    out = float(ctx.p.rf_out)\n    if d > 0:\n        return r < out\n    if d < 0:\n        return r > -out\n    return False\n"
+}

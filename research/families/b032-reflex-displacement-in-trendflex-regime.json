@@ -1,0 +1,34 @@
+{
+ "name": "Reflex displacement inside a TrendFlex regime",
+ "note": "Ehlers' SuperSmoother feeds two orthogonal statistics built from the same filtered series: Reflex, the mean gap between the filtered price and the straight line joining it to its value n bars ago, and TrendFlex, the same difference-sum without the slope added back. Both are divided by the square root of an EWMA of their own square, so they read as self-calibrating standard errors and one threshold means the same thing on every symbol. TrendFlex gives the regime; a fresh Reflex cross down through -disp inside an up regime is a measured displacement below the zero-lag trend line, and that is the long entry. Exit when Reflex is reclaimed past +rf_exit, when TrendFlex loses its sign, or on the time stop. Threshold sanity, measured rather than assumed: on real 5-minute bars |Reflex| has a median near 0.62 and a 99th percentile near 2.5, so the published 2.5 setting produces 0-6 gated crosses in 6,000 bars and is not a signal at all. The swept displacements are therefore 1.0/1.5/2.0, which sit at roughly the 75th, 90th and 97th percentiles of the statistic.",
+ "source": "John F. Ehlers, 'Reflex: A New Zero-Lag Indicator', Technical Analysis of Stocks & Commodities, February 2020. Slope-detrended difference sum, the 0.04/0.96 mean-square EWMA and the division by sqrt(MS) verified against github.com/MathisWellmann/go_ehlers_indicators, file re_flex.go. The TrendFlex-gated displacement entry is the harvested synthesis.",
+ "params": {
+  "n": 20,
+  "ss": 20.0,
+  "alpha": 0.04,
+  "disp": 2.0,
+  "rf_exit": 1.0,
+  "side": "both",
+  "exit_signal_on": 1,
+  "time_stop": 25,
+  "st_atr": 2.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "n": [
+   10,
+   20,
+   30
+  ],
+  "disp": [
+   1.0,
+   1.5,
+   2.0
+  ],
+  "rf_exit": [
+   0.5,
+   1.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    N = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    n = int(ctx.p.n)\n    k = float(ctx.p.ss)\n    al = float(ctx.p.alpha)\n    # --- SuperSmoother (2-pole Butterworth), Ehlers' constants ---\n    a1 = math.exp(-1.414213562373095 * math.pi / k)\n    b1 = 2.0 * a1 * math.cos(1.414213562373095 * math.pi / k)\n    c2 = b1\n    c3 = -a1 * a1\n    c1 = 1.0 - c2 - c3\n    f = [0.0] * N\n    for j in range(N):\n        p0 = c[j]\n        p1 = c[j - 1] if j >= 1 else p0\n        f1 = f[j - 1] if j >= 1 else p0\n        f2 = f[j - 2] if j >= 2 else p0\n        f[j] = c1 * (p0 + p1) * 0.5 + c2 * f1 + c3 * f2\n    # --- Reflex and TrendFlex from the same filtered series ---\n    rf = [None] * N\n    tf = [None] * N\n    msr = 0.0\n    mst = 0.0\n    sq = math.sqrt\n    inv_n = 1.0 / n\n    for j in range(n + 2, N):\n        fj = f[j]\n        slope = (f[j - n] - fj) * inv_n\n        sr = 0.0\n        st = 0.0\n        for q in range(1, n + 1):\n            d = fj - f[j - q]\n            st += d\n            sr += d + q * slope\n        sr *= inv_n\n        st *= inv_n\n        msr = al * sr * sr + (1.0 - al) * msr\n        mst = al * st * st + (1.0 - al) * mst\n        if msr > 0.0:\n            rf[j] = sr / sq(msr)\n        if mst > 0.0:\n            tf[j] = st / sq(mst)\n    ctx.rf = ctx.series(rf, \"reflex\")\n    ctx.tf = ctx.series(tf, \"trendflex\")\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    r = ctx.rf[i]\n    pr = ctx.rf[i - 1]\n    t = ctx.tf[i]\n    if r is None or pr is None or t is None:\n        return 0\n    d = float(ctx.p.disp)\n    # a FRESH displacement below the zero-lag line while the regime is up\n    if t > 0.0 and r <= -d and pr > -d:\n        return 1\n    if t < 0.0 and r >= d and pr < d:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    r = ctx.rf[i]\n    t = ctx.tf[i]\n    if r is None or t is None:\n        return False\n    x = float(ctx.p.rf_exit)\n    if ctx.positions[0][\"side\"] == \"long\":\n        return r >= x or t < 0.0\n    return r <= -x or t > 0.0"
+}

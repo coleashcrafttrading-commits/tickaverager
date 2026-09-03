@@ -1,0 +1,41 @@
+{
+ "name": "Strike Grid Pin",
+ "note": "Option market makers holding net long expiring contracts delta-hedge by buying below the strike and selling above it, and that rebalancing physically drags the close onto the strike. The signal is therefore not an indicator at all but a deterministic distance to a fixed price lattice reconstructed from the listing convention, gated by an expiration date and an afternoon clock, and bounded on BOTH ends - it deliberately does not fire when price is already on the strike or too far from it to be reachable. Exits are the paper's three: pin reached, the closing clock, or the distance widening against the entry. NOTE ON THE DEFAULT: `expiry_mode` defaults to 1 (every Friday expiration, weeklies included) rather than to the paper's monthly-only universe, because monthly expiration gives a single tradeable afternoon per month and a probe over a month and a half cannot tell a working rule from a broken one at that rate. Mode 0 is the paper verbatim and is in the sweep; if the effect is real it should be STRONGER in mode 0, and that comparison is itself a test of the mechanism.",
+ "source": "Ni, Pearson & Poteshman (2005), 'Stock Price Clustering on Option Expiration Dates', Journal of Financial Economics 78(1), 49-87 - full text at https://optionsoffice.ru/wp-content/uploads/2020/01/Stock-Price-Clustering-on-Option-Expiration-Dates.pdf. The clustering z-statistic of 8.15, the >=16.5bp return effect on expiration dates, and the deficit concentrated $0.50-$1.00 from the nearest strike on a $5 grid (i.e. 0.10G to 0.20G) are all from that paper; the effect disappears when the stocks lose listed options, which rules out generic round-number clustering.",
+ "params": {
+  "band_lo": 0.1,
+  "band_hi": 0.2,
+  "pin_tol": 0.02,
+  "stop_frac": 0.35,
+  "t_start": 840,
+  "t_end": 958,
+  "expiry_mode": 1,
+  "g_lo": 25.0,
+  "g_hi": 200.0,
+  "g1": 1.0,
+  "g2": 2.5,
+  "g3": 5.0,
+  "dv_min": 200000000.0,
+  "dv_n": 60,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1,
+  "side": "both"
+ },
+ "grid": {
+  "band_lo": [
+   0.05,
+   0.1,
+   0.15
+  ],
+  "band_hi": [
+   0.2,
+   0.3
+  ],
+  "expiry_mode": [
+   0,
+   1
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    import datetime as dt\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        f = dt.date(y, 3, 1)\n        return d >= 1 + (6 - f.weekday()) % 7 + 7\n    f = dt.date(y, 11, 1)\n    return d < 1 + (6 - f.weekday()) % 7\n\n\ndef _et(ts):\n    import datetime as dt\n    s = str(ts)\n    y = int(s[0:4]); mo = int(s[5:7]); d = int(s[8:10])\n    m = int(s[11:13]) * 60 + int(s[14:16])\n    m -= 240 if _dst(y, mo, d) else 300\n    dd = dt.date(y, mo, d)\n    if m < 0:\n        m += 1440\n        dd = dd - dt.timedelta(days=1)\n    return dd, m\n\n\ndef family_init(ctx):\n    \"\"\"Distance to a fixed price lattice, gated by a calendar date.\n\n    There is no indicator here and no options feed: the strike grid comes from\n    the published listing convention (G = $1 below $25, $2.50 to $200, $5 above),\n    the attractor K is the nearest multiple of G, and the trade is taken only\n    when the close sits in the band the paper identifies as the one that gets\n    pulled onto the strike - far enough away to have somewhere to go, close\n    enough for the hedging flow to reach it.\n\n    `expiry_mode` 0 is the paper's universe, monthly expiration Fridays only.\n    Mode 1 also takes weekly expirations, which did not exist for the paper's\n    1996-2002 sample but do now for every liquid optionable name, and the same\n    delta-hedging mechanism applies to them. Both are swept.\n    \"\"\"\n    import datetime as dt\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    vol = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    lo_b = float(ctx.p.band_lo)\n    hi_b = float(ctx.p.band_hi)\n    t0 = int(ctx.p.t_start)\n    t1 = int(ctx.p.t_end)\n    mode = int(ctx.p.expiry_mode)\n    dvmin = float(ctx.p.dv_min)\n    dvn = max(1, int(ctx.p.dv_n))\n\n    dates = []\n    sess = [0] * n\n    mins = [0] * n\n    key = None\n    for i in range(n):\n        d, m = _et(bars[i][\"t\"])\n        if d != key:\n            key = d\n            dates.append(d)\n        sess[i] = len(dates) - 1\n        mins[i] = m\n\n    # dollar volume per session, and the trailing median of it\n    dv = [0.0] * len(dates)\n    for i in range(n):\n        dv[sess[i]] += c[i] * vol[i]\n    liq = [False] * len(dates)\n    for k in range(len(dates)):\n        h = dv[max(0, k - dvn):k]\n        if len(h) < 5:\n            h = dv[:k] if k >= 1 else []\n        if not h:\n            continue\n        srt = sorted(h)\n        med = srt[len(srt) // 2] if len(srt) % 2 else 0.5 * (srt[len(srt) // 2 - 1] + srt[len(srt) // 2])\n        liq[k] = med >= dvmin\n\n    def is_expiry(d):\n        if d.weekday() != 4:\n            return False\n        if mode:\n            return True\n        return 15 <= d.day <= 21          # the third Friday of the month\n\n    exp = [is_expiry(d) for d in dates]\n\n    def grid(px):\n        if px < float(ctx.p.g_lo):\n            return float(ctx.p.g1)\n        if px < float(ctx.p.g_hi):\n            return float(ctx.p.g2)\n        return float(ctx.p.g3)\n\n    sig = [0] * n\n    kk = [None] * n\n    gg = [None] * n\n    for i in range(n):\n        k = sess[i]\n        g = grid(c[i])\n        strike = round(c[i] / g) * g\n        kk[i] = strike\n        gg[i] = g\n        if not exp[k] or not liq[k]:\n            continue\n        if mins[i] < t0 or mins[i] > t1:\n            continue\n        d = c[i] - strike\n        ad = abs(d)\n        if lo_b * g <= ad <= hi_b * g:\n            sig[i] = 1 if d < 0.0 else -1\n    ctx.sig = ctx.series(sig, \"grid_pin\")\n    ctx.k = ctx.series(kk, \"strike\")\n    ctx.g = ctx.series(gg, \"grid\")\n    ctx.m = ctx.series(mins, \"et_min\")\n    ctx._pin = float(ctx.p.pin_tol)\n    ctx._stop = float(ctx.p.stop_frac)\n    ctx._t1 = t1\n\n\ndef signal(ctx, i):\n    return ctx.sig[i]\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Pin reached, the clock, or the distance widening against the entry.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    k = ctx.k[e]\n    g = ctx.g[e]\n    if k is None or g is None or g <= 0.0:\n        return True\n    if ctx.m[i] > ctx._t1 or ctx.m[i] < ctx.m[e]:\n        return True\n    d = ctx.c[i] - k\n    if abs(d) <= ctx._pin * g:\n        return True\n    d0 = 1.0 if ctx.positions[0][\"side\"] == \"short\" else -1.0\n    if d * d0 > 0.0 and abs(d) >= ctx._stop * g:\n        return True\n    return False"
+}

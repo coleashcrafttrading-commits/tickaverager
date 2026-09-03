@@ -1,0 +1,33 @@
+{
+ "name": "Diurnal Volume-Pace Day Typing",
+ "note": "The intraday volume U-shape used as an integral rather than a point. For each time-of-day slot, the median completion fraction (cumulative RTH volume divided by the day's total) over the trailing 20 sessions gives a symbol-specific curve. At midday the day's realised cumulative volume is divided by what that curve times the 20-session median session volume predicts, giving a pace ratio. A hot day (>=1.5) takes session-extreme breakouts WITH the break; a cold day (<=0.70) takes the same trigger AGAINST it; in between it stands aside. One position at a time, reversals flip it, everything flat at the close. The 20-session curve is built on an expanding window with a 5-session floor so the rule is not blind for its first month.",
+ "source": "Synthesis. Grounded in the intraday periodicity literature - Jain & Joh, 'The Dependence between Hourly Prices and Trading Volume', Journal of Financial and Quantitative Analysis 23(3), 1988 (the volume U-shape), and Andersen & Bollerslev, 'Intraday Periodicity and Volatility Persistence in Financial Markets', Journal of Empirical Finance 4(2-3), 1997 (the deterministic intraday pattern and the case for deseasonalising by time of day). Cited from the literature, not re-fetched. The pace-ratio day-typing rule and the sign flip are the harvesting agent's.",
+ "params": {
+  "pace_min": 720,
+  "cutoff_min": 930,
+  "flat_min": 955,
+  "hot": 1.5,
+  "cold": 0.7,
+  "curve_n": 20,
+  "min_sessions": 5,
+  "exit_signal_on": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "pace_min": [
+   660,
+   720,
+   780
+  ],
+  "hot": [
+   1.3,
+   1.5,
+   2.0
+  ],
+  "cold": [
+   0.65,
+   0.75
+  ]
+ },
+ "code": "def _et(bars):\n    \"\"\"Minute-of-day in New York and a session index, for every bar.\n\n    Bars are stamped in UTC. US DST runs from the second Sunday in March to\n    the first Sunday in November, so the offset is derived rather than\n    assumed - a hard-coded -4 silently shifts every winter session by an hour.\n    \"\"\"\n    import datetime\n    mins = []\n    sess = []\n    dows = []\n    last = None\n    s = -1\n    for b in bars:\n        ts = str(b[\"t\"])\n        y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        if mo < 3 or mo > 11:\n            dst = False\n        elif 3 < mo < 11:\n            dst = True\n        elif mo == 3:\n            w = datetime.date(y, 3, 1).weekday()\n            fs = 1 + ((6 - w) % 7)\n            dst = d >= fs + 7\n        else:\n            w = datetime.date(y, 11, 1).weekday()\n            fs = 1 + ((6 - w) % 7)\n            dst = d < fs\n        t = (datetime.datetime(y, mo, d, hh, mi)\n             - datetime.timedelta(minutes=240 if dst else 300))\n        key = (t.year, t.month, t.day)\n        if key != last:\n            last = key\n            s += 1\n        mins.append(t.hour * 60 + t.minute)\n        sess.append(s)\n        dows.append(t.weekday())\n    return mins, sess, dows\n\n\ndef family_init(ctx):\n    import statistics\n    bars = ctx.bars\n    n = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    cl = [float(b[\"c\"]) for b in bars]\n    vo = [float(b.get(\"v\") or 0.0) for b in bars]\n    mins, sess, _ = _et(bars)\n\n    OPEN = 570          # 09:30 ET\n    CLOSE = 960         # 16:00 ET\n    pace_m = int(ctx.p.pace_min)\n    cut_m = int(ctx.p.cutoff_min)\n    flat_m = int(ctx.p.flat_min)\n    hot = float(ctx.p.hot)\n    cold = float(ctx.p.cold)\n    look = int(ctx.p.curve_n)\n    minses = int(ctx.p.min_sessions)\n\n    # --- history of completed sessions: slot -> completion fraction, and total\n    hist_frac = []      # list of dict slot -> cum/total\n    hist_tot = []\n\n    sig = [0] * n\n    flat = [0] * n\n\n    cur = -1\n    cum = 0.0\n    slot_cum = {}\n    hsf = None\n    lsf = None\n    pace = None\n\n    def flush():\n        if not slot_cum:\n            return\n        tot = cum\n        if tot <= 0:\n            return\n        hist_frac.append(dict((k, v / tot) for k, v in slot_cum.items()))\n        hist_tot.append(tot)\n        if len(hist_frac) > look:\n            del hist_frac[0]\n            del hist_tot[0]\n\n    for t in range(n):\n        m = mins[t]\n        if sess[t] != cur:\n            flush()\n            cur = sess[t]\n            cum = 0.0\n            slot_cum = {}\n            hsf = None\n            lsf = None\n            pace = None\n        if m < OPEN or m >= CLOSE:\n            continue\n\n        # -------- the pace ratio, fixed once per session --------\n        if pace is None and m >= pace_m and len(hist_frac) >= minses:\n            fr = [h[m] for h in hist_frac if m in h]\n            if len(fr) >= minses and cum > 0:\n                f = statistics.median(fr)\n                v20 = statistics.median(hist_tot)\n                if f > 0 and v20 > 0:\n                    pace = cum / (f * v20)\n                else:\n                    pace = 0.0\n            # cum here is the volume through the bars BEFORE this one, which is\n            # exactly the information available when the decision is made\n\n        # -------- the breakout trigger, sign chosen by the pace --------\n        if (pace is not None and pace_m <= m <= cut_m\n                and hsf is not None and lsf is not None):\n            d = 0\n            if cl[t] > hsf:\n                d = 1\n            elif cl[t] < lsf:\n                d = -1\n            if d:\n                if pace >= hot:\n                    sig[t] = d\n                elif pace <= cold:\n                    sig[t] = -d\n\n        if m >= flat_m:\n            flat[t] = 1\n\n        # the fraction stored for a slot is the volume completed BEFORE that\n        # slot opens, which is exactly what the live pace ratio can see; storing\n        # the inclusive figure would compare a one-bar-longer history against a\n        # one-bar-shorter one and bias the ratio low every single day\n        slot_cum[m] = cum\n        cum += vo[t]\n        hsf = hi[t] if hsf is None else max(hsf, hi[t])\n        lsf = lo[t] if lsf is None else min(lsf, lo[t])\n\n    ctx.sig = ctx.series(sig, \"pace\")\n    ctx.eod = ctx.series(flat, \"flatten\")\n\n\ndef signal(ctx, i):\n    return int(ctx.sig[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The exit is the clock: everything is closed on the last bar of the day.\"\"\"\n    return bool(ctx.eod[i])\n"
+}

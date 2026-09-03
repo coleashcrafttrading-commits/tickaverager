@@ -1,0 +1,33 @@
+{
+ "name": "Range-Bar Flip Count Regime",
+ "note": "Range bars of fixed height S = s_atr * ATR(atr_n), S recomputed at the first regular-hours bar of each session and then frozen for that session. A range bar opens at the previous one's close and closes as soon as its running high minus running low reaches S; because only OHLC is available and not the path inside a bar, the extreme reached LAST is taken to be the high when that bar closed up and the low when it closed down. F is the number of direction flips among the last flip_win closed range bars -- a unit-free path-efficiency measure, since the price distance per bar is constant by construction, which is exactly what ADX and the choppiness index cannot claim on time bars. Enter with the tape when F <= in_flip and the last run_len range bars all closed the same way; exit on the same statistic at a looser threshold (F >= out_flip), on opp_run range bars against the position, or after rb_max range bars. The 2*S hard stop is 2*s_atr in ATR units, left to the shared execution grid whose stops bracket it. One approximation is worth naming: a single 5-minute bar wide enough to complete more than one range bar closes only one, because the path inside that bar is unknown and inventing the rest would be inventing data.",
+ "source": "Range-bar construction is standard in futures platform documentation (constant-range bars); the flip-count statistic and the entry/exit thresholds are my synthesis. The path-efficiency reasoning follows Kaufman's efficiency ratio (Perry Kaufman, 'Trading Systems and Methods', Wiley) applied in range-bar space rather than time space.",
+ "params": {
+  "s_atr": 0.75,
+  "atr_n": 14,
+  "flip_win": 20,
+  "in_flip": 6,
+  "out_flip": 12,
+  "run_len": 5,
+  "opp_run": 3,
+  "rb_max": 20,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "in_flip": [
+   4,
+   6,
+   8
+  ],
+  "run_len": [
+   3,
+   5
+  ],
+  "s_atr": [
+   0.5,
+   0.75,
+   1.0
+  ]
+ },
+ "code": "def _et(bars):\n    \"\"\"Minute-of-day, session index, weekday and day-of-month, in New York.\n\n    Bars carry UTC timestamps; every calendar rule here is a New York rule, so\n    the offset has to be resolved per bar rather than assumed.\"\"\"\n    import datetime\n    mins = []\n    sess = []\n    dow = []\n    dom = []\n    last = None\n    s = -1\n    for b in bars:\n        ts = str(b[\"t\"])\n        y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        if mo < 3 or mo > 11:\n            dst = False\n        elif 3 < mo < 11:\n            dst = True\n        elif mo == 3:\n            w = datetime.date(y, 3, 1).weekday()\n            dst = d >= 1 + ((6 - w) % 7) + 7\n        else:\n            w = datetime.date(y, 11, 1).weekday()\n            dst = d < 1 + ((6 - w) % 7)\n        t = (datetime.datetime(y, mo, d, hh, mi)\n             - datetime.timedelta(minutes=240 if dst else 300))\n        key = (t.year, t.month, t.day)\n        if key != last:\n            last = key\n            s += 1\n        mins.append(t.hour * 60 + t.minute)\n        sess.append(s)\n        dow.append(t.weekday())\n        dom.append(t.day)\n    return mins, sess, dow, dom\n\n\ndef family_init(ctx):\n    import indicators as I\n    bars = ctx.bars\n    n = len(bars)\n    mins, sess, dow, dom = _et(bars)\n    if len(set(str(b[\"t\"])[:10] for b in bars)) == n:\n        mins = [955] * n\n\n    at = I.compute(\"atr\", bars, period=max(2, int(ctx.p.atr_n)))[\"atr\"]\n    mult = float(ctx.p.s_atr)\n    fw = max(5, int(ctx.p.flip_win))\n    inf = int(ctx.p.in_flip)\n    run = max(1, int(ctx.p.run_len))\n\n    # S is fixed for the session at its first regular-hours bar\n    sizes = {}\n    for j in range(n):\n        s = sess[j]\n        if s in sizes:\n            continue\n        if mins[j] >= 570 and at[j]:\n            sizes[s] = mult * float(at[j])\n\n    dirs = []\n    flips = []\n    cur = None\n    sig = [0] * n\n    rb_at = [0] * n          # closed range bars up to and including this bar\n    f_at = [None] * n        # flips over the last fw closed range bars\n    up_run = [0] * n\n    dn_run = [0] * n\n    cf = None\n    cu = 0\n    cd = 0\n    for j in range(n):\n        s = sizes.get(sess[j])\n        if s and s > 0.0 and 570 <= mins[j] < 960:\n            o = float(bars[j][\"o\"]); h = float(bars[j][\"h\"])\n            l = float(bars[j][\"l\"]); c = float(bars[j][\"c\"])\n            if cur is None:\n                cur = [o, h, l]\n            else:\n                if h > cur[1]:\n                    cur[1] = h\n                if l < cur[2]:\n                    cur[2] = l\n            if cur[1] - cur[2] >= s:\n                # which extreme was reached last: the only path information an\n                # OHLC bar carries is the sign of its own body\n                px = cur[1] if c >= o else cur[2]\n                d = 1 if px > cur[0] else -1\n                if dirs:\n                    flips.append(1 if d != dirs[-1] else 0)\n                dirs.append(d)\n                if d > 0:\n                    cu += 1\n                    cd = 0\n                else:\n                    cd += 1\n                    cu = 0\n                if len(flips) >= fw:\n                    cf = sum(flips[-fw:])\n                cur = [px, px, px]\n                if h > cur[1]:\n                    cur[1] = h\n                if l < cur[2]:\n                    cur[2] = l\n                if cf is not None and len(dirs) >= run:\n                    same = True\n                    for x in range(run):\n                        if dirs[-1 - x] != d:\n                            same = False\n                            break\n                    if cf <= inf and same:\n                        sig[j] = d\n        rb_at[j] = len(dirs)\n        f_at[j] = cf\n        up_run[j] = cu\n        dn_run[j] = cd\n\n    ctx.sig = ctx.series(sig, \"rb_sig\")\n    ctx.rbn = ctx.series(rb_at, \"rb_count\")\n    ctx.f = ctx.series(f_at, \"rb_flips\")\n    ctx.upr = ctx.series(up_run, \"rb_up_run\")\n    ctx.dnr = ctx.series(dn_run, \"rb_dn_run\")\n\n\ndef signal(ctx, i):\n    return int(ctx.sig[i])\n\n\ndef exit_signal(ctx, i):\n    \"\"\"The same statistic that let the trade on, at a looser threshold -- the\n    hysteresis is the point.\"\"\"\n    if not ctx.positions:\n        return False\n    e = min(p[\"entry_i\"] for p in ctx.positions)\n    f = ctx.f[i]\n    if f is not None and f >= int(ctx.p.out_flip):\n        return True\n    long_ = ctx.positions[0][\"side\"] == \"long\"\n    against = ctx.dnr[i] if long_ else ctx.upr[i]\n    if against >= int(ctx.p.opp_run):\n        return True\n    return (ctx.rbn[i] - ctx.rbn[e]) >= int(ctx.p.rb_max)\n"
+}

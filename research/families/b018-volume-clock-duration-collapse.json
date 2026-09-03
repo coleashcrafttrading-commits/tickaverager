@@ -1,0 +1,30 @@
+{
+ "name": "Volume-Clock Duration Collapse",
+ "note": "Re-bars the tape in volume time: accumulate bars until ADV(20 sessions)/N shares have traded, pro-rating the boundary bar, and record how many clock minutes that took. Easley-O'Hara make the duration itself informative - a fixed quantity absorbed unusually fast is an information event. Enters with the direction of a volume bar whose duration is in the bottom decile of the last 200, and exits when durations normalise.",
+ "source": "Easley & O'Hara (1992), 'Time and the Process of Security Price Adjustment', Journal of Finance 47(2); Easley, Lopez de Prado & O'Hara (2012), 'The Volume Clock: Insights into the High-Frequency Paradigm', Journal of Portfolio Management 39(1) (researchgate.net/publication/254199259).",
+ "params": {
+  "vol_div": 50,
+  "dur_pct": 10,
+  "dur_hist": 200,
+  "hold_vb": 5,
+  "adv_days": 20,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "vol_div": [
+   20,
+   50,
+   100
+  ],
+  "dur_pct": [
+   5,
+   10,
+   20
+  ],
+  "dur_hist": [
+   100,
+   200
+  ]
+ },
+ "code": "def family_init(ctx):\n    import bisect\n    bars = ctx.bars\n    n = len(bars)\n    day = [str(b[\"t\"])[:10] for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    tp = [(float(b[\"h\"]) + float(b[\"l\"]) + float(b[\"c\"])) / 3.0 for b in bars]\n\n    # ---- ADV over the trailing sessions, causal ----\n    tot = {}\n    order = []\n    for j in range(n):\n        d = day[j]\n        if d not in tot:\n            tot[d] = 0.0\n            order.append(d)\n        tot[d] += v[j]\n    adv = {}\n    seen = []\n    ad = int(ctx.p.adv_days)\n    for d in order:\n        use = seen[-ad:] if len(seen) >= ad else seen\n        if len(use) >= 3:\n            adv[d] = sum(use) / float(len(use))\n        seen.append(tot[d])\n\n    div = max(1.0, float(ctx.p.vol_div))\n    hist_n = max(20, int(ctx.p.dur_hist))\n    qd = float(ctx.p.dur_pct) / 100.0\n\n    vsig = [0] * n\n    vexit = [False] * n\n    vcount = [0] * n\n\n    durs = []                    # every completed duration, in bar units\n    win = []                     # sorted trailing window of durations\n    acc = 0.0\n    dur = 0.0\n    open_px = None\n    count = 0\n    cur_day = None\n\n    for j in range(n):\n        d = day[j]\n        if d != cur_day:         # never let a volume bar straddle the night\n            cur_day = d\n            acc = 0.0\n            dur = 0.0\n            open_px = tp[j]\n        vstar = adv.get(d)\n        if vstar is None or vstar <= 0:\n            vcount[j] = count\n            continue\n        vstar = vstar / div\n        if open_px is None:\n            open_px = tp[j]\n\n        rem_v = v[j]\n        rem_t = 1.0\n        guard = 0\n        while rem_v > 0 and acc + rem_v >= vstar and guard < 500:\n            guard += 1\n            need = vstar - acc\n            if need <= 0:\n                need = 0.0\n                ft = 0.0\n            else:\n                ft = rem_t * (need / rem_v)\n            dur += ft\n            # ---- a volume bar just closed on time bar j ----\n            pct = None\n            med = None\n            if len(win) >= 20:\n                m = len(win)\n                k = int(qd * (m - 1))\n                pct = win[k]\n                med = win[m // 2]\n            count += 1\n            if pct is not None:\n                if dur <= pct and tp[j] > open_px:\n                    vsig[j] = 1\n                elif dur <= pct and tp[j] < open_px:\n                    vsig[j] = -1\n                if med is not None and dur > med:\n                    vexit[j] = True\n            durs.append(dur)\n            bisect.insort(win, dur)\n            if len(win) > hist_n:\n                old = durs[len(durs) - 1 - hist_n]\n                kk = bisect.bisect_left(win, old)\n                if kk < len(win):\n                    win.pop(kk)\n            rem_v -= need\n            rem_t -= ft\n            acc = 0.0\n            dur = 0.0\n            open_px = tp[j]\n        acc += rem_v\n        dur += rem_t if rem_t > 0 else 0.0\n        vcount[j] = count\n\n    ctx.vsig = vsig\n    ctx.vexit = vexit\n    ctx.vcount = vcount\n    ctx._entry_vc = None\n\n\ndef signal(ctx, i):\n    s = ctx.vsig[i]\n    if s and not ctx.positions:\n        ctx._entry_vc = ctx.vcount[i]\n    return s\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.vexit[i]:\n        return True                   # durations have normalised\n    ec = ctx._entry_vc\n    if ec is not None and ctx.vcount[i] - ec >= int(ctx.p.hold_vb):\n        return True\n    return False"
+}

@@ -1,0 +1,25 @@
+{
+ "name": "Leveraged ETF rebalance front-run",
+ "note": "At a wall-clock trigger (14:15 ET by default) measure the day's move from the prior session's regular-hours close; if it exceeds the threshold, take the position in the SAME direction as that move and hold it to the close, because a leveraged fund on this underlying must rebalance (L^2 - L) x assets x r in that same direction into the last hour. Honest adaptation: the published rule reads the underlying and buys a different instrument (the 3x fund), and a family sees only the symbol it trades, so the day's move is measured on the traded symbol itself -- correct for an underlying or a long LETF, sign-flipped for an inverse fund, and the (L^2 - L) size scaling is dropped because sizing belongs to the harness.",
+ "source": "QuantConnect Lean, Algorithm.Python/Alphas/RebalancingLeveragedETFAlpha.py (docstring cites the leveraged-ETF rebalance literature; academic origin is Cheng & Madhavan, 'The Dynamics of Leveraged and Inverse ETFs') - https://github.com/QuantConnect/Lean/blob/master/Algorithm.Python/Alphas/RebalancingLeveragedETFAlpha.py",
+ "params": {
+  "trig": 1415,
+  "thr": 0.01,
+  "exit_at": 1555,
+  "trig_win": 30,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "trig": [
+   1345,
+   1415,
+   1500
+  ],
+  "thr": [
+   0.005,
+   0.01,
+   0.02
+  ]
+ },
+ "code": "def _et_off(y, m, d):\n    \"\"\"US eastern UTC offset: EDT from the 2nd Sunday of March to the 1st\n    Sunday of November, EST otherwise.\"\"\"\n    import datetime\n    if m < 3 or m > 11:\n        return -5\n    if 3 < m < 11:\n        return -4\n    wd = datetime.date(y, m, 1).weekday()          # Mon=0 .. Sun=6\n    first_sun = 1 + (6 - wd) % 7\n    if m == 3:\n        return -4 if d >= first_sun + 7 else -5\n    return -5 if d >= first_sun else -4\n\n\ndef family_init(ctx):\n    import datetime\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    day = [None] * n\n    mn = [0] * n\n    for i in range(n):\n        ts = bars[i][\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        off = _et_off(y, mo, d)\n        v = hh * 60 + mi + off * 60\n        dt = datetime.date(y, mo, d)\n        if v < 0:\n            v += 1440\n            dt = dt - datetime.timedelta(days=1)\n        elif v >= 1440:\n            v -= 1440\n            dt = dt + datetime.timedelta(days=1)\n        day[i] = dt.toordinal()\n        mn[i] = v\n\n    # the prior SESSION's close: the last regular-hours print of the previous\n    # eastern trading date, which is known to everyone before this bar opens\n    pc = [None] * n\n    cur = None\n    last_reg = None\n    prev_close = None\n    for i in range(n):\n        if day[i] != cur:\n            if cur is not None and last_reg is not None:\n                prev_close = last_reg\n            cur = day[i]\n            last_reg = None\n        pc[i] = prev_close\n        if 570 <= mn[i] <= 960:\n            last_reg = c[i]\n\n    trig = int(ctx.p.trig)\n    trig_min = (trig // 100) * 60 + (trig % 100)\n    xt = int(ctx.p.exit_at)\n    ctx.exit_min = (xt // 100) * 60 + (xt % 100)\n    win = int(ctx.p.trig_win)\n\n    fire = [0] * n\n    for i in range(n):\n        if not (trig_min <= mn[i] < trig_min + win):\n            continue\n        if i and day[i - 1] == day[i] and mn[i - 1] >= trig_min:\n            continue                       # only the first qualifying bar\n        fire[i] = 1\n    ctx.fire = ctx.series(fire, \"fire\")\n    ctx.pc = ctx.series(pc, \"prev_close\")\n    ctx.mn = ctx.series(mn, \"et_minute\")\n\n\ndef signal(ctx, i):\n    if not ctx.fire[i]:\n        return 0\n    base = ctx.pc[i]\n    if not base:\n        return 0\n    r = ctx.c[i] / base - 1.0\n    thr = float(ctx.p.thr)\n    if r >= thr:\n        return 1\n    if r <= -thr:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    m = ctx.mn[i]\n    return m is not None and m >= ctx.exit_min"
+}

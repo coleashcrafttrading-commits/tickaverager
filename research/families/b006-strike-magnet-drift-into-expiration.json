@@ -1,0 +1,42 @@
+{
+ "name": "Strike Magnet Drift Into Expiration",
+ "note": "Mid-week in an expiration week, takes the side that points back at the nearest option-strike grid level ($2.50 under $50, $5 above) and holds to the last bar before Friday's close. The target price comes from contract specifications, not from price history. Two deliberate deviations from the source, both sweepable back: expirations default to WEEKLY rather than the third Friday, because monthly-only yields one trade a month and modern optionable US equities list weeklies; and entry defaults to the first qualifying session in the Tue-Thu window rather than Wednesday alone. The distance band and the already-pinned dead zone are also measured against the strike spacing as well as against price, because the source's price-relative numbers stop meaning the same thing outside its $20-$200 universe.",
+ "source": "Ni, Pearson & Poteshman, 'Stock price clustering on option expiration dates', Journal of Financial Economics 78(1), 2005, 49-87.",
+ "params": {
+  "entry_dows": "123",
+  "weekly": 1,
+  "strike_grid": 0,
+  "band": 0.015,
+  "band_g": 0.85,
+  "dead": 0.002,
+  "dead_g": 0.15,
+  "stop_rel": 0.02,
+  "atr_max": 0.04,
+  "atr_days": 20,
+  "dv_min": 50000000.0,
+  "dv_days": 60,
+  "px_min": 5.0,
+  "entry_cut": 955,
+  "exit_cut": 945,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0
+ },
+ "grid": {
+  "entry_dows": [
+   "2",
+   "123"
+  ],
+  "band_g": [
+   0.5,
+   0.85,
+   1.0
+  ],
+  "dead_g": [
+   0.08,
+   0.15,
+   0.3
+  ]
+ },
+ "code": "from datetime import date as _date\n\n_OFF = {}\n\n\ndef _et_offset(y, m, d):\n    \"\"\"Hours to subtract from UTC to get US/Eastern (4 in DST, 5 otherwise).\"\"\"\n    k = (y, m, d)\n    o = _OFF.get(k)\n    if o is not None:\n        return o\n    if m < 3 or m > 11:\n        o = 5\n    elif 3 < m < 11:\n        o = 4\n    elif m == 3:\n        first_sun = 1 + (6 - _date(y, 3, 1).weekday()) % 7\n        o = 4 if d >= first_sun + 7 else 5\n    else:\n        first_sun = 1 + (6 - _date(y, 11, 1).weekday()) % 7\n        o = 5 if d >= first_sun else 4\n    _OFF[k] = o\n    return o\n\n\ndef _et(ts):\n    \"\"\"(day ordinal, minute of day, weekday) in US/Eastern for an ISO UTC stamp.\"\"\"\n    y = int(ts[0:4]); mo = int(ts[5:7]); d = int(ts[8:10])\n    hh = int(ts[11:13]); mi = int(ts[14:16])\n    mins = hh * 60 + mi - 60 * _et_offset(y, mo, d)\n    o = _date(y, mo, d).toordinal()\n    while mins < 0:\n        mins += 1440\n        o -= 1\n    while mins >= 1440:\n        mins -= 1440\n        o += 1\n    return o, mins, (o - 1) % 7          # ordinal 1 is a Monday\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    RTH_LO, RTH_HI = 570, 960            # 09:30 .. 16:00 ET\n    entry_cut = int(ctx.p.entry_cut)\n    exit_cut = int(ctx.p.exit_cut)\n    dows = str(ctx.p.entry_dows)\n    weekly = int(ctx.p.weekly) != 0\n\n    # ---- fold the bars into sessions ----------------------------------\n    # [ordinal, weekday, high, low, close, dollar volume,\n    #  last bar index at or before entry_cut, ditto for exit_cut]\n    sess = []\n    cur = None\n    for i in range(n):\n        o, mins, wd = _et(bars[i][\"t\"])\n        if mins < RTH_LO or mins >= RTH_HI:\n            continue\n        h = float(bars[i][\"h\"]); l = float(bars[i][\"l\"])\n        if cur is None or cur[0] != o:\n            if cur is not None:\n                sess.append(cur)\n            cur = [o, wd, h, l, c[i], c[i] * v[i], -1, -1]\n        else:\n            if h > cur[2]:\n                cur[2] = h\n            if l < cur[3]:\n                cur[3] = l\n            cur[4] = c[i]\n            cur[5] += c[i] * v[i]\n        if mins <= entry_cut:\n            cur[6] = i\n        if mins <= exit_cut:\n            cur[7] = i\n    if cur is not None:\n        sess.append(cur)\n\n    ns = len(sess)\n    entry_flag = [0] * n\n    exit_flag = [0] * n\n    spacing = [0.0] * n\n\n    if ns >= 12:\n        # ---- 20-session ATR / price and 60-session median dollar volume\n        tr = [None] * ns\n        for s in range(1, ns):\n            pc = sess[s - 1][4]\n            hi, lo = sess[s][2], sess[s][3]\n            tr[s] = max(hi - lo, abs(hi - pc), abs(lo - pc))\n        an = max(5, int(ctx.p.atr_days))\n        dn = max(5, int(ctx.p.dv_days))\n        atr_p = [None] * ns              # usable DURING session s: prior data only\n        dv_med = [None] * ns\n        for s in range(ns):\n            lo = s - an\n            if lo < 1:\n                lo = 1\n            w = [tr[k] for k in range(lo, s) if tr[k] is not None]\n            if len(w) >= 5 and sess[s][4] > 0:\n                atr_p[s] = (sum(w) / len(w)) / sess[s][4]\n            d = sorted(sess[k][5] for k in range(max(0, s - dn), s))\n            if len(d) >= 5:\n                dv_med[s] = d[len(d) // 2]\n\n        # ---- weeks, and the last session of each week -------------------\n        week_last = {}\n        for s in range(ns):\n            week_last[sess[s][0] - sess[s][1]] = s      # Monday ordinal -> idx\n\n        for s in range(ns):\n            mon = sess[s][0] - sess[s][1]\n            fri = _date.fromordinal(mon + 4)\n            if not (weekly or 15 <= fri.day <= 21):\n                continue                 # not an expiration week\n            last = week_last.get(mon)\n            if last is not None and sess[last][7] >= 0:\n                exit_flag[sess[last][7]] = 1\n            if s == last or str(sess[s][1]) not in dows:\n                continue                 # never open on the day we must close\n            bi = sess[s][6]\n            if bi < 0:\n                continue\n            px = c[bi]\n            ap, dm = atr_p[s], dv_med[s]\n            if ap is None or dm is None:\n                continue\n            if ap > ctx.p.atr_max or dm < ctx.p.dv_min or px < ctx.p.px_min:\n                continue\n            g = float(ctx.p.strike_grid)\n            if g <= 0:\n                g = 2.5 if px < 50.0 else 5.0\n            entry_flag[bi] = 1\n            spacing[bi] = g\n\n    ctx.entry_flag = ctx.series(entry_flag, \"entry_bar\")\n    ctx.exit_flag = ctx.series(exit_flag, \"exit_bar\")\n    ctx.spacing = ctx.series(spacing, \"strike_grid\")\n    ctx._K = None\n    ctx._sgn = 0\n\n\ndef signal(ctx, i):\n    if not ctx.entry_flag[i]:\n        return 0\n    g = ctx.spacing[i]\n    if not g:\n        return 0\n    px = ctx.c[i]\n    K = round(px / g) * g\n    if K <= 0:\n        return 0\n    # The source states both distances as a fraction of PRICE, which was safe\n    # inside its $20-$200 universe but is not scale-free: 1.5% of a $765 name\n    # is three whole strikes, while 0.2% of it is 60% of the way to the next\n    # one. Both bounds are therefore also expressed against the strike spacing\n    # and combined, so \"near the magnet\" and \"already pinned\" keep the same\n    # meaning at every price level.\n    half = g / 2.0\n    outer = ctx.p.band * px\n    if ctx.p.band_g * half > outer:\n        outer = ctx.p.band_g * half\n    inner = ctx.p.dead * px\n    if ctx.p.dead_g * half < inner:\n        inner = ctx.p.dead_g * half\n    dist = abs(px - K)\n    if dist <= inner or dist > outer:\n        return 0\n    rel = (px - K) / K\n    ctx._K = K\n    ctx._sgn = 1 if rel > 0 else -1\n    # above the magnet, short it back down; below it, buy it back up\n    return -1 if rel > 0 else 1\n\n\ndef exit_signal(ctx, i):\n    if ctx.exit_flag[i]:\n        ctx._K = None\n        return True\n    K = getattr(ctx, \"_K\", None)\n    if K:\n        rel = (ctx.c[i] - K) / K\n        if rel * ctx._sgn > ctx.p.stop_rel:     # pushed further from the magnet\n            ctx._K = None\n            return True\n    return False\n"
+}

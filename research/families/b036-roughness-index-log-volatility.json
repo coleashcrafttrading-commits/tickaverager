@@ -1,0 +1,41 @@
+{
+ "name": "Roughness Index of Log-Volatility",
+ "note": "Estimates the Hurst exponent of LOG-VOLATILITY (not of price) with the q=1 absolute-increment scaling m(D) ~ D^H of the rough-volatility literature, on realised volatility measured over non-overlapping blocks of bars. When vol is unusually PERSISTENT and high it follows the tape; when it is unusually ROUGH it fades a 2-ATR excursion from the mean, because a one-bar vol spike has no follow-through mechanism. The literature's absolute 0.25/0.08 cutoffs are daily-calibrated and unreachable intraday (measured H is 0.0-0.15 on every probe symbol), so the two branches are cut on H's own trailing percentile, which is what 'H drifts up toward persistence' actually means.",
+ "source": "Gatheral, Jaisson & Rosenbaum, 'Volatility is rough', arXiv:1410.3394, published Quantitative Finance 18(6) 2018 - opened and verified this session; confirms 'log-volatility behaves essentially as a fractional Brownian motion with Hurst exponent H of order 0.1, at any reasonable time scale' and the m(q,Delta) ~ Delta^(qH) scaling framework. The rolling-window trading application and the two-branch entry are my synthesis.",
+ "params": {
+  "rv_block": 12,
+  "hurst_win": 150,
+  "h_hist": 252,
+  "h_hi": 70,
+  "h_lo": 30,
+  "h_exit": 50,
+  "vol_pct": 70,
+  "mom_blk": 20,
+  "exc": 2.0,
+  "fade_hold": 60,
+  "sma_n": 20,
+  "atr_n": 14,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0,
+  "trail_atr": 3.0,
+  "side": "both"
+ },
+ "grid": {
+  "rv_block": [
+   6,
+   12,
+   26
+  ],
+  "h_hi": [
+   60,
+   70,
+   80
+  ],
+  "exc": [
+   1.5,
+   2.5
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    day = [str(b[\"t\"])[:10] for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    hh = [float(b[\"h\"]) for b in bars]\n    ll = [float(b[\"l\"]) for b in bars]\n\n    # ---- realised volatility on non-overlapping blocks of bars. A block is\n    #      the rescaled \"session\" of the rough-volatility literature: the\n    #      scaling law m(q,D) ~ D^(qH) is itself scale free, so the statistic\n    #      is the same object measured at a higher sampling frequency.\n    blk = max(3, int(ctx.p.rv_block))\n    end_bar = []\n    sig = []\n    bret = []\n    acc = 0.0\n    r_acc = 0.0\n    k = 0\n    for i in range(1, n):\n        if day[i] != day[i - 1]:\n            acc = 0.0\n            r_acc = 0.0\n            k = 0\n            continue\n        r = math.log(c[i] / c[i - 1]) if (c[i] > 0 and c[i - 1] > 0) else 0.0\n        acc += r * r\n        r_acc += r\n        k += 1\n        if k >= blk:\n            sig.append(math.sqrt(acc) if acc > 0 else 1e-12)\n            bret.append(r_acc)\n            end_bar.append(i)\n            acc = 0.0\n            r_acc = 0.0\n            k = 0\n    nb = len(sig)\n    x = [math.log(s) for s in sig]\n\n    # ---- rolling first-absolute-moment estimate of H on log-volatility ----\n    lags = [1, 2, 3, 4, 5, 8, 12, 16, 25, 40]\n    T = max(60, int(ctx.p.hurst_win))\n    lags = [d for d in lags if d < T - 5]\n    lx = [math.log(d) for d in lags]\n    mlx = sum(lx) / len(lx)\n    dx2 = sum((v - mlx) ** 2 for v in lx)\n    S = [0.0] * len(lags)\n    H = [None] * nb\n    for e in range(nb):\n        if e < T - 1:\n            continue\n        if e == T - 1:\n            for q, d in enumerate(lags):\n                S[q] = sum(abs(x[j + d] - x[j]) for j in range(0, T - d))\n        else:\n            lo = e - T + 1\n            for q, d in enumerate(lags):\n                S[q] += abs(x[e] - x[e - d]) - abs(x[lo - 1 + d] - x[lo - 1])\n        ly = []\n        ok = True\n        for q, d in enumerate(lags):\n            m = S[q] / float(T - d)\n            if m <= 0:\n                ok = False\n                break\n            ly.append(math.log(m))\n        if not ok or dx2 <= 0:\n            continue\n        mly = sum(ly) / len(ly)\n        H[e] = sum((lx[q] - mlx) * (ly[q] - mly)\n                   for q in range(len(lags))) / dx2\n\n    # ---- percentile ranks: of sigma against its own trailing history, and of\n    #      H against its own. The literature's absolute 0.25 / 0.08 cutoffs are\n    #      calibrated to DAILY log-vol; measured on intraday blocks H sits in\n    #      0.0-0.15 on every probe symbol, so an absolute gate is unreachable\n    #      on one side and always-on on the other. The regime call is therefore\n    #      made against H's own trailing distribution, which is what \"H_vol\n    #      drifts up toward persistence\" means operationally.\n    hist = max(40, int(ctx.p.h_hist))\n    hp = [None] * nb\n    sp = [None] * nb\n    mom = [None] * nb\n    mb = max(2, int(ctx.p.mom_blk))\n    for e in range(nb):\n        if H[e] is not None:\n            w = [H[j] for j in range(max(0, e - hist), e + 1) if H[j] is not None]\n            if len(w) >= 20:\n                hp[e] = 100.0 * sum(1 for v in w if v <= H[e]) / len(w)\n        lo = max(0, e - hist + 1)\n        w2 = sig[lo:e + 1]\n        if len(w2) >= 20:\n            sp[e] = 100.0 * sum(1 for v in w2 if v <= sig[e]) / len(w2)\n        if e >= mb:\n            mom[e] = sum(bret[e - mb + 1:e + 1])\n\n    # ---- carry each block's verdict onto the bars that follow it ----\n    HP = [None] * n\n    SP = [None] * n\n    MO = [None] * n\n    j = -1\n    for i in range(n):\n        while j + 1 < nb and end_bar[j + 1] < i:\n            j += 1\n        if j >= 0:\n            HP[i] = hp[j]\n            SP[i] = sp[j]\n            MO[i] = mom[j]\n\n    # ---- own SMA / ATR for the fade leg, so the whole rule is one array ----\n    sn = max(2, int(ctx.p.sma_n))\n    an = max(2, int(ctx.p.atr_n))\n    sma = [None] * n\n    run = 0.0\n    for i in range(n):\n        run += c[i]\n        if i >= sn:\n            run -= c[i - sn]\n        if i >= sn - 1:\n            sma[i] = run / sn\n    atr = [None] * n\n    prev = None\n    a = None\n    tot = 0.0\n    for i in range(n):\n        tr = hh[i] - ll[i] if prev is None else max(hh[i] - ll[i],\n                                                    abs(hh[i] - prev),\n                                                    abs(ll[i] - prev))\n        prev = c[i]\n        if i < an:\n            tot += tr\n            if i == an - 1:\n                a = tot / an\n        else:\n            a = (a * (an - 1) + tr) / an\n        atr[i] = a\n\n    h_hi = float(ctx.p.h_hi)\n    h_lo = float(ctx.p.h_lo)\n    vpc = float(ctx.p.vol_pct)\n    exc = float(ctx.p.exc)\n    S_ = [0] * n\n    LEG = [0] * n\n    for i in range(n):\n        hpv, spv, mv = HP[i], SP[i], MO[i]\n        if hpv is None:\n            continue\n        if hpv >= h_hi and spv is not None and spv >= vpc and mv:\n            S_[i] = 1 if mv > 0 else -1\n            LEG[i] = 1\n        elif hpv <= h_lo and sma[i] is not None and atr[i]:\n            z = (c[i] - sma[i]) / atr[i]\n            if z >= exc:\n                S_[i] = -1\n                LEG[i] = 2\n            elif z <= -exc:\n                S_[i] = 1\n                LEG[i] = 2\n    ctx.rs = ctx.series(S_, \"roughness_signal\")\n    ctx.leg = ctx.series(LEG, \"roughness_leg\")\n    ctx.hp = ctx.series(HP, \"hurst_pct\")\n    ctx.mo = ctx.series(MO, \"block_momentum\")\n    ctx.sm = ctx.series(sma, \"sma\")\n\n\ndef signal(ctx, i):\n    s = ctx.rs[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    p = ctx.positions[0]\n    e = max(0, int(p[\"entry_i\"]))\n    if i <= e:\n        return False\n    leg = ctx.leg[max(0, e - 1)] or ctx.leg[e]\n    long_side = p[\"side\"] == \"long\"\n    if leg == 2:\n        s = ctx.sm[i]\n        if i - e >= int(ctx.p.fade_hold):\n            return True\n        if s is None:\n            return False\n        return (ctx.c[i] >= s) if long_side else (ctx.c[i] <= s)\n    hpv = ctx.hp[i]\n    if hpv is not None and hpv < float(ctx.p.h_exit):\n        return True\n    mv = ctx.mo[i]\n    if mv is None or mv == 0:\n        return False\n    return (mv < 0) if long_side else (mv > 0)"
+}

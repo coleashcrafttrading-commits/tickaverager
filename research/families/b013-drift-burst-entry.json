@@ -1,0 +1,35 @@
+{
+ "name": "Pre-averaged drift burst entry",
+ "note": "The Christensen-Oomen-Reno drift burst test, built exactly as the paper specifies: returns pre-averaged with g(x)=min(x,1-x), a left-sided exponential kernel for the spot drift, and a Parzen-kernel HAC spot variance whose lag length carries the 2(k_n-1) correction for the serial correlation pre-averaging itself induces, so it does not fire on bid-ask bounce. Enters when the statistic exceeds the critical value AND cumulative session volume beats its own 20-day time-of-day profile; holds while the statistic stays above the lower (exit) level, flattens at 15:55 ET, and never re-enters the same direction on the same day. Bandwidths are in BARS, not seconds, keeping the paper's 1:3 drift/variance ratio; the critical values likewise cannot be the paper's tick-level 4.6/3.9 because at bar sampling the studentised statistic tops out near 3 -- cv is swept over the range the statistic actually occupies.",
+ "source": "Christensen, K., Oomen, R. & Reno, R. (2022), 'The drift burst hypothesis', Journal of Econometrics 227, 461-497. Estimator, pre-averaging, HAC variance and default bandwidth ratios as implemented in driftBursts in the R highfrequency package.",
+ "params": {
+  "exit_on_zero": 1,
+  "k_n": 5,
+  "h_mean": 20,
+  "h_var": 60,
+  "cv": 2.2,
+  "cv_exit_frac": 0.85,
+  "vol_mult": 1.2,
+  "vol_days": 20,
+  "vol_min_days": 3,
+  "t_start": 585,
+  "t_flat": 955
+ },
+ "grid": {
+  "cv": [
+   1.8,
+   2.2,
+   2.6
+  ],
+  "h_mean": [
+   10,
+   20,
+   40
+  ],
+  "vol_mult": [
+   1.0,
+   1.5
+  ]
+ },
+ "code": "\nimport math as _m\nfrom datetime import datetime as _dt, timedelta as _td\n\n\ndef _parzen(x):\n    if x <= 0.5:\n        return 1.0 - 6.0 * x * x + 6.0 * x * x * x\n    if x <= 1.0:\n        return 2.0 * (1.0 - x) ** 3\n    return 0.0\n\n\ndef _nth_sunday(y, mo, nth):\n    d = _dt(y, mo, 1)\n    off = (6 - d.weekday()) % 7\n    return d + _td(days=off + 7 * (nth - 1))\n\n\ndef _eastern(ts):\n    \"\"\"UTC stamp -> (yyyymmdd, minutes past Eastern midnight), DST included.\"\"\"\n    y = int(ts[0:4])\n    mo = int(ts[5:7])\n    dd = int(ts[8:10])\n    hh = int(ts[11:13])\n    mi = int(ts[14:16])\n    u = _dt(y, mo, dd, hh, mi)\n    lo = _nth_sunday(y, 3, 2) + _td(hours=7)\n    hi = _nth_sunday(y, 11, 1) + _td(hours=6)\n    e = u - _td(hours=(4 if lo <= u < hi else 5))\n    return e.year * 10000 + e.month * 100 + e.day, e.hour * 60 + e.minute\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    vol = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    day = [0] * n\n    mod = [0] * n\n    for i in range(n):\n        day[i], mod[i] = _eastern(str(bars[i][\"t\"]))\n    ctx.day = day\n    ctx.mod = ctx.series(mod, \"et_minute\")\n\n    # ---- log returns, with the overnight gap removed so a session break can\n    # ---- never masquerade as an explosive drift\n    r = [0.0] * n\n    for i in range(1, n):\n        if day[i] == day[i - 1] and c[i] > 0 and c[i - 1] > 0:\n            r[i] = _m.log(c[i] / c[i - 1])\n\n    # ---- pre-averaging with g(x) = min(x, 1-x), anchored on the last return\n    # ---- in its window so nothing reaches forward\n    kn = max(2, int(ctx.p.k_n))\n    gw = [min(j / float(kn), 1.0 - j / float(kn)) for j in range(1, kn)]\n    x = [0.0] * n\n    for i in range(kn, n):\n        base = i - (kn - 1)\n        s = 0.0\n        for j in range(1, kn):\n            s += gw[j - 1] * r[base + j]\n        x[i] = s\n\n    # ---- spot drift (left exponential kernel) and a Parzen-HAC spot variance\n    hm = float(ctx.p.h_mean)\n    hv = float(ctx.p.h_var)\n    phi = _m.exp(-1.0 / hm)\n    psi = _m.exp(-1.0 / hv)\n    Ln = max(1, int(4.0 * ((hv / 100.0) ** (2.0 / 9.0)))) + 2 * (kn - 1)\n    pw = [_parzen(l / (Ln + 1.0)) for l in range(Ln + 1)]\n    pin = [psi ** (-l) for l in range(Ln + 1)]\n    p2l = [psi ** (2 * l) for l in range(Ln + 1)]\n    A = 0.0\n    B = [0.0] * (Ln + 1)\n    T = [None] * n\n    ready = int(2 * hv) + kn\n    k2 = 0.5                       # integral of the exponential kernel squared\n    scale = _m.sqrt(hm / k2)\n    for t in range(n):\n        if t >= ready:\n            s2 = B[0]\n            for l in range(1, Ln + 1):\n                s2 += 2.0 * pw[l] * pin[l] * B[l]\n            s2 /= hv\n            if s2 > 1e-20:\n                T[t] = scale * (A / hm) / _m.sqrt(s2)\n        A = phi * (A + x[t])\n        xt = x[t]\n        for l in range(Ln, -1, -1):\n            add = x[t - l] * xt if t - l >= 0 else 0.0\n            B[l] = psi * psi * (B[l] + p2l[l] * add)\n    ctx.T = ctx.series(T, \"drift_burst_t\")\n\n    # ---- cumulative session volume against its own 20-day profile ----------\n    ndays = int(ctx.p.vol_days)\n    minday = int(ctx.p.vol_min_days)\n    mult = float(ctx.p.vol_mult)\n    prof = {}\n    ok = [False] * n\n    cum = 0.0\n    curday = None\n    for i in range(n):\n        if day[i] != curday:\n            curday = day[i]\n            cum = 0.0\n        if mod[i] < 570 or mod[i] >= 960:\n            continue\n        cum += vol[i]\n        hist = prof.get(mod[i])\n        if hist is None:\n            hist = []\n            prof[mod[i]] = hist\n        if len(hist) >= minday:\n            av = sum(hist) / len(hist)\n            ok[i] = av > 0.0 and cum >= mult * av\n        hist.append(cum)\n        if len(hist) > ndays:\n            hist.pop(0)\n    ctx.volok = ctx.series(ok, \"volume_confirms\")\n    ctx._bdir = 0\n    ctx._done = set()\n\n\ndef signal(ctx, i):\n    m = ctx.mod[i]\n    live = int(ctx.p.t_start) <= m < int(ctx.p.t_flat)\n    d = ctx._bdir\n    if d:\n        # in a burst: hold while the statistic stays above the exit level\n        if not live or ctx.flat:\n            ctx._bdir = 0\n            return 0\n        t = ctx.T[i]\n        lo = float(ctx.p.cv) * float(ctx.p.cv_exit_frac)\n        if t is not None and (t > lo if d > 0 else t < -lo):\n            return d\n        ctx._bdir = 0\n        return 0\n    if not live:\n        return 0\n    t = ctx.T[i]\n    if t is None or not ctx.volok[i]:\n        return 0\n    cv = float(ctx.p.cv)\n    if t > cv:\n        s = 1\n    elif t < -cv:\n        s = -1\n    else:\n        return 0\n    key = (ctx.day[i], s)\n    if key in ctx._done:\n        return 0\n    ctx._done.add(key)\n    ctx._bdir = s\n    return s\n"
+}

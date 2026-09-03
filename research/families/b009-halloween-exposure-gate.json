@@ -1,0 +1,28 @@
+{
+ "name": "Halloween Exposure Gate",
+ "note": "The six-month seasonal as an exposure gate: fully long through the November-to-winter_end window, and in the summer window either flat (summer_mode 0, the pure form) or long only inside the turn-of-month windows (summer_mode 1, the paper-suggested softened form, which is where much of the summer return has historically sat). No price condition and no stop rule of its own. Note the pure form is degenerate on any backtest window that lies entirely inside one half of the year -- it will show zero trades there, which is the rule behaving correctly, not a broken signal.",
+ "source": "Bouman & Jacobsen, \"The Halloween Indicator, 'Sell in May and Go Away': Another Puzzle,\" American Economic Review 92(5), 2002, 1618-1635",
+ "params": {
+  "winter_end": 4,
+  "summer_mode": 1,
+  "tom_off": 4,
+  "tom_exit": 3,
+  "side": "long",
+  "exit_on_zero": 1
+ },
+ "grid": {
+  "winter_end": [
+   4,
+   5
+  ],
+  "summer_mode": [
+   0,
+   1
+  ],
+  "tom_off": [
+   2,
+   4
+  ]
+ },
+ "code": "import math\n\n\ndef _sess(ctx):\n    \"\"\"Per-bar ET clock, session index and RTH flag, from the timestamps alone.\n\n    The feed carries extended hours (04:00-20:00 ET) and some symbols are\n    missing premarket bars entirely, so nothing here may count bars to find a\n    session -- it all comes off the clock. US DST boundaries are computed from\n    the calendar, which is a priori knowledge, not a peek at the tape.\n    \"\"\"\n    import datetime as _dt\n    etm = []\n    day = []\n    rth = []\n    ri = []\n    cache = {}\n    last = None\n    di = -1\n    nr = 0\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        key = (y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            pv = _dt.date(y, mo, dd) - _dt.timedelta(days=1)\n            key = (pv.year, pv.month, pv.day)\n        if key != last:\n            last = key\n            di += 1\n        r = 570 <= tot < 960\n        etm.append(tot); day.append(di); rth.append(r)\n        if r:\n            nr += 1\n        ri.append(nr)\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ri = ri\n\n\ndef _rth_returns(ctx):\n    \"\"\"RTH-only log returns and the raw bar index each one ends on.\n\n    Overnight and pre/post-market returns are dropped: the intraday moments\n    below estimate an intraday quantity, and a gap return is not a 5-minute\n    return however it is labelled.\n    \"\"\"\n    R = []\n    POS = []\n    prev = None\n    prevday = None\n    for i in range(len(ctx.bars)):\n        if ctx.f_rth[i]:\n            c = float(ctx.bars[i][\"c\"])\n            if prev is not None and prev > 0.0 and c > 0.0 and \\\n                    ctx.f_day[i] == prevday:\n                R.append(math.log(c / prev))\n                POS.append(i)\n            prev = c\n            prevday = ctx.f_day[i]\n    return R, POS\n\n\ndef _monthpos(y, mo, dd):\n    \"\"\"(trading-day index within the month, trading days left after today).\"\"\"\n    import datetime as _dt\n    nb = 0\n    for k in range(1, dd + 1):\n        if _dt.date(y, mo, k).weekday() < 5:\n            nb += 1\n    nxt = _dt.date(y + 1, 1, 1) if mo == 12 else _dt.date(y, mo + 1, 1)\n    last = (nxt - _dt.timedelta(days=1)).day\n    rem = 0\n    for k in range(dd + 1, last + 1):\n        if _dt.date(y, mo, k).weekday() < 5:\n            rem += 1\n    return nb, rem\n\n\ndef family_init(ctx):\n    _sess(ctx)\n    n = len(ctx.bars)\n    mon = [0] * n\n    pos = [None] * n\n    cache = {}\n    for i in range(n):\n        if not ctx.f_rth[i]:\n            continue\n        ts = ctx.bars[i][\"t\"]\n        key = ts[0:10]\n        v = cache.get(key)\n        if v is None:\n            v = (int(ts[5:7]),\n                 _monthpos(int(ts[0:4]), int(ts[5:7]), int(ts[8:10])))\n            cache[key] = v\n        mon[i] = v[0]\n        pos[i] = v[1]\n    ctx.f_mon = mon\n    ctx.f_pos = pos\n\n\ndef signal(ctx, i):\n    v = ctx.f_pos[i]\n    if v is None:\n        return 0\n    mo = ctx.f_mon[i]\n    we = int(ctx.p.winter_end)\n    winter = mo >= 11 or mo <= we\n    if winter:\n        return 1\n    if not int(ctx.p.summer_mode):\n        return 0\n    nb, rem = v\n    if rem <= int(ctx.p.tom_off) or nb <= int(ctx.p.tom_exit):\n        return 1\n    return 0\n"
+}

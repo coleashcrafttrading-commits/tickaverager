@@ -128,7 +128,11 @@ def main(argv=None) -> int:
         return 2
     target = Path(args[0])
     tf = args[1] if len(args) > 1 else "5Min"
-    files = sorted(target.glob("*.json")) if target.is_dir() else [target]
+    # famcheck writes its own reports into the folder it scans, so skip them:
+    # a report has a "name" but no "code" and would be judged a broken family.
+    files = ([f for f in sorted(target.glob("*.json"))
+              if f.name != "_famcheck.json" and not f.name.endswith(".famcheck.json")]
+             if target.is_dir() else [target])
     specs = []
     for f in files:
         try:

@@ -1,0 +1,31 @@
+{
+ "name": "Amihud Illiquidity Reversal",
+ "note": "Bar-based Amihud lambda: rolling mean of |log return| / dollar volume. Buys when that ratio sits above its own trailing percentile AND price is more than atr_d ATRs below its 20-bar mean -- a decline produced by very little money changing hands. Exits when the ratio falls back under its trailing median, or price reclaims the mean, or the clock runs out. The percentile is a true rolling rank over the trailing window, not a fixed cut.",
+ "source": "Bar-based Amihud lambda, AFML pp.288-289, implemented as get_bar_based_amihud_lambda in mlfinlab/microstructural_features/second_generation.py - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB.",
+ "params": {
+  "illiq_n": 20,
+  "pct_win": 252,
+  "pct_in": 90.0,
+  "atr_d": 1.0,
+  "sma_n": 20,
+  "time_stop": 15,
+  "exit_signal_on": 1,
+  "side": "long"
+ },
+ "grid": {
+  "illiq_n": [
+   20,
+   40
+  ],
+  "pct_in": [
+   85.0,
+   90.0,
+   95.0
+  ],
+  "atr_d": [
+   0.5,
+   1.0
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"ILLIQ, then its own trailing rank. Volume is the DENOMINATOR here.\"\"\"\n    import math\n    from bisect import bisect_left, insort\n    bars = ctx.bars\n    m = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    n = max(2, int(ctx.p.illiq_n))\n    w = max(40, int(ctx.p.pct_win))\n    q = float(ctx.p.pct_in) / 100.0\n    if q < 0.5:\n        q = 0.5\n    if q > 0.995:\n        q = 0.995\n\n    raw = [None] * m\n    for i in range(1, m):\n        if c[i] > 0.0 and c[i - 1] > 0.0 and v[i] > 0.0:\n            dv = c[i] * v[i]\n            if dv > 0.0:\n                raw[i] = abs(math.log(c[i] / c[i - 1])) / dv\n\n    il = [None] * m\n    buf = []\n    s = 0.0\n    cnt = 0\n    need = max(2, n // 2)\n    for i in range(m):\n        x = raw[i]\n        buf.append(x)\n        if x is not None:\n            s += x\n            cnt += 1\n        if len(buf) > n:\n            old = buf.pop(0)\n            if old is not None:\n                s -= old\n                cnt -= 1\n        if cnt >= need:\n            il[i] = s / cnt\n\n    thr = [None] * m\n    med = [None] * m\n    win = []\n    srt = []\n    minh = max(30, w // 4)\n    for i in range(m):\n        x = il[i]\n        if x is None:\n            continue\n        win.append(x)\n        insort(srt, x)\n        if len(win) > w:\n            old = win.pop(0)\n            k = bisect_left(srt, old)\n            if k < len(srt):\n                srt.pop(k)\n        L = len(srt)\n        if L >= minh:\n            j = int(q * L)\n            if j >= L:\n                j = L - 1\n            thr[i] = srt[j]\n            med[i] = srt[L // 2]\n    ctx._il = il\n    ctx._thr = thr\n    ctx._med = med\n    ctx.ma = ctx.indicator(\"sma\", period=max(2, int(ctx.p.sma_n)))\n\n\ndef signal(ctx, i):\n    x = ctx._il[i]\n    t = ctx._thr[i]\n    if x is None or t is None:\n        return 0\n    s = ctx.ma[i]\n    a = ctx.a[i]\n    c = ctx.c[i]\n    if s is None or a is None or a <= 0.0 or c is None:\n        return 0\n    if x < t:\n        return 0\n    if c > s - float(ctx.p.atr_d) * a:\n        return 0\n    return 1\n\n\ndef exit_signal(ctx, i):\n    x = ctx._il[i]\n    mv = ctx._med[i]\n    s = ctx.ma[i]\n    c = ctx.c[i]\n    if x is not None and mv is not None and x < mv:\n        return True\n    if s is not None and c is not None and c > s:\n        return True\n    return False\n"
+}

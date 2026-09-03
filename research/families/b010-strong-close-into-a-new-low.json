@@ -1,0 +1,34 @@
+{
+ "name": "Strong Close Into a New Low",
+ "note": "Shorts the bar that breaks to a new N-bar low and then closes in the top of its own range (IBS above threshold) -- a failed flush whose bounce is already spent by the close. Optional 200-EMA downtrend filter and an optional intraday session window given in UTC minutes-of-day. Covers on the first close beneath the previous bar's low, which is a bar-versus-bar test rather than an indicator.",
+ "source": "StockSharp/AlgoTrading, strategy API/1501-1600/1598_10_Bar_Low_Pullback -- 'Low breaks the previous LowestPeriod bars lowest low; IBS > IbsThreshold (0.85); optional close below EMA200; exit on close below previous low'",
+ "params": {
+  "n_low": 10,
+  "ibs_min": 0.85,
+  "ema_n": 200,
+  "ema_on": 1,
+  "session_on": 0,
+  "sess_start": 810,
+  "sess_end": 1200,
+  "side": "short",
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 1.0
+ },
+ "grid": {
+  "n_low": [
+   5,
+   10,
+   20
+  ],
+  "ibs_min": [
+   0.75,
+   0.85
+  ],
+  "ema_on": [
+   0,
+   1
+  ]
+ },
+ "code": "def family_init(ctx):\n    ctx.e = ctx.indicator(\"ema\", period=int(ctx.p.ema_n))\n    b = ctx.bars\n    n = len(b)\n    lows = [float(x[\"l\"]) for x in b]\n    highs = [float(x[\"h\"]) for x in b]\n    closes = [float(x[\"c\"]) for x in b]\n    lb = max(1, int(ctx.p.n_low))\n    prior = [None] * n\n    for j in range(lb, n):\n        prior[j] = min(lows[j - lb:j])\n    ibs = [None] * n\n    for j in range(n):\n        rng = highs[j] - lows[j]\n        if rng > 0:\n            ibs[j] = (closes[j] - lows[j]) / rng\n    ctx.prior_low = ctx.series(prior, \"prior_low\")\n    ctx.ibs = ctx.series(ibs, \"ibs\")\n\n\ndef _in_session(ctx, i):\n    if not int(ctx.p.session_on):\n        return True\n    ts = str(ctx.t[i])\n    try:\n        m = int(ts[11:13]) * 60 + int(ts[14:16])\n    except Exception:\n        return True\n    a = int(ctx.p.sess_start)\n    z = int(ctx.p.sess_end)\n    if a <= z:\n        return a <= m <= z\n    return m >= a or m <= z\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    pl = ctx.prior_low[i]\n    ib = ctx.ibs[i]\n    if pl is None or ib is None:\n        return 0\n    if ctx.l[i] >= pl:\n        return 0\n    if ib <= ctx.p.ibs_min:\n        return 0\n    if int(ctx.p.ema_on):\n        e = ctx.e[i]\n        if e is None or ctx.c[i] >= e:\n            return 0\n    if not _in_session(ctx, i):\n        return 0\n    return -1\n\n\ndef exit_signal(ctx, i):\n    if i < 1:\n        return False\n    return ctx.c[i] < ctx.l[i - 1]"
+}

@@ -1,0 +1,31 @@
+{
+ "name": "Variance-ratio trend gate",
+ "note": "Lo-MacKinlay overlapping variance ratio VR(q) with the heteroskedasticity-robust z*(q), used as an entry gate for a drift-direction trade. On a window of vr_win log returns ending at the current bar it computes sigma_a^2 (1-period), sigma_c^2 (overlapping q-period, with the m = q(nq-q+1)(1-q/nq) correction), VR = sigma_c^2/sigma_a^2, and theta*(q) = sum_j [2(q-j)/q]^2 delta_j with delta_j the ratio of sum_t d_t^2 d_{t-j}^2 to (sum_t d_t^2)^2. A position is taken only while z*(q) exceeds vr_zin, in the direction of the vr_mom-bar return; it is exited when z* falls to vr_zout (regime over) or the drift sign flips. Two honest deviations from the idea as written. First, the study's bars are 5-minute, not daily, so the 252-bar window and 63-bar direction lookback are bar counts here, not days -- the statistic is scale-free but the horizon it describes is intraday. Second, z* is recomputed every vr_step bars rather than every bar: theta* costs O(q*win) and recomputing it 6000 times per backtest dominated everything else, so the statistic is refreshed on a fixed grid and held between refreshes, which is what a daily statistic does to an intraday tape anyway. Measured on the probe symbols z*(20) runs roughly -2 to +9 with about a quarter of evaluations above +1.65, so the gate is restrictive without being unreachable.",
+ "source": "Lo & MacKinlay (1988), 'Stock Market Prices Do Not Follow Random Walks: Evidence from a Simple Specification Test', Review of Financial Studies 1(1), 41-66 - the VR(q) estimator and the heteroskedasticity-robust z*(q). Link from VR to trend P&L: Dao, Nguyen, Deremble, Lemperiere, Bouchaud & Potters (2017), 'Tail protection for long investors: Trend convexity at work', arXiv:1607.02410.",
+ "params": {
+  "vr_q": 20,
+  "vr_win": 252,
+  "vr_step": 26,
+  "vr_mom": 63,
+  "vr_zin": 1.65,
+  "vr_zout": 0.0,
+  "exit_signal_on": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "vr_q": [
+   10,
+   20,
+   40
+  ],
+  "vr_win": [
+   252,
+   504
+  ],
+  "vr_zin": [
+   1.0,
+   1.65
+  ]
+ },
+ "code": "import math as _m\n\n\ndef _vr_z(d, q):\n    \"\"\"Lo-MacKinlay VR(q) and heteroskedasticity-robust z*(q) on de-meaned d.\n\n    d is already x_t - mu over the estimation window (length nq).\n    Returns (vr, z) or (None, None) when the window cannot support q.\n    \"\"\"\n    nq = len(d)\n    if nq < 3 * q + 2:\n        return None, None\n    s2 = 0.0\n    for v in d:\n        s2 += v * v\n    if s2 <= 0.0:\n        return None, None\n    sig_a = s2 / (nq - 1)                       # 1-period variance\n    m = q * (nq - q + 1) * (1.0 - float(q) / nq)\n    if m <= 0.0:\n        return None, None\n    run = 0.0\n    for j in range(q):\n        run += d[j]\n    acc = run * run\n    for j in range(q, nq):\n        run += d[j] - d[j - q]\n        acc += run * run\n    sig_c = acc / m                             # q-period overlapping variance\n    if sig_a <= 0.0:\n        return None, None\n    vr = sig_c / sig_a\n    # heteroskedasticity-robust theta*(q) = sum_j [2(q-j)/q]^2 * delta_j\n    den = s2 * s2\n    if den <= 0.0:\n        return vr, None\n    sq = [v * v for v in d]\n    th = 0.0\n    for j in range(1, q):\n        a = 0.0\n        for t in range(j, nq):\n            a += sq[t] * sq[t - j]\n        w = 2.0 * (q - j) / q\n        th += w * w * (a / den)\n    if th <= 0.0:\n        return vr, None\n    return vr, (vr - 1.0) / _m.sqrt(th)\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    q = max(2, int(ctx.p.vr_q))\n    win = max(3 * q + 2, int(ctx.p.vr_win))\n    step = max(1, int(ctx.p.vr_step))\n    look = max(2, int(ctx.p.vr_mom))\n\n    x = [0.0] * n\n    for i in range(1, n):\n        if c[i] > 0.0 and c[i - 1] > 0.0:\n            x[i] = _m.log(c[i] / c[i - 1])\n\n    zs = [None] * n\n    mom = [None] * n\n    z_cur = None\n    seen = []\n    for i in range(n):\n        if i >= win and (i - win) % step == 0:\n            w = x[i - win + 1:i + 1]            # ends on the current bar\n            mu = sum(w) / win\n            _, z = _vr_z([v - mu for v in w], q)\n            if z is not None:\n                z_cur = z\n                seen.append(z)\n        zs[i] = z_cur\n        if i >= look and c[i - look] > 0.0:\n            mom[i] = c[i] / c[i - look] - 1.0\n\n    ctx.vr_zs = ctx.series(zs, \"vr_z\")\n    ctx.vr_m = ctx.series(mom, \"vr_mom\")\n    if seen:\n        s = sorted(seen)\n        ctx.log(\"VR z*(q=%d) over %d evaluations: min %.2f p25 %.2f med %.2f \"\n                \"p75 %.2f max %.2f | frac above %.2f = %.3f\"\n                % (q, len(s), s[0], s[len(s) // 4], s[len(s) // 2],\n                   s[(3 * len(s)) // 4], s[-1], float(ctx.p.vr_zin),\n                   sum(1 for v in s if v > ctx.p.vr_zin) / float(len(s))))\n\n\ndef signal(ctx, i):\n    z = ctx.vr_zs[i]\n    m = ctx.vr_m[i]\n    if z is None or m is None:\n        return 0\n    if z <= ctx.p.vr_zin:\n        return 0\n    if m > 0.0:\n        return 1\n    if m < 0.0:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out when the trending regime ends, or the 63-bar drift flips.\"\"\"\n    z = ctx.vr_zs[i]\n    if z is None:\n        return False\n    if z <= ctx.p.vr_zout:\n        return True\n    m = ctx.vr_m[i]\n    if m is None or not ctx.positions:\n        return False\n    d = 1.0 if ctx.positions[0][\"side\"] == \"long\" else -1.0\n    return m * d < 0.0"
+}

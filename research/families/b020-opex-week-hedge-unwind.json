@@ -1,0 +1,31 @@
+{
+ "name": "OPEX Week Hedge Unwind",
+ "note": "A pure calendar rule with no price condition in the entry at all. The third Friday of each month is derived from the bar timestamps on an exact ET clock (DST included), long from the first trading day of that week to the third Friday's close, and optionally short from that close through the following Friday's close. The only non-calendar condition is the source's universe filter, a trailing median session dollar volume floor. Useful as an overlay or a gate on other rules as much as a standalone book.",
+ "source": "Stivers & Sun (2013), 'Returns and option activity over the option-expiration week for S&P 100 stocks', Journal of Banking & Finance 37(11), 4226-4240. Abstract and stated mechanisms retrieved from https://ideas.repec.org/a/eee/jbfina/v37y2013i11p4226-4240.html",
+ "params": {
+  "short_leg": 1,
+  "entry_shift": 0,
+  "exit_shift": 0,
+  "dv_min": 200000000.0,
+  "dv_sess": 20,
+  "tp_atr": 0.0,
+  "st_atr": 2.0,
+  "exit_on_zero": 1,
+  "exit_on_flip": 1
+ },
+ "grid": {
+  "short_leg": [
+   0,
+   1
+  ],
+  "entry_shift": [
+   0,
+   1
+  ],
+  "exit_shift": [
+   0,
+   1
+  ]
+ },
+ "code": "import datetime as _dt\n\n\ndef _clock(ctx):\n    \"\"\"ET minute-of-day, session index, RTH flag and the ET calendar date.\n\n    Everything about this family is a date, so the clock has to be exact.\n    US DST boundaries are calendar arithmetic, known a priori, not a peek at\n    the tape.\n    \"\"\"\n    etm = []\n    day = []\n    rth = []\n    ordn = []\n    cache = {}\n    last = None\n    di = -1\n    for b in ctx.bars:\n        ts = b[\"t\"]\n        y = int(ts[0:4]); mo = int(ts[5:7]); dd = int(ts[8:10])\n        hh = int(ts[11:13]); mi = int(ts[14:16])\n        g = cache.get(y)\n        if g is None:\n            g = (1 + ((6 - _dt.date(y, 3, 1).weekday()) % 7) + 7,\n                 1 + ((6 - _dt.date(y, 11, 1).weekday()) % 7))\n            cache[y] = g\n        dst = (mo > 3 or (mo == 3 and dd >= g[0])) and \\\n              (mo < 11 or (mo == 11 and dd < g[1]))\n        tot = hh * 60 + mi - (240 if dst else 300)\n        d = _dt.date(y, mo, dd)\n        if tot < 0:\n            tot += 1440\n            d = d - _dt.timedelta(days=1)\n        if d != last:\n            last = d\n            di += 1\n        etm.append(tot)\n        day.append(di)\n        rth.append(570 <= tot < 960)\n        ordn.append(d.toordinal())\n    ctx.f_etm = etm\n    ctx.f_day = day\n    ctx.f_rth = rth\n    ctx.f_ord = ordn\n\n\ndef _third_friday(y, m):\n    d = _dt.date(y, m, 1)\n    return _dt.date(y, m, 1 + ((4 - d.weekday()) % 7) + 14)\n\n\ndef family_init(ctx):\n    _clock(ctx)\n    n = len(ctx.bars)\n    entry_shift = 1 if int(ctx.p.entry_shift) else 0\n    exit_shift = 1 if int(ctx.p.exit_shift) else 0\n    short_on = 1 if int(ctx.p.short_leg) else 0\n    CLOSE = 955                       # last 5 minutes of the RTH session\n\n    # every expiry window the sample touches, as minute-stamped intervals\n    wins = []\n    seen = set()\n    for i in range(n):\n        d = _dt.date.fromordinal(ctx.f_ord[i])\n        for k in (-1, 0, 1):\n            y = d.year\n            m = d.month + k\n            if m < 1:\n                m += 12\n                y -= 1\n            elif m > 12:\n                m -= 12\n                y += 1\n            if (y, m) in seen:\n                continue\n            seen.add((y, m))\n            tf = _third_friday(y, m)\n            start = tf - _dt.timedelta(days=4 + 3 * entry_shift)\n            endl = tf - _dt.timedelta(days=exit_shift)\n            wins.append((start.toordinal() * 1440 + 570,\n                         endl.toordinal() * 1440 + CLOSE,\n                         tf.toordinal() * 1440 + CLOSE,\n                         (tf + _dt.timedelta(days=7)).toordinal() * 1440 + CLOSE))\n\n    # trailing median session dollar volume, prior sessions only\n    dvs = {}\n    for i in range(n):\n        if ctx.f_rth[i]:\n            b = ctx.bars[i]\n            dvs[ctx.f_day[i]] = dvs.get(ctx.f_day[i], 0.0) + \\\n                float(b[\"c\"]) * float(b.get(\"v\") or 0.0)\n    ns = max(3, int(ctx.p.dv_sess))\n    dvok = [False] * n\n    hist = []\n    cur = -1\n    ok = False\n    for i in range(n):\n        if ctx.f_day[i] != cur:\n            cur = ctx.f_day[i]\n            if len(hist) >= 3:\n                q = sorted(hist)\n                k2 = len(q)\n                med = q[k2 // 2] if k2 % 2 else 0.5 * (q[k2 // 2 - 1] + q[k2 // 2])\n                ok = med >= float(ctx.p.dv_min)\n            else:\n                ok = float(ctx.p.dv_min) <= 0.0\n            prev = cur - 1\n            if prev in dvs:\n                hist.append(dvs[prev])\n                if len(hist) > ns:\n                    hist.pop(0)\n        dvok[i] = ok\n\n    sig = [0] * n\n    for i in range(n):\n        if not ctx.f_rth[i] or not dvok[i]:\n            continue\n        key = ctx.f_ord[i] * 1440 + ctx.f_etm[i]\n        for (ls, le, ss, se) in wins:\n            if ls <= key <= le:\n                sig[i] = 1\n                break\n            if short_on and ss <= key <= se:\n                sig[i] = -1\n                break\n    ctx.f_sig = ctx.series(sig, \"opex_calendar\")\n\n\ndef signal(ctx, i):\n    return ctx.f_sig[i]\n"
+}

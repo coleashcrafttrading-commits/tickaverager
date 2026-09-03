@@ -1,0 +1,33 @@
+{
+ "name": "TD sequential setup nine with perfection",
+ "note": "DeMark bar counting and nothing else. A buy setup counts consecutive bars closing below the close `off` bars back; at count `setup_len` the perfection inequality is tested (min of the last two setup lows at or below min of setup bars L-3 and L-2) and, if it fails, the count is allowed to extend to max_len looking for the first bar that satisfies it. Sell setup is the mirror. entry_mode 0 enters at the qualifying close, 1 is DeMark's Method 2 (the first later bar that closes back above close[-off]), 2 runs the Countdown to 13 on close <= low[-2]. The TDST target -- the first close beyond the extreme of the setup bars -- is the family's own exit_signal.",
+ "source": "Thomas DeMark, 'The New Science of Technical Analysis' (1994). Setup rule (9 consecutive closes with Close[i] < Close[i-4]) and the countdown's switch to a close[2]-based comparison confirmed in the open-source implementation https://github.com/Forte11Cuba/TD-Sequential-Tom-DeMark. Independent backtest with the same 4-bar offset, 9-bar count and 'Method 2' entry, across 42 futures markets 1980-2013: https://oxfordstrat.com/trading-strategies/td-sequential-1/ - note performance deteriorates markedly at $100 round-turn costs, so this needs liquid names and passive fills.",
+ "params": {
+  "off": 4,
+  "setup_len": 9,
+  "max_len": 13,
+  "perfect": 1,
+  "entry_mode": 0,
+  "cd_len": 13,
+  "cd_off": 2,
+  "exit_signal_on": 1,
+  "time_stop": 12
+ },
+ "grid": {
+  "off": [
+   2,
+   4,
+   6
+  ],
+  "setup_len": [
+   7,
+   9,
+   11
+  ],
+  "perfect": [
+   0,
+   1
+  ]
+ },
+ "code": "def _setups(c, h, l, off, L, mx, perfect, up):\n    \"\"\"Indices of qualifying setup completions, and the setup's extreme.\n\n    up=False is the buy setup (closes below close[-off]); up=True the sell.\n    Returns (done_i, extreme, bars) for every completion, in bar order.\n    \"\"\"\n    n = len(c)\n    out = []\n    cnt = 0\n    idx = []\n    done = False\n    for i in range(off, n):\n        hit = (c[i] > c[i - off]) if up else (c[i] < c[i - off])\n        if hit:\n            cnt += 1\n            idx.append(i)\n        else:\n            cnt = 0\n            idx = []\n            done = False\n            continue\n        if done or cnt < L or cnt > mx:\n            continue\n        ok = True\n        if perfect and L >= 4:\n            a = idx[cnt - 2]\n            b = idx[cnt - 1]\n            r1 = idx[L - 4]\n            r2 = idx[L - 3]\n            if up:\n                ok = max(h[a], h[b]) >= max(h[r1], h[r2])\n            else:\n                ok = min(l[a], l[b]) <= min(l[r1], l[r2])\n        if ok:\n            done = True\n            ext = max(h[j] for j in idx) if not up else min(l[j] for j in idx)\n            out.append((i, ext, list(idx)))\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    off = max(1, int(ctx.p.off))\n    L = max(4, int(ctx.p.setup_len))\n    mx = max(L, int(ctx.p.max_len))\n    pf = int(ctx.p.perfect)\n    mode = int(ctx.p.entry_mode)\n    cdl = max(1, int(ctx.p.cd_len))\n    cdo = max(1, int(ctx.p.cd_off))\n\n    sig = [0.0] * n\n    lvl = [None] * n\n\n    for up in (False, True):\n        d = -1.0 if up else 1.0\n        for done_i, ext, idx in _setups(c, h, l, off, L, mx, pf, up):\n            fire = None\n            if mode == 0:\n                fire = done_i\n            elif mode == 1:                       # DeMark's Method 2\n                for j in range(done_i + 1, min(n, done_i + 40)):\n                    back = c[j - off] if j - off >= 0 else None\n                    if back is None:\n                        continue\n                    if (c[j] < back) if up else (c[j] > back):\n                        fire = j\n                        break\n            else:                                 # Countdown to 13\n                k = 0\n                for j in range(done_i + 1, n):\n                    if j - cdo < 0:\n                        continue\n                    if (c[j] >= h[j - cdo]) if up else (c[j] <= l[j - cdo]):\n                        k += 1\n                        if k >= cdl:\n                            fire = j\n                            break\n            if fire is not None and not sig[fire]:\n                sig[fire] = d\n                lvl[fire] = ext\n    ctx.sig = ctx.series(sig, \"tdsig\")\n    ctx.tdst = ctx.series(lvl, \"tdst\")\n    ctx._lv = None\n    ctx._lvd = 0\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    if not s:\n        return 0\n    v = ctx.tdst[i]\n    if v is not None:\n        ctx._lv = v\n        ctx._lvd = 1 if s > 0 else -1\n    return 1 if s > 0 else -1\n\n\ndef exit_signal(ctx, i):\n    if ctx._lv is None or not ctx._dir or ctx._lvd != ctx._dir:\n        return False\n    if ctx._dir > 0:\n        return ctx.c[i] > ctx._lv\n    return ctx.c[i] < ctx._lv\n"
+}

@@ -1,0 +1,40 @@
+{
+ "name": "ACD A-level breakout with time confirmation",
+ "note": "Fisher's ACD. The opening range is taken over the first or_min minutes of RTH, the A levels sit a_mult * daily ATR beyond it, and an entry needs conf consecutive bars that both TRADE and CLOSE beyond the level - the dwell requirement that rejects the one-print stop run. The day is gated on the session open sitting outside the prior session's pivot range P +/- |P - (H+L)/2|, and a failed A entry is reversed at the opposite A level (the C point). The family's own exit carries the two exits the idea specifies as structural: the opposite side of the opening range, and flat by the bell. The breakeven move after A and the 3A target are left to the shared execution grid.",
+ "source": "Mark B. Fisher, 'The Logical Trader: Applying a Method to the Madness' (2002) - the ACD method, A and C levels as an ATR-scaled extension of the opening range with the 22% of 30-day ATR figure for the ES, and the rolling pivot range P = (H+L+C)/3 with pivot differential |P - (H+L)/2|; documented at http://www.dacharts.com/templates/descr/ACDmethod.htm and https://news.cqg.com/workspaces/2016/11/mark-fisher-indicator",
+ "params": {
+  "or_min": 30,
+  "a_mult": 0.22,
+  "atr_days": 10,
+  "conf": 1,
+  "gate": 1,
+  "crev": 1,
+  "rth_open": 570,
+  "rth_close": 960,
+  "exit_min": 950,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "side": "both"
+ },
+ "grid": {
+  "or_min": [
+   15,
+   30
+  ],
+  "a_mult": [
+   0.1,
+   0.22,
+   0.4
+  ],
+  "conf": [
+   1,
+   2
+  ],
+  "gate": [
+   0,
+   1
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    import datetime as _dt\n    m1 = _dt.date(y, 3, 1)\n    ms = 1 + ((6 - m1.weekday()) % 7) + 7\n    n1 = _dt.date(y, 11, 1)\n    ne = 1 + ((6 - n1.weekday()) % 7)\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        return d >= ms\n    return d < ne\n\n\ndef _et_minutes(bars):\n    \"\"\"Minute-of-day in America/New_York for every bar. UTC in, ET out.\"\"\"\n    off = {}\n    out = []\n    for b in bars:\n        ts = str(b[\"t\"])\n        day = ts[:10]\n        o = off.get(day)\n        if o is None:\n            o = -4 if _dst(int(ts[0:4]), int(ts[5:7]), int(ts[8:10])) else -5\n            off[day] = o\n        out.append((int(ts[11:13]) + o) * 60 + int(ts[14:16]))\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    ctx.et = _et_minutes(bars)\n    ctx.day = [str(b[\"t\"])[:10] for b in bars]\n    R0 = int(ctx.p.rth_open)\n    R1 = int(ctx.p.rth_close)\n    ormin = int(ctx.p.or_min)\n\n    # ---- RTH session aggregates, opening range, session open ----\n    sess = []\n    pos = {}\n    orh = {}\n    orl = {}\n    sop = {}\n    for j in range(n):\n        if not (R0 <= ctx.et[j] < R1):\n            continue\n        d = ctx.day[j]\n        k = pos.get(d)\n        if k is None:\n            pos[d] = len(sess)\n            sess.append({\"d\": d, \"h\": h[j], \"l\": l[j], \"c\": c[j]})\n            sop[d] = o[j]\n        else:\n            s = sess[k]\n            if h[j] > s[\"h\"]:\n                s[\"h\"] = h[j]\n            if l[j] < s[\"l\"]:\n                s[\"l\"] = l[j]\n            s[\"c\"] = c[j]\n        if ctx.et[j] < R0 + ormin:\n            if d in orh:\n                if h[j] > orh[d]:\n                    orh[d] = h[j]\n                if l[j] < orl[d]:\n                    orl[d] = l[j]\n            else:\n                orh[d] = h[j]\n                orl[d] = l[j]\n\n    # ---- daily ATR and the prior session's pivot range, both from\n    # COMPLETED prior sessions only ----\n    wd = int(ctx.p.atr_days)\n    atrd = {}\n    piv = {}\n    trs = []\n    for k in range(len(sess)):\n        s = sess[k]\n        if k > 0:\n            hist = trs[-wd:]\n            if len(hist) >= 2:\n                atrd[s[\"d\"]] = sum(hist) / float(len(hist))\n            p = sess[k - 1]\n            P = (p[\"h\"] + p[\"l\"] + p[\"c\"]) / 3.0\n            PD = abs(P - (p[\"h\"] + p[\"l\"]) / 2.0)\n            piv[s[\"d\"]] = (P + PD, P - PD)\n            pc = p[\"c\"]\n        else:\n            pc = s[\"c\"]\n        trs.append(max(s[\"h\"] - s[\"l\"], abs(s[\"h\"] - pc), abs(s[\"l\"] - pc)))\n\n    ctx.orh = orh\n    ctx.orl = orl\n    ctx.sop = sop\n    ctx.atrd = atrd\n    ctx.piv = piv\n    ctx._acd_day = None\n    ctx._up = 0\n    ctx._dn = 0\n    ctx._fl = 0\n    ctx._fs = 0\n    ctx._crev = 0\n    ctx._lvl = None\n\n\ndef signal(ctx, i):\n    d = ctx.day[i]\n    if d != ctx._acd_day:\n        ctx._acd_day = d\n        ctx._up = 0\n        ctx._dn = 0\n        ctx._fl = 0\n        ctx._fs = 0\n        ctx._crev = 0\n    e = ctx.et[i]\n    R0 = int(ctx.p.rth_open)\n    if not (R0 <= e < int(ctx.p.rth_close)):\n        return 0\n    if e < R0 + int(ctx.p.or_min):\n        return 0                       # the opening range is still forming\n    if e >= int(ctx.p.exit_min):\n        return 0                       # too late to open anything\n    A = ctx.atrd.get(d)\n    oh = ctx.orh.get(d)\n    ol = ctx.orl.get(d)\n    so = ctx.sop.get(d)\n    pv = ctx.piv.get(d)\n    if A is None or oh is None or ol is None or so is None or pv is None:\n        return 0\n    av = float(ctx.p.a_mult) * A\n    if av <= 0:\n        return 0\n    aup = oh + av\n    adn = ol - av\n    ctx._lvl = (oh, ol)\n\n    # the dwell: price must TRADE beyond the A level and CLOSE beyond it,\n    # for conf consecutive bars. One print through the level is not an entry.\n    if ctx.c[i] > aup and ctx.h[i] > aup:\n        ctx._up += 1\n    else:\n        ctx._up = 0\n    if ctx.c[i] < adn and ctx.l[i] < adn:\n        ctx._dn += 1\n    else:\n        ctx._dn = 0\n\n    conf = int(ctx.p.conf)\n    gate = int(ctx.p.gate)\n    ph, pl = pv\n    if not ctx._fl and ctx._up >= conf and (not gate or so > ph):\n        ctx._fl = 1\n        return 1\n    if not ctx._fs and ctx._dn >= conf and (not gate or so < pl):\n        ctx._fs = 1\n        return -1\n\n    # ---- the C point: the failed A, taken the other way ----\n    if int(ctx.p.crev) and not ctx._crev and not ctx.positions:\n        if ctx._fl and ctx._dn >= conf:\n            ctx._crev = 1\n            ctx._fs = 1\n            return -1\n        if ctx._fs and ctx._up >= conf:\n            ctx._crev = 1\n            ctx._fl = 1\n            return 1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = ctx.et[i]\n    if e >= int(ctx.p.exit_min) or e < int(ctx.p.rth_open):\n        return True                    # market on close; nothing held overnight\n    if ctx._lvl is None:\n        return False\n    oh, ol = ctx._lvl\n    if ctx.positions[0][\"side\"] == \"long\":\n        return ctx.c[i] < ol           # the opposite side of the opening range\n    return ctx.c[i] > oh"
+}

@@ -1,0 +1,38 @@
+{
+ "name": "Analogue forecast with distance abstention",
+ "note": "The feature is the whole z-normalised m-bar price path. For every bar, the k closest historical windows inside a trailing history are found, subject to the neighbour's own forward H-bar return already being fully observed and its window not overlapping the query's; the vote is the mean and the sign-agreement of those neighbours' realised forward returns. The part that matters is the third condition: textbook k-NN always returns k neighbours however far away they are, so it always has an opinion. Requiring the mean neighbour distance to sit below its own trailing 20th percentile makes the rule abstain whenever the current shape is unprecedented. Exit is a hard time stop at exactly H bars - the horizon the neighbours voted on - plus the source's 2*sigma_H adverse stop, both in exit_signal, which is why tp_atr and st_atr are switched off. Two implementation notes, both material: shapes are compared in 5-segment PAA space (Lin, Keogh et al., cited in the source) rather than at full resolution, and candidate windows are examined every second bar, because the harness has no numpy and a full-resolution all-pairs join over every bar is not affordable in pure Python. Adjacent windows are near-duplicates, so the stride costs almost nothing; the PAA distance is the standard lower bound on the true z-normalised distance.",
+ "source": "Yeh, Zhu, Ulanova, Begum, Ding, Dau, Silva, Mueen & Keogh, 'Matrix Profile I: All Pairs Similarity Joins for Time Series', IEEE ICDM 2016 - the z-normalised nearest-neighbour machinery and MASS. Discretised (SAX) variant: Lin, Keogh, Lonardi & Chiu (2003), 'A Symbolic Representation of Time Series, with Implications for Streaming Algorithms', ACM SIGMOD DMKD Workshop. Financial k-NN evidence: Alkhatib & Najadat, 'Stock Price Prediction Using K-Nearest Neighbor (kNN) Algorithm'.",
+ "params": {
+  "m": 20,
+  "H": 10,
+  "k": 25,
+  "hist": 1000,
+  "stride": 2,
+  "f_thr": 0.25,
+  "agree": 0.65,
+  "dist_pct": 0.2,
+  "stat_win": 250,
+  "stop_sig": 2.0,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "m": [
+   10,
+   20,
+   40
+  ],
+  "agree": [
+   0.55,
+   0.65,
+   0.8
+  ],
+  "dist_pct": [
+   0.1,
+   0.2,
+   0.5
+  ]
+ },
+ "code": "import heapq as _hq\nimport math as _m\n\n_SEG = 5          # PAA segments per window (Lin/Keogh dimensionality reduction)\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    m = int(ctx.p.m)\n    H = int(ctx.p.H)\n    K = int(ctx.p.k)\n    hist = int(ctx.p.hist)\n    stride = int(ctx.p.stride)\n    fthr = float(ctx.p.f_thr)\n    agree = float(ctx.p.agree)\n    dpct = float(ctx.p.dist_pct)\n    win = int(ctx.p.stat_win)\n\n    seg = m // _SEG\n    if seg < 1:\n        seg = 1\n        m = _SEG\n    c = [float(b[\"c\"]) for b in bars]\n\n    # ---- forward H-bar log return of every bar ---------------------------\n    f = [None] * n\n    for j in range(n - H):\n        a, b = c[j], c[j + H]\n        if a > 0 and b > 0:\n            f[j] = _m.log(b / a)\n\n    # ---- trailing H-bar log return, for sigma_H --------------------------\n    rH = [None] * n\n    for j in range(H, n):\n        a, b = c[j - H], c[j]\n        if a > 0 and b > 0:\n            rH[j] = _m.log(b / a)\n\n    # ---- z-normalised PAA coordinates of the window ending at each bar ----\n    cs = [0.0] * (n + 1)\n    q = [0.0] * (n + 1)\n    for i in range(n):\n        cs[i + 1] = cs[i] + c[i]\n        q[i + 1] = q[i] + c[i] * c[i]\n    p0 = [None] * n\n    p1 = [0.0] * n\n    p2 = [0.0] * n\n    p3 = [0.0] * n\n    p4 = [0.0] * n\n    span = _SEG * seg\n    for t in range(span - 1, n):\n        s = t - span + 1\n        tot = cs[t + 1] - cs[s]\n        mu = tot / span\n        var = (q[t + 1] - q[s]) / span - mu * mu\n        if var <= 1e-12:\n            continue\n        sd = _m.sqrt(var)\n        a0 = ((cs[s + seg] - cs[s]) / seg - mu) / sd\n        a1 = ((cs[s + 2 * seg] - cs[s + seg]) / seg - mu) / sd\n        a2 = ((cs[s + 3 * seg] - cs[s + 2 * seg]) / seg - mu) / sd\n        a3 = ((cs[s + 4 * seg] - cs[s + 3 * seg]) / seg - mu) / sd\n        a4 = ((cs[s + 5 * seg] - cs[s + 4 * seg]) / seg - mu) / sd\n        p0[t] = a0\n        p1[t] = a1\n        p2[t] = a2\n        p3[t] = a3\n        p4[t] = a4\n\n    # ---- the similarity join ---------------------------------------------\n    # neighbours must satisfy j <= t - m - H, so the neighbour's own forward\n    # return was fully observed before bar t, and its window cannot overlap\n    # the query's.\n    md = [None] * n              # mean neighbour distance\n    fm = [None] * n              # mean neighbour forward return\n    fp = [None] * n              # fraction of neighbours with f_j > 0\n    root = _m.sqrt(float(seg))\n    first = span - 1 + hist\n    if first < span - 1 + K * stride + m + H:\n        first = span - 1 + K * stride + m + H\n    for t in range(first, n):\n        a0 = p0[t]\n        if a0 is None:\n            continue\n        a1 = p1[t]\n        a2 = p2[t]\n        a3 = p3[t]\n        a4 = p4[t]\n        lo = t - hist\n        if lo < span - 1:\n            lo = span - 1\n        hi = t - m - H + 1\n        if hi <= lo:\n            continue\n        best = _hq.nsmallest(K, (\n            ((a0 - p0[j]) ** 2 + (a1 - p1[j]) ** 2 + (a2 - p2[j]) ** 2\n             + (a3 - p3[j]) ** 2 + (a4 - p4[j]) ** 2, j)\n            for j in range(lo, hi, stride) if p0[j] is not None))\n        if len(best) < K:\n            continue\n        ds = 0.0\n        fs = 0.0\n        np_ = 0\n        bad = False\n        for d2, j in best:\n            ds += root * _m.sqrt(d2)\n            fj = f[j]\n            if fj is None:\n                bad = True\n                break\n            fs += fj\n            if fj > 0:\n                np_ += 1\n        if bad:\n            continue\n        md[t] = ds / K\n        fm[t] = fs / K\n        fp[t] = np_ / float(K)\n\n    # ---- sigma_H, and the trailing percentile of the distance ------------\n    sig = [None] * n\n    for t in range(n):\n        if t < win:\n            continue\n        s = [x for x in rH[t - win + 1:t + 1] if x is not None]\n        if len(s) < win // 2:\n            continue\n        mu = sum(s) / len(s)\n        var = sum((x - mu) ** 2 for x in s) / (len(s) - 1)\n        sig[t] = _m.sqrt(var) if var > 0 else None\n\n    cut = [None] * n\n    for t in range(win, n):\n        s = [x for x in md[t - win:t] if x is not None]\n        if len(s) < win // 2:\n            continue\n        s.sort()\n        cut[t] = s[int(dpct * (len(s) - 1))]\n\n    # ---- the vote --------------------------------------------------------\n    sg = [0] * n\n    for t in range(n):\n        d = md[t]\n        cu = cut[t]\n        sh = sig[t]\n        if d is None or cu is None or sh is None or sh <= 0:\n            continue\n        if d > cu:                       # unprecedented shape -- abstain\n            continue\n        mf = fm[t]\n        pos = fp[t]\n        if mf > fthr * sh and pos >= agree:\n            sg[t] = 1\n        elif mf < -fthr * sh and (1.0 - pos) >= agree:\n            sg[t] = -1\n\n    ctx.sg = ctx.series(sg, \"analogue_vote\")\n    ctx.sigH = ctx.series(sig, \"sigma_H\")\n    ctx.H = H\n\n\ndef signal(ctx, i):\n    return ctx.sg[i]\n\n\ndef exit_signal(ctx, i):\n    p = ctx.positions[0]\n    if i - p[\"entry_i\"] >= ctx.H:\n        return True\n    sh = ctx.sigH[i]\n    if sh is None:\n        return False\n    d = -1.0 if p[\"side\"] == \"short\" else 1.0\n    adverse = (p[\"entry\"] - ctx.c[i]) * d\n    return adverse >= float(ctx.p.stop_sig) * sh * p[\"entry\"]"
+}

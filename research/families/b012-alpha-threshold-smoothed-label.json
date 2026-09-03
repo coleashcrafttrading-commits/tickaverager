@@ -1,0 +1,31 @@
+{
+ "name": "Alpha-threshold smoothed label",
+ "note": "DeepLOB's labelling scheme made causal. l = (mean of the last k closes / mean of the k before them - 1), classed +1 / -1 / 0 against an alpha taken as the pct-th percentile of |l| over a trailing training window and recalibrated periodically, with an optional agreement requirement against the next-longer horizon, and the holding horizon set equal to the label horizon k. HONEST LIMIT: the published label averages the NEXT k closes as well, which is future data the harness rightly refuses, and no CNN/LSTM is trained here. What is tested is therefore the labelling machinery -- two-sided smoothing, a percentile-set alpha, three classes, horizon-matched exit -- not the network.",
+ "source": "Zhang, Zohren & Roberts (2019), 'DeepLOB: Deep Convolutional Neural Networks for Limit Order Books', IEEE Transactions on Signal Processing 67(11):3001-3012; arXiv:1808.03668. Read the full text (ar5iv) and verified: m_minus(t) as the mean of the previous k mid-prices, m_plus(t) as the mean of the next k, l_t = (m_plus - m_minus)/m_minus, three-class labelling at threshold alpha, horizons k in {20,50,100}, and the architecture (1x2 stride-2 convolutions over price-volume pairs, a 1x10 integrating filter, Inception@32 with 1x3 and 1x5 branches plus max-pooling, then 64 LSTM units). Applied here to OHLCV bars rather than LOB levels.",
+ "params": {
+  "k": 20,
+  "k_mult": 2.0,
+  "pct": 67,
+  "win": 500,
+  "agree": 1,
+  "exit_on_flip": 1,
+  "time_stop": 20
+ },
+ "grid": {
+  "k": [
+   10,
+   20,
+   50
+  ],
+  "pct": [
+   33,
+   50,
+   67
+  ],
+  "agree": [
+   0,
+   1
+  ]
+ },
+ "code": "def _l_series(c, cs, k):\n    n = len(c)\n    out = [None] * n\n    for i in range(n):\n        if i + 1 < 2 * k:\n            continue\n        rec = (cs[i + 1] - cs[i + 1 - k]) / k\n        pri = (cs[i + 1 - k] - cs[i + 1 - 2 * k]) / k\n        out[i] = ((rec - pri) / pri) if pri else None\n    return out\n\n\ndef _classes(l, win, step, q):\n    n = len(l)\n    out = [0.0] * n\n    cur = None\n    for i in range(n):\n        if i >= win and (i - win) % step == 0:\n            s = sorted(abs(x) for x in l[i - win:i] if x is not None)\n            cur = s[min(len(s) - 1, int(q * (len(s) - 1)))] if s else None\n        if cur is None or l[i] is None:\n            continue\n        if l[i] > cur:\n            out[i] = 1.0\n        elif l[i] < -cur:\n            out[i] = -1.0\n    return out\n\n\ndef family_init(ctx):\n    c = [float(b[\"c\"]) for b in ctx.bars]\n    n = len(c)\n    cs = [0.0] * (n + 1)\n    for i in range(n):\n        cs[i + 1] = cs[i] + c[i]\n    k1 = max(2, int(ctx.p.k))\n    k2 = max(k1 + 1, int(round(k1 * float(ctx.p.k_mult))))\n    # the exit horizon IS the label horizon -- the point of the scheme\n    ctx.p.time_stop = k1\n    win = max(50, min(int(ctx.p.win), max(50, n // 3)))\n    step = max(20, win // 4)\n    q = min(0.999, max(0.0, float(ctx.p.pct) / 100.0))\n    a1 = _classes(_l_series(c, cs, k1), win, step, q)\n    a2 = _classes(_l_series(c, cs, k2), win, step, q)\n    agree = int(ctx.p.agree)\n    sig = [0.0] * n\n    for i in range(n):\n        sig[i] = (a1[i] if (a1[i] and a1[i] == a2[i]) else 0.0) if agree \\\n            else a1[i]\n    ctx.sig = ctx.series(sig, \"alpha\")\n\n\ndef signal(ctx, i):\n    s = ctx.sig[i]\n    if not s:\n        return 0\n    return 1 if s > 0 else -1\n"
+}

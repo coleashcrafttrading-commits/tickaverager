@@ -1,0 +1,37 @@
+{
+ "name": "Out-of-range gap retest",
+ "note": "The open must clear the whole prior regular session - above yesterday's high plus a fraction of daily ATR(14), or below yesterday's low. The entry is then a PULLBACK into that prior-day extreme inside a morning window, taken only if the bar closes back on the correct side of it, with the day's setup voided if any session bar closes a quarter-ATR through the level first. One attempt per day, either direction. Exits are the family's own: the level stop, a three-bar trailing extreme once open profit reaches one unit of initial risk, and a hard close at the end of the session. Daily ATR expands from five days up to fourteen so the rule is live before a fourteen-day warm-up has elapsed. The default gap clearance is 0.05 daily ATR rather than the source's 0.10 floor because the rule's substance is that the open clears the prior range ENTIRELY - the ATR term is only a tolerance against a one-tick clearance - and on 33 days of real bars a quiet ETF like XLU produces two out-of-range gaps at 0.10 and none that retest. The stated 0.10-0.40 range is fully covered by the grid.",
+ "source": "Supporting evidence for gap continuation: Bulkowski, T., thepatternsite.com/Gap2H.html - the Gap 2H pattern (a price gap followed by a higher high and higher low) acts as a CONTINUATION 72% of the time, with a 34% break-even failure rate and 10% average rise in bull markets, and Bulkowski reports the pattern stop (a penny beyond the pattern extreme, as used here) wins 62% versus 55% for a percentage stop. Gap taxonomy from Edwards and Magee, 'Technical Analysis of Stock Trends'.",
+ "params": {
+  "gap_atr": 0.05,
+  "tol_atr": 0.1,
+  "fail_atr": 0.25,
+  "win_start": 575,
+  "win_end": 720,
+  "trail_bars": 3,
+  "hard_lead": 5,
+  "datr_n": 14,
+  "datr_min": 5,
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "gap_atr": [
+   0.05,
+   0.1,
+   0.2,
+   0.4
+  ],
+  "win_end": [
+   630,
+   660,
+   720
+  ],
+  "trail_bars": [
+   3,
+   5
+  ]
+ },
+ "code": "import datetime as _dt\n\n_DSTB = {}\n_OFF = {}\n\n\ndef _et(ts):\n    \"\"\"(ET day ordinal, ET minute-of-day) for a UTC ISO timestamp.\"\"\"\n    k = ts[:13]\n    off = _OFF.get(k)\n    if off is None:\n        y = int(ts[0:4])\n        u = _dt.datetime(y, int(ts[5:7]), int(ts[8:10]), int(ts[11:13]))\n        b = _DSTB.get(y)\n        if b is None:\n            d = _dt.date(y, 3, 1)\n            s = _dt.datetime(y, 3, 1 + (6 - d.weekday()) % 7 + 7, 7, 0)\n            d2 = _dt.date(y, 11, 1)\n            e = _dt.datetime(y, 11, 1 + (6 - d2.weekday()) % 7, 6, 0)\n            b = _DSTB[y] = (s, e)\n        off = _OFF[k] = (4 if b[0] <= u < b[1] else 5)\n    loc = _dt.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]),\n                       int(ts[11:13]), int(ts[14:16])) - _dt.timedelta(hours=off)\n    return loc.toordinal(), loc.hour * 60 + loc.minute\n\n\n_OPEN = 9 * 60 + 30\n_CLOSE = 16 * 60\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    gap_a = float(ctx.p.gap_atr)\n    tol_a = float(ctx.p.tol_atr)\n    fail_a = float(ctx.p.fail_atr)\n    win_beg = int(ctx.p.win_start)\n    win_end = int(ctx.p.win_end)\n    atr_n = int(ctx.p.datr_n)\n    atr_min = int(ctx.p.datr_min)\n    ctx.trail_n = int(ctx.p.trail_bars)\n\n    o = [float(b[\"o\"]) for b in bars]\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    ctx._h = h\n    ctx._l = l\n\n    # ---- group the regular session into daily bars -------------------------\n    dord = [0] * n\n    mnt = [0] * n\n    for i in range(n):\n        dord[i], mnt[i] = _et(bars[i][\"t\"])\n\n    days = []                 # (ordinal, open, high, low, close, [bar idx...])\n    cur = None\n    for i in range(n):\n        if not (_OPEN <= mnt[i] < _CLOSE):\n            continue\n        if cur is None or cur[0] != dord[i]:\n            cur = [dord[i], o[i], h[i], l[i], c[i], []]\n            days.append(cur)\n        else:\n            if h[i] > cur[2]:\n                cur[2] = h[i]\n            if l[i] < cur[3]:\n                cur[3] = l[i]\n            cur[4] = c[i]\n        cur[5].append(i)\n\n    # ---- daily ATR, expanding to atr_n once enough days exist --------------\n    trs = []\n    datr = [None] * len(days)\n    for k, d in enumerate(days):\n        if k == 0:\n            trs.append(d[2] - d[3])\n        else:\n            pc = days[k - 1][4]\n            a = d[2] - d[3]\n            b1 = abs(d[2] - pc)\n            b2 = abs(d[3] - pc)\n            trs.append(max(a, b1, b2))\n        # value stored at day k uses only days 0..k, and is read on day k+1\n        m = trs[-atr_n:]\n        datr[k] = (sum(m) / len(m)) if len(m) >= atr_min else None\n\n    # ---- walk each day looking for the gap and then the retest -------------\n    trig = [0] * n\n    lvl = [None] * n\n    dat = [None] * n\n    hard = [False] * n\n\n    for k in range(1, len(days)):\n        d = days[k]\n        p = days[k - 1]\n        a = datr[k - 1]\n        idx = d[5]\n        if idx:\n            last = idx[-1]\n            hard[last] = True          # hard exit on the final session bar\n            for j in idx:\n                if mnt[j] >= _CLOSE - int(ctx.p.hard_lead):\n                    hard[j] = True\n        if a is None or a <= 0:\n            continue\n        yh, yl = p[2], p[3]\n        d_open = d[1]\n        up = d_open > yh + gap_a * a\n        dn = d_open < yl - gap_a * a\n        if not (up or dn):\n            continue\n        ref = yh if up else yl\n        for j in idx:\n            lvl[j] = ref\n            dat[j] = a\n        # invalidation is watched from the first session bar, the trigger only\n        # inside the retest window\n        for j in idx:\n            m = mnt[j]\n            if up:\n                if c[j] < yh - fail_a * a:\n                    break\n                if win_beg <= m <= win_end and l[j] <= yh + tol_a * a and c[j] > yh:\n                    trig[j] = 1\n                    break\n            else:\n                if c[j] > yl + fail_a * a:\n                    break\n                if win_beg <= m <= win_end and h[j] >= yl - tol_a * a and c[j] < yl:\n                    trig[j] = -1\n                    break\n\n    ctx.trig = ctx.series(trig, \"gap_retest_trigger\")\n    ctx.lvl = ctx.series(lvl, \"prior_day_extreme\")\n    ctx.dat = ctx.series(dat, \"daily_atr\")\n    ctx.hard = ctx.series(hard, \"session_end\")\n\n\ndef signal(ctx, i):\n    return ctx.trig[i]\n\n\ndef exit_signal(ctx, i):\n    if ctx.hard[i]:\n        return True\n    p = ctx.positions[0]\n    lv = ctx.lvl[i]\n    a = ctx.dat[i]\n    if lv is None or a is None:\n        return False\n    d = -1.0 if p[\"side\"] == \"short\" else 1.0\n    stop = lv - d * float(ctx.p.fail_atr) * a\n    px = ctx.c[i]\n    if (px - stop) * d <= 0:\n        return True\n    risk = (p[\"entry\"] - stop) * d\n    if risk > 0 and (px - p[\"entry\"]) * d >= risk:\n        nb = ctx.trail_n\n        if i >= nb:\n            if d > 0:\n                t = min(ctx._l[i - nb:i])\n                if px < t:\n                    return True\n            else:\n                t = max(ctx._h[i - nb:i])\n                if px > t:\n                    return True\n    return False"
+}

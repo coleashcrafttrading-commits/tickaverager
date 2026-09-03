@@ -1,0 +1,31 @@
+{
+ "name": "EMD cycle-versus-trend mode switch",
+ "note": "Ehlers' empirical mode decomposition regime switch, implemented from his Figure 9 listing. A 2-pole bandpass on (high+low)/2 isolates the swing component; its mean over 2*Period bars is compared to a fraction of the 50-bar average of the tracked local peaks and valleys of the bandpass itself. Mean above Fraction*AvgPeak is UPTREND, below Fraction*AvgValley is DOWNTREND, otherwise CYCLE -- and the mode changes the RULE SET, not just permission to trade. Uptrend: long on a bandpass cross above zero. Cycle: long on a cross above AvgValley, short on a cross below AvgPeak. Downtrend takes no longs (dn_short=1 adds the mirror short on a zero cross down). Exits are the mode's own: the regime at the entry bar decides which exit applies.",
+ "source": "John F. Ehlers and Ric Way, 'Empirical Mode Decomposition: A novel approach for cycle and trend mode detection', https://www.mesasoftware.com/papers/EmpiricalModeDecomposition.pdf -- Figure 9 EasyLanguage listing (beta/gamma/alpha bandpass recursion, Mean = Average(BP, 2*Period), Peak/Valley detection, AvgPeak/AvgValley = Average(...,50), Fraction thresholds) and the concluding trend/cycle delineation rule.",
+ "params": {
+  "period": 20,
+  "delta": 0.5,
+  "fraction": 0.1,
+  "pv_avg": 50,
+  "dn_short": 0,
+  "side": "both",
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "period": [
+   10,
+   20,
+   40
+  ],
+  "delta": [
+   0.1,
+   0.3,
+   0.5
+  ],
+  "fraction": [
+   0.1,
+   0.3
+  ]
+ },
+ "code": "def family_init(ctx):\n    import math\n    bars = ctx.bars\n    N = len(bars)\n    hi = [float(b[\"h\"]) for b in bars]\n    lo = [float(b[\"l\"]) for b in bars]\n    P = max(4, int(ctx.p.period))\n    delta = float(ctx.p.delta)\n    fr = float(ctx.p.fraction)\n    PA = max(5, int(ctx.p.pv_avg))\n\n    ang = 4.0 * math.pi * delta / P\n    if ang > 1.45:\n        ang = 1.45\n    if ang < 1e-4:\n        ang = 1e-4\n    beta = math.cos(2.0 * math.pi / P)\n    gamma = 1.0 / math.cos(ang)\n    alpha = gamma - math.sqrt(gamma * gamma - 1.0)\n\n    pr = [(hi[j] + lo[j]) * 0.5 for j in range(N)]\n    bp = [0.0] * N\n    ca = 0.5 * (1.0 - alpha)\n    cb = beta * (1.0 + alpha)\n    for j in range(2, N):\n        bp[j] = ca * (pr[j] - pr[j - 2]) + cb * bp[j - 1] - alpha * bp[j - 2]\n\n    W = 2 * P\n    mean = [None] * N\n    s = 0.0\n    for j in range(N):\n        s += bp[j]\n        if j >= W:\n            s -= bp[j - W]\n        if j >= W - 1:\n            mean[j] = s / W\n\n    pk = [0.0] * N\n    vl = [0.0] * N\n    cp = 0.0\n    cv = 0.0\n    for j in range(N):\n        if j >= 2:\n            b1 = bp[j - 1]\n            if b1 > bp[j] and b1 > bp[j - 2]:\n                cp = b1\n            if b1 < bp[j] and b1 < bp[j - 2]:\n                cv = b1\n        pk[j] = cp\n        vl[j] = cv\n\n    ap = [None] * N\n    avv = [None] * N\n    s1 = 0.0\n    s2 = 0.0\n    for j in range(N):\n        s1 += pk[j]\n        s2 += vl[j]\n        if j >= PA:\n            s1 -= pk[j - PA]\n            s2 -= vl[j - PA]\n        if j >= PA - 1:\n            ap[j] = s1 / PA\n            avv[j] = s2 / PA\n\n    md = [None] * N\n    for j in range(N):\n        m = mean[j]\n        a = ap[j]\n        v = avv[j]\n        if m is None or a is None or v is None:\n            continue\n        if m > fr * a:\n            md[j] = 1\n        elif m < fr * v:\n            md[j] = -1\n        else:\n            md[j] = 0\n\n    ctx.bp = ctx.series(bp, \"bandpass\")\n    ctx.ap = ctx.series(ap, \"avgpeak\")\n    ctx.av = ctx.series(avv, \"avgvalley\")\n    ctx.md = ctx.series(md, \"mode\")\n\n\ndef signal(ctx, i):\n    if i < 1:\n        return 0\n    m = ctx.md[i]\n    if m is None:\n        return 0\n    b = ctx.bp[i]\n    pb = ctx.bp[i - 1]\n    if b is None or pb is None:\n        return 0\n    if m == 1:\n        return 1 if (pb <= 0.0 < b) else 0\n    if m == -1:\n        if int(ctx.p.dn_short) and pb >= 0.0 > b:\n            return -1\n        return 0\n    a = ctx.ap[i]\n    v = ctx.av[i]\n    if a is None or v is None:\n        return 0\n    if pb <= v < b:\n        return 1\n    if pb >= a > b:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions or i < 1:\n        return False\n    p = ctx.positions[0]\n    ei = p[\"entry_i\"]\n    m0 = ctx.md[ei]\n    m = ctx.md[i]\n    b = ctx.bp[i]\n    pb = ctx.bp[i - 1]\n    if m0 is None or m is None or b is None or pb is None:\n        return False\n    if m0 == 1:\n        return m != 1 or (pb >= 0.0 > b)\n    if m0 == -1:\n        return m != -1 or (pb <= 0.0 < b)\n    if m != 0:\n        return True\n    if i - ei >= int(ctx.p.period):\n        return True\n    a = ctx.ap[i]\n    v = ctx.av[i]\n    if a is None or v is None:\n        return False\n    if p[\"side\"] == \"long\":\n        return pb >= a > b\n    return pb <= v < b"
+}

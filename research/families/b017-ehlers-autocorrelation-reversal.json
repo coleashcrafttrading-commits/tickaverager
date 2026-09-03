@@ -1,0 +1,33 @@
+{
+ "name": "Ehlers Autocorrelation Reversal",
+ "note": "Ehlers' roofing filter (48-bar high pass into a 10-bar super smoother), then the Pearson autocorrelation of the filtered series against itself at every lag from lag_min to lag_max. A reversal is not one lag turning over, it is MANY turning over at once: the count of lags whose correlation crossed zero since the previous bar, against a threshold expressed as a fraction of the lags examined. Ehlers' own SumDeltas > 24 of 46 is 0.52 and is simply unreachable on this series -- the flip fraction on 5-minute bars tops out near 0.29 -- so the threshold is expressed as a fraction and the sweep is centred on the upper tail that actually occurs. The detector has no direction of its own -- the side is read off the filter's slope on the reversal bar. The position is held until the next reversal fires, whichever way it points, so the holding period is set by the market's cycle structure and not by a target. Each lag's correlation is evaluated from prefix sums, which is what keeps 46 lags per bar affordable.",
+ "source": "John F. Ehlers, 'Cycle Analytics for Traders' (Wiley, 2013), autocorrelation and autocorrelation-reversals chapters. Constants and the exact SumDeltas > 24 rule verified against the open-source MQL5 implementation at github.com/thetestspecimen/ehlers-indicators-mql5, file mq5/ehlers_autocorrelation_reversals.mq5, which I fetched and read. Roofing filter reference: Ehlers, 'Predictive Indicators for Effective Trading Strategies' (mesasoftware.com/papers).",
+ "params": {
+  "hp_n": 48,
+  "ss_n": 10,
+  "lag_min": 3,
+  "lag_max": 30,
+  "frac": 0.22,
+  "exit_signal_on": 1,
+  "time_stop": 30,
+  "tp_atr": 0.0,
+  "st_atr": 2.0
+ },
+ "grid": {
+  "hp_n": [
+   40,
+   48,
+   80
+  ],
+  "frac": [
+   0.18,
+   0.22,
+   0.27
+  ],
+  "lag_max": [
+   30,
+   48
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n    hp_n = float(ctx.p.hp_n)\n    ss_n = float(ctx.p.ss_n)\n    r2 = math.sqrt(2.0)\n\n    # ---- roofing filter: high-pass, then a two-pole super smoother\n    a1 = math.cos(r2 * math.pi / hp_n)\n    if a1 == 0:\n        a1 = 1e-9\n    al = (a1 + math.sin(r2 * math.pi / hp_n) - 1.0) / a1\n    k1 = (1.0 - al / 2.0) ** 2\n    k2 = 2.0 * (1.0 - al)\n    k3 = (1.0 - al) ** 2\n    hp = [0.0] * n\n    for j in range(2, n):\n        hp[j] = k1 * (c[j] - 2.0 * c[j - 1] + c[j - 2]) \\\n            + k2 * hp[j - 1] - k3 * hp[j - 2]\n\n    a2 = math.exp(-r2 * math.pi / ss_n)\n    b2 = 2.0 * a2 * math.cos(r2 * math.pi / ss_n)\n    c2 = b2\n    c3 = -a2 * a2\n    c1 = 1.0 - c2 - c3\n    F = [0.0] * n\n    for j in range(2, n):\n        F[j] = c1 * (hp[j] + hp[j - 1]) / 2.0 + c2 * F[j - 1] + c3 * F[j - 2]\n\n    # ---- prefix sums so each lag's correlation costs O(1) per bar\n    PS = [0.0] * (n + 1)\n    for j in range(n):\n        PS[j + 1] = PS[j] + F[j]\n\n    lmin = int(ctx.p.lag_min)\n    lmax = int(ctx.p.lag_max)\n    lags = list(range(lmin, lmax + 1))\n    XY = {}\n    for L in lags:\n        p = [0.0] * (n + 1)\n        for j in range(n):\n            p[j + 1] = p[j] + (F[j] * F[j - L] if j >= L else 0.0)\n        XY[L] = p\n\n    frac = float(ctx.p.frac)\n    need = frac * len(lags)\n    start = 2 * lmax + 3\n    prev = None\n    rev = [0] * n\n    up = [0] * n\n    for t in range(start, n):\n        cur = []\n        flips = 0\n        for L in lags:\n            m = float(L)\n            Sx = PS[t + 1] - PS[t + 1 - L]\n            Sy = PS[t + 1 - L] - PS[t + 1 - 2 * L]\n            Sxy = XY[L][t + 1] - XY[L][t + 1 - L]\n            num = m * Sxy - Sx * Sy\n            s = 1 if num > 0 else 0\n            cur.append(s)\n        if prev is not None:\n            for q in range(len(lags)):\n                if cur[q] != prev[q]:\n                    flips += 1\n            if flips > need:\n                rev[t] = 1\n                up[t] = 1 if F[t] > F[t - 1] else -1\n        prev = cur\n    ctx.rev = ctx.series(rev, \"reversal\")\n    ctx.dir = ctx.series(up, \"direction\")\n\n\ndef signal(ctx, i):\n    if not ctx.rev[i]:\n        return 0\n    d = ctx.dir[i]\n    return 1 if d and d > 0 else (-1 if d else 0)\n\n\ndef exit_signal(ctx, i):\n    return bool(ctx.rev[i])"
+}

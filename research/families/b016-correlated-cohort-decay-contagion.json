@@ -1,0 +1,35 @@
+{
+ "name": "Correlated Cohort Decay Contagion",
+ "note": "Pools decay evidence across a cohort of economically identical variants instead of monitoring one rule alone. The cohort here is six RSI mean-reversion members (periods 5/9/14/21/34/50) computed on this symbol - the group that average-linkage clustering at rho=0.5 exists to discover, declared in advance because a single-symbol harness has no cross-idea return matrix to cluster. Each member's trailing Sharpe is compared to its OWN pct_win distribution; when the fraction of members below their own mem_pct percentile reaches dead_frac the whole cohort is DEAD, no member may open, and open members are flattened - killing a healthy-looking member is the intended behaviour. Revival needs revive_frac of members above their own median for revive_bars consecutive bars. The published size = base*clip(1-f_c,0.3,1) term is dropped because sizing belongs to the shared harness.",
+ "source": "Synthesis. The power-pooling rationale is the harvester's; the cohort-level decay premise follows McLean, R.D. & Pontiff, J. (2016), 'Does Academic Research Destroy Stock Return Predictability?', Journal of Finance 71(1):5-32, and Chordia, T., Subrahmanyam, A. & Tong, Q. (2014), 'Have Capital Market Anomalies Attenuated in the Recent Era of High Liquidity and Trading Activity?', Journal of Accounting and Economics 58(1):41-58. Magnitudes from Chen & Zimmermann, FEDS 2018-033.",
+ "params": {
+  "sharpe_win": 60,
+  "pct_win": 500,
+  "mem_pct": 10.0,
+  "dead_frac": 0.6,
+  "revive_frac": 0.6,
+  "revive_bars": 20,
+  "min_cohort": 4,
+  "base_n": 14,
+  "rsi_lo": 30.0,
+  "rsi_hi": 70.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "sharpe_win": [
+   40,
+   60,
+   120
+  ],
+  "dead_frac": [
+   0.5,
+   0.6,
+   0.75
+  ],
+  "mem_pct": [
+   10.0,
+   25.0
+  ]
+ },
+ "code": "import math\n\n_PERIODS = (5, 9, 14, 21, 34, 50)\n_PCT_STEP = 20          # the percentile table is refreshed every 20 bars\n\n\ndef _rsi(c, p):\n    n = len(c)\n    out = [None] * n\n    if n <= p or p < 2:\n        return out\n    au = 0.0\n    ad = 0.0\n    for j in range(1, p + 1):\n        d = c[j] - c[j - 1]\n        if d > 0.0:\n            au += d\n        else:\n            ad -= d\n    au /= p\n    ad /= p\n    out[p] = 100.0 if ad <= 0.0 else 100.0 - 100.0 / (1.0 + au / ad)\n    for j in range(p + 1, n):\n        d = c[j] - c[j - 1]\n        u = d if d > 0.0 else 0.0\n        v = -d if d < 0.0 else 0.0\n        au = (au * (p - 1) + u) / p\n        ad = (ad * (p - 1) + v) / p\n        out[j] = 100.0 if ad <= 0.0 else 100.0 - 100.0 / (1.0 + au / ad)\n    return out\n\n\ndef _quantile(sorted_vals, q):\n    m = len(sorted_vals)\n    if m == 0:\n        return None\n    k = q * (m - 1)\n    lo = int(k)\n    hi = lo + 1 if lo + 1 < m else lo\n    f = k - lo\n    return sorted_vals[lo] * (1.0 - f) + sorted_vals[hi] * f\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    c = [float(x[\"c\"]) for x in b]\n\n    lr = [0.0] * n\n    for j in range(1, n):\n        if c[j] > 0.0 and c[j - 1] > 0.0:\n            lr[j] = math.log(c[j] / c[j - 1])\n\n    lo = float(ctx.p.rsi_lo)\n    hi = float(ctx.p.rsi_hi)\n    sw = max(10, int(ctx.p.sharpe_win))\n    pw = max(60, int(ctx.p.pct_win))\n    qq = float(ctx.p.mem_pct) / 100.0\n    dead_f = float(ctx.p.dead_frac)\n    rev_need = max(1, int(ctx.p.revive_bars))\n    rev_f = float(ctx.p.revive_frac)\n    base_n = int(ctx.p.base_n)\n\n    members = list(_PERIODS)\n    m = len(members)\n    rsis = [_rsi(c, p) for p in members]\n\n    # ---- each member's own return stream: the SAME trade at a different\n    # lookback, which is exactly what average-linkage clustering at rho=0.5\n    # would have grouped into one cohort ----\n    sharpe = []\n    for k in range(m):\n        rk = rsis[k]\n        pos = [0] * n\n        for j in range(n):\n            x = rk[j]\n            if x is None:\n                continue\n            pos[j] = 1 if x < lo else (-1 if x > hi else 0)\n        ret = [0.0] * n\n        for j in range(1, n):\n            ret[j] = pos[j - 1] * lr[j]\n        sh = [None] * n\n        s1 = 0.0\n        s2 = 0.0\n        for j in range(1, n):\n            s1 += ret[j]\n            s2 += ret[j] * ret[j]\n            if j - sw >= 1:\n                t = j - sw\n                s1 -= ret[t]\n                s2 -= ret[t] * ret[t]\n            cnt = j if j < sw else sw\n            if cnt >= sw:\n                mu = s1 / cnt\n                v = s2 / cnt - mu * mu\n                sh[j] = 0.0 if v <= 0.0 else mu / math.sqrt(v)\n        sharpe.append(sh)\n\n    # ---- rolling low percentile and median of each member's own Sharpe ----\n    thr = [[None] * n for _ in range(m)]\n    med = [[None] * n for _ in range(m)]\n    for k in range(m):\n        sh = sharpe[k]\n        ct = None\n        cm = None\n        for j in range(n):\n            if j >= pw and (j % _PCT_STEP) == 0:\n                w = [x for x in sh[j - pw:j] if x is not None]\n                if len(w) >= 30:\n                    w.sort()\n                    ct = _quantile(w, qq)\n                    cm = _quantile(w, 0.5)\n            thr[k][j] = ct\n            med[k][j] = cm\n\n    # ---- cohort state machine: contagion, then a slow revival ----\n    alive = [1] * n\n    dead = False\n    run = 0\n    for j in range(n):\n        nlive = 0\n        below = 0\n        above = 0\n        for k in range(m):\n            s = sharpe[k][j]\n            t = thr[k][j]\n            d = med[k][j]\n            if s is None or t is None or d is None:\n                continue\n            nlive += 1\n            if s < t:\n                below += 1\n            if s > d:\n                above += 1\n        if nlive >= int(ctx.p.min_cohort):\n            f = below / nlive\n            g = above / nlive\n            if not dead:\n                if f >= dead_f:\n                    dead = True\n                    run = 0\n            else:\n                run = run + 1 if g >= rev_f else 0\n                if run >= rev_need:\n                    dead = False\n        alive[j] = 0 if dead else 1\n\n    # ---- the traded member, gated by its cohort's health ----\n    ref = rsis[members.index(base_n)] if base_n in members else _rsi(c, base_n)\n    sig = [0] * n\n    for j in range(1, n):\n        if not alive[j]:\n            continue\n        a = ref[j - 1]\n        x = ref[j]\n        if a is None or x is None:\n            continue\n        if a >= lo and x < lo:\n            sig[j] = 1\n        elif a <= hi and x > hi:\n            sig[j] = -1\n    ctx.sg = ctx.series(sig, \"cohort_sig\")\n    ctx.alive = ctx.series(alive, \"cohort_alive\")\n\n\ndef signal(ctx, i):\n    s = ctx.sg[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    # a cohort declared DEAD flattens every member, including this one\n    a = ctx.alive[i]\n    return a is not None and not a"
+}

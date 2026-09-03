@@ -1,0 +1,36 @@
+{
+ "name": "Momentum burst out of a tight base",
+ "note": "Bonde's momentum burst, with the bar-count exit that is the point of it: time_stop=3. A range-expansion bar out of a volatility contraction, on heavy volume, closing in the top quartile of its own range, with the previous bar not already running. SCALE NOTE: Bonde's 4% / $0.90 move and 15% base width are DAILY calibrations and are unreachable on intraday bars (SPY's 99.9th-percentile 5-minute move is 0.32%), so the two size conditions are expressed against the base's own geometry instead: the bar must gain at least exp_mult times the mean (high-low)/close of the 20-bar base, and the base's own range must be no more than tight of the 80-bar range containing it. Everything else (volume multiple, top-quartile close, prior-bar cap, minimum price, 3-bar exit) is literal.",
+ "source": "Pradeep Bonde, Stockbee -- 'Momentum Burst' / '4% breakout' method, taught free at stockbee.blogspot.com and on his YouTube channel. Thresholds corroborated by github.com/ZihaoGuan/ticker-screener, src/stockbee_momentum_burst_screen.py (FOUR_PCT_THRESHOLD=4.0, DOLLAR_THRESHOLD=0.90, MIN_VOLUME=100000, MIN_PRICE=5.0, MIN_BASE_DAYS=3, MAX_BASE_DAYS=20, MAX_BASE_WIDTH_PCT=15.0, MAX_PRIOR_AVG_RANGE_PCT=5.0, MAX_PREV_DAY_GAIN_FOR_RANGE=2.0).",
+ "params": {
+  "base_n": 20,
+  "long_n": 80,
+  "vol_n": 20,
+  "min_px": 5.0,
+  "exp_mult": 1.5,
+  "vol_mult": 1.5,
+  "tight": 0.7,
+  "prev_frac": 0.5,
+  "cl_q": 0.75,
+  "side": "long",
+  "time_stop": 3
+ },
+ "grid": {
+  "exp_mult": [
+   1.5,
+   2.5,
+   4.0
+  ],
+  "vol_mult": [
+   1.5,
+   2.0,
+   3.0
+  ],
+  "tight": [
+   0.45,
+   0.6,
+   0.8
+  ]
+ },
+ "code": "def family_init(ctx):\n    bars = ctx.bars\n    N = len(bars)\n    h = [float(b[\"h\"]) for b in bars]\n    l = [float(b[\"l\"]) for b in bars]\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n    bn = max(3, int(ctx.p.base_n))\n    ln = max(bn + 5, int(ctx.p.long_n))\n    vn = max(5, int(ctx.p.vol_n))\n\n    rp = [0.0] * N\n    for j in range(N):\n        rp[j] = (h[j] - l[j]) / c[j] if c[j] > 0 else 0.0\n    arng = [None] * N\n    s = 0.0\n    for j in range(N):\n        s += rp[j]\n        if j >= bn:\n            s -= rp[j - bn]\n        if j >= bn - 1:\n            arng[j] = s / bn\n    vsm = [None] * N\n    s = 0.0\n    for j in range(N):\n        s += v[j]\n        if j >= vn:\n            s -= v[j - vn]\n        if j >= vn - 1:\n            vsm[j] = s / vn\n\n    ctx.arng = ctx.series(arng, \"base_avg_range\")\n    ctx.vsm = ctx.series(vsm, \"vol_sma\")\n    ctx.db = ctx.indicator(\"donchian\", period=bn)\n    ctx.dl = ctx.indicator(\"donchian\", period=ln)\n\n\ndef signal(ctx, i):\n    if i < 3:\n        return 0\n    cn = ctx.c[i]\n    c1 = ctx.c[i - 1]\n    c2 = ctx.c[i - 2]\n    if cn is None or c1 is None or c2 is None or c1 <= 0 or c2 <= 0:\n        return 0\n    if cn < ctx.p.min_px:\n        return 0\n    ar = ctx.arng[i - 1]\n    vs = ctx.vsm[i - 1]\n    bh = ctx.db.upper[i - 1]\n    bl = ctx.db.lower[i - 1]\n    lh = ctx.dl.upper[i - 1]\n    ll = ctx.dl.lower[i - 1]\n    if ar is None or vs is None or bh is None or bl is None:\n        return 0\n    if lh is None or ll is None or ar <= 0 or vs <= 0 or ll <= 0 or bl <= 0:\n        return 0\n    thr = float(ctx.p.exp_mult) * ar\n    if thr <= 0:\n        return 0\n    if cn / c1 - 1.0 < thr:\n        return 0\n    if c1 / c2 - 1.0 >= float(ctx.p.prev_frac) * thr:\n        return 0\n    if ctx.v[i] < float(ctx.p.vol_mult) * vs:\n        return 0\n    lw = (lh - ll) / ll\n    if lw <= 0:\n        return 0\n    bw = (bh - bl) / bl\n    if bw > float(ctx.p.tight) * lw:\n        return 0\n    rng = ctx.h[i] - ctx.l[i]\n    if rng > 0 and cn < ctx.l[i] + float(ctx.p.cl_q) * rng:\n        return 0\n    return 1"
+}

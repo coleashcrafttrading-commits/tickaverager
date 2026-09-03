@@ -1,0 +1,36 @@
+{
+ "name": "Stop-cascade band above round",
+ "note": "Osler's stop-loss clustering: executed stop BUYS bunch just ABOVE a round number and stop SELLS just BELOW it. Buys a close that has just crossed up into the narrow band above a grid level on at least 2x the 30-bar median volume, and mirrors it below. Target is 40% of the way to the next level, plus an immediate ATR trail and a 20-bar time stop.",
+ "source": "C. L. Osler, 'Stop-Loss Orders and Price Cascades in Currency Markets', FRBNY Staff Report, https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr150.pdf - VERIFIED. p.7 and Table III: '14.3 percent of executed stop-loss buy orders have requested execution rates ending in the range [01,10], while only 6.9 percent of those orders have requested execution rates ending in the range [90,99]'. Abstract: 'The response to stop-loss orders is larger than the response to take-profit orders' and 'lasts longer'.",
+ "params": {
+  "g_frac": 0.005,
+  "band": 0.1,
+  "vol_mult": 2.0,
+  "vol_win": 30,
+  "tgt": 0.4,
+  "px_win": 500,
+  "rth_only": 1,
+  "exit_signal_on": 1,
+  "time_stop": 20,
+  "trail_atr": 0.75,
+  "tp_atr": 0.0,
+  "st_atr": 1.5
+ },
+ "grid": {
+  "g_frac": [
+   0.0025,
+   0.005,
+   0.01
+  ],
+  "vol_mult": [
+   1.5,
+   2.0,
+   3.0
+  ],
+  "band": [
+   0.1,
+   0.2
+  ]
+ },
+ "code": "def _nice(x):\n    import math\n    if x <= 0.0:\n        return 0.01\n    e = math.floor(math.log10(x))\n    m = x / (10.0 ** e)\n    if m < 1.5:\n        q = 1.0\n    elif m < 3.5:\n        q = 2.0\n    elif m < 7.5:\n        q = 5.0\n    else:\n        q = 10.0\n    return q * (10.0 ** e)\n\n\ndef family_init(ctx):\n    import bisect\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    v = [float(b.get(\"v\") or 0.0) for b in bars]\n\n    L = int(ctx.p.vol_win)\n    med = [None] * n\n    win = []\n    for t in range(n):\n        if t >= 1:\n            bisect.insort(win, v[t - 1])\n            if len(win) > L:\n                old = v[t - 1 - L]\n                k = bisect.bisect_left(win, old)\n                if k < len(win) and win[k] == old:\n                    del win[k]\n            if len(win) >= L:\n                m = len(win)\n                med[t] = win[m // 2] if m % 2 else 0.5 * (win[m // 2 - 1] + win[m // 2])\n    ctx.medv = med\n\n    P = int(ctx.p.px_win)\n    G = [None] * n\n    run = 0.0\n    for t in range(n):\n        run += c[t]\n        if t >= P:\n            run -= c[t - P]\n        k = min(t + 1, P)\n        if k >= 20:\n            G[t] = _nice(float(ctx.p.g_frac) * (run / k))\n    ctx.G = G\n\n    rth = [True] * n\n    eod = [False] * n\n    for t in range(n):\n        ts = str(bars[t].get(\"t\") or \"\")\n        hh = -1\n        mm = 0\n        if len(ts) >= 16 and ts[10:11] == \"T\":\n            try:\n                hh = int(ts[11:13])\n                mm = int(ts[14:16])\n            except Exception:\n                hh = -1\n        if hh >= 0:\n            mins = hh * 60 + mm\n            rth[t] = (13 * 60 + 30) <= mins <= (19 * 60 + 45)\n            eod[t] = mins >= (19 * 60 + 50)\n    ctx.rth = rth\n    ctx.eod = eod\n    ctx.start = max(L, 21) + 2\n\n\ndef signal(ctx, i):\n    import math\n    if i < ctx.start:\n        return 0\n    if ctx.p.rth_only and not ctx.rth[i]:\n        return 0\n    mv = ctx.medv[i]\n    g = ctx.G[i]\n    if mv is None or mv <= 0.0 or g is None or g <= 0.0:\n        return 0\n    if ctx.v[i] < float(ctx.p.vol_mult) * mv:\n        return 0\n    c0, c1 = ctx.c[i], ctx.c[i - 1]\n    b = float(ctx.p.band) * g\n    lo = math.floor(c0 / g) * g\n    hi = lo + g\n    if c0 > lo and (c0 - lo) <= b and c1 <= lo:\n        return 1\n    if c0 < hi and (hi - c0) <= b and c1 >= hi:\n        return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    import math\n    if not ctx.positions:\n        return False\n    if ctx.p.rth_only and ctx.eod[i]:\n        return True\n    j = ctx.positions[0][\"entry_i\"] - 1\n    if j < 0:\n        return False\n    g = ctx.G[j]\n    if g is None or g <= 0.0:\n        return False\n    lo = math.floor(ctx.c[j] / g) * g\n    t = float(ctx.p.tgt) * g\n    d = ctx._dir\n    if d > 0:\n        return ctx.c[i] >= lo + t\n    if d < 0:\n        return ctx.c[i] <= (lo + g) - t\n    return False"
+}

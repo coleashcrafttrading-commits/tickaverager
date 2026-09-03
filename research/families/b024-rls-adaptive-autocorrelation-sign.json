@@ -1,0 +1,38 @@
+{
+ "name": "RLS Adaptive Autocorrelation Sign",
+ "note": "Runs textbook recursive least squares with exponential forgetting on standardised log returns, z_t = a + b z_{t-1}, updating theta and P every bar with k = Px/(mu + x'Px), theta += k(z - x'theta), P = (P - k x'P)/mu, P initialised to p_init x I. The regime variable is the tracked coefficient itself, so there is no window and no refit schedule: mu alone sets an effective memory of about 1/(1-mu) bars. The traded object is the significance ratio G = b / sqrt(s2 P[1,1]) with s2 an EWM residual variance, not the raw coefficient, which keeps the family out of the long stretches where b is noise around zero. Significantly negative G plus a large last bar fades it; significantly positive G plus a large last bar follows it; both branches mirror for shorts. Exit is the idea's own three-way: hold bars elapsed, |G| collapsing below g_out, or a stop at stop_sig x the bar's own EWM sigma, with the harness target and stop switched off.",
+ "source": "Synthesis. RLS with exponential forgetting is standard: Ljung, System Identification: Theory for the User (2nd ed., Prentice Hall, 1999), ch. 11 recursive estimation. The pattern of online adaptive-rate learning applied to short-horizon price prediction appears in PLOS ONE 15(6): e0234107, 'Mid-price prediction based on machine learning methods with technical and quantitative indicators' (online learning with adaptive rate for next mid-price move). The specific entry/exit construction above is mine, not taken from a paper.",
+ "params": {
+  "mu": 0.97,
+  "p_init": 1000.0,
+  "sig_span": 100.0,
+  "res_span": 100.0,
+  "warm": 60,
+  "g_thr": 2.0,
+  "z_thr": 1.0,
+  "g_out": 1.0,
+  "hold": 3,
+  "stop_sig": 2.0,
+  "side": "both",
+  "tp_atr": 0.0,
+  "st_atr": 0.0,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "mu": [
+   0.95,
+   0.97,
+   0.99
+  ],
+  "g_thr": [
+   1.5,
+   2.0,
+   2.5
+  ],
+  "z_thr": [
+   0.75,
+   1.25
+  ]
+ },
+ "code": "def family_init(ctx):\n    \"\"\"Recursive least squares with exponential forgetting on z_t = a + b z_{t-1}.\n\n    The regime variable is the coefficient itself, tracked bar by bar, and the\n    tradeable object is its significance ratio G = b / se(b): significantly\n    negative means the tape is genuinely fading its own one-bar moves,\n    significantly positive means it is extending them.\n    \"\"\"\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    cl = [float(b[\"c\"]) for b in bars]\n\n    lr = [0.0] * n\n    for i in range(1, n):\n        a = cl[i - 1]\n        if a > 0.0 and cl[i] > 0.0:\n            lr[i] = math.log(cl[i] / a)\n\n    # EWM standard deviation of returns, span sig_span\n    span = float(ctx.p.sig_span)\n    lam = 2.0 / (span + 1.0)\n    sig = [None] * n\n    ev = 0.0\n    seen = 0\n    for i in range(1, n):\n        ev = (1.0 - lam) * ev + lam * lr[i] * lr[i] if seen else lr[i] * lr[i]\n        seen += 1\n        if seen >= 20 and ev > 0.0:\n            sig[i] = math.sqrt(ev)\n\n    z = [None] * n\n    for i in range(1, n):\n        s = sig[i]\n        if s is not None and s > 0.0:\n            z[i] = lr[i] / s\n\n    # --- RLS with forgetting factor mu on x = [1, z_{t-1}]\n    mu = float(ctx.p.mu)\n    if mu <= 0.5:\n        mu = 0.5\n    elif mu > 0.9999:\n        mu = 0.9999\n    p0 = float(ctx.p.p_init)\n    P = [[p0, 0.0], [0.0, p0]]\n    th = [0.0, 0.0]\n    rspan = float(ctx.p.res_span)\n    rlam = 2.0 / (rspan + 1.0)\n    s2 = 0.0\n    nres = 0\n\n    G = [None] * n\n    B = [None] * n\n    prev = None\n    for i in range(n):\n        zi = z[i]\n        if zi is None:\n            prev = None\n            continue\n        if prev is None:\n            prev = zi\n            continue\n        x0 = 1.0\n        x1 = prev\n        # k = P x / (mu + x' P x)\n        Px0 = P[0][0] * x0 + P[0][1] * x1\n        Px1 = P[1][0] * x0 + P[1][1] * x1\n        den = mu + x0 * Px0 + x1 * Px1\n        if den <= 0.0:\n            prev = zi\n            continue\n        k0 = Px0 / den\n        k1 = Px1 / den\n        err = zi - (th[0] * x0 + th[1] * x1)\n        th[0] += k0 * err\n        th[1] += k1 * err\n        # P = (P - k x' P) / mu\n        xP0 = x0 * P[0][0] + x1 * P[1][0]\n        xP1 = x0 * P[0][1] + x1 * P[1][1]\n        P[0][0] = (P[0][0] - k0 * xP0) / mu\n        P[0][1] = (P[0][1] - k0 * xP1) / mu\n        P[1][0] = (P[1][0] - k1 * xP0) / mu\n        P[1][1] = (P[1][1] - k1 * xP1) / mu\n        if P[0][0] > 1e9:\n            P[0][0] = 1e9\n        if P[1][1] > 1e9:\n            P[1][1] = 1e9\n        if P[1][1] < 1e-12:\n            P[1][1] = 1e-12\n        # EWM residual variance, using the a-posteriori residual\n        r2 = (zi - (th[0] * x0 + th[1] * x1)) ** 2\n        s2 = (1.0 - rlam) * s2 + rlam * r2 if nres else r2\n        nres += 1\n        prev = zi\n        if nres < int(ctx.p.warm):\n            continue\n        se = math.sqrt(s2 * P[1][1]) if s2 > 0.0 else 0.0\n        if se <= 0.0:\n            continue\n        B[i] = th[1]\n        G[i] = th[1] / se\n\n    ctx.z = ctx.series(z, \"z\")\n    ctx.G = ctx.series(G, \"G_ratio\")\n    ctx.b = ctx.series(B, \"b_coef\")\n    ctx.sig = ctx.series(sig, \"sigma\")\n\n\ndef signal(ctx, i):\n    g = ctx.G[i]\n    z = ctx.z[i]\n    if g is None or z is None:\n        return 0\n    gt = float(ctx.p.g_thr)\n    zt = float(ctx.p.z_thr)\n    if g < -gt:                       # one-lag mean reversion is real: fade\n        if z < -zt:\n            return 1\n        if z > zt:\n            return -1\n        return 0\n    if g > gt:                        # one-lag momentum is real: follow\n        if z > zt:\n            return 1\n        if z < -zt:\n            return -1\n    return 0\n\n\ndef exit_signal(ctx, i):\n    \"\"\"Out after hold bars, or when the serial structure evaporates, or on a\n    stop measured in the bar's own standard deviations.\"\"\"\n    import math\n    if not ctx.positions:\n        return False\n    p = ctx.positions[0]\n    k = i - p[\"entry_i\"]\n    if k >= int(ctx.p.hold):\n        return True\n    g = ctx.G[i]\n    if g is not None and abs(g) < float(ctx.p.g_out):\n        return True\n    if k < 1:\n        return False\n    s = ctx.sig[i]\n    e = p[\"entry\"]\n    c = ctx.c[i]\n    if s is None or s <= 0.0 or e <= 0.0 or c <= 0.0:\n        return False\n    d = 1.0 if p[\"side\"] == \"long\" else -1.0\n    return math.log(c / e) * d < -float(ctx.p.stop_sig) * s\n"
+}

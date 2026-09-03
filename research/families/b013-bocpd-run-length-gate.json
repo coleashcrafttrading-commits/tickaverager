@@ -1,0 +1,38 @@
+{
+ "name": "BOCPD run length gate",
+ "note": "Runs Adams & MacKay's Bayesian online changepoint detection on the sub-strategy's own per-bar return series -- Normal-Inverse-Gamma conjugate model, constant hazard, the full run-length posterior propagated by the message-passing recursion and pruned to keep it cheap. New entries only while the probability that a break just happened is below p_gate AND the posterior predictive mean of the current run is positive; everything is flattened when that break probability exceeds p_flat, and the strategy stays flat until the new run has accumulated re_r bars and turned positive again -- no manual reset, because the posterior re-estimates the parameters on the new regime by itself. The paper's third output, size proportional to expected run length, is the one part not implemented: position size belongs to the shared execution harness, not to the signal. The gated rule is the study's own EMA-cross floor family, so what is measured is the overlay.",
+ "source": "Adams, R.P. & MacKay, D.J.C. (2007), 'Bayesian Online Changepoint Detection', arXiv:0710.3742 -- exact online inference of the run-length posterior via a message-passing recursion.",
+ "params": {
+  "exit_on_flip": 1,
+  "exit_signal_on": 1,
+  "base_f": 9,
+  "base_s": 30,
+  "hazard_n": 250,
+  "kappa0": 1.0,
+  "alpha0": 2.0,
+  "warm": 250,
+  "p_gate": 0.2,
+  "p_flat": 0.5,
+  "re_r": 20,
+  "rl_short": 5,
+  "rmax": 200,
+  "prune": 1e-06
+ },
+ "grid": {
+  "hazard_n": [
+   100,
+   250,
+   1000
+  ],
+  "p_gate": [
+   0.1,
+   0.2,
+   0.35
+  ],
+  "p_flat": [
+   0.35,
+   0.5
+  ]
+ },
+ "code": "\nimport math as _m\n\ndef _ema(c, n):\n    a = 2.0 / (n + 1.0)\n    out = [None] * len(c)\n    s = None\n    for i, x in enumerate(c):\n        s = x if s is None else s + a * (x - s)\n        if i >= n:\n            out[i] = s\n    return out\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    # ---- the sub-strategy being monitored: the study's own floor rule, so\n    # ---- what is measured is the overlay and not a new signal\n    ef = _ema(c, int(ctx.p.base_f))\n    es = _ema(c, int(ctx.p.base_s))\n    pos = [0] * n\n    ev = [0] * n\n    for i in range(n):\n        if ef[i] is not None and es[i] is not None:\n            pos[i] = 1 if ef[i] > es[i] else -1\n            if i and pos[i - 1] and pos[i] != pos[i - 1]:\n                ev[i] = pos[i]\n    ctx.ev = ev\n    r = [0.0] * n\n    for i in range(1, n):\n        if pos[i - 1] and c[i - 1] > 0:\n            r[i] = pos[i - 1] * (c[i] / c[i - 1] - 1.0)\n\n    # ---- Adams & MacKay run-length posterior, Normal-Inverse-Gamma model ----\n    warm = int(ctx.p.warm)\n    if warm + 10 >= n:\n        warm = max(10, n // 4)\n    seg = r[1:warm + 1]\n    mu_s = sum(seg) / len(seg)\n    v0 = sum((z - mu_s) ** 2 for z in seg) / len(seg)\n    b0 = max(v0, 1e-14)\n    a0 = float(ctx.p.alpha0)\n    k0 = float(ctx.p.kappa0)\n    mu0 = 0.0\n    haz = 1.0 / float(ctx.p.hazard_n)\n    rmax = int(ctx.p.rmax)\n    short = int(ctx.p.rl_short)\n    floor = float(ctx.p.prune)\n\n    lgc = {}\n\n    def _lg(v):\n        got = lgc.get(v)\n        if got is None:\n            got = _m.lgamma(v)\n            lgc[v] = got\n        return got\n\n    P = [1.0]\n    N = [0]\n    MU = [mu0]\n    KA = [k0]\n    AL = [a0]\n    BE = [b0]\n    pb = [None] * n\n    rl = [None] * n\n    mh = [None] * n\n    lpi = _m.log(_m.pi)\n    for t in range(warm, n):\n        x = r[t]\n        k = len(P)\n        nP = [0.0] * (k + 1)\n        cp = 0.0\n        for j in range(k):\n            al = AL[j]\n            be = BE[j]\n            ka = KA[j]\n            df = 2.0 * al\n            sc2 = be * (ka + 1.0) / (al * ka)\n            z = (x - MU[j]) ** 2 / sc2\n            lp = (_lg((df + 1.0) / 2.0) - _lg(df / 2.0)\n                  - 0.5 * (lpi + _m.log(df * sc2))\n                  - ((df + 1.0) / 2.0) * _m.log1p(z / df))\n            w = P[j] * _m.exp(lp)\n            nP[j + 1] = w * (1.0 - haz)\n            cp += w * haz\n        nP[0] = cp\n        nN = [0] + [v + 1 for v in N]\n        nMU = [mu0] + [(KA[j] * MU[j] + x) / (KA[j] + 1.0) for j in range(k)]\n        nKA = [k0] + [KA[j] + 1.0 for j in range(k)]\n        nAL = [a0] + [AL[j] + 0.5 for j in range(k)]\n        nBE = [b0] + [BE[j] + KA[j] * (x - MU[j]) ** 2 / (2.0 * (KA[j] + 1.0))\n                      for j in range(k)]\n        s = sum(nP)\n        if s <= 0.0:\n            P = [1.0]\n            N = [0]\n            MU = [mu0]\n            KA = [k0]\n            AL = [a0]\n            BE = [b0]\n            continue\n        keep = []\n        for j in range(k + 1):\n            if nP[j] / s > floor:\n                keep.append(j)\n        if len(keep) > rmax:\n            keep.sort(key=lambda j: -nP[j])\n            keep = sorted(keep[:rmax])\n        P = [nP[j] for j in keep]\n        N = [nN[j] for j in keep]\n        MU = [nMU[j] for j in keep]\n        KA = [nKA[j] for j in keep]\n        AL = [nAL[j] for j in keep]\n        BE = [nBE[j] for j in keep]\n        s = sum(P)\n        P = [v / s for v in P]\n        e = 0.0\n        br = 0.0\n        m_ = 0.0\n        for j in range(len(P)):\n            e += P[j] * N[j]\n            m_ += P[j] * MU[j]\n            if N[j] < short:\n                br += P[j]\n        rl[t] = e\n        pb[t] = br\n        mh[t] = m_\n    ctx.pb = ctx.series(pb, \"p_break\")\n    ctx.rl = ctx.series(rl, \"run_length\")\n    ctx.mh = ctx.series(mh, \"posterior_mean\")\n    ctx._blocked = False\n\n\ndef _state(ctx, i):\n    p = ctx.pb[i]\n    if p is None:\n        return None, None, None\n    return p, ctx.rl[i], ctx.mh[i]\n\n\ndef signal(ctx, i):\n    p, R, mu = _state(ctx, i)\n    if p is None:\n        return 0\n    if p > float(ctx.p.p_flat):\n        ctx._blocked = True\n        return 0\n    if ctx._blocked:\n        if R >= float(ctx.p.re_r) and mu > 0.0:\n            ctx._blocked = False\n        else:\n            return 0\n    if p >= float(ctx.p.p_gate) or mu <= 0.0:\n        return 0\n    s = ctx.ev[i]\n    return 1 if s > 0 else (-1 if s < 0 else 0)\n\n\ndef exit_signal(ctx, i):\n    p = ctx.pb[i]\n    return p is not None and p > float(ctx.p.p_flat)\n"
+}

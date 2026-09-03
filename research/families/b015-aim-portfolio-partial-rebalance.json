@@ -1,0 +1,39 @@
+{
+ "name": "Aim-Portfolio Partial Rebalancing",
+ "note": "Garleanu-Pedersen for one asset: compute the Markowitz aim weight each bar, then never trade to it -- move a constant fraction M of the way there, with M = (sqrt(k^2+4k)-k)/2 and k = delta*sigma^2/(2c), c the (high-low)/close half-spread proxy plus slippage. The weight path therefore decays exponentially toward zero whenever the aim goes to zero, instead of being cut by any rule about the position. A ternary signal cannot hold a fractional weight, so the emitted signal is 'the smoothed weight is above w_in' -- what is actually under test is the timing content of the trade rate M, which is what delta and cost_mult sweep. The cross-sectional z-score of the source becomes a time-series z-score of log price/MA.",
+ "source": "Garleanu & Pedersen (2013) 'Dynamic Trading with Predictable Returns and Transaction Costs', Journal of Finance 68(6) (NBER Working Paper 17777). Note: the NBER PDF fetched by the harvester returned unreadable encoded content, so the aim-portfolio and trade-rate formulas are quoted from the published paper rather than verified by fetch; the trade rate given is the standard quadratic-cost closed form.",
+ "params": {
+  "vol_n": 60,
+  "sig_n": 50,
+  "z_n": 250,
+  "cost_n": 20,
+  "slip_bp": 5.0,
+  "cost_mult": 1.0,
+  "delta": 2.5,
+  "mu_scale": 0.005,
+  "stress_k": 1.5,
+  "stress_n": 250,
+  "w_in": 0.5,
+  "side": "long",
+  "exit_on_zero": 1,
+  "tp_atr": 0.0,
+  "st_atr": 3.0
+ },
+ "grid": {
+  "delta": [
+   1.0,
+   2.5,
+   6.0
+  ],
+  "cost_mult": [
+   0.5,
+   1.0,
+   2.0
+  ],
+  "w_in": [
+   0.35,
+   0.6
+  ]
+ },
+ "code": "import math\n\n\ndef family_init(ctx):\n    b = ctx.bars\n    n = len(b)\n    h = [float(x[\"h\"]) for x in b]\n    l = [float(x[\"l\"]) for x in b]\n    c = [float(x[\"c\"]) for x in b]\n\n    lr = [0.0] * n\n    for j in range(1, n):\n        if c[j - 1] > 0 and c[j] > 0:\n            lr[j] = math.log(c[j] / c[j - 1])\n\n    vn = max(20, int(ctx.p.vol_n))\n    sig = [None] * n\n    s1 = 0.0\n    s2 = 0.0\n    for j in range(n):\n        s1 += lr[j]\n        s2 += lr[j] * lr[j]\n        if j >= vn:\n            s1 -= lr[j - vn]\n            s2 -= lr[j - vn] * lr[j - vn]\n        m = j + 1 if j + 1 < vn else vn\n        if m >= 20:\n            var = s2 / m - (s1 / m) ** 2\n            if var > 0:\n                sig[j] = math.sqrt(var)\n\n    sn = max(2, int(ctx.p.sig_n))\n    zn = max(20, int(ctx.p.z_n))\n    ma = [None] * n\n    run = 0.0\n    for j in range(n):\n        run += c[j]\n        if j >= sn:\n            run -= c[j - sn]\n        if j >= sn - 1:\n            ma[j] = run / sn\n    g = [None] * n\n    for j in range(n):\n        if ma[j] and ma[j] > 0 and c[j] > 0:\n            g[j] = math.log(c[j] / ma[j])\n    z = [None] * n\n    g1 = 0.0\n    g2 = 0.0\n    cnt = 0\n    q = []\n    for j in range(n):\n        if g[j] is None:\n            continue\n        q.append(g[j])\n        g1 += g[j]\n        g2 += g[j] * g[j]\n        cnt += 1\n        if cnt > zn:\n            old = q.pop(0)\n            g1 -= old\n            g2 -= old * old\n            cnt -= 1\n        if cnt >= 20:\n            mu = g1 / cnt\n            var = g2 / cnt - mu * mu\n            if var > 1e-18:\n                z[j] = (g[j] - mu) / math.sqrt(var)\n\n    # per-unit round-trip cost: the Corwin-free (high-low)/close spread proxy\n    cn = max(5, int(ctx.p.cost_n))\n    sp = [None] * n\n    run = 0.0\n    for j in range(n):\n        run += (h[j] - l[j]) / c[j] if c[j] > 0 else 0.0\n        if j >= cn:\n            run -= (h[j - cn] - l[j - cn]) / c[j - cn] if c[j - cn] > 0 else 0.0\n        if j >= cn - 1:\n            sp[j] = run / cn\n    slipb = float(ctx.p.slip_bp) / 10000.0\n    cm = float(ctx.p.cost_mult)\n\n    # long-run vol reference for the stress rule\n    sref = [None] * n\n    rn = max(50, int(ctx.p.stress_n))\n    run = 0.0\n    cnt = 0\n    qq = []\n    for j in range(n):\n        if sig[j] is None:\n            continue\n        qq.append(sig[j])\n        run += sig[j]\n        cnt += 1\n        if cnt > rn:\n            run -= qq.pop(0)\n            cnt -= 1\n        if cnt >= 30:\n            sref[j] = run / cnt\n\n    delta = float(ctx.p.delta)\n    mus = float(ctx.p.mu_scale)\n    stress = float(ctx.p.stress_k)\n    w = 0.0\n    warr = [0.0] * n\n    for j in range(n):\n        s = sig[j]\n        if s is None or s <= 0 or z[j] is None or sp[j] is None:\n            warr[j] = w\n            continue\n        cost = cm * (sp[j] / 4.0 + slipb)\n        if cost <= 0:\n            warr[j] = w\n            continue\n        # the Markowitz optimum we will deliberately NOT trade to\n        aim = mus * z[j] / (delta * s)\n        if aim < 0.0:\n            aim = 0.0\n        elif aim > 1.0:\n            aim = 1.0\n        k = delta * s * s / (2.0 * cost)\n        M = (math.sqrt(k * k + 4.0 * k) - k) / 2.0\n        if stress > 0 and sref[j] and s > stress * sref[j]:\n            M *= 2.0          # converge faster when risk runs hot\n        if M < 0.05:\n            M = 0.05\n        elif M > 0.60:\n            M = 0.60\n        # trade a constant fraction of the way to the aim -- never all of it\n        w = w + M * (aim - w)\n        warr[j] = w\n    ctx.w = ctx.series(warr, \"aim_weight\")\n    ctx.aimz = ctx.series(z, \"signal_z\")\n\n\ndef signal(ctx, i):\n    w = ctx.w[i]\n    if w is None:\n        return 0\n    return 1 if w >= float(ctx.p.w_in) else 0"
+}

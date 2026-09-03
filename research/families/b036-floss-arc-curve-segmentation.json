@@ -1,0 +1,37 @@
+{
+ "name": "FLOSS Arc-Curve Segmentation",
+ "note": "Regime boundaries from the topology of nearest-neighbour arcs rather than from any moment of the return distribution: each finished subsequence is joined to its closest earlier match, and where the market's shape vocabulary changes almost no arc crosses, so the corrected arc curve collapses. Entry is the direction of the new regime measured against the m bars before the boundary; exit is the next boundary. Arcs are the causal backward form (a new subsequence matching the past), which is the only version knowable in real time; distances are z-normalised PAA so the whole thing stays cheap.",
+ "source": "Gharghabi, Ding, Yeh, Kamgar, Ulanova & Keogh, 'Matrix Profile VIII: Domain Agnostic Online Semantic Segmentation at Superhuman Performance Levels', IEEE ICDM 2017 (FLUSS offline, FLOSS online with forward-only arcs). UCR Matrix Profile page: cs.ucr.edu/~eamonn/MatrixProfile.html. Financial application survey: 'Financial Time Series: Market Analysis Techniques Based on Matrix Profiles', MDPI Engineering Proceedings 5(1):45.",
+ "params": {
+  "mp_m": 30,
+  "mp_win": 1000,
+  "mp_stride": 5,
+  "mp_seg": 8,
+  "cac_thr": 0.45,
+  "gap_m": 5,
+  "recent": 3,
+  "time_stop": 30,
+  "trail_atr": 2.5,
+  "exit_signal_on": 1,
+  "tp_atr": 0.0,
+  "st_atr": 2.5,
+  "side": "both"
+ },
+ "grid": {
+  "mp_m": [
+   20,
+   30,
+   45
+  ],
+  "cac_thr": [
+   0.35,
+   0.45,
+   0.5
+  ],
+  "mp_win": [
+   600,
+   1000
+  ]
+ },
+ "code": "def family_init(ctx):\n    from operator import mul as _mul\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    m = max(8, int(ctx.p.mp_m))\n    stride = max(1, int(ctx.p.mp_stride))\n    seg = max(3, int(ctx.p.mp_seg))\n    win = max(4 * m, int(ctx.p.mp_win))\n    thr = float(ctx.p.cac_thr)\n    excl = max(1, m // 2)\n\n    # ---- z-normalised PAA of every candidate subsequence ----\n    cs = [0.0] * (n + 1)\n    cs2 = [0.0] * (n + 1)\n    for i in range(n):\n        cs[i + 1] = cs[i] + c[i]\n        cs2[i + 1] = cs2[i] + c[i] * c[i]\n    cut = [int(round(q * m / float(seg))) for q in range(seg + 1)]\n\n    pos = list(range(0, n - m + 1, stride))\n    PV = {}\n    SQ = {}\n    for j in pos:\n        s1 = cs[j + m] - cs[j]\n        s2 = cs2[j + m] - cs2[j]\n        mu = s1 / m\n        var = s2 / m - mu * mu\n        if var <= 1e-12:\n            continue\n        sd = var ** 0.5\n        v = []\n        q = 0.0\n        for k in range(seg):\n            a, b = j + cut[k], j + cut[k + 1]\n            if b <= a:\n                b = a + 1\n            x = ((cs[b] - cs[a]) / (b - a) - mu) / sd\n            v.append(x)\n            q += x * x\n        PV[j] = v\n        SQ[j] = q\n\n    # ---- causal arcs: each finished subsequence points back at its nearest\n    #      earlier neighbour. FLOSS keeps only arcs that are known at the time,\n    #      and a backward arc from the newest subsequence is exactly that.\n    W = max(8, win // stride)\n    arcs = []\n    bnd = [0] * n\n    sg = [0] * n\n    last_b = -10 ** 9\n    min_gap = int(ctx.p.gap_m) * m\n    edge = max(2, m // stride)\n    recent = max(1, int(ctx.p.recent))\n    decl = []\n    npos = len(pos)\n    back = max(1, (excl + stride - 1) // stride)\n    for jk in range(npos):\n        j = pos[jk]\n        vj = PV.get(j)\n        if vj is None:\n            continue\n        qj = SQ[j]\n        best = None\n        bp = -1\n        k1 = jk - back\n        k0 = k1 - W\n        if k0 < 0:\n            k0 = 0\n        for pk in range(k0, k1 + 1):\n            p = pos[pk]\n            v = PV.get(p)\n            if v is None:\n                continue\n            d = qj + SQ[p] - 2.0 * sum(map(_mul, vj, v))\n            if best is None or d < best:\n                best = d\n                bp = p\n        if bp < 0:\n            continue\n        arcs.append((bp, j))\n        t = j + m - 1                     # the bar on which this arc is known\n\n        # arc curve over the trailing window, on the same stride grid\n        lo = j - win\n        gg = [0] * (W + 2)\n        cnt = 0\n        for (a, b) in arcs[-2 * W:]:\n            if b < lo:\n                continue\n            ia = (max(a, lo) - lo) // stride\n            ib = (b - lo) // stride\n            if ib <= ia:\n                continue\n            gg[ia + 1] += 1\n            gg[ib] -= 1\n            cnt += 1\n        if cnt < 8:\n            continue\n        ac = [0] * (W + 1)\n        run = 0\n        for u in range(W + 1):\n            run += gg[u]\n            ac[u] = run\n        cac = [1.0] * (W + 1)\n        for u in range(1, W):\n            exp_ = 2.0 * u * (W - u) / float(W)\n            if exp_ > 0:\n                v = ac[u] / exp_\n                cac[u] = v if v < 1.0 else 1.0\n\n        # most recent local minimum below the threshold, away from both edges\n        cand = -1\n        for u in range(W - edge, edge, -1):\n            if cac[u] < thr and cac[u] <= cac[u - 1] and cac[u] <= cac[u + 1]:\n                cand = u\n                break\n        if cand < 0:\n            continue\n        bbar = lo + cand * stride\n        if bbar - last_b < min_gap or bbar < m:\n            continue\n        last_b = bbar\n        bnd[t] = 1\n        decl.append((t, bbar))\n\n    # ---- direction of the new regime, decided only from bars already seen ---\n    for (t, b) in decl:\n        for k in range(t, min(n, t + recent)):\n            if sg[k]:\n                continue\n            a0 = sum(c[b:k + 1]) / float(k + 1 - b) if k + 1 > b else None\n            a1 = sum(c[max(0, b - m):b]) / float(b - max(0, b - m)) if b > 0 else None\n            if a0 is None or a1 is None or a0 == a1:\n                continue\n            sg[k] = 1 if a0 > a1 else -1\n\n    ctx.fl = ctx.series(sg, \"floss_signal\")\n    ctx.fb = ctx.series(bnd, \"floss_boundary\")\n\n\ndef signal(ctx, i):\n    s = ctx.fl[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    e = int(ctx.positions[0][\"entry_i\"])\n    return i > e and bool(ctx.fb[i])"
+}

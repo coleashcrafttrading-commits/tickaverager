@@ -1,0 +1,38 @@
+{
+ "name": "Parkinson efficiency reversion gate",
+ "note": "Q = Parkinson range volatility / close-to-close volatility over a trailing window of regular sessions - a path-efficiency measure that separates a symbol which oscillated around its open all day from one that trended cleanly open to close, two cases no close-only statistic can tell apart. A session is OSCILLATING when Q sits at or above its own trailing percentile (self-relative, because the absolute level is a property of the symbol: XLU runs near 1.1 and SOXL near 0.7). Only then, and only between 10:00 and 15:00 ET, does it fade a stretch of one band away from the session open that closes back towards it, targeting the open, stopping at stop_mult times the entry distance beyond entry, and flattening at 15:50. Session windows are shorter than the paper-scale 20/120 because the study fetches 85-170 sessions, not decades; the percentile is expanding up to pct_hist so it forms early.",
+ "source": "Synthesis. The two estimators are Michael Parkinson, 'The extreme value method for estimating the variance of the rate of return', Journal of Business 53 (1980) 61-65, and the standard close-to-close estimator; their relative efficiency and the use of the range as a volatility proxy are established in Sassan Alizadeh, Michael Brandt, Francis Diebold, 'Range-based estimation of stochastic volatility models', Journal of Finance 57 (2002) 1047-1091. The RATIO of the two as a mean-reversion regime classifier, and the session-open reversion trade built on it, are my own construction and I am not aware of a paper that tests exactly this - it should be treated as an untested hypothesis rather than a documented effect.",
+ "params": {
+  "q_win": 5,
+  "pct": 0.7,
+  "pct_hist": 20,
+  "pct_min": 3,
+  "band": 1.0,
+  "stop_mult": 1.5,
+  "max_sig": 2,
+  "t_open": 600,
+  "t_close": 900,
+  "t_flat": 950,
+  "exit_signal_on": 1,
+  "st_atr": 0.0,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "q_win": [
+   5,
+   10,
+   20
+  ],
+  "pct": [
+   0.6,
+   0.7,
+   0.85
+  ],
+  "band": [
+   0.5,
+   1.0,
+   1.5
+  ]
+ },
+ "code": "_TT = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]\n\n\ndef _nth_sunday(y, mo, n):\n    yy = y - (1 if mo < 3 else 0)\n    d1 = (yy + yy // 4 - yy // 100 + yy // 400 + _TT[mo - 1] + 1) % 7\n    return 1 + ((7 - d1) % 7) + 7 * (n - 1)\n\n\ndef _etmin(ts):\n    \"\"\"Minutes past ET midnight for a UTC ISO stamp, DST handled properly.\"\"\"\n    s = str(ts)\n    y = int(s[0:4])\n    mo = int(s[5:7])\n    d = int(s[8:10])\n    hh = int(s[11:13])\n    mm = int(s[14:16])\n    if 3 < mo < 11:\n        dst = True\n    elif mo == 3:\n        dst = d >= _nth_sunday(y, 3, 2)\n    elif mo == 11:\n        dst = d < _nth_sunday(y, 11, 1)\n    else:\n        dst = False\n    t = hh * 60 + mm - (4 if dst else 5) * 60\n    return t if t >= 0 else t + 1440\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n\n    mins = [0] * n\n    for t in range(n):\n        mins[t] = _etmin(bars[t][\"t\"])\n    ctx.mins = mins\n\n    # ---- regular sessions, which is what a daily bar actually is ---------\n    day = [None] * n\n    sh = []\n    sl = []\n    sc = []\n    so = []\n    key = None\n    for t in range(n):\n        if not (570 <= mins[t] < 960):\n            continue\n        k = str(bars[t][\"t\"])[:10]\n        if k != key:\n            key = k\n            sh.append(float(bars[t][\"h\"]))\n            sl.append(float(bars[t][\"l\"]))\n            so.append(float(bars[t][\"o\"]))\n            sc.append(float(bars[t][\"c\"]))\n        else:\n            j = len(sh) - 1\n            hv = float(bars[t][\"h\"])\n            lv = float(bars[t][\"l\"])\n            if hv > sh[j]:\n                sh[j] = hv\n            if lv < sl[j]:\n                sl[j] = lv\n            sc[j] = float(bars[t][\"c\"])\n        day[t] = len(sh) - 1\n    ctx.day = day\n    m = len(sh)\n\n    # ---- Q = Parkinson range vol / close-to-close vol --------------------\n    # Under a driftless random walk E[Q] ~ 1. Q > 1 says the path travelled\n    # far further than its net displacement (oscillation); Q < 1 says the\n    # moves persisted within the session and gapped across sessions.\n    W = int(ctx.p.q_win)\n    k4 = 4.0 * math.log(2.0)\n    Q = [None] * m\n    for t in range(W, m):\n        acc = 0.0\n        for d in range(t - W, t):\n            a, b = sh[d], sl[d]\n            if a > 0.0 and b > 0.0:\n                x = math.log(a / b)\n                acc += x * x\n        park = (acc / (W * k4)) ** 0.5\n        rs = []\n        for d in range(t - W, t):\n            if d < 1:\n                continue\n            a, b = sc[d - 1], sc[d]\n            if a > 0.0 and b > 0.0:\n                rs.append(math.log(b / a))\n        if len(rs) < 3 or park <= 0.0:\n            continue\n        mu = sum(rs) / len(rs)\n        var = sum((x - mu) * (x - mu) for x in rs) / (len(rs) - 1)\n        if var <= 0.0:\n            continue\n        Q[t] = park / (var ** 0.5)\n\n    # ---- OSCILLATING if Q sits in the top of its OWN history -------------\n    # A trailing self-percentile, not an absolute level: XLU sits near 1.1 and\n    # SOXL near 0.7, and an absolute cut would simply classify the symbol.\n    ph = int(ctx.p.pct_hist)\n    pmin = int(ctx.p.pct_min)\n    osc = [False] * m\n    hist = []\n    for t in range(m):\n        q = Q[t]\n        if q is None:\n            continue\n        if len(hist) >= pmin:\n            s = sorted(hist)\n            j = int(float(ctx.p.pct) * (len(s) - 1))\n            osc[t] = q >= s[j]\n        hist.append(q)\n        if len(hist) > ph:\n            hist.pop(0)\n    ctx.osc = osc\n\n    # ---- half the average session range, the reversion band --------------\n    B = [None] * m\n    for t in range(W, m):\n        B[t] = sum(sh[d] - sl[d] for d in range(t - W, t)) / (2.0 * W)\n    ctx.B = B\n\n    # the session open, carried onto every bar of that session\n    ctx.sop = so\n    ctx.start = W + pmin + 1\n    ctx._sk = -1\n    ctx._nsig = 0\n\n\ndef signal(ctx, i):\n    d = ctx.day[i]\n    if d is None or d < ctx.start:\n        return 0\n    flat = not ctx.positions\n    if flat and d != ctx._sk:\n        ctx._sk = d\n        ctx._nsig = 0\n    if not ctx.osc[d]:\n        return 0\n    mi = ctx.mins[i]\n    if mi < int(ctx.p.t_open) or mi > int(ctx.p.t_close):\n        return 0\n    b = ctx.B[d]\n    if b is None or b <= 0.0:\n        return 0\n    if flat and ctx._nsig >= int(ctx.p.max_sig):\n        return 0\n    O = ctx.sop[d]\n    c = ctx.c[i]\n    o = ctx.o[i]\n    band = float(ctx.p.band) * b\n    sig = 0\n    if c < O - band and c > o:\n        sig = 1                   # stretched below the open, turning back up\n    elif c > O + band and c < o:\n        sig = -1\n    if sig and flat:\n        ctx._nsig += 1\n    return sig\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    if ctx.mins[i] >= int(ctx.p.t_flat):\n        return True               # never carried overnight\n    d = ctx.day[i]\n    if d is None:\n        return True\n    O = ctx.sop[d]\n    px = ctx.c[i]\n    e = ctx.positions[0][\"entry\"]\n    dist = abs(e - O)\n    if dist <= 0.0:\n        return False\n    stop = float(ctx.p.stop_mult) * dist\n    if ctx._dir > 0:\n        return px >= O or px <= e - stop\n    if ctx._dir < 0:\n        return px <= O or px >= e + stop\n    return False"
+}

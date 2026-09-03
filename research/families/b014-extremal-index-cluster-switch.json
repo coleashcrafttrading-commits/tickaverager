@@ -1,0 +1,37 @@
+{
+ "name": "Extremal index cluster switch",
+ "note": "Ferro-Segers intervals estimator of the extremal index theta, computed from the inter-exceedance times of |r| above its own rolling 95th percentile, refreshed every re_n bars. theta is the extreme-value parameter for how much LARGE moves bunch, and 1/theta is the mean cluster size - a different quantity from GARCH persistence of the variance LEVEL. Low theta (extremes arrive in clusters) brackets the shock bar with a stop-buy at H+0.1 ATR and a stop-sell at L-0.1 ATR; high theta (extremes arrive singly) fades the shock into the prior close. Nothing is traded on non-exceedance bars or in the dead band between the two thresholds. Stated for daily bars; windows are expressed in bars because the study is intraday, and the estimator is scale-free. A bar where both bracket legs are touched claims neither, since the bar hides its own path.",
+ "source": "Ferro & Segers (2003), 'Inference for clusters of extreme values', Journal of the Royal Statistical Society Series B 65(2) - the intervals estimator of the extremal index reproduced above. Leadbetter, Lindgren & Rootzen (1983), 'Extremes and Related Properties of Random Sequences and Processes' - the definition of the extremal index. Cited from knowledge; the web search budget was exhausted before I could open these, so verify the two-branch estimator formula against Ferro-Segers before implementation. The trading application is my synthesis.",
+ "params": {
+  "win": 500,
+  "q": 0.95,
+  "th_clu": 0.45,
+  "th_iso": 0.75,
+  "re_n": 25,
+  "brk_atr": 0.1,
+  "brk_bars": 1,
+  "iso_hold": 3,
+  "clu_hold": 5,
+  "exit_signal_on": 1,
+  "trail_atr": 2.0,
+  "st_atr": 1.5,
+  "tp_atr": 0.0
+ },
+ "grid": {
+  "win": [
+   300,
+   500,
+   800
+  ],
+  "th_clu": [
+   0.35,
+   0.45,
+   0.55
+  ],
+  "th_iso": [
+   0.65,
+   0.75
+  ]
+ },
+ "code": "def _theta_fs(pos):\n    \"\"\"Ferro-Segers intervals estimator of the extremal index.\n\n    pos is the ascending list of exceedance bar indices S_1..S_N inside the\n    window. The two-branch form is exactly as published: the (T-1)(T-2)\n    branch is used whenever any inter-exceedance time exceeds 2, because the\n    plain sum-of-squares branch is biased when clusters are widely separated.\n    \"\"\"\n    N = len(pos)\n    if N < 3:\n        return None\n    T = [pos[k + 1] - pos[k] for k in range(N - 1)]\n    m = len(T)\n    if max(T) <= 2:\n        s1 = 0.0\n        s2 = 0.0\n        for t in T:\n            s1 += t\n            s2 += t * t\n        if s2 <= 0.0:\n            return None\n        th = 2.0 * s1 * s1 / (m * s2)\n    else:\n        s1 = 0.0\n        s2 = 0.0\n        for t in T:\n            s1 += t - 1.0\n            s2 += (t - 1.0) * (t - 2.0)\n        if s2 <= 0.0:\n            return None\n        th = 2.0 * s1 * s1 / (m * s2)\n    if th <= 0.0:\n        return 1e-6\n    return 1.0 if th > 1.0 else th\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    r = [0.0] * n\n    for t in range(1, n):\n        a, b = c[t - 1], c[t]\n        r[t] = math.log(b / a) if (a > 0.0 and b > 0.0) else 0.0\n    ctx.r = r\n\n    win = int(ctx.p.win)\n    q = float(ctx.p.q)\n    step = max(1, int(ctx.p.re_n))\n\n    u = [None] * n            # the running |r| exceedance threshold\n    th = [None] * n           # the running extremal index\n    cu = None\n    ct = None\n    for t in range(n):\n        if t >= win and (t % step == 0 or cu is None):\n            w = [abs(x) for x in r[t - win + 1:t + 1]]\n            w.sort()\n            k = int(q * len(w))\n            if k >= len(w):\n                k = len(w) - 1\n            cu = w[k]\n            if cu <= 0.0:\n                cu = None\n                ct = None\n            else:\n                seg = r[t - win + 1:t + 1]\n                pos = [j for j, x in enumerate(seg) if abs(x) > cu]\n                ct = _theta_fs(pos)\n        u[t] = cu\n        th[t] = ct\n    ctx.u = u\n    ctx.th = th\n\n    exc = [False] * n\n    for t in range(n):\n        if u[t] is not None and abs(r[t]) > u[t]:\n            exc[t] = True\n    ctx.exc = exc\n\n    ctx.start = win + 2\n    ctx._pmode = 0            # 1 = cluster breakout, -1 = isolated fade\n    ctx._pref = None          # isolated mode's profit target: C before the shock\n\n\ndef signal(ctx, i):\n    if i < ctx.start:\n        return 0\n    flat = not ctx.positions\n    sig = 0\n    mode = 0\n    ref = None\n\n    # ---- ISOLATED: theta near 1, this bar is a lone outlier -> fade it ----\n    t = ctx.th[i]\n    if ctx.exc[i] and t is not None and t >= float(ctx.p.th_iso):\n        rr = ctx.r[i]\n        if rr > 0.0:\n            sig = -1\n        elif rr < 0.0:\n            sig = 1\n        if sig:\n            mode = -1\n            ref = ctx.c[i - 1]        # the close before the shock bar\n\n    # ---- CLUSTER: theta low, shocks bunch -> bracket the shock bar ----\n    if sig == 0:\n        a = ctx.a[i]\n        if a is not None and a > 0.0:\n            off = float(ctx.p.brk_atr) * a\n            live = int(ctx.p.brk_bars)\n            for k in range(1, live + 1):\n                j = i - k\n                if j < ctx.start:\n                    break\n                tj = ctx.th[j]\n                if not ctx.exc[j] or tj is None or tj > float(ctx.p.th_clu):\n                    continue\n                hi = ctx.h[j] + off\n                lo = ctx.l[j] - off\n                up = ctx.h[i] >= hi\n                dn = ctx.l[i] <= lo\n                if up and dn:\n                    break             # the bar hides its path: claim neither\n                if up:\n                    sig = 1\n                    mode = 1\n                    break\n                if dn:\n                    sig = -1\n                    mode = 1\n                    break\n\n    if sig and flat:\n        ctx._pmode = mode\n        ctx._pref = ref\n    return sig\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    held = i - min(p[\"entry_i\"] for p in ctx.positions)\n    if ctx._pmode < 0:\n        if held >= int(ctx.p.iso_hold):\n            return True\n        ref = ctx._pref\n        if ref is not None:\n            px = ctx.c[i]\n            if ctx._dir > 0:\n                return px >= ref\n            if ctx._dir < 0:\n                return px <= ref\n        return False\n    if held >= int(ctx.p.clu_hold):\n        return True\n    return False"
+}

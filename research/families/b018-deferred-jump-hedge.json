@@ -1,0 +1,31 @@
+{
+ "name": "Deferred Jump Hedge",
+ "note": "Baltussen et al. find intraday jumps predict returns but that the hedge lands at the close, because partial hedging under fixed costs defers the residual to where depth is. Detects a jump (|5-min log return| >= k x the trailing 20-session median absolute return) between 10:00 and 14:30 ET, cancels the day if a later jump reverses sign, then opens IN THE JUMP'S DIRECTION at 15:30 ET and exits on the close. Signal and entry are deliberately decoupled by hours.",
+ "source": "Baltussen, Da, Lammers & Martens (2021), JFE 142(1), 377-403 - 'we do find evidence that large price jumps during the day predict subsequent returns... the bulk of the hedge seems to take place towards the end of the day', citing Clewlow & Hodges (1997) on partial hedging under fixed costs.",
+ "params": {
+  "jump_k": 4.0,
+  "win_start": 600,
+  "win_end": 870,
+  "entry_min": 930,
+  "exit_min": 955,
+  "med_days": 20,
+  "use_first": 1,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "jump_k": [
+   3.0,
+   4.0,
+   6.0
+  ],
+  "entry_min": [
+   900,
+   930
+  ],
+  "use_first": [
+   0,
+   1
+  ]
+ },
+ "code": "def _dst(y, mo, d):\n    import datetime as _dt\n    m1 = _dt.date(y, 3, 1)\n    ms = 1 + ((6 - m1.weekday()) % 7) + 7\n    n1 = _dt.date(y, 11, 1)\n    ne = 1 + ((6 - n1.weekday()) % 7)\n    if mo < 3 or mo > 11:\n        return False\n    if 3 < mo < 11:\n        return True\n    if mo == 3:\n        return d >= ms\n    return d < ne\n\n\ndef _et_minutes(bars):\n    \"\"\"Minute-of-day in America/New_York for every bar. UTC in, ET out.\"\"\"\n    off = {}\n    out = []\n    for b in bars:\n        ts = str(b[\"t\"])\n        day = ts[:10]\n        o = off.get(day)\n        if o is None:\n            o = -4 if _dst(int(ts[0:4]), int(ts[5:7]), int(ts[8:10])) else -5\n            off[day] = o\n        out.append((int(ts[11:13]) + o) * 60 + int(ts[14:16]))\n    return out\n\n\ndef family_init(ctx):\n    import math\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n    et = _et_minutes(bars)\n    day = [str(b[\"t\"])[:10] for b in bars]\n    ctx.et = et\n\n    # 5-minute log returns, never across the overnight gap\n    r = [0.0] * n\n    for j in range(1, n):\n        if day[j] != day[j - 1]:\n            continue\n        if c[j - 1] > 0 and c[j] > 0:\n            r[j] = math.log(c[j] / c[j - 1])\n\n    k = float(ctx.p.jump_k)\n    w0, w1 = int(ctx.p.win_start), int(ctx.p.win_end)\n    emin = int(ctx.p.entry_min)\n    md = int(ctx.p.med_days)\n    first = int(ctx.p.use_first)\n\n    # bar indices grouped by session, in order\n    groups = []\n    cur = []\n    for j in range(n):\n        if j and day[j] != day[j - 1]:\n            groups.append(cur)\n            cur = []\n        cur.append(j)\n    if cur:\n        groups.append(cur)\n\n    sig = [0] * n\n    hist = []                      # per-session lists of |5-min return|\n    for g in groups:\n        # ---- the scale: median |return| over the trailing sessions ----\n        use = hist[-md:] if len(hist) >= md else hist\n        m = None\n        if len(use) >= 3:\n            pool = []\n            for hh in use:\n                pool.extend(hh)\n            pool = [x for x in pool if x > 0]\n            if len(pool) >= 20:\n                pool.sort()\n                q = len(pool) // 2\n                m = pool[q] if len(pool) % 2 else 0.5 * (pool[q - 1] + pool[q])\n\n        todays = [abs(r[j]) for j in g if abs(r[j]) > 0]\n\n        if m is not None and m > 0:\n            thr = k * m\n            jumps = [(j, r[j]) for j in g\n                     if w0 <= et[j] <= w1 and abs(r[j]) >= thr]\n            d = 0\n            if jumps:\n                if first:\n                    d = 1 if jumps[0][1] > 0 else -1\n                    for j, x in jumps[1:]:\n                        if (1 if x > 0 else -1) != d:\n                            d = 0          # a reversal cancels the session\n                            break\n                else:\n                    big = max(jumps, key=lambda p: abs(p[1]))\n                    d = 1 if big[1] > 0 else -1\n            if d:\n                for j in g:\n                    if et[j] >= emin:\n                        sig[j] = d\n                        break\n\n        hist.append(todays)\n\n    ctx.sg = sig\n\n\ndef signal(ctx, i):\n    return ctx.sg[i]\n\n\ndef exit_signal(ctx, i):\n    return ctx.et[i] >= int(ctx.p.exit_min)"
+}

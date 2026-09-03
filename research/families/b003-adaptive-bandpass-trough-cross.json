@@ -1,0 +1,39 @@
+{
+ "name": "Adaptive bandpass trough cross",
+ "note": "Measures the dominant cycle every bar with Ehlers' autocorrelation periodogram - roofing filter, Pearson autocorrelation at each lag, a DFT of those correlations, 0.2/0.8 smoothing, then the power-weighted centre of gravity of the periods above half peak power - and tunes a band-pass filter to it. The output is normalised by its own decaying peak (automatic gain control) so the entry gate means the same thing on a quiet ticker and a violent one, and the trigger is a 0.9-scaled one-bar lag of the signal, which crosses it at the cycle's turning points. Long when the signal crosses up through the trigger while still below -gate. Holding period is 1.5 measured cycles, not a fixed bar count.",
+ "source": "John F. Ehlers, 'Cycle Analytics for Traders' (Wiley, 2013), autocorrelation periodogram and adaptive band-pass chapters. The harvester verified the correlations-then-DFT-then-0.2/0.8-EMA-then-centre-of-gravity pipeline, the beta1/gamma1/alpha2 band-pass coefficients, the default bandwidth 0.3, the 0.9*DomCycle scaling and the 0.9-scaled lagged trigger against github.com/thetestspecimen/ehlers-indicators-mql5, file mq5/ehlers_adaptive_bandpass.mq5.",
+ "params": {
+  "bp_hp": 48,
+  "bp_lp": 10,
+  "bp_minlag": 3,
+  "bp_maxlag": 48,
+  "bp_pmin": 10,
+  "bp_pmax": 48,
+  "bp_thr": 0.5,
+  "bp_bw": 0.3,
+  "bp_scale": 0.9,
+  "bp_agc": 0.991,
+  "bp_trig": 0.9,
+  "bp_gate": 0.5,
+  "bp_hold": 1.5,
+  "exit_signal_on": 1
+ },
+ "grid": {
+  "bp_bw": [
+   0.1,
+   0.2,
+   0.3,
+   0.5
+  ],
+  "bp_gate": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "bp_agc": [
+   0.985,
+   0.995
+  ]
+ },
+ "code": "import math as _m\nfrom operator import mul as _mul\n\n\ndef family_init(ctx):\n    bars = ctx.bars\n    n = len(bars)\n    c = [float(b[\"c\"]) for b in bars]\n\n    hp_per = float(ctx.p.bp_hp)\n    lp_per = float(ctx.p.bp_lp)\n    lo_lag = max(1, int(ctx.p.bp_minlag))\n    hi_lag = max(lo_lag + 2, int(ctx.p.bp_maxlag))\n    p_lo = max(3, int(ctx.p.bp_pmin))\n    p_hi = max(p_lo + 1, int(ctx.p.bp_pmax))\n    thr = float(ctx.p.bp_thr)\n    bw = float(ctx.p.bp_bw)\n    scale = float(ctx.p.bp_scale)\n    agc = float(ctx.p.bp_agc)\n    tscale = float(ctx.p.bp_trig)\n    gate = float(ctx.p.bp_gate)\n    hold = float(ctx.p.bp_hold)\n\n    # ---------- 1. roofing filter: 2-pole high pass, then SuperSmoother -----\n    w = 0.707 * 2.0 * _m.pi / hp_per\n    cw = _m.cos(w)\n    alpha1 = (cw + _m.sin(w) - 1.0) / cw\n    k1 = (1.0 - alpha1 / 2.0) ** 2\n    k2 = 2.0 * (1.0 - alpha1)\n    k3 = (1.0 - alpha1) ** 2\n    a1 = _m.exp(-1.414 * _m.pi / lp_per)\n    b1 = 2.0 * a1 * _m.cos(1.414 * _m.pi / lp_per)\n    s2, s3 = b1, -a1 * a1\n    s1 = 1.0 - s2 - s3\n\n    hp = [0.0] * n\n    f = [0.0] * n\n    for i in range(2, n):\n        hp[i] = (k1 * (c[i] - 2.0 * c[i - 1] + c[i - 2])\n                 + k2 * hp[i - 1] - k3 * hp[i - 2])\n        f[i] = s1 * (hp[i] + hp[i - 1]) / 2.0 + s2 * f[i - 1] + s3 * f[i - 2]\n\n    # rolling 3-point sums of Filt, so the autocorrelation is a few flops\n    m3 = 3\n    s1v = [0.0] * n\n    s2v = [0.0] * n\n    for j in range(2, n):\n        s1v[j] = f[j] + f[j - 1] + f[j - 2]\n        s2v[j] = f[j] * f[j] + f[j - 1] * f[j - 1] + f[j - 2] * f[j - 2]\n\n    # ---------- 2. DFT tables over the candidate periods ----------\n    lags = list(range(lo_lag, hi_lag + 1))\n    nl = len(lags)\n    periods = list(range(p_lo, p_hi + 1))\n    npd = len(periods)\n    COS = []\n    SIN = []\n    for p in periods:\n        t = 2.0 * _m.pi / p\n        COS.append([_m.cos(t * lg) for lg in lags])\n        SIN.append([_m.sin(t * lg) for lg in lags])\n\n    dom = [0.0] * n\n    smooth = [0.0] * npd\n    corr = [0.0] * nl\n    dc = float(p_lo + p_hi) / 2.0\n    warm = hi_lag + m3 + int(hp_per) + 5\n\n    for i in range(warm, n):\n        fi0, fi1, fi2 = f[i], f[i - 1], f[i - 2]\n        sx = s1v[i]\n        sxx = s2v[i]\n        dx = m3 * sxx - sx * sx\n        if dx <= 0:\n            dom[i] = dc\n            continue\n        for k in range(nl):\n            j = i - lags[k]\n            sy = s1v[j]\n            dy = m3 * s2v[j] - sy * sy\n            if dy <= 0:\n                corr[k] = 0.0\n                continue\n            sxy = fi0 * f[j] + fi1 * f[j - 1] + fi2 * f[j - 2]\n            corr[k] = (m3 * sxy - sx * sy) / _m.sqrt(dx * dy)\n        mx = 0.0\n        for q in range(npd):\n            cp = sum(map(_mul, corr, COS[q]))\n            sp = sum(map(_mul, corr, SIN[q]))\n            v = 0.2 * (cp * cp + sp * sp) + 0.8 * smooth[q]\n            smooth[q] = v\n            if v > mx:\n                mx = v\n        if mx > 0:\n            num = 0.0\n            den = 0.0\n            for q in range(npd):\n                pn = smooth[q] / mx\n                if pn >= thr:\n                    num += periods[q] * pn\n                    den += pn\n            if den > 0:\n                dc = num / den\n        dom[i] = dc\n\n    # ---------- 3. band pass tuned to the measured cycle, then AGC ---------\n    sig = [0.0] * n\n    trig = [0.0] * n\n    bp0 = bp1 = bp2 = 0.0\n    peak = 0.0\n    two_pi = 2.0 * _m.pi\n    for i in range(warm, n):\n        d = dom[i] * scale\n        if d < 2.0:\n            d = 2.0\n        cg = _m.cos(two_pi * bw / d)\n        if abs(cg) < 1e-9:\n            cg = 1e-9\n        g1 = 1.0 / cg\n        r = g1 * g1 - 1.0\n        a2 = g1 - _m.sqrt(r) if r > 0 else 0.0\n        beta1 = _m.cos(two_pi / d)\n        bp0 = (0.5 * (1.0 - a2) * (c[i] - c[i - 2])\n               + beta1 * (1.0 + a2) * bp1 - a2 * bp2)\n        bp2, bp1 = bp1, bp0\n        peak *= agc\n        ab = abs(bp0)\n        if ab > peak:\n            peak = ab\n        sig[i] = bp0 / peak if peak > 0 else 0.0\n        trig[i] = tscale * sig[i - 1]\n\n    entry = [0] * n\n    ex = [0] * n\n    for i in range(warm + 2, n):\n        s, t = sig[i], trig[i]\n        ps, pt = sig[i - 1], trig[i - 1]\n        if ps <= pt and s > t:\n            if s < -gate:\n                entry[i] = 1            # the trough of the measured cycle\n            elif s > gate:\n                ex[i] = -1              # covers a short\n        elif ps >= pt and s < t:\n            if s > gate:\n                entry[i] = -1\n            elif s < -gate:\n                ex[i] = 1               # closes a long\n\n    ctx.bp_entry = ctx.series(entry, \"bandpass_entry\")\n    ctx.bp_exit = ctx.series(ex, \"bandpass_exit\")\n    ctx.bp_dom = ctx.series(dom, \"dominant_cycle\")\n    ctx.bp_hold_mult = hold\n\n\ndef signal(ctx, i):\n    s = ctx.bp_entry[i]\n    return s if s else 0\n\n\ndef exit_signal(ctx, i):\n    if not ctx.positions:\n        return False\n    long_side = ctx.positions[0][\"side\"] == \"long\"\n    e = ctx.bp_exit[i]\n    if e and ((e > 0) == long_side):\n        return True\n    d = ctx.bp_dom[i]\n    if d:\n        held = i - min(p[\"entry_i\"] for p in ctx.positions)\n        if held >= ctx.bp_hold_mult * d:\n            return True\n    return False"
+}
