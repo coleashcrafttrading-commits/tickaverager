@@ -1,0 +1,210 @@
+[
+ {
+  "name": "Take-Profit Cluster Rejection",
+  "category": "anchoring / limit-order clustering at round numbers",
+  "side": "both",
+  "timeframe": "intraday minutes (5-minute primary, 1-minute for entry timing)",
+  "entry_rule": "Define the round-number grid G by price tier: G=1.00 if close>=100; G=0.50 if 20<=close<100; G=0.10 if close<20. Let R = the grid level (an exact integer multiple of G) nearest the current bar. SHORT at the close of bar t when ALL hold: (1) high_t >= R; (2) close_{t-1} < R; (3) close_t < R; (4) (close_t - low_t) / (high_t - low_t) <= 0.40; (5) no bar in t-20..t-1 had close >= R. LONG mirror: low_t <= R, close_{t-1} > R, close_t > R, (high_t - close_t)/(high_t - low_t) <= 0.40, and no bar in t-20..t-1 had close <= R.",
+  "exit_rule": "Target = min(1.0 * ATR(14) from entry, the next grid level R -/+ G in the profit direction). Stop = 0.6 * ATR(14) beyond R (i.e. above R for shorts, below R for longs). Time stop: exit at market on bar t+12 if neither hit. Flatten all positions 10 minutes before the close.",
+  "inputs": [
+   "close",
+   "high",
+   "low",
+   "atr(14) on 5-min bars",
+   "session-time"
+  ],
+  "params": [
+   "grid size G per price tier",
+   "close-position-in-range threshold (0.40)",
+   "lookback for untested level (20 bars)",
+   "ATR multiples for target and stop (1.0 / 0.6)",
+   "time stop (12 bars)"
+  ],
+  "why": "Osler documents directly from a dealing bank's order book that take-profit orders cluster far more strongly at exact round numbers than stop-loss orders do, and that exchange rates 'reverse course relatively frequently when they reach take-profit clusters'. Take-profit orders are limit orders, so they supply liquidity against the incoming move and generate negative-feedback trading. A price arriving at an untouched round level walks into a wall of resting contra-side limit orders placed by traders who anchored their exit on the salient number. The rejection is mechanical, not informational.",
+  "source": "C. L. Osler, 'Stop-Loss Orders and Price Cascades in Currency Markets', FRBNY Staff Report (June 2002), https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr150.pdf - VERIFIED by reading the PDF. Section III provides 'evidence that rates reverse course relatively frequently when they reach take-profit clusters'; p.7 reports that of 9,655 orders, 'Almost 10 percent of all such orders are placed at rates ending in 00' and 'executed take-profit orders have a stronger tendency to cluster at rates ending in 00 than executed stop-loss orders'. Companion: Osler (2003), 'Currency Orders and Exchange Rate Dynamics', Journal of Finance 58(5).",
+  "novelty": "The anchor is a fixed exogenous price grid, not any feature of the price history. Unlike the liquidity-sweep and order-block patterns we already run, this fires at levels that have NEVER been tested - condition (5) explicitly requires the level to be untouched over the lookback, which is the opposite of a swing-high sweep. It is not a Bollinger/Keltner fade either: no volatility band is involved and the reversion target is a discrete number, not a moving average.",
+  "ohlcv_only": true,
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Deferred Jump Hedge",
+  "category": "dealer-gamma",
+  "side": "both",
+  "timeframe": "intraday 5-minute, entry at 15:30 ET",
+  "entry_rule": "Let m = median of |5-min log returns| over the trailing 20 sessions. Scan 5-min bars between 10:00 and 14:30 ET; a bar is a jump if |log(C_i/C_i-1)| >= 4*m. Record the sign of the FIRST jump of the session. If a later jump of the opposite sign occurs, cancel the day. At 15:30 ET, if a surviving jump exists, enter in the SAME direction as that jump.",
+  "exit_rule": "Exit market-on-close the same session. Hard stop at 1.0 * ATR(14, 5-min) against entry.",
+  "inputs": [
+   "5-min OHLCV",
+   "20-session history of 5-min absolute returns",
+   "ATR(14) on 5-min bars"
+  ],
+  "params": [
+   "jump multiple (3/4/6 x median)",
+   "scan window start and end (10:00-14:30)",
+   "first jump vs largest jump of the day",
+   "entry clock time",
+   "ATR stop multiple"
+  ],
+  "why": "Baltussen et al. find that large intraday price jumps predict subsequent returns, but that the bulk of the hedge lands at the close rather than at the jump. Their stated reason is Clewlow and Hodges: with partially fixed transaction costs it is optimal to hedge only PARTIALLY after a large price move, which means residual hedging is still required afterwards - and that residual gets deferred to the close where spreads are tighter and depth is greater. So a morning jump creates a known, dated, one-sided buy or sell order that has not yet been executed and will hit the tape in the closing half hour.",
+  "source": "Baltussen, Da, Lammers & Martens (2021), JFE 142(1), 377-403 - 'we do find evidence that large price jumps during the day predict subsequent returns... the bulk of the hedge seems to take place towards the end of the day', citing Clewlow & Hodges (1997) on partial hedging under fixed costs.",
+  "novelty": "An event detector fires early in the session but the position is opened hours later at a fixed clock time - the signal and the entry are deliberately decoupled, which no breakout or pullback rule does. It also trades the residual of an incomplete hedge rather than the move itself, so it explicitly skips the part of the move that a momentum rule would chase. Shares the 15:30/MOC execution window with Rest-of-Day Hedging Momentum but is triggered by a completely different variable and fires on far fewer days.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Forward-Split Ex-Date Continuation",
+  "category": "corporate action",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV requested unadjusted (adjustment=raw)",
+   "daily OHLCV requested split-adjusted (adjustment=split)",
+   "200-session and 50-session moving averages",
+   "250-session return"
+  ],
+  "entry_rule": "Request the same symbol's daily bars twice from the same OHLCV endpoint - once raw and once split-adjusted - and form the split adjustment factor F_s = raw_close_s / split_adjusted_close_s. Let k_t = F_t / F_{t-1}; the implied forward-split ratio is R = 1/k_t (verified algebraically: a 2:1 split gives k = 0.5 and R = 2; a 3:1 gives k = 0.3333 and R = 3). A forward-split ex-date is any session with k_t <= 0.70 (R >= 1.43). Require additionally: the symbol's trailing 250-session return >= +30% AND its split-adjusted close on the ex-date >= its 200-session moving average. Enter LONG at the close of the ex-date session.",
+  "exit_rule": "Exit at the close of the 60th session after the ex-date. Exit early on a -10% stop from the entry fill, or when the split-adjusted close is below the 50-session moving average for two consecutive sessions.",
+  "why": "A split is a discretionary management action taken only after a large run-up and only when management is confident the price will not fall straight back through the pre-split range - which is why it is the canonical signalling event and why Fama, Fisher, Jensen & Roll chose it for the first modern event study. The documented post-split abnormal drift, plus the mechanical improvements in retail accessibility, round-lot affordability and option-strike granularity that follow a split, give a continuation edge over the following quarter. The run-up and 200-day filters restrict the sample to the confident-management case rather than the mechanical-price-level case.",
+  "source": "Fama, Fisher, Jensen & Roll (1969) - the founding split event study, whose table layout Kothari & Warner (2006, sec. 2.2) note that every event study still copies. Ikenberry, Rankine & Stice (1996) 'What Do Stock Splits Really Signal?', JFQA, on post-split-announcement drift. Detection method is a synthesis: derived from the Alpaca bars `adjustment` parameter and verified numerically (see algebra above).",
+  "novelty": "Derives an exact corporate-action calendar - date AND ratio - from the divergence between two adjustment versions of the same bar series, so no corporate-action feed is needed at all. Nothing in the existing set uses the adjustment factor as an input, and the trade is conditioned on the prior-state variables that make the signal informative rather than on the split alone.",
+  "params": [
+   "split-ratio floor (1.43 / 2.0 / 3.0)",
+   "prior-run-up filter (+0% / +30% / +60% over 250 sessions)",
+   "trend filter MA (100/200/none)",
+   "drift horizon (20/60/120 sessions)",
+   "stop (-7%/-10%/-15%)",
+   "trailing MA exit (20/50/none)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Accumulative Swing Index Lead",
+  "category": "divergence",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Compute Wilder's Swing Index per bar with limit T (T = 10000 for equities, effectively removing the limit-move cap): K = max(abs(high - close[1]), abs(low - close[1])); R = if abs(high-close[1]) >= max(abs(low-close[1]), high-low) then abs(high-close[1]) - 0.5*abs(low-close[1]) + 0.25*abs(close[1]-open[1]); else if abs(low-close[1]) >= max(abs(high-close[1]), high-low) then abs(low-close[1]) - 0.5*abs(high-close[1]) + 0.25*abs(close[1]-open[1]); else (high-low) + 0.25*abs(close[1]-open[1]). SI = 50 * ((close - close[1] + 0.5*(close - open) + 0.25*(close[1] - open[1])) / R) * K / T. ASI = cumulative sum of SI. ENTER LONG when ASI > highest(ASI, 20)[1] AND close <= highest(high, 20)[1] (ASI makes a new 20-bar high while price has NOT). ENTER SHORT when ASI < lowest(ASI, 20)[1] AND close >= lowest(low, 20)[1].",
+  "exit_rule": "Exit long when ASI falls below lowest(ASI, 10)[1], or when price finally makes its 20-bar high and then closes below it (thesis realised), or after 25 bars. Exit short mirrored.",
+  "inputs": [
+   "open",
+   "high",
+   "low",
+   "close",
+   "previous bar's open and close",
+   "cumulative sum"
+  ],
+  "params": [
+   "swing lookback for the ASI channel (10-50)",
+   "price lookback (10-50)",
+   "limit value T (scaling only)",
+   "exit lookback (5-20)",
+   "time stop"
+  ],
+  "why": "The swing index weights each bar by where it closed relative to its own open AND relative to the previous bar's open and close, divided by the largest of the bar-to-bar gaps. It therefore scores the QUALITY of a bar's move (closing on its high after opening weak scores far higher than a gap-and-fade of the same net size). When this quality-weighted accumulation makes a new high while raw price has not, buyers have been winning the bars without yet winning the level - a structural lead that raw price cannot show.",
+  "novelty": "Uses the open, which almost nothing in the existing 32 does, and encodes intra-bar and inter-bar relationships into a single quality score. The signal is a divergence between a cumulative quality series and raw price extremes, not a divergence between an oscillator and price, and not a break of structure.",
+  "source": "TradingView open-source: 'Accumulative Swing Index' by everget (original: J. Welles Wilder, 'New Concepts in Technical Trading Systems'). Exact Pine read from github.com/everget/tradingview-pinescript-indicators/blob/master/oscillators/accumulative_swing_index.pine . The ASI-leads-price entry condition is my specification of Wilder's ASI-breakout concept.",
+  "_agent": "v2:c6d26b53adc796d5fdc1781976f0086807e6d93dc8c88198d7132491992e1d30"
+ },
+ {
+  "name": "BVC Absorption Fade",
+  "category": "order flow imbalance",
+  "side": "both",
+  "timeframe": "intraday minutes (5-min)",
+  "entry_rule": "Using the same BVC construction, define per-bar signed imbalance OI_t = V_t * (2*Phi(dP_t/sigma_t) - 1). Let SumOI_t = sum of OI over the last 6 bars and R_t = C_t/C_{t-6} - 1. Enter SHORT at the next bar's open when SumOI_t >= the 90th percentile of SumOI over the trailing 500 bars AND |R_t| <= 0.25 * ATR(14)/C_t - i.e. heavy net BUYING that produced almost no net price advance. Enter LONG on the mirror condition (SumOI <= 10th percentile with no net decline).",
+  "exit_rule": "Exit when the trailing 6-bar SumOI crosses back through its 50th percentile, OR after 8 bars, OR on a 1.0 x ATR(14) stop, OR at a 1.5 x ATR(14) target.",
+  "inputs": [
+   "5-min OHLCV",
+   "BVC signed imbalance",
+   "ATR(14)",
+   "rolling percentiles of SumOI"
+  ],
+  "why": "Kyle's lambda says price should move in proportion to signed order flow. When large signed flow produces no price response, lambda has locally collapsed because a large resting counterparty is absorbing the flow - an iceberg, a VWAP seller, a hedger. Once the aggressive side exhausts itself the absorbed side wins and price moves against the flow. This is the classic 'absorption' read from tape trading, made computable without a tape.",
+  "source": "Kyle (1985), 'Continuous Auctions and Insider Trading', Econometrica 53(6) for the flow-to-price-impact relation; the absorption interpretation is my own synthesis - the testable formulation is flow in the top decile paired with a price response below a quarter of an ATR.",
+  "novelty": "It is a divergence between order flow and price, not between an oscillator and price. RSI divergence compares price to a momentum oscillator; this compares price to classified volume, so a bar can show a large absorption signal with a perfectly neutral RSI.",
+  "ohlcv_only": true,
+  "params": [
+   "imbalance lookback (3/6/12 bars)",
+   "imbalance percentile (85/90/95)",
+   "price-response ceiling (0.15/0.25/0.4 x ATR)",
+   "hold length"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Amihud Illiquidity Spike Reversal",
+  "category": "illiquidity",
+  "side": "both",
+  "timeframe": "daily or 15-min",
+  "entry_rule": "ILLIQ_t = |r_t| / (C_t * V_t) * 1e9 where r_t = ln(C_t/C_{t-1}). Enter LONG at the next bar's open when (a) ILLIQ_t >= the 95th percentile of ILLIQ over the trailing 250 bars, (b) r_t < 0, and (c) the 20-bar MEDIAN of ILLIQ is NOT itself in the top quartile of its own trailing 250 values - the spike must be a one-bar event, not a persistent illiquidity regime. Mirror for SHORT after an ILLIQ spike with r_t > 0.",
+  "exit_rule": "Exit when ILLIQ_t falls to or below its 50th percentile of the trailing 250, OR after 5 bars, OR on a 2.0 x ATR(14) stop.",
+  "inputs": [
+   "OHLCV",
+   "dollar volume",
+   "250-bar percentiles of ILLIQ",
+   "20-bar median of ILLIQ",
+   "ATR(14)"
+  ],
+  "why": "Amihud's ratio is price move per dollar traded. A one-bar spike means the move happened on almost no volume, so it is very unlikely to be information - it is a liquidity air pocket. Nagel shows that the expected return to providing liquidity into exactly these dislocations rises sharply when liquidity evaporates. The regime filter matters: if illiquidity is chronically elevated the stock is simply thin, and the reversal premium is offset by the cost of trading it.",
+  "source": "Amihud (2002), 'Illiquidity and stock returns: cross-section and time-series effects', Journal of Financial Markets 5(1); Nagel (2012), 'Evaporating Liquidity', Review of Financial Studies 25(7) / NBER WP 17653 (nber.org/system/files/working_papers/w17653/w17653.pdf), which shows reversal-strategy returns are compensation for liquidity provision and are strongly time-varying.",
+  "novelty": "The trigger is return-per-dollar-of-volume, which is orthogonal to both price extremes and raw volume. A bar can spike ILLIQ with a small return on tiny volume - invisible to Bollinger, RSI or any volume-surge rule. The transient-vs-regime median filter is the part that makes it tradeable.",
+  "ohlcv_only": true,
+  "params": [
+   "percentile threshold (90/95/99)",
+   "percentile lookback (125/250/500)",
+   "regime-filter quartile",
+   "hold horizon (3/5/10 bars)"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Volume-Clock Duration Collapse",
+  "category": "trade intensity",
+  "side": "both",
+  "timeframe": "volume bars built from 1-min data",
+  "entry_rule": "Build volume bars by accumulating 1-min bars until cumulative volume reaches V* = ADV(20 days)/100, pro-rating a minute's volume across a boundary and pricing each contributing minute at (H+L+C)/3. Record for volume bar i its open price, close price and its DURATION d_i in clock minutes. Enter LONG at the start of volume bar i+1 when d_i <= the 10th percentile of {d} over the last 200 volume bars AND the close of volume bar i > its open. Mirror for SHORT.",
+  "exit_rule": "Exit when a subsequent volume bar's duration exceeds the median of the last 200 durations, OR after 5 volume bars, OR on a 1.5 x ATR(14, computed on the volume-bar series) stop.",
+  "inputs": [
+   "1-min OHLCV",
+   "20-day ADV to size the volume bar",
+   "clock-minute duration per volume bar",
+   "ATR on volume bars"
+  ],
+  "why": "Easley and O'Hara's sequential-trade model makes the interval between trades informative: informed traders trade when they have information and are absent when they do not, so short durations signal an information event, not merely activity. Building volume bars converts this into something computable from minute bars - the time taken to absorb a fixed quantity of shares is the inverse of trade intensity. It also normalises the sampling: volume bars have far more Gaussian, less heteroskedastic returns than time bars, so a threshold set on them is stable across the session's U-shape without any time-of-day adjustment.",
+  "source": "Easley & O'Hara (1992), 'Time and the Process of Security Price Adjustment', Journal of Finance 47(2); Easley, Lopez de Prado & O'Hara (2012), 'The Volume Clock: Insights into the High-Frequency Paradigm', Journal of Portfolio Management 39(1) (researchgate.net/publication/254199259).",
+  "novelty": "The bar itself is redefined. Every one of the existing 32 is computed on fixed-time bars; this one samples in volume time and makes the CLOCK DURATION the signal. That is a different sampling scheme, not a different indicator, and it automatically de-seasonalises the open and close.",
+  "ohlcv_only": true,
+  "params": [
+   "volume bar size (ADV/50, /100, /200)",
+   "duration percentile (5/10/20)",
+   "duration history (100/200/500)",
+   "hold in volume bars"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Vol Term Structure Switch",
+  "category": "vol-risk-premium",
+  "side": "both",
+  "timeframe": "daily, regime-length hold",
+  "entry_rule": "Compute TS = VXX_close / VXZ_close, the ratio of a short-dated (1-2 month) to a mid-dated (4-7 month) VIX futures ETP - a direct read of the term-structure slope. Substitute VIXY for VXX and VIXM for VXZ if preferred. Let z = (TS - SMA(TS,252)) / stdev(TS,252). Enter LONG the equity (SPY/QQQ or the traded symbol) at the close when z crosses DOWN through 0.0 from above. Exit longs and optionally enter SHORT when z crosses UP through +1.0.",
+  "exit_rule": "Long exits on z crossing above +1.0. Short exits on z crossing back below +0.25. Hard stop on the long leg at 3.0 * ATR(14, daily). Positions persist across days - this is a regime switch, not a bar-level trade.",
+  "inputs": [
+   "daily OHLCV for VXX and VXZ (or VIXY and VIXM)",
+   "daily OHLCV for the traded equity",
+   "252 sessions of history"
+  ],
+  "params": [
+   "ETP pair choice",
+   "z-score lookback (126/252/504)",
+   "entry and exit z thresholds",
+   "short leg on/off",
+   "ATR stop multiple"
+  ],
+  "why": "Johnson shows the shape of the VIX term structure conveys information about the price of variance risk rather than about expected changes in VIX - a clean rejection of the expectations hypothesis - and that a single slope factor summarises nearly all of that information, negatively predicting the excess returns of variance swaps, VIX futures and straddles across all maturities. Backwardation (short-dated implied above mid-dated) is the state where variance risk is expensive, dealers are short gamma into a stressed tape, and hedging demand is spiking. The VXX/VXZ ratio is the tradable-instrument expression of that slope, and both legs are ordinary listed ETPs with normal OHLCV bars.",
+  "source": "Johnson (2017), 'Risk Premia and the VIX Term Structure', Journal of Financial and Quantitative Analysis 52(6), 2461-2490. Full text read at https://www.travislakejohnson.com/pdfs/Johnson%20VIXTS%202017%20(JFQA).pdf The two-ETP ratio implementation is my synthesis.",
+  "novelty": "A cross-instrument ratio between two different points on a volatility curve - a slope, not a level, and one that no single-symbol indicator can express. It is distinct from ETP Variance Risk Premium, which compares implied against realized at one maturity; this compares implied against implied at two maturities, and the two signals disagree in the common state where the whole curve is elevated but still in contango.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ }
+]

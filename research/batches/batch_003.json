@@ -1,0 +1,212 @@
+[
+ {
+  "name": "Deflated Sharpe Arming Gate",
+  "category": "multiple-testing control / meta-strategy",
+  "side": "both",
+  "timeframe": "any (gate computed on daily P&L)",
+  "entry_rule": "Keep the per-bar P&L series of ALL M candidate rules in the sweep, synchronised to a common daily index. On the first trading bar of each calendar month, using the trailing T=756 daily returns: (a) for each candidate n compute the NON-annualised Sharpe SR_n = mean(r_n)/std(r_n), skewness g3_n and non-excess kurtosis g4_n; (b) compute V = sample variance of {SR_n} across all M candidates; (c) compute rho_bar = mean of the off-diagonal entries of the Pearson correlation matrix of the M daily P&L series, and the effective number of independent trials N_hat = rho_bar + (1 - rho_bar)*M (Bailey & Lopez de Prado eq. 8-9); (d) compute the selection-bias threshold SR_0 = sqrt(V) * ((1-gamma)*Zinv(1 - 1/N_hat) + gamma*Zinv(1 - 1/(N_hat*e))) with gamma = 0.5772156649, e = 2.718281828, Zinv = inverse standard-normal CDF; (e) compute DSR_n = Phi[ (SR_n - SR_0)*sqrt(T-1) / sqrt(1 - g3_n*SR_n + ((g4_n - 1)/4)*SR_n^2) ]. A candidate is ARMED for the coming month iff DSR_n >= 0.95. On every bar, take an entry only if the underlying candidate rule fires AND that candidate is currently armed. Unarmed candidates generate no orders.",
+  "exit_rule": "Positions exit on the underlying candidate rule's own exit signal. Additionally, at each monthly recompute any armed candidate whose DSR falls below 0.60 is DISARMED: flatten its open positions at the next bar's open and take no new entries from it until DSR >= 0.95 again. Hysteresis (arm at 0.95, disarm at 0.60) is deliberate to stop the gate itself from becoming a high-frequency overfit switch.",
+  "inputs": [
+   "per-bar P&L series of every candidate rule",
+   "close",
+   "rolling mean/std/skew/kurtosis of strategy returns",
+   "cross-candidate correlation matrix",
+   "inverse normal CDF"
+  ],
+  "why": "With 578 rules swept over parameter grids, the maximum in-sample Sharpe you observe is an extreme order statistic, not an estimate of skill. Under the null of zero true skill, E[max SR] over N independent trials grows like sqrt(2 ln N) in Sharpe units, so a 2+ Sharpe is the EXPECTED outcome of a large enough search, not evidence. DSR raises the rejection threshold by exactly that expected maximum and simultaneously corrects the Sharpe's own standard error for negative skew and fat tails, which is where trend and mean-reversion P&L actually lives. It is the cheapest single gate that converts the corpus size from a liability into an explicit input.",
+  "novelty": "Not a price rule at all - it is an arming layer that sits over every other rule and makes the size of the search a first-class parameter. Nothing in the corpus of 32 conditions references the number of trials.",
+  "source": "Bailey, D. & Lopez de Prado, M. (2014), 'The Deflated Sharpe Ratio: Correcting for Selection Bias, Backtest Overfitting and Non-Normality', Journal of Portfolio Management 40(5), eqs. (1) and (2) and Appendix A.3 (effective N). PDF: https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf . I reproduced the paper's own worked example numerically to confirm the (1 - 1/(N*e)) form: with SR=2.5 annualised, T=1250, skew=-3, kurt=10, V=1/500, the formula gives DSR=0.9004 at N=100 and 0.9505 at N=46, exactly the two figures the paper quotes. Underlying PSR: Bailey & Lopez de Prado (2012), 'The Sharpe Ratio Efficient Frontier', Journal of Risk 15(2).",
+  "ohlcv_only": true,
+  "params": [
+   "T (504 / 756 / 1260 bars)",
+   "arm threshold (0.90 / 0.95 / 0.99)",
+   "disarm threshold (0.50 / 0.60 / 0.75)",
+   "recompute frequency (monthly / quarterly)",
+   "N_hat estimator (mean-correlation vs PCA eigenvalue count)"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Overnight Variance Share Gap Regime",
+  "category": "variance decomposition / session structure",
+  "side": "both",
+  "timeframe": "daily gate, 15-minute execution",
+  "entry_rule": "Over the last 20 sessions compute VO = mean of (ln(O_t/C_{t-1}))^2 (overnight variance) and VI = mean of (ln(C_t/O_t))^2 (intraday variance). Share S = VO/(VO + VI). CONTINUATION MODE when S >= 0.55: at today's open, if |ln(O_t/C_{t-1})| >= 0.5 * ATR(14)/C_{t-1} and the first 15-minute bar closes on the same side of the open as the gap direction, enter in the gap direction at that bar's close. FADE MODE when S <= 0.30: same gap size condition, but enter against the gap at the close of the first 15-minute bar only if that bar closed against the gap direction. No trade when 0.30 < S < 0.55, and no trade when the gap is smaller than 0.5 ATR.",
+  "exit_rule": "Continuation mode: trail 1.0*ATR(14) from the best 15-minute close, force flat at 15:55 ET. Fade mode: target the previous session's close, stop at 1.0*ATR(14) beyond the entry bar's extreme, force flat at 15:55 ET.",
+  "inputs": [
+   "daily OHLC",
+   "15-minute OHLC",
+   "ATR(14)"
+  ],
+  "params": [
+   "decomposition window (10, 20, 60)",
+   "share thresholds (0.5/0.35, 0.55/0.30, 0.6/0.25)",
+   "minimum gap in ATR (0.3, 0.5, 1.0)",
+   "confirmation bar (5, 15, 30 min)"
+  ],
+  "why": "The overnight share of total variance says where price discovery is happening for this name. A high share means information arrives when the market is shut and the open is a genuine repricing that continues; a low share means overnight moves are inventory noise from thin after-hours prints, and the open reverts. The same gap therefore deserves opposite trades in the two regimes, which is why unconditional gap strategies backtest near zero - they average two opposite-signed populations.",
+  "novelty": "Splits realized variance by session rather than by return sign or horizon, and uses the split to flip the sign of a trade rather than to filter it. Nothing in the existing 32 conditions on overnight versus intraday variance.",
+  "source": "Synthesis. The overnight/open-to-close variance split is the decomposition underlying the Yang & Zhang (2000) estimator, 'Drift-Independent Volatility Estimation Based on High, Low, Open, and Close Prices', Journal of Business 73(3), 477-491 - see the component description at https://macrosynergy.com/research/six-ways-to-estimate-realized-volatility/ . The regime-flip trading rule is mine.",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Length-Of-Night Exposure Tilt",
+  "category": "annual seasonality, continuous clock function",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "Compute, purely from the date and a fixed latitude (use 40.7N for New York), the number of hours of night H_t using the standard solar-declination formula. Define the SAD variable: SAD_t = H_t - 12 for sessions between the autumn equinox (about 21 September) and the spring equinox (about 20 March), and SAD_t = 0 otherwise. Define an asymmetry dummy FALL_t = 1 for sessions between the autumn equinox and 31 December, else 0. Exposure rule: target gross long exposure in the index proxy of E_t = clip(1.0 + a x SAD_t - b x FALL_t x SAD_t, 0, 2.0) with base coefficients a = 0.25 and b = 0.55. In practice this means: reduced or negative exposure through late September, October and November as nights lengthen, maximum exposure from the winter solstice through February as nights shorten from their peak, and neutral exposure from late March through mid-September. Rebalance the position to E_t at each session's 16:00 close whenever |E_t - current exposure| > 0.15.",
+  "exit_rule": "No discrete exit - this is a continuously rebalanced exposure schedule. The position is fully unwound (E_t = 1.0, the neutral level, or 0 in the pure form) between the spring and autumn equinoxes. Cap turnover with the 0.15 rebalance band.",
+  "inputs": [
+   "daily close",
+   "date",
+   "fixed latitude constant",
+   "solar declination formula (no market data required)"
+  ],
+  "params": [
+   "coefficients a and b",
+   "latitude used",
+   "clip bounds on E_t",
+   "rebalance band (0.10 / 0.15 / 0.25)",
+   "neutral baseline (0 gross vs 1x gross)"
+  ],
+  "why": "Kamstra, Kramer and Levi argue that the fraction of the population affected by seasonal affective disorder rises with the length of night, that affected investors become more risk averse, and that this produces depressed prices in autumn as nights lengthen and elevated returns through winter as the affected population recovers. Whatever one makes of the mechanism, the resulting exposure schedule is an entirely deterministic function of the date - it needs no market data at all to compute - which makes it unusually clean to test and impossible to overfit to price history.",
+  "novelty": "The existing Halloween gate is a binary six-month switch with the same exposure every day from 1 November to 30 April. This is a continuous function of the date with an explicit asymmetry: it is SHORT (or minimum exposure) through the autumn as nights lengthen and LONG through the winter as they shorten, which means it disagrees with the Halloween gate for roughly two months every autumn - specifically the November stretch where Halloween is already maximally long. That disagreement window is the whole test.",
+  "ohlcv_only": true,
+  "source": "Kamstra, Kramer & Levi, 'Winter Blues: A SAD Stock Market Cycle', American Economic Review 93(1), 2003 - cited from the literature; I attempted to fetch the Atlanta Fed working-paper version this session and got a 404, and the search budget was exhausted, so the exact published coefficient values were not re-verified. The SAD variable definition (hours of night minus 12, nonzero only in the autumn-to-spring half of the year) and the fall dummy are as specified in that paper; the coefficient magnitudes a and b given here are indicative starting points for a sweep, not the paper's estimates.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Shrunk-SDF Weights on Characteristic-Managed Portfolios",
+  "category": "multi-signal combination / shrinkage",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "H characteristics from the CHARS block (H = 15-25)",
+   "daily stock returns",
+   "rank transform and leverage normalisation per Kozak-Nagel-Santosh eqs (31)-(32)",
+   "5-year rolling covariance matrix Sigma and mean vector mu_bar of the H managed-portfolio daily returns",
+   "3-fold cross-validation"
+  ],
+  "entry_rule": "Step 1, build H managed portfolios. For characteristic j at date t: rank all n_t eligible stocks on c_j (average ranks for ties); rc_{i,j,t} = rank / (n_t + 1); then z_{i,j,t} = (rc_{i,j,t} - mean_i rc) / sum_i |rc_{i,j,t} - mean_i rc|. Factor return F_{j,t+1} = sum_i z_{i,j,t} * r_{i,t+1}. Rescale each F_j so its in-sample daily stdev equals SPY's, and subtract beta_j * SPY return with beta_j from a full-sample regression. Step 2, estimate SDF coefficients. Over a trailing 1260-session window compute mu_bar (H-vector of mean F) and Sigma (H x H covariance of F). Set bhat = (Sigma + gamma * I)^{-1} mu_bar, where gamma = 1/(kappa^2 * T) and kappa is chosen by 3-fold cross-validation over the trailing window, split chronologically into 3 blocks, maximising the average out-of-sample R2 = 1 - (mu_bar_2 - Sigma_2 bhat)'(mu_bar_2 - Sigma_2 bhat) / (mu_bar_2' mu_bar_2) on the withheld block. Step 3, trade. Stock weight w_{i,t} = sum_j bhat_j * z_{i,j,t}. Scale so sum|w| = 2. Enter every stock with |w_i| >= 0.05% of gross.",
+  "exit_rule": "Recompute bhat and w monthly and trade the difference. Drop any name whose new |w_i| falls below 0.05% of gross. Halve gross exposure for the following month whenever the cross-validated out-of-sample R2 at the last re-estimation is negative, and go flat if it is negative twice in a row.",
+  "why": "With H correlated signals the sample mean vector is mostly noise and the unregularised solution Sigma^{-1} mu_bar loads enormously on low-variance directions where the mean is least reliably estimated. Penalising the Hansen-Jagannathan distance with an L2 term shrinks exactly those low-eigenvalue directions, because shrinking them costs little pricing accuracy and buys a lot of penalty relief - which is an economically motivated prior, not an arbitrary regulariser.",
+  "novelty": "This is the missing 'how do 578 signals become one book' step. The output is a single continuous stock-level weight vector derived from all signals jointly with a principled shrinkage, rather than 578 separate sleeves or an equal-weight blend.",
+  "source": "Kozak, Nagel & Santosh, 'Shrinking the Cross Section', NBER Working Paper 24070 (Nov 2017), equations (27) [HJ-distance with L2 penalty], (28) [dual L1+L2], (30) [cross-validated OOS R2], (31)-(32) [rank transform and leverage normalisation]; published Journal of Financial Economics 135(2):271-292 (2019). They use K=3 folds and interpret gamma via the prior root expected maximum squared Sharpe ratio kappa.",
+  "params": [
+   "H (number of characteristics)",
+   "estimation window (750 / 1260 / 2520 sessions)",
+   "kappa grid for cross-validation",
+   "number of CV folds (3 / 5)",
+   "daily vs weekly return frequency for Sigma",
+   "gross leverage cap",
+   "whether to add an L1 term (see the PC-sparse variant)"
+  ],
+  "_agent": "v2:ea925ed25b6af9d1d174935a23471f0383024a2b532396e09ec39a411346d203"
+ },
+ {
+  "name": "Kagi Yin-Yang Thickness Flip",
+  "category": "alternative bar construction / Kagi",
+  "side": "both",
+  "timeframe": "intraday 5-minute, also testable daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "5-minute closes",
+   "ATR(20) on 5-minute bars for the reversal amount"
+  ],
+  "entry_rule": "Build a Kagi line from 5-minute closes. Reversal amount R = 2.0 * ATR(20) of 5-minute bars, recomputed at 09:30 each day and held fixed for the session. The line extends vertically in its current direction whenever price makes a new extreme; it turns and starts a new vertical segment when price retraces >= R from the current extreme. Record every turning point: a SHOULDER is a local high where the line turned down, a WAIST is a local low where it turned up. Maintain a thickness state: state = YANG once the line rises strictly above the most recent shoulder, state = YIN once it falls strictly below the most recent waist; the state persists until the opposite condition fires. ENTER LONG on the 5-minute bar where the state flips YIN -> YANG, provided the immediately preceding down-swing length (previous shoulder price minus previous waist price) is less than the median of the last 10 swing lengths. Mirror for short on a YANG -> YIN flip with a shallow preceding up-swing.",
+  "exit_rule": "Exit on the state flip back (YANG -> YIN for a long), or on a hard stop at 1.5*R below the entry price, whichever is first. Optionally scale out half at +2R.",
+  "why": "The Kagi thickness rule is a path-dependent state machine: the market must both retrace less than R (so the line does not turn) and exceed a prior structural level (so the state flips). Requiring the preceding counter-swing to be shallow relative to its own recent distribution adds the condition that sellers were unable to push a full-sized retracement before buyers reclaimed the prior high \u2014 weak supply meeting renewed demand. Quantising all decisions to multiples of R suppresses the noise-triggered signals that plague continuous-price breakout rules.",
+  "novelty": "Superficially close to 'break of structure', but the swing points are defined by a volatility-quantised reversal amount rather than by fractal pivot bars, so the swing set is completely different, and the signal carries a persistent two-state memory (yin/yang) that BOS does not have. It is not an MA cross \u2014 there is no averaging anywhere \u2014 and it is a trend-continuation signal rather than an oscillator extreme. Be candid: this is the idea in my list closest to an existing one, and the parameter R is doing most of the differentiating work.",
+  "params": [
+   "reversal multiple R (1.0/1.5/2.0/3.0 x ATR)",
+   "ATR length (14/20/50)",
+   "swing-length lookback for the median (5/10/20)",
+   "shallow-swing condition on/off",
+   "stop multiple of R (1.0/1.5/2.5)"
+  ],
+  "source": "Kagi construction and the yin/yang (thick/thin) shoulder-waist rules: Steve Nison, 'Beyond Candlesticks' (Wiley, 1994), Kagi chapter. Empirical work on Kagi in a systematic context: 'Performance of Pairs Trading Strategies Based on Renko and Kagi Charts' (2025), DOI 10.33138/2957-0506.2025.20.483. The shallow-preceding-swing filter is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Adaptive Bandpass Trough Cross",
+  "category": "Ehlers DSP / adaptive band-pass with measured centre frequency",
+  "side": "both",
+  "timeframe": "any (daily and 15-minute)",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "ATR(14)"
+  ],
+  "entry_rule": "Step 1, MEASURE THE DOMINANT CYCLE with the autocorrelation periodogram. Roofing-filter the close (HP period 48 then SuperSmoother 10, formulas as in the Autocorrelation Reversal idea) to get Filt. For each lag in 3..48 compute the Pearson correlation of Filt against its lag-shifted copy. Take a discrete Fourier transform of those correlations: for each candidate period p in 10..48, cosPart(p) = sum over lags of corr(lag)*cos(2*pi*lag/p), sinPart(p) = sum over lags of corr(lag)*sin(2*pi*lag/p), Power(p) = cosPart(p)^2 + sinPart(p)^2. Smooth each with SmoothPower(p) = 0.2*Power(p) + 0.8*SmoothPower(p)[1], then normalise all powers to a maximum of 1. DomCycle = the centre-of-gravity (power-weighted average) of the periods p whose normalised power >= 0.5. Step 2, BANDPASS with bandwidth bw = 0.3: beta1 = cos(2*pi/(0.9*DomCycle)); gamma1 = 1/cos(2*pi*bw/(0.9*DomCycle)); alpha2 = gamma1 - sqrt(gamma1^2 - 1); BP = 0.5*(1 - alpha2)*(C - C[2]) + beta1*(1 + alpha2)*BP[1] - alpha2*BP[2]. Step 3, AUTOMATIC GAIN CONTROL: Peak = 0.991*Peak[1]; if |BP| > Peak then Peak = |BP|; Signal = BP/Peak (bounded in [-1,1]). Trigger = 0.9*Signal[1]. ENTER LONG at the close of bar t when Signal[t] crosses ABOVE Trigger[t] while Signal[t] < -0.5. Mirror for short: Signal crosses below Trigger while Signal > +0.5.",
+  "exit_rule": "Exit at the close of the first bar where Signal crosses BELOW Trigger while Signal > +0.5 (the symmetric opposite condition), or after 1.5 * DomCycle bars have elapsed (a holding period set by the measured cycle length, not a fixed number). Hard stop at 1.5 * ATR(14).",
+  "why": "A fixed-period band-pass filter is only useful when the market happens to be oscillating at that period. Re-measuring the centre frequency each bar from the power spectrum of the autocorrelation function means the filter is always tuned to whatever rhythm is actually present. The trigger is a 0.9-scaled one-bar lag of the AGC-normalised output, which is a deliberate exploitation of the fact that a sinusoid's one-bar-lagged copy crosses it at the turning points \u2014 so the crossover fires at the trough of the currently dominant cycle. Requiring Signal < -0.5 restricts entries to genuine troughs rather than mid-cycle wobbles. Economically this is buying the low of whatever oscillation the current mix of participants is producing, with the oscillation's length inferred rather than assumed.",
+  "novelty": "Every oscillator on the exclusion list has a fixed lookback chosen by the user; here the lookback is a MEASURED quantity that changes every bar, and it also sets the holding period (1.5 * DomCycle). The AGC normalisation (Peak decaying at 0.991 per bar) is a further departure: the oscillator's scale is set by its own recent peak amplitude, so the -0.5 threshold means the same thing on a quiet ticker and a violent one. And the trigger line is not an average of the signal \u2014 it is a scaled lag of it, a construction with no analogue in MACD or Stochastic.",
+  "params": [
+   "bandwidth bw (0.1/0.2/0.3/0.5)",
+   "DomCycle scaling (0.9 vs 1.0)",
+   "period search range (10-48 vs 8-30)",
+   "power threshold for the CG (0.4/0.5/0.6)",
+   "AGC decay (0.985/0.991/0.995)",
+   "trigger scale (0.85/0.9/0.95)",
+   "entry gate level (0.3/0.5/0.7)"
+  ],
+  "source": "John F. Ehlers, 'Cycle Analytics for Traders' (Wiley, 2013), autocorrelation periodogram and adaptive band-pass chapters. The Pearson-correlations-then-DFT-then-0.2/0.8-EMA-then-centre-of-gravity pipeline, the beta1/gamma1/alpha2 band-pass coefficients, the default bandwidth 0.3, the 0.9*DomCycle scaling and the 0.9-scaled lagged trigger were all verified against github.com/thetestspecimen/ehlers-indicators-mql5, file mq5/ehlers_adaptive_bandpass.mq5, which I fetched and read.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Two-Speed Wald Sentinel",
+  "category": "structural-break overlay / live strategy monitoring",
+  "side": "both",
+  "timeframe": "any (test runs on daily aggregation of the base signal's P&L; base signal may be 1/5/15-min or daily)",
+  "entry_rule": "For each sub-strategy s, build its per-bar realised return series r_t (mark-to-market P&L of s's positions divided by capital at risk) over a rolling window of T = 750 bars. Regress r_t on a constant only. For every candidate break index tau in [0.15T, 0.85T] (Andrews' recommended symmetric 15% trimming) compute the Chow/Wald statistic W(tau) for equality of the pre- and post-tau means, using a Newey-West HAC variance with lag = floor(4*(T/100)^(2/9)). Form TWO statistics: supW = max_tau W(tau), and avgW = mean_tau W(tau) over the same trimmed grid. Convert each to a p-value by the Hansen (1997) approximate-asymptotic method (as Stata's estat sbsingle does), or equivalently by stationary bootstrap of r_t with 500 draws and mean block length 20. State machine, evaluated once per day at the close: s is HEALTHY if p(avgW) > 0.10 and p(supW) > 0.05; s is DECAYING if p(avgW) <= 0.10 and p(supW) > 0.05; s is BROKEN if p(supW) <= 0.05 AND mean(r_t) after the argmax break tau_hat is <= 0. New entries: take s's own entry signal at the next bar's open at 100% of base size when HEALTHY, at 40% of base size when DECAYING, and take no new entries when BROKEN.",
+  "exit_rule": "Use s's own exit rule normally. Additionally: on the bar s first transitions to BROKEN, flatten every position belonging to s at the next open regardless of its own exit. Re-arming requires 60 consecutive daily evaluations with p(supW) > 0.05 and post-break mean > 0, after which s resumes at 40% size and steps to 100% after a further 60 HEALTHY days.",
+  "inputs": [
+   "OHLCV bars of the traded symbols (to reconstruct the sub-strategy's own P&L series)",
+   "rolling per-bar strategy return series r_t",
+   "Newey-West HAC variance estimator",
+   "Hansen (1997) p-value approximation or a stationary bootstrap"
+  ],
+  "params": [
+   "T window length (500 / 750 / 1000 bars)",
+   "trimming fraction (0.10 / 0.15 / 0.20)",
+   "avgW p-value threshold for de-sizing (0.05 / 0.10 / 0.20)",
+   "supW p-value threshold for the kill (0.01 / 0.05)",
+   "DECAYING size fraction (0.25 / 0.40 / 0.60)",
+   "re-arm dwell length (40 / 60 / 120 bars)"
+  ],
+  "why": "Published anomalies do not usually die with a bang; they bleed. Stata's own documentation of the Andrews (1993) family notes that supremum tests have much less power than average and exponential tests, and that the average test is optimal when the alternative is a SMALL change in parameter values while the exponential/supremum test is optimal for a LARGE break. Gradual crowding-driven alpha decay is precisely the small-change alternative, so a single sup-test will keep passing a strategy all the way down to zero alpha. Running both tests and giving them different jobs - the average test governs position size, the supremum test governs the kill switch - matches the test's power profile to the failure mode it is best at catching.",
+  "source": "Andrews, D.W.K. (1993), 'Tests for parameter instability and structural change with unknown change point', Econometrica 61:821-856; Andrews & Ploberger (1994) Econometrica 62:1383-1414; Hansen, B.E. (1997) JBES 15:60-67 for the p-value approximation. Implementation conventions (15% default trimming, avg/exp/sup variants, Hansen p-values) taken verbatim from the Stata manual entry estat sbsingle, https://www.stata.com/manuals/tsestatsbsingle.pdf",
+  "novelty": "Not a moving-average cross or an oscillator at all - it is a parameter-stability test on the strategy's own P&L with an unknown break location, and it deliberately runs two tests with different power profiles and wires them to two different actions (size vs kill). Distinct from the corpus's single Page-Hinkley overlay, which is a one-sided sequential CUSUM with a fixed drift parameter and no break-location search or calibrated p-value.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "Weis Wave Swing Volume Divergence",
+  "category": "effort versus result at swing scale",
+  "side": "both",
+  "timeframe": "5-minute or 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "volume",
+   "atr(14)",
+   "ATR-based zigzag wave segmentation",
+   "per-wave cumulative volume",
+   "per-wave price travel"
+  ],
+  "params": [
+   "zigzag reversal multiple k (2.0 ATR)",
+   "volume ratio threshold (0.70)",
+   "travel comparison (>= previous same-direction wave)",
+   "waves compared back (2)"
+  ],
+  "entry_rule": "Segment price into waves with an ATR zigzag on the close: while in an UP wave, track the highest close; the UP wave ends and a DOWN wave begins on the first bar whose close is more than k * ATR(14) below that highest close (k = 2.0), and mirror for DOWN waves. For each completed wave n record its direction, its price travel P_n = abs(close at wave end - close at wave start), and its wave volume W_n = sum of volume over every bar in the wave. SHORT: an UP wave n has just been confirmed complete, AND P_n >= P_{n-2} (this up-leg travelled at least as far as the previous up-leg), AND W_n <= 0.70 * W_{n-2} (it did so on far less committed volume). Enter SHORT at the close of the bar that confirms the reversal. LONG: mirror on DOWN waves - the completed down-leg travelled at least as far as the prior down-leg on <= 0.70x its volume; enter LONG at the confirming bar's close.",
+  "exit_rule": "Exit at the close of the bar that confirms the END of the next completed wave running in the trade's direction (so the holding period is measured in waves, not bars); stop at the extreme price of the wave that generated the signal.",
+  "why": "Wyckoff's effort-versus-result is a statement about swings, not bars: a rally that covers the same ground as the last rally while attracting materially less volume shows the supply of willing buyers thinning even as price rises, which is the setup for the leg to fail. Measuring it per wave rather than per bar is the point - a single quiet bar means little, but a whole leg completed on 30% less volume than its predecessor is a participation deficit.",
+  "novelty": "The unit of analysis is a price swing of variable length, not a fixed lookback window or a single bar, so neither the bar-level effort/result residual nor any fixed-window accumulation-line divergence can express it. The exit is also wave-structured: the trade ends when the next swing completes, which adapts its holding period to volatility automatically.",
+  "source": "David Weis's Weis Wave, a computerisation of the wave charts in Richard Wyckoff's course; see Weis, 'Trades About to Happen' (Wiley, 2013). I could not retrieve a primary page for the construction (my search budget was exhausted and the fallback search endpoint returned a CAPTCHA, which I did not attempt to solve), so I pinned the wave definition myself to an ATR zigzag to make it unambiguous and testable - flagging that the specific 2.0-ATR segmentation is my choice, not Weis's.",
+  "_agent": "v2:d2c68c917bfc2191138a0a4fd2776864b6bac0b59fb98dd59663666fef7408af"
+ }
+]

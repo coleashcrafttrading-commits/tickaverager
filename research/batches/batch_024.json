@@ -1,0 +1,209 @@
+[
+ {
+  "name": "Composite Operator Anchored VWAP Reclaim",
+  "category": "wyckoff",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "ATR=ATR(14), AV=SMA(volume,20), typical price TP=(high+low+close)/3. (1) Anchor selection: scan bars t-120..t-20 and choose the anchor bar A that maximises volume/AV, subject to volume(A)>=2.5*AV(A) AND low(A) <= (lowest low of the 60 bars ending at A) + 0.25*ATR(A). If no bar qualifies, there is no setup. (2) Compute the anchored VWAP from A forward: AVWAP(t) = sum_{i=A..t} TP(i)*volume(i) / sum_{i=A..t} volume(i). (3) Require at least 20 bars since A, and require that close(i)<AVWAP(i) for at least 10 of the last 20 bars (the accumulated position is under water). (4) Require AVWAP(t) >= AVWAP(t-10) (the average cost line is flat or rising - the operator is still bidding, not liquidating). (5) LONG entry: buy at the close of the first bar satisfying close>AVWAP AND close>high[1] AND volume>=1.3*AV. SHORT mirror: anchor A is chosen with volume(A)>=2.5*AV and high(A) >= (highest high of the 60 bars ending at A) - 0.25*ATR; require close(i)>AVWAP(i) for at least 10 of the last 20 bars, require AVWAP(t)<=AVWAP(t-10), and sell at the close of the first bar with close<AVWAP AND close<low[1] AND volume>=1.3*AV.",
+  "exit_rule": "Stop = lowest low of the 5 bars preceding entry, minus 0.25*ATR (mirror for shorts). Compute sigma = the standard deviation of (TP(i)-AVWAP(i)) over i=A..t; take profit at AVWAP + 2*sigma. Hard invalidation: exit the whole position at the close of any bar closing below AVWAP - 0.50*ATR (above AVWAP + 0.50*ATR for shorts). Re-entry is permitted on a subsequent qualifying reclaim of the SAME anchor; the anchor is discarded once price closes 3.0*ATR beyond the take-profit band or once 250 bars have elapsed since A.",
+  "inputs": [
+   "ohlcv",
+   "atr(14)",
+   "sma(volume,20)",
+   "anchored VWAP from an event bar",
+   "standard deviation of price-to-AVWAP dispersion"
+  ],
+  "params": [
+   "anchor search window (120..20 bars back)",
+   "anchor volume multiple (2.5)",
+   "anchor extreme proximity (0.25*ATR)",
+   "minimum bars since anchor (20)",
+   "underwater bar count (10 of 20)",
+   "AVWAP slope lookback (10)",
+   "entry volume multiple (1.3)",
+   "take-profit sigma multiple (2.0)"
+  ],
+  "why": "Wyckoff's composite operator framing says the large accumulator has an average cost, and that price behaves differently above and below it: below, the operator is still buying and defending; the moment price reclaims that average cost the operator's book turns profitable and its incentive flips from accumulating to marking up, so it stops supplying the bid and steps aside or supports the move. The anchored VWAP from the climax bar is the most direct OHLCV estimate of that average cost, because the climax is the bar on which the bulk of the inventory changed hands. The slope filter distinguishes accumulation from a bag-holder distribution: a falling anchored VWAP means the operator is averaging down into a losing position, which is not the setup.",
+  "novelty": "Not session VWAP and not a VWAP band. The anchor is chosen by an EVENT (the highest relative-volume climax bar near a 60-bar extreme), the line is monotone-ish and slow-moving rather than resetting daily, and the trigger is the first reclaim of that line after a sustained period beneath it, gated by the line's own slope. The existing VWAP z-score reversion and VWAP trend ideas both use the intraday session anchor and would produce entirely different signal sets.",
+  "source": "Wyckoff's composite operator concept (StockCharts ChartSchool, 'The Wyckoff Method'); anchored VWAP as an event-anchored fair-value line popularised by Brian Shannon (Alphatrends, 'Maximum Trading Gains with Anchored VWAP', 2023). The practice of anchoring specifically to 'climax/exhaustion bars' and trading the reclaim/rejection is documented in the TradingView anchored-VWAP script literature I reviewed. The anchor-selection algorithm, underwater filter, slope filter and sigma exit are my quantification (synthesis).",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Campbell-Yogo Bonferroni Q Predictor Gate",
+  "category": "return predictability econometrics / local-to-unity inference",
+  "timeframe": "daily bars aggregated to monthly; monthly re-evaluation",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "A licensing test that decides, each month, whether a persistent predictor x is allowed to drive exposure at all. At month-end t, on data through t: (1) Estimate the AR(1) x_s = mu + rho*x_{s-1} + v_s and compute the DF-GLS unit-root t-statistic on x. (2) Build a 90% confidence interval for rho by INVERTING that statistic through simulation: for each candidate rho_g on a grid from 0.80 to 1.02 in steps of 0.002, simulate 5,000 AR(1) paths of length T with intercept and Gaussian innovations, record the DF-GLS t-statistic distribution, and retain rho_g if the observed DF-GLS t lies between that distribution's 5th and 95th percentiles. Call the retained set C_rho. (3) Estimate delta = corr(e_s, v_s), the correlation between the predictive-regression residual and the AR innovation, and sigma_e, sigma_v. (4) For each rho_g in C_rho and each candidate slope beta0 on a grid, compute the Q-statistic Q(beta0, rho_g) = sum_s xdm_{s-1} * [ r_s - beta0*x_{s-1} - (delta*sigma_e/sigma_v)*(x_s - rho_g*x_{s-1}) ] / ( sigma_e * sqrt(1 - delta^2) * sqrt(sum_s xdm_{s-1}^2) ), where xdm is the de-meaned predictor. Retain beta0 if |Q| < 1.645 (one-sided 5% after the Bonferroni split). (5) The Bonferroni confidence interval for beta is the union of retained beta0 across all rho_g in C_rho. (6) TRADE GATE: enter the market-timing position from this predictor only if that entire interval lies strictly on the theoretically expected side of zero. If it straddles zero, the predictor is not licensed this month and exposure falls back to the prevailing-mean benchmark weight.",
+  "exit_rule": "No stop, no target. Re-run the licensing test every month on the extended sample. The position is unwound to the benchmark weight the month the Bonferroni interval first admits zero. Exposure is therefore governed by the width of a confidence interval, and can be cut in a rising market and restored in a falling one.",
+  "inputs": [
+   "a persistent OHLCV-derived predictor",
+   "DF-GLS unit-root statistic",
+   "simulated DF-GLS null distributions over a rho grid",
+   "predictive-regression and AR residual series",
+   "innovation correlation delta",
+   "Q-statistic grid search"
+  ],
+  "params": [
+   "Bonferroni split (alpha1 for rho, alpha2 for beta; 0.10/0.00, 0.05/0.05)",
+   "rho grid range and step",
+   "number of simulation paths",
+   "whether to use the Q-statistic or the simpler Bonferroni t-test",
+   "which predictor is under test"
+  ],
+  "why": "Conventional t-tests on persistent predictors are size-distorted: when the predictor's largest autoregressive root is near unity and its innovation is correlated with the return innovation, the null is rejected far too often, so a nominal 5% test is really a 15-20% test. Campbell and Yogo's fix is to stop pretending rho is known: get a confidence set for the local-to-unity parameter first via DF-GLS, then invert a test statistic that is uniformly most powerful CONDITIONAL on rho, and combine the two intervals by Bonferroni. The Q-statistic achieves this by subtracting the projection of the return on the predictor's contemporaneous innovation, which is exactly the same de-biasing idea as the augmented regression but delivered as an interval rather than a point estimate. In practice their test disqualifies several predictors that pass a naive t-test, which is the whole point: it prevents the bot from committing capital to a signal whose apparent significance is an artefact of persistence.",
+  "novelty": "Distinct from the Stambaugh/Kendall idea in both machinery and output: that one produces a bias-corrected POINT estimate and gates on its t-statistic; this one abandons point estimation, produces a joint confidence REGION over (rho, beta), and gates on whether the whole region excludes zero. The two disagree in exactly the cases that matter - a predictor can have a significant bias-corrected slope and still fail the Bonferroni test if rho is poorly pinned down. No rule in the corpus conditions on parameter uncertainty at all.",
+  "source": "Campbell, J.Y. and Yogo, M., 'Efficient Tests of Stock Return Predictability', NBER Working Paper 10026 (Oct 2003), published JFE 81, 2006 - read directly at https://www.nber.org/system/files/working_papers/w10026/w10026.pdf. The Q-statistic is eq. (9) on p.8; the local-to-unity framework is section 3.1; the use of DF-GLS (Elliott, Rothenberg and Stock) rather than ADF to build the confidence interval for c, and the reason for it, are on pp.523-527 of the text; the Bonferroni construction and the choice of the Q-test over the Bonferroni t-test of Cavanagh, Elliott and Stock (1995) are in section 3.3. The simulation-based inversion of the DF-GLS statistic over a rho grid is my pinning-down of a step the paper implements via published lookup tables.",
+  "_agent": "v2:2986ad60a64b30f5d6a1ab8fd871eb95cd89b5d6c01da660d34a55f6bf9aab82"
+ },
+ {
+  "name": "Nested Clustered Optimization",
+  "category": "portfolio construction / covariance estimation",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Last trading day of each month. (1) Build the correlation matrix over 252 daily returns and denoise it by Marchenko-Pastur eigenvalue clipping (noise eigenvalues below sigma^2(1+sqrt(N/T))^2 replaced by their mean, diagonal rescaled to 1). (2) Convert distance d_ij = sqrt(0.5*(1-rho_ij)); cluster with average linkage; choose K in 2..min(10, floor(N/2)) by maximum mean silhouette. (3) Intra-cluster step: for each cluster k, take the sub-matrix Sigma_kk of the denoised covariance over its members and solve the constrained GMV problem there, w_k = Sigma_kk^{-1}1 / (1'Sigma_kk^{-1}1), clipped to [0, 0.5] within the cluster and renormalised so sum(w_k) = 1. (4) Reduce: form the K x K matrix Sigma_red with Sigma_red[k,l] = w_k' Sigma_kl w_l, i.e. the covariance of the K synthetic cluster-portfolio return streams. (5) Inter-cluster step: a_k = Sigma_red^{-1}1 / (1'Sigma_red^{-1}1), clipped to [0, 0.40] and renormalised. (6) Final weight for symbol i in cluster k: W_i = a_k * w_k,i. Enter every symbol with W_i > 0.005 at the next open.",
+  "exit_rule": "Monthly rebalance, 0.02 no-trade band. Exit a name when W_i < 0.005. Conditioning guard: before trading, compute the condition number of every Sigma_kk and of Sigma_red; if any exceeds 500, merge that cluster into its dendrogram sibling and recompute, and if the guard still fails fall back to equal weighting within the offending cluster for that month.",
+  "inputs": [
+   "daily close (252 bars)",
+   "MP-denoised covariance",
+   "hierarchical clustering + silhouette",
+   "two nested GMV solves"
+  ],
+  "params": [
+   "K search range",
+   "intra- and inter-cluster weight caps",
+   "condition-number guard threshold",
+   "denoising method (clip vs Ledoit-Wolf shrink)"
+  ],
+  "novelty": "Two nested small inversions instead of one large one. It is not a different estimator of Sigma - it is a different way of using Sigma, in which estimation error stays inside the cluster where it originated instead of leaking across the whole weight vector via the global inverse.",
+  "why": "The instability of Markowitz optimisation is driven by the condition number of Sigma, which grows with N. If the matrix is block-structured, each block has a far smaller condition number than the whole, and the K x K reduced matrix is tiny. Solving the problem twice at small scale therefore inherits almost none of the large-matrix instability, while still producing a genuinely optimised - not merely heuristic - weight vector, which is what HRP gives up.",
+  "source": "Lopez de Prado (2019) 'A Robust Estimator of the Efficient Frontier' (Nested Clustered Optimization), SSRN 3469961; and Lopez de Prado, 'Machine Learning for Asset Managers' (2020), Ch. 7. NCO with four objectives is confirmed as a supported model in Riskfolio-Lib (https://riskfolio-lib.readthedocs.io/en/latest/, fetched this session). MP clipping bounds verified per the Marchenko-Pastur entry cited above.",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Cumulative-Violation Severity Clustering",
+  "category": "risk-model backtesting / tail severity",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "250 trailing daily returns",
+   "conditional CDF from a GARCH-t or EWMA-normal model",
+   "cumulative violation process",
+   "Box-Pierce statistic"
+  ],
+  "entry_rule": "Fit a GARCH(1,1) with standardised Student-t innovations to the trailing 1000 daily returns of SPY and produce the probability integral transform u_t = F(r_t | Omega_{t-1}) each day. With alpha = 0.05 form the cumulative violation H_t = (1/alpha) * (alpha - u_t) * 1{u_t <= alpha}, which is 0 on non-violation days and rises toward 1 the deeper the violation. Over the trailing 250 days compute (a) the unconditional statistic U_ES = sqrt(250) * (mean(H_t) - alpha/2) / sqrt( alpha*(1/3 - alpha/4) ), asymptotically N(0,1), and (b) the Box-Pierce statistic BP = 250 * sum_{j=1..5} rho_j^2 on the sample autocorrelations rho_j of the series {H_t - alpha/2}, asymptotically chi-square with 5 d.f. Take the fleet's base long entries only while U_ES < 1.645 AND BP < 11.07 (5% chi-square_5).",
+  "exit_rule": "Halve every position on the first close where BP >= 11.07 (tail SEVERITY is autocorrelated, so the next violation is likely to be a deep one). Flatten entirely if U_ES >= 2.33 (the model is systematically under-stating expected shortfall). Restore full size after 10 consecutive closes with both statistics back inside their thresholds.",
+  "params": [
+   "alpha (0.025, 0.05, 0.10)",
+   "GARCH innovation distribution (t vs skew-t vs normal)",
+   "number of Box-Pierce lags (1, 5, 10)",
+   "backtest window (250/500)",
+   "half-size vs quarter-size on the BP trip"
+  ],
+  "why": "Violations of a VaR level are binary - they throw away how bad the bad day was. The cumulative violation H_t integrates the hit function over ALL quantile levels below alpha, so it inherits ES's severity-awareness while remaining distribution-free (H_t has mean alpha/2 and variance alpha*(1/3 - alpha/4) under the null, since u_t is uniform). Du and Escanciano show {H_t - alpha/2} is a martingale difference sequence under a correct model, so autocorrelation in it is direct evidence that DEEP losses cluster - a different and more dangerous failure than the count-clustering that Christoffersen's independence test detects. For a levered ladder that adds on the way down, severity clustering is the exact mechanism that turns a normal drawdown into a wipe-out.",
+  "source": "Du & Escanciano (2017), 'Backtesting expected shortfall: accounting for tail risk', Management Science 63(4), building on Costanzino & Curran (2015). Cumulative violation definition H_t(alpha) = (1/alpha)(alpha - u_t)1{u_t <= alpha}, the moments E[H_t] = alpha/2 and Var = alpha(1/3 - alpha/4), the U_ES t-statistic and the Box-Pierce conditional test as set out in Nieto & Ruiz, UCM working paper Section 4.2.4 (https://docta.ucm.es/bitstreams/661963d3-b3ca-44e1-b46c-ad300c907b79/download); open access at https://caepr.indiana.edu/RePEc/inu/caeprp/caepr2015-001.pdf.",
+  "novelty": "Trades on the autocorrelation of a continuous severity measure rather than on a violation count. Two return series with identical exception counts, identical volatility and identical Christoffersen statistics can differ completely here.",
+  "_agent": "v2:6c9a27a7b9b617a4303b5edac46faea41cc4f0cce91accc1a836f0c1ce47f6d8"
+ },
+ {
+  "name": "Five-Year Reversal Value Everywhere",
+  "category": "cross-asset value",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily closes going back at least 1400 trading days",
+   "cross-sectional ranks"
+  ],
+  "params": [
+   "averaging window endpoints (1134 and 1386 trading days, i.e. 4.5-5.5 years)",
+   "rebalance period (21d)",
+   "rank weights vs tercile spread"
+  ],
+  "entry_rule": "For every asset i in a cross-asset ETF universe (equity country and sector ETFs, bond and credit ETFs, commodity ETFs, currency ETFs - at least 20 names), compute the value signal exactly as Asness, Moskowitz and Pedersen define it for asset classes that have no book value: V_i,t = ln( mean(close_i over trading days t-1386 to t-1134) / close_i,t ). That is the log of the average price 4.5 to 5.5 years ago divided by today's price, which is essentially the negative of the 5-year return, and the 12-month averaging window smooths out the endpoint. A high V_i means the asset is cheap. At each month end rank all N assets by V_i and set weights w_i = c_t * (rank(V_i) - mean rank), with c_t scaling the portfolio to one dollar long and one dollar short. Enter at the next open.",
+  "exit_rule": "Full rebalance to fresh rank weights every 21 trading days; positions whose rank crosses the cross-sectional mean flip sign. No individual stop - the signal is deliberately slow and a stop would cut exactly the losers the strategy is designed to accumulate. Portfolio-level circuit breaker: halve exposure if the book's 63-day return is below its own 5th percentile over the trailing 1250 days.",
+  "why": "Book-to-market does not exist for commodities, currencies or bonds, so AMP needed a value measure computable from prices alone, and the negative of the 5-year return turns out to be an excellent stand-in - in US stocks a value factor built from negative 5-year returns has a 0.83 correlation with one built from book-to-market sorts. Economically it is long-horizon overreaction: assets that have underperformed for half a decade have had their discount rates pushed up and subsequently mean-revert. Crucially the 5-year horizon is long enough that it does not collide with 1-12 month momentum; the two are negatively correlated.",
+  "novelty": "This is not a mean-reversion oscillator. The lookback is 4.5 to 5.5 years, it deliberately excludes the recent past, it is applied cross-sectionally across asset classes rather than to a single instrument, and it is rank-weighted. No existing idea in the 32 uses a lookback longer than a year or ranks across a universe.",
+  "source": "Asness, Moskowitz & Pedersen, 'Value and Momentum Everywhere' (Journal of Finance 2013; PDF fetched from https://w4.stern.nyu.edu/facdir/lpederse/papers/ValMomEverywhere.pdf), p. 938: for commodities value is 'the log of the spot price 5 years ago (actually, the average spot price from 4.5 to 5.5 years ago), divided by the most recent spot price'; the paper reports a 0.83 correlation between US stock portfolios formed on negative 5-year returns and those formed on BE/ME. Equation (1) gives the rank-weighting w_it = c_t(rank(S_it) - mean rank).",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "Almgren-Chriss Sinh Slice Schedule",
+  "category": "optimal execution",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "When a signal fires at bar 0 with target size X shares, do not fill at once. Compute per-bar volatility sigma = stdev of per-bar log returns over 20 bars, converted to dollars per share as sigma_$ = sigma * C_t. Set the temporary impact coefficient eta = c_imp * C_t / V_bar, where V_bar = 20-bar average shares per bar and c_imp is a swept constant. Set kappa = sqrt(lambda * sigma_$^2 / eta) with lambda the swept risk-aversion. With tau = 1 bar, N = T bars, execute slice j (j = 1..N) of size n_j = X * [2*sinh(kappa*tau/2) / sinh(kappa*T)] * cosh(kappa * (T - (j - 0.5)*tau)), each as a market order filled at the next bar's (H+L+C)/3. The half-life theta = 1/kappa is the intrinsic time scale; set T = ceil(3*theta) so the schedule is essentially complete.",
+  "exit_rule": "On the exit trigger (H bars elapsed, or a 2*ATR(14) stop, or signal reversal), liquidate on the same sinh schedule recomputed with the then-current sigma and V_bar, over T' = ceil(3/kappa') bars. A stop-loss trigger overrides the schedule and liquidates in a single slice.",
+  "inputs": [
+   "ohlc bars at 1 or 5 minute resolution",
+   "volume per bar",
+   "stdev of per-bar log returns (20)",
+   "atr(14)"
+  ],
+  "params": [
+   "lambda risk aversion (1e-7 to 1e-5)",
+   "c_imp impact scaling",
+   "T total execution bars",
+   "N number of slices",
+   "X target size"
+  ],
+  "why": "Almgren and Chriss show that the cost-minimising liquidation of X shares against linear temporary impact and volatility risk is not a straight line but a hyperbolic-sine decay with a characteristic half-life theta = 1/kappa, kappa ~ sqrt(lambda*sigma^2/eta). The economics: trading fast pays impact, trading slow pays volatility risk, and the optimum front-loads exactly enough to balance them. Critically, theta is independent of X and of any externally imposed deadline, so it is a property of the security, not of the order.",
+  "novelty": "None of the 32 model a fill as anything but a point event at a bar price. This makes the ENTRY ITSELF a trajectory with a computed shape, and yields a falsifiable prediction the corpus can test directly: a 100-share and a 10,000-share order in the same name should be worked over the same number of bars.",
+  "source": "Almgren, R. & Chriss, N. (2000), 'Optimal Execution of Portfolio Transactions', eq. (17) x_j = [sinh(kappa*(T-t_j))/sinh(kappa*T)]*X, eq. (18) for the trade list n_j, eq. (19) kappa ~ sqrt(lambda*sigma^2/eta), and section 2.3 defining theta = 1/kappa as the trade's half-life.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Oops Gap Reversal at the Recovered Level",
+  "category": "gap failure, price-level entry",
+  "side": "both",
+  "timeframe": "daily bars with intraday fill",
+  "entry_rule": "Daily bars, entry executed intraday during US regular hours. LONG: today's open < low[-1] AND (low[-1] - open) >= 0.30 x ATR(14) measured on daily bars. Place a BUY STOP at exactly low[-1] (the prior day's low); it fills the moment price trades back up into yesterday's range. The order is live only for today's session and is cancelled at the close if unfilled. SHORT: today's open > high[-1] AND (open - high[-1]) >= 0.30 x ATR(14); place a SELL STOP at exactly high[-1], live today only. One attempt per symbol per day.",
+  "exit_rule": "Exit at the first profitable opening: at each subsequent session's open, if the open is above the entry price (below, for shorts), exit there; otherwise hold and re-test the next day. Hard stop at entry - 2.0 x ATR(14) for longs / entry + 2.0 x ATR(14) for shorts. Cap the hold at 5 sessions and exit at market. Sweep the alternative exit of a fixed n-day close, n = 1..10, to measure how much of the edge the first-profitable-open rule contributes.",
+  "inputs": [
+   "ohlcv daily",
+   "intraday bars (1 or 5 minute) for the stop fill",
+   "atr(14) on daily bars"
+  ],
+  "params": [
+   "minimum gap in daily ATR (0.30, sweep 0.10-0.75)",
+   "ATR stop multiple (2.0)",
+   "max hold sessions (5)",
+   "exit mode: first profitable open vs fixed n-day close"
+  ],
+  "why": "An out-of-range gap that is fully recovered is a failed overnight liquidation. The recovered level - yesterday's exact extreme - is where the overnight sellers' implied thesis is disproved and where the resting buy stops of the prior day's longs sit. Published futures backtests rate it D over 1980-2011 and the DAX version has decayed since extended hours arrived; the honest reason to test it on US equities is that the RTH open is one of the last venues with a genuine overnight-to-open information discontinuity, and the Unger test showed a minimum-gap filter nearly doubled the average trade (EUR 230 to EUR 400) even as net profit fell.",
+  "source": "Larry Williams 'Oops' trade, 'Long-Term Secrets to Short-Term Trading'. Exact rules and rating D at https://oxfordstrat.com/trading-strategies/oops-pattern/ (long: Open[today] < Low[yesterday], buy stop at Low[yesterday]; time/ATR/stop-loss exits, 42 futures 1980-2011). Minimum-gap filter, 'exit at the first opening where the position is in profit' variant, and DAX 2010-present results at https://ungeracademy.com/blog/we-tested-larry-williams-oops-pattern-the-results-might-surprise-you",
+  "novelty": "Entry is a resting order at an exact recovered price LEVEL (the prior bar's extreme), not at a bar close or a fresh extreme, and the exit is condition-driven with no target and no fixed time stop. The excluded in-range gap fade requires the open INSIDE the prior range and enters at a 5-minute bar close; the excluded gap-and-go requires the gap to HOLD. This requires the gap to clear the range and then fail completely.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "RLS Adaptive Autocorrelation Sign",
+  "category": "lightweight ML / recursive parameter tracking",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "standardised log returns",
+   "recursive least squares state (theta, P)",
+   "EWM residual variance"
+  ],
+  "entry_rule": "Standardise log returns as z_t = r_t / sigma_t with sigma_t the EWM sd (span 100). Run recursive least squares with exponential forgetting on z_t = a + b*z_{t-1} + e_t. With x = [1, z_{t-1}]', update: k = P x / (mu + x' P x); theta += k*(z_t - x'theta); P = (P - k x' P)/mu, with forgetting factor mu = 0.97 and P initialised to 1000*I, theta to [0,0]. Let b_t = theta[1]. Track the recursive standard error se_t = sqrt(s2_t * P[1,1]) where s2_t is an EWM estimate of the residual variance (span 100), and define the ratio G_t = b_t/se_t. LONG entry at the next open when EITHER (a) G_t < -2.0 and z_t < -1.0 (significant one-lag mean reversion, and the last bar was a large down bar), OR (b) G_t > +2.0 and z_t > +1.0 (significant one-lag momentum, last bar was a large up bar). SHORT entry mirrors both branches with the sign of z_t reversed.",
+  "exit_rule": "Exit after 3 bars, or when |G_t| falls below 1.0 (the serial-dependence structure has evaporated), or on a 2 * sigma_t stop - whichever first.",
+  "params": [
+   "forgetting factor mu (0.95-0.995)",
+   "significance ratio threshold (1.5-3.0)",
+   "trigger magnitude in sd (0.75-2.0)",
+   "P initialisation",
+   "residual-variance span",
+   "holding horizon"
+  ],
+  "why": "The regime variable here is a model parameter being tracked in real time, so there is no window length to choose and no refit schedule - the forgetting factor mu sets an effective memory of about 1/(1-mu) bars continuously. When b is significantly negative the market is genuinely fading its own moves at the one-bar scale and you should fade with it; when significantly positive it is extending them. The significance ratio, rather than the raw coefficient, keeps you out during the long stretches where b is noise around zero, which for liquid US equities is most of the time.",
+  "novelty": "A recursively estimated model coefficient IS the regime indicator, updated every bar with no window. Distinct from the variance-ratio idea, which uses a multi-period ratio over a fixed 250-bar sample and a formal hypothesis test on a 5-bar deviation; this one is one-lag, recursive, memory-weighted, and triggers on a single-bar move. This idea is largely synthesis - the RLS machinery is textbook and the trading application is my own construction, so treat the citation as method provenance rather than published evidence of profitability. NOTE ON COVERAGE: 19 ideas are returned here, comfortably above the 14 requested; the domain yields more than that and the binding constraint was distinctness, not supply.",
+  "source": "Synthesis. RLS with exponential forgetting is standard: Ljung, System Identification: Theory for the User (2nd ed., Prentice Hall, 1999), ch. 11 recursive estimation. The pattern of online adaptive-rate learning applied to short-horizon price prediction appears in PLOS ONE 15(6): e0234107, 'Mid-price prediction based on machine learning methods with technical and quantitative indicators' (online learning with adaptive rate for next mid-price move). The specific entry/exit construction above is mine, not taken from a paper.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ }
+]

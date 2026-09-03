@@ -1,0 +1,203 @@
+[
+ {
+  "name": "Lagged Industry Diffusion",
+  "category": "lead-lag-cross-sectional",
+  "side": "long",
+  "timeframe": "daily bars, monthly rebalance",
+  "ohlcv_only": true,
+  "inputs": [
+   "XRT, IYR, XME, XLE, XLI daily closes",
+   "SPY daily open/close",
+   "SHY daily close",
+   "21-session returns",
+   "12-observation rolling median"
+  ],
+  "entry_rule": "Evaluated on the last trading session of each calendar month, after the close. For each of the five industry ETFs - XRT (retail), IYR (commercial real estate), XME (metals and mining), XLE (petroleum) and XLI (industrials) - compute its 21-session return. Let L_t be the equal-weight mean of those five returns. Compute M_t = the median of the last 12 monthly values of L (a one-year history, so the rule needs 13 months of warm-up). Buy SPY at the next session's open if L_t > 0 AND L_t > M_t. Otherwise hold SHY (or cash) for the coming month.",
+  "exit_rule": "Position is closed at the next monthly evaluation and replaced by whichever leg the fresh comparison selects; if SPY is reselected, the position carries. There is no stop and no target - the rebalance is the only exit. A variant worth testing: hold for two months rather than one, since the published effect is reported to run up to two months.",
+  "why": "Hong, Torous and Valkanov argue that information originating in specific industries - housing and commercial real estate, commodity demand, retail spending - reaches investors in those industries first and only diffuses to the broad market with a lag, because attention and analytic capacity are limited and segmented. The industries they identify as leading are precisely the ones most directly tied to real economic activity, and the same paper shows their return predictability lines up with their ability to forecast measures of economic activity. The strategy tries to be positioned in the index before that information arrives in it.",
+  "source": "Harrison Hong, Walter Torous and Rossen Valkanov, 'Do industries lead stock markets?', Journal of Financial Economics, 2007 (working paper at columbia.edu/~hh2679/industry-12-05-05.pdf) - a significant number of industry returns including retail, services, commercial real estate, and metal and petroleum forecast the market by up to two months. Important caveat from the authors' own follow-up (rady.ucsd.edu/_files/faculty-research/valkanov/Note_10282014.pdf): in a revised sample extending to 2013, fewer industries lead the market, so the effect has weakened out of sample and should be tested on recent data before being sized. The ETF proxies for the paper's industry portfolios, and the median-of-12 threshold, are my implementation.",
+  "novelty": "The predictor is a lagged cross-sectional average of other assets' returns, and the horizon is a month rather than a bar - a completely different clock and a completely different information source from anything in the existing set. It also has a documented economic mechanism (segmented attention and gradual information diffusion) rather than a purely statistical justification.",
+  "params": [
+   "industry set (the five above; add or drop XLB, XLY, XHB, ITB)",
+   "industry return lookback (21/42/63 sessions)",
+   "threshold rule (L>0 only / L>median / L>0 and L>median / z-score of L)",
+   "median history length (6/12/24 observations)",
+   "holding period (1/2/3 months)",
+   "defensive leg (SHY / IEF / cash)"
+  ],
+  "_agent": "v2:ace0102422e727c7e04dff379b63c92968054af0ad5011a5f348056e83babce2"
+ },
+ {
+  "name": "Temporary vs Permanent Impact Switch",
+  "category": "price impact",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Define an 'event' bar as one with |r_t| >= 1.5 * stdev(r, 60), r = log return. For the most recent 100 event bars strictly in the past, compute per event the temporary-impact ratio ti = -(sum_{i=1..3} r_{t+i}) / r_t, and let TI = the median of those 100 values. Then, on a new event bar t: if TI >= 0.5 enter AGAINST sign(r_t) at the next bar's open; if TI <= -0.2 enter WITH sign(r_t) at the next bar's open; otherwise no trade.",
+  "exit_rule": "Exit at the close of bar t+3 - the horizon over which TI is estimated, so the exit structure and the estimator are matched by construction. Hard stop at 1.5 x ATR(14).",
+  "inputs": [
+   "closes",
+   "60-bar return stdev",
+   "rolling event history",
+   "ATR(14)"
+  ],
+  "why": "The microstructure decomposition of a trade's price impact splits it into a permanent component (information now in the price) and a temporary component (the compensation paid to the liquidity provider, which reverts). The realized spread is precisely the part that reverts within a short horizon. TI is a bar-level estimate of that split, measured from the asset's own history: TI near 1 means large moves are almost entirely liquidity-driven and fully revert, TI near 0 or negative means they are informational and extend. The strategy does not assume which regime holds - it measures it and takes the corresponding side.",
+  "source": "Hasbrouck (1991), 'Measuring the Information Content of Stock Trades', Review of Financial Studies 4(1), on permanent vs transitory impact; Huang & Stoll (1996), 'Dealer versus auction markets', Journal of Financial Economics 41(3), for the effective-vs-realized-spread decomposition. The bar-level TI estimator and the sign-switching rule are my synthesis of that decomposition.",
+  "novelty": "The strategy's SIDE is not fixed by the rule - the same trigger produces a fade or a follow depending on an estimated impact-decomposition parameter. Every rule in the existing 32 has a hard-coded polarity; this one learns it, and the estimation horizon and the holding horizon are deliberately identical so the estimate is of the exact quantity being traded.",
+  "ohlcv_only": true,
+  "params": [
+   "event threshold (1.0/1.5/2.0 sd)",
+   "reversal horizon k (1/3/5 bars)",
+   "event history length (50/100/250)",
+   "TI thresholds",
+   "median vs trimmed mean"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Abdi-Ranaldo Negative-Product Run",
+  "category": "effective spread proxy",
+  "side": "both",
+  "timeframe": "daily or 15-min",
+  "entry_rule": "Work in logs: c_t = ln(C_t), eta_t = (ln(H_t) + ln(L_t))/2 (log mid-range). Define the Abdi-Ranaldo inner product pi_t = (c_t - eta_t) * (c_t - eta_{t+1}); the AR spread estimate is 2*sqrt(max(0, pi_t)). Note pi_t is only known at bar t+1, so act at the open of bar t+2. Enter LONG when pi has been strictly NEGATIVE on at least 4 of the last 5 bars AND the mean of (c_t - eta_t) over those same 5 bars is > 0. Mirror for SHORT (4 of 5 negative pi with mean (c - eta) < 0).",
+  "exit_rule": "Exit on the first bar where pi_t >= 0, OR when the 5-bar mean of (c - eta) changes sign, OR after 10 bars, OR on a 2.0 x ATR(14) stop.",
+  "inputs": [
+   "Close, High, Low",
+   "log mid-range eta",
+   "ATR(14)"
+  ],
+  "why": "Abdi and Ranaldo build their estimator on the fact that under a pure bid-ask bounce the close sits randomly above or below the mid-range, so the product of consecutive close-minus-mid deviations is positive in expectation. When that product is persistently NEGATIVE the estimator breaks down - and it breaks down precisely because the close is being pinned to one side of the range by directional pressure rather than bouncing. The failure mode of the spread estimator is itself the informed-trading signal.",
+  "source": "Abdi & Ranaldo (2017), 'A Simple Estimation of Bid-Ask Spreads from Daily Close, High, and Low Prices', Review of Financial Studies 30(12):4437-4480 (SSRN 2725981). Closed form AR_t = sqrt(2*(C_t - 0.5(H_t+L_t))*(C_t - 0.5(H_{t+1}+L_{t+1}))) as reproduced in Entropy 22(7):783, 'Do Liquidity Proxies Based on Daily Prices and Quotes Really Measure Liquidity?'.",
+  "novelty": "Trades the SIGN of a spread estimator's inner product - the part every implementation throws away by clamping to zero. Nobody publishes this as a signal because in the liquidity literature the negative values are treated as estimation noise to be discarded.",
+  "ohlcv_only": true,
+  "params": [
+   "run length (3 of 4 / 4 of 5 / 6 of 8)",
+   "mean (c - eta) threshold (0 vs 0.25 x sigma)",
+   "hold length"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Lee-Mykland No-News Jump Fade",
+  "category": "nonparametric jump test as signal",
+  "side": "both",
+  "timeframe": "5-minute intraday",
+  "entry_rule": "On 5-minute bars let r_i = ln(C_i/C_{i-1}). Local bipower spot volatility with K = 270: sigma_i^2 = (1/(K-2)) * SUM_{j=i-K+2..i-1} |r_j| * |r_{j-1}|. Test statistic L_i = r_i / sigma_i. With n = number of bars in the test window, c = sqrt(2/pi) = 0.79788, C_n = (2*ln n)^0.5 / c - (ln(pi) + ln(ln n)) / (2*c*(2*ln n)^0.5), S_n = 1 / (c * (2*ln n)^0.5). Declare a jump on bar i when |L_i| > C_n + S_n * (-ln(-ln(0.99))) (1% Gumbel critical value). FADE it: if a jump is declared with L_i > 0 AND that bar's volume < 2.0 * the 20-session median volume for the same time-of-day bin, SHORT at the close of the jump bar; if L_i < 0 with the same volume condition, LONG at the close of the jump bar. Skip the first 30 minutes and any bar within 10 minutes of the close.",
+  "exit_rule": "Target = 60% retracement of the jump bar's range, measured from the jump bar's close. Stop = 1.0 * jump bar range beyond the jump extreme. Time stop at 12 bars (60 minutes) or 15:55 ET, whichever first.",
+  "inputs": [
+   "5-minute OHLCV",
+   "time-of-day volume medians"
+  ],
+  "params": [
+   "K (156, 270, 390)",
+   "significance level (0.01, 0.05)",
+   "volume ratio cutoff (1.5, 2.0, 3.0)",
+   "retracement target (40%, 60%, 80%)",
+   "time stop (6, 12, 24 bars)"
+  ],
+  "why": "Lee & Mykland's statistic standardises each return by locally-estimated diffusive volatility (bipower variation, which is robust to the jump itself), so it separates a genuine discontinuity from an ordinary large move in a high-vol stretch. The volume condition is the discriminator: a jump on ordinary volume is a liquidity vacuum - a market order sweeping a thin book - and mean-reverts, whereas a jump on heavy volume is information and continues. Fading only the low-volume half is where the edge should live.",
+  "novelty": "Liquidity sweep and order-block retests are drawn by eye from structure; this is a distributional test with an explicit false-positive rate, and the volume gate reverses the sign of the trade rather than just filtering it. The null distribution is Gumbel, not normal, because the test is on the maximum of many standardised returns.",
+  "source": "Lee & Mykland (2008), 'Jumps in Financial Markets: A New Nonparametric Test and Jump Dynamics', Review of Financial Studies 21(6), 2535-2563. Discussion of the K=270 window at 5-minute sampling and the Gumbel constants: https://www.scheller.gatech.edu/directory/research/finance/lee/pdf/leehannig09.pdf",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Strategy-Volatility Circuit Breaker",
+  "category": "meta-layer / risk-managed signal",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Maintain a simulated always-on equity curve for a base signal - for a self-contained test define the base signal as: long when the trailing 126-day return > 0, short when < 0, rebalanced at each daily close. Compute SV_t = stdev of the last 126 daily returns OF THAT SIMULATED CURVE * sqrt(252). Take the base signal's live entry only when SV_t <= its own 80th percentile over the trailing 756 sessions. Size the position at min(1.0, 0.12 / SV_t) for a 12% annualised target.",
+  "exit_rule": "Force flat immediately whenever SV_t crosses above the 90th percentile of its trailing 756-session distribution, regardless of what the base signal says, and stay flat until SV_t falls back below the 70th percentile. Otherwise exit on the base signal flipping.",
+  "inputs": [
+   "daily close",
+   "log returns",
+   "simulated strategy return series"
+  ],
+  "params": [
+   "strategy-vol window (63, 126, 252)",
+   "cutoff percentiles (70/80/90)",
+   "target vol (8%, 12%, 20%)",
+   "base signal lookback (63, 126, 252)",
+   "re-arm percentile"
+  ],
+  "why": "Barroso & Santa-Clara show momentum's own realized variance is highly predictable and inversely related to its subsequent returns - momentum crashes are preceded by rising momentum volatility, not by rising market volatility. Scaling by the inverse of the strategy's six-month realized variance nearly doubled momentum's Sharpe and effectively removed the crashes. The key point is that the risk being measured is the strategy's, not the asset's: a stock can be calm while the signal riding it is unstable.",
+  "novelty": "The volatility input is the equity curve of the signal itself, not the price series. It is a wrapper that can be applied to any of the other 32 rules and changes their exit structure by adding a state-dependent force-flat that no price-based stop can replicate.",
+  "source": "Barroso & Santa-Clara (2015), 'Momentum has its moments', Journal of Financial Economics 116(1), 111-120. Leverage-constrained variant and replication: https://www.garp.org/hubfs/Whitepapers/a1Z1W0000054xSXUAY.pdf",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "OPEX Week Hedge Unwind",
+  "category": "expiry-effect",
+  "side": "both",
+  "timeframe": "daily, weekly calendar-driven",
+  "entry_rule": "Derive the monthly expiry calendar from bar timestamps: the third Friday of each month. Enter LONG at the OPEN of the first trading day of the calendar week containing that third Friday. Optional second leg: at the close of the third Friday, flip to SHORT and hold through the close of the following Friday (the fourth-Friday week). Universe filter, matching the S&P 100 character of the source: 60-day median dollar volume >= $200M.",
+  "exit_rule": "Long leg exits at the close of the third Friday. Short leg, if enabled, exits at the close of the following Friday. Stop each leg at 2.0 * ATR(14, daily). No intra-week discretionary exits - the holding period is fixed by the calendar.",
+  "inputs": [
+   "daily OHLCV",
+   "bar timestamps for the third-Friday calendar",
+   "ATR(14) daily",
+   "dollar-volume filter"
+  ],
+  "params": [
+   "short leg on/off",
+   "entry timing (Friday close before vs Monday open)",
+   "exit timing (Friday close vs Thursday close)",
+   "dollar-volume floor",
+   "ATR stop multiple",
+   "skip months with quad-witching"
+  ],
+  "why": "Stivers and Sun document that for S&P 100 stocks, weekly returns over option-expiration weeks - the third-Friday week - tend to be high, while the following fourth-Friday week modestly underperforms. They attribute this to two option-market mechanisms: delta-hedge rebalancing by option market makers, specifically a reduction in short-stock hedge positions over the OE week, and declining risk perceptions over the week as measured by option-implied volatilities. Market makers who are short stock as a hedge against long option inventory must buy that stock back as the options roll off, and that buying is concentrated in one identifiable week per month.",
+  "source": "Stivers & Sun (2013), 'Returns and option activity over the option-expiration week for S&P 100 stocks', Journal of Banking & Finance 37(11), 4226-4240. Abstract and stated mechanisms retrieved from https://ideas.repec.org/a/eee/jbfina/v37y2013i11p4226-4240.html",
+  "novelty": "A pure calendar strategy with no price condition in the entry at all - the only idea here where the entry rule never looks at the price series. Both entry and exit are fixed dates, and the optional flip makes it a two-legged monthly cycle rather than a signal. That also makes it trivially cheap to backtest and a useful overlay or gate on the other ideas rather than a standalone book. Note this is the thirteenth idea and the domain yielded well past the ten requested: pinning, dealer gamma, skew-as-sentiment, implied-vs-realized vol, dispersion and expiry effects each produced at least two distinct testable rules with primary-source support.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Volatility-Scaled Symmetric CUSUM Event",
+  "category": "change-point detection",
+  "side": "both",
+  "timeframe": "any (tested on daily and 15-minute)",
+  "ohlcv_only": true,
+  "inputs": [
+   "log returns",
+   "EWM standard deviation of returns (span 100)"
+  ],
+  "entry_rule": "Maintain two accumulators on log returns r_t = ln(C_t/C_{t-1}): S_pos_t = max(0, S_pos_{t-1} + r_t) and S_neg_t = min(0, S_neg_{t-1} + r_t). Threshold h_t = k * sigma_t where sigma_t is the EWM standard deviation of r with span 100 and k = 3. When S_pos_t >= h_t emit an UP event and reset BOTH accumulators to 0; when S_neg_t <= -h_t emit a DOWN event and reset both to 0. LONG entry at the next bar's open on an UP event, but only if it is the second consecutive UP event with no intervening DOWN event. SHORT entry mirrored on a second consecutive DOWN event.",
+  "exit_rule": "Triple barrier from the entry price: profit target at +2 * sigma_t * sqrt(10), stop at -1 * sigma_t * sqrt(10), vertical barrier at 10 bars - whichever is touched first. Additionally exit immediately on any opposite-direction CUSUM event.",
+  "params": [
+   "k threshold multiplier (2-5)",
+   "EWM span for sigma",
+   "consecutive-event count (1-3)",
+   "profit/stop barrier multiples",
+   "vertical barrier length"
+  ],
+  "why": "CUSUM is the classical optimal detector for a shift in the mean of a process, and the reset makes signal spacing endogenous: quiet, drifting periods emit nothing at all, while a persistent drift accumulates and fires. Scaling h by EWM volatility makes the same code work across tickers and across the volatility cycle without re-tuning. Requiring two same-direction events before trading filters the single-shock case and keeps only genuine persistent mean shifts, which is what CUSUM is theoretically good at detecting.",
+  "novelty": "Not a level, a crossover, or a channel break - the trigger is cumulative deviation since the last reset, so an identical absolute price move cannot re-trigger and the same move fires or does not depending on what has accumulated. This is a fundamentally different sampling scheme from any fixed-lookback indicator in the existing 32.",
+  "source": "Page (1954), 'Continuous Inspection Schemes', Biometrika 41(1-2). Financial form with volatility-scaled threshold and reset: Lopez de Prado, Advances in Financial Machine Learning (Wiley, 2018), section 2.5.2.1 'The CUSUM Filter'. Reference implementation: github.com/muMAJJI/Trading---CUSUM-FILTER",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Percentile-Band Spread with Median Exit",
+  "category": "pairs trading - nonparametric bands",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "MULTI-SYMBOL. Formation window = 40 bars. Standardize each leg's close over the formation window: z_i(t) = (P_i(t) - mean_40(P_i)) / sd_40(P_i). spread_t = z_i(t) - z_j(t). Build the EMPIRICAL cdf of spread over those 40 formation bars and record its 5th, 15th, 50th, 85th and 95th percentiles (q05, q15, q50, q85, q95). In the following 40-bar trading window: ENTER SHORT the spread (short i, long j, equal dollars) on the first bar where spread_t >= q85. ENTER LONG the spread (long i, short j) on the first bar where spread_t <= q15.",
+  "exit_rule": "Close when spread_t reverts to q50 (the formation MEDIAN, not zero) - crossing it from the entry side. Hard stop: close immediately if spread_t >= q95 for a short-spread position or spread_t <= q05 for a long-spread position. Time exit at the end of the 40-bar trading window.",
+  "inputs": [
+   "daily close of both legs",
+   "40-bar rolling mean and stdev per leg",
+   "empirical percentiles of the formation-window spread distribution"
+  ],
+  "params": [
+   "formation/trading length (40/40)",
+   "entry percentiles (85/15)",
+   "exit percentile (50)",
+   "stop percentiles (95/5)"
+  ],
+  "why": "Spread distributions are fat-tailed and skewed, so a Gaussian 2-sigma band mis-states how unusual any given divergence actually is: on a leptokurtic spread, 2 sigma is hit far more often than 5% of the time, and the trader systematically over-trades. Percentiles of the realized distribution are calibration-free and adapt to whatever shape the spread actually has. Exiting at the formation median rather than at zero also concedes that the equilibrium level of a standardized spread is rarely exactly zero - two firms can carry a persistent, non-zero relative premium (different leverage, different payout policy) that a zero-exit rule would keep waiting for.",
+  "source": "Nath (2003), 'High Frequency Pairs Trading with U.S. Treasury Securities: Risks and Rewards for Hedge Funds', applied to GovPX 1994-2000; rules summarized in Krauss (2015), FAU Discussion Paper 09/2015, section 2.1 (page 8 discussion of Nath's percentile triggers, median reversion exit and stop-loss percentiles).",
+  "novelty": "MULTI-SYMBOL. Distinct from idea 1 on both sides of the trade: the entry threshold is a nonparametric quantile rather than a fitted sigma, and the EXIT STRUCTURE is different - reversion to the formation median plus an explicit percentile stop-loss, where GGR has neither. Krauss notes the real hazard this design introduces (a pair already diverging at the end of formation opens immediately at the start of trading), which is exactly what the q95/q05 stop is there to bound.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ }
+]

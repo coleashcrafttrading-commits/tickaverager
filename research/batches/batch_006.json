@@ -1,0 +1,216 @@
+[
+ {
+  "name": "Intraday Sector-ETF Lead-Lag Catch-Up",
+  "category": "lead-lag",
+  "side": "both",
+  "timeframe": "intraday 5-minute",
+  "ohlcv_only": true,
+  "entry_rule": "SINGLE-SYMBOL TRADED, conditioned on one ETF's data. On 5-minute bars. Estimate beta_i by OLS of stock i's 5-minute returns on its sector ETF's 5-minute returns over the trailing 20 sessions. Each bar after 10:00 ET compute the session-to-date returns from the 09:30 open: R_E = ETF close / ETF session open - 1, and R_S = stock close / stock session open - 1. Gap G = beta_i * R_E - R_S. Estimate sigma_G as the stdev of G measured at the SAME time-of-day bar over the last 20 sessions. ENTER LONG stock i when ALL of: G > +1.0 * sigma_G; |R_E| > 0.30%; the ETF's last three 5-minute bars all closed in the same direction as the sign of R_E (the leader is still moving, not already reverting); and stock i's 5-minute dollar volume over the last three bars is at least 0.7x its 20-session median for that time-of-day. ENTER SHORT on the mirror condition G < -1.0 * sigma_G with the same three confirmations.",
+  "exit_rule": "Close when G falls back to within 0.25 * sigma_G of zero (the laggard has caught up), OR at 15:55 ET (no overnight carry - the effect is an intraday information-diffusion effect and the overnight gap is a different process), OR on a stop when |G| widens to 2.5 * sigma_G against you, which means the divergence is real news in the stock rather than slow diffusion.",
+  "inputs": [
+   "5-minute OHLCV for the stock",
+   "5-minute OHLCV for its sector ETF",
+   "20-session rolling beta on 5-minute returns",
+   "session-open anchored cumulative returns for both",
+   "time-of-day conditional stdev of the gap",
+   "time-of-day median dollar volume"
+  ],
+  "params": [
+   "bar size (5m, sweep 1m/15m)",
+   "beta window (20 sessions)",
+   "entry multiple (1.0)",
+   "exit multiple (0.25)",
+   "stop multiple (2.5)",
+   "minimum leader move (0.30%)",
+   "leader-persistence bar count (3)",
+   "liquidity floor multiple (0.7)",
+   "cutoff time"
+  ],
+  "why": "Information does not reach all securities at the same speed. Index and sector ETFs are where informed and macro traders express views first because they are the cheapest, deepest instruments available, and Hasbrouck's price-discovery decomposition confirms the flow runs overwhelmingly from the index vehicle into the sector vehicles and not back. Individual constituents, particularly the thinner ones, then re-price with a lag measured in minutes. Requiring the leader to still be moving is what separates a genuine diffusion lag from a stale quote or a stock that is idiosyncratically weak for its own reasons, and the liquidity floor stops the signal from firing on a name that simply has not printed.",
+  "source": "Hasbrouck (2003), 'Intraday Price Formation in U.S. Equity Index Markets', Journal of Finance 58(6) - finds the S&P 500 ETF contributes markedly to price discovery in the sector ETFs with only minor effects in reverse; Hou (2007), 'Industry Information Diffusion and the Lead-Lag Effect in Stock Returns', Review of Financial Studies 20(4) - establishes that big-firm-leads-small-firm predictability is predominantly an INTRA-industry phenomenon, which is why the conditioning series here is the sector ETF rather than SPY.",
+  "novelty": "SINGLE-SYMBOL TRADED. This is directional catch-up, not mean reversion: it buys the laggard while the divergence is still opening, whereas every band strategy waits for it to stop. The predictor is another instrument's intraday path, and the signal is anchored to the session open with a time-of-day conditional band, which correctly handles the U-shaped intraday volatility profile that a flat rolling stdev would smear. Distinct from opening-range breakout, which uses only the stock's own first N minutes and no second symbol.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ },
+ {
+  "name": "Kyle Lambda Shock",
+  "category": "price impact",
+  "side": "both",
+  "timeframe": "intraday 15-min or daily",
+  "entry_rule": "Let r_t = ln(C_t/C_{t-1}), s_t = sign(r_t) (skip bars with r_t = 0), and x_t = s_t * sqrt(C_t * V_t) (signed square-root dollar volume). Estimate lambda_t as the OLS slope (with intercept) of r on x over the trailing 60 bars. Compute z_lambda = (lambda_t - mean(lambda, 250)) / stdev(lambda, 250). Enter LONG at the next bar's open when z_lambda >= 2.0 AND lambda_t > lambda_{t-5} (impact still rising) AND |r_t| >= 1.0 * ATR(14)/C_t AND r_t > 0. Mirror for SHORT with r_t < 0.",
+  "exit_rule": "Exit when z_lambda <= 0, OR after 10 bars, OR on a 2.0 x ATR(14) stop.",
+  "inputs": [
+   "OHLCV at chosen frequency",
+   "rolling 60-bar OLS regression",
+   "ATR(14)",
+   "250-bar mean and stdev of lambda"
+  ],
+  "why": "Lambda is the slope of the price-impact function - dollars of price move per unit of order flow. A sharp rise means the book has thinned: the same size now moves price further. In a thin book, an initiated move meets less resistance and follows through, and market makers charge more to lean against it. Rising lambda plus a large directional bar is the signature of liquidity withdrawal ahead of a directional repricing.",
+  "source": "Kyle (1985), Econometrica 53(6). The estimation form - regressing returns on signed SQUARE-ROOT dollar volume over a rolling window - follows the Office of Financial Research Working Paper 15-11, 'Systemwide Commonalities in Market Liquidity' (financialresearch.gov/working-papers/files/OFRwp-2015-11_Systemwide-Commonalities-in-Market-Liquidity.pdf), and Hasbrouck (2009) on estimating trading costs from daily data.",
+  "novelty": "The state variable is a regression coefficient measuring market depth, not a price statistic. ATR expansion breakout keys off realized volatility; lambda can rise while ATR is flat, because it measures volatility PER UNIT OF VOLUME. The two disagree most in exactly the thin-tape conditions that matter.",
+  "ohlcv_only": true,
+  "params": [
+   "regression window (30/60/120)",
+   "z threshold (1.5/2.0/2.5)",
+   "signed sqrt-dollar-volume vs signed raw dollar volume",
+   "sign source: return sign vs BVC imbalance sign"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Corwin-Schultz Spread Shock Fade",
+  "category": "effective spread proxy",
+  "side": "both",
+  "timeframe": "daily (or 15-min bars treated as the 'day')",
+  "entry_rule": "For consecutive bars t and t+1 compute beta = [ln(H_t/L_t)]^2 + [ln(H_{t+1}/L_{t+1})]^2; gamma = [ln(max(H_t,H_{t+1}) / min(L_t,L_{t+1}))]^2; alpha = (sqrt(2*beta) - sqrt(beta))/(3 - 2*sqrt(2)) - sqrt(gamma/(3 - 2*sqrt(2))); S_t = 2*(e^alpha - 1)/(1 + e^alpha), setting S_t = 0 when alpha < 0. Let Sbar_t = mean(S, 5). Enter LONG at the next bar's open when Sbar_t >= the 95th percentile of Sbar over the trailing 250 bars AND the cumulative return over the two bars used in the estimate is negative. Mirror for SHORT.",
+  "exit_rule": "Exit when Sbar_t falls below its 50th percentile of the trailing 250, OR after 5 bars, OR on a 2.0 x ATR(14) stop.",
+  "inputs": [
+   "daily or intraday High and Low only for the spread estimate",
+   "closes for the direction filter",
+   "ATR(14)"
+  ],
+  "why": "Corwin and Schultz show that the daily high is nearly always a buy at the ask and the low nearly always a sell at the bid, so the high-low ratio contains both variance and spread; because variance scales with the return interval and the spread does not, the one-day versus two-day ranges separate them. A spike in the estimated spread means the effective cost of immediacy has jumped - liquidity suppliers have backed away. Prices pushed through a temporarily wide spread revert once it normalises, which is the mechanical part of short-horizon reversal.",
+  "source": "Corwin & Schultz (2012), 'A Simple Way to Estimate Bid-Ask Spreads from Daily High and Low Prices', Journal of Finance 67(2):719-759; formula cross-checked against Odegaard's lecture notes (ba-odegaard.no/teach/notes/liquidity_estimators/corwin_schultz_high_low_estimator/) and the intraday application at sites.nd.edu/scorwin/files/2019/11/Application_Intraday_Analysis.pdf.",
+  "novelty": "The state variable is an estimated TRANSACTION COST recovered from the geometry of overlapping ranges, not a volatility band. Keltner and Bollinger fades widen with volatility; this estimator explicitly nets volatility out of the range and keeps only the spread component, so it can spike on a day whose ATR is unremarkable.",
+  "ohlcv_only": true,
+  "params": [
+   "smoothing window for S (1/5/10)",
+   "percentile threshold (90/95/99)",
+   "overnight-return adjustment on/off",
+   "2-day vs 1-day variant"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Kernel-Regression Smoothed Extremum",
+  "category": "nonparametric smoothing / kernel regression",
+  "side": "both",
+  "timeframe": "daily and 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "ATR(14)"
+  ],
+  "entry_rule": "On each bar t, fit a NADARAYA-WATSON KERNEL REGRESSION of close on time over the trailing window of the last 38 bars, indexed i = 1..38: m(tau) = sum_i K_h(tau - i)*P_i / sum_i K_h(tau - i), with the Gaussian kernel K_h(z) = exp(-z^2 / (2*h^2)). Bandwidth: compute h_cv by leave-one-out cross-validation over the window (minimise sum_i (P_i - m_(-i)(i))^2), then set h = 0.3 * h_cv - the deliberate under-smoothing factor Lo, Mamaysky and Wang use so that local extrema are preserved rather than averaged away. Because the fit is one-sided and unstable at the right edge, evaluate extrema with a 2-bar confirmation lag: a LOCAL MINIMUM is declared at index t-2 when m(t-3) > m(t-2) and m(t-2) < m(t-1). ENTER LONG at the close of bar t when a local minimum is declared at t-2 AND close_t is within 0.5 * ATR(14) of close_(t-2) (price has not already run away from the turn). Mirror for short on a declared local maximum.",
+  "exit_rule": "Exit at the close of the bar on which the NEXT local extremum of the opposite type is declared (a local maximum, for a long) - so the holding period is set by the smoothed series' own turning points. Additional hard exits: a 3.0 * ATR(14) stop, and a 20-bar time stop if no opposing extremum has been declared.",
+  "why": "Lo, Mamaysky and Wang's contribution was to show that the chart patterns human technicians claim to see can be defined rigorously as sequences of local extrema of a kernel-smoothed price path, and that some of those definitions carry statistically significant information in US equities. The 0.3 bandwidth adjustment is the crux: cross-validation on financial data picks a bandwidth that is too large for turning-point detection because CV optimises pointwise fit, not derivative structure. Trading the extrema directly is the simplest possible use of the machinery - it buys the confirmed turn of a nonparametrically estimated conditional mean, which is a far more robust notion of 'the low' than a pivot-bar definition that any single wick can create.",
+  "novelty": "The reference series is a NONPARAMETRIC CONDITIONAL MEAN with a data-chosen bandwidth, not a linear filter with a fixed lookback. That distinction matters in practice: the effective smoothing adapts to the local density and noise level of the window, so during a fast move the fit tracks tightly and during chop it flattens - behaviour no fixed-length MA, EMA or Hull MA reproduces. The entry is an extremum of the estimated derivative rather than a crossing of anything, and the exit is the next opposing extremum, making holding period fully endogenous. The 2-bar confirmation lag is stated explicitly because the right-edge instability of a one-sided kernel fit is where naive implementations of this quietly acquire look-ahead bias.",
+  "params": [
+   "window length (30/38/60 bars)",
+   "bandwidth multiplier (0.2/0.3/0.5 x h_cv, or sweep h directly)",
+   "confirmation lag (1/2/3 bars)",
+   "proximity filter (0.25/0.5/1.0 x ATR)",
+   "kernel (Gaussian vs Epanechnikov)",
+   "ATR stop multiple",
+   "time stop (10/20/40)"
+  ],
+  "source": "Andrew Lo, Harry Mamaysky & Jiang Wang, 'Foundations of Technical Analysis: Computational Algorithms, Statistical Inference, and Empirical Implementation', NBER Working Paper 7613 (2000), DOI 10.3386/w7613, published in Journal of Finance 55(4), 2000, pp. 1705-1765 - Nadaraya-Watson kernel regression on price, the cross-validated bandwidth, the explicit 0.3 under-smoothing multiplier, and extrema-based pattern definitions. Trading the raw extrema (rather than their named patterns) is my synthesis; the causal-window and confirmation-lag construction is mine and is not in the paper, which fits two-sided.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Model Confidence Set Volatility Ensemble",
+  "category": "meta-strategy: statistical model selection as the signal",
+  "side": "long",
+  "timeframe": "daily, multiple realized measures from 1- and 5-minute bars",
+  "entry_rule": "Maintain K = 8 one-day-ahead volatility forecasts per symbol, each a HAR regression RV_{t+1} = b0 + b1*M_t + bw*mean(M over lags 2..5) + bm*mean(M over lags 6..22) fitted on a rolling 500-day window, where M is a different realized measure per model: (1) RV from 5-minute returns; (2) subsampled RV from 1-minute returns averaged over 5 offset grids; (3) MedRV; (4) MinRV; (5) bipower variation; (6) the pre-averaged MRC of Idea 6; (7) a Parzen realized kernel with H = floor(sqrt(M)); (8) SHAR with the RS_plus/RS_minus split of Idea 3. Each day score every model against the realised RV(5-min) with QLIKE loss L = RV/f - log(RV/f) - 1. Over a rolling 250-day window of these loss series run the Hansen-Lunde-Nason Model Confidence Set at alpha = 0.10 using the T_max statistic with 1000 block-bootstrap replications, block length chosen from the maximum number of significant AR(p) coefficients fitted to the loss differentials (minimum 3). Let S_t be the surviving set and f*_t = mean of the forecasts in S_t. RULE: open a new long only when f*_t <= the 60th percentile of f* over the last 250 days. Size the position at target_daily_risk / sqrt(f*_t). If |S_t| = 1, halve that size.",
+  "exit_rule": "Exit on a close below the 10-day low, OR when f*_t rises above its 250-day 90th percentile (volatility regime break), OR when the model that was in S_t at entry has been eliminated from S_t for three consecutive days - i.e. the exit is partly governed by the collapse of the forecast that justified the entry, which no fixed-rule exit can express.",
+  "inputs": [
+   "1-minute and 5-minute OHLCV",
+   "daily closes",
+   "rolling OLS for 8 HAR variants",
+   "block bootstrap MCS implementation"
+  ],
+  "why": "Liu, Patton and Sheppard compared over 400 realized measures on 31 assets across five asset classes over 11 years and found that with 5-minute RV as the stated benchmark almost nothing beats it, but under benchmark-free inference some sophisticated measures do win - i.e. which estimator is best is regime-dependent and unknowable ex ante. The Model Confidence Set answers exactly that question with a size-controlled sequential elimination test rather than a beauty contest, and returns a SET rather than a winner. Averaging over the survivors hedges estimator choice, and the width of the set is itself informative: a set that has collapsed to one model means the loss surface has become sharply regime-specific and is likely to shift, which is when a volatility-scaled position is most fragile.",
+  "source": "Hansen, Lunde & Nason (2011), 'The Model Confidence Set', Econometrica 79(2), 453-497 - T_max and T_R statistics, block bootstrap, elimination rule; implementation defaults (alpha, B = 1000, statistic, AR-based block length) as in the CRAN MCS package, MCSprocedure and LossVol(QLIKE): https://cran.r-project.org/web/packages/MCS/MCS.pdf. Motivation and the estimator comparison from Liu, Patton & Sheppard (2015), 'Does anything beat 5-minute RV? A comparison of realized measures across multiple asset classes', Journal of Econometrics 187, 293-311: https://public.econ.duke.edu/~ap172/Liu_Patton_Sheppard_JoE_2015.pdf",
+  "ohlcv_only": true,
+  "params": [
+   "alpha for the MCS (0.05 / 0.10 / 0.25)",
+   "statistic (T_max vs T_R)",
+   "bootstrap replications B (500 / 1000 / 5000)",
+   "block length (fixed 5/10/20 vs AR-selected)",
+   "loss function (QLIKE vs squared error vs R2LOG)",
+   "evaluation window (125 / 250 / 500 days)",
+   "which K measures to include",
+   "forecast horizon h (1 / 5 / 22 days)"
+  ],
+  "novelty": "The strategy's own model-selection step is the signal generator. Nothing in the existing 32 makes the identity and cardinality of the surviving forecast set part of the entry, sizing and exit logic.",
+  "_agent": "v2:7553de6b0ec86a2f6842bf8a52309d6335e8a8ccb631ed57c8015c0d2345e01c"
+ },
+ {
+  "name": "Strike Magnet Drift Into Expiration",
+  "category": "expiry calendar",
+  "side": "both",
+  "timeframe": "daily, 2-3 day holding",
+  "entry_rule": "On the Wednesday of expiration week, at the 15:55 bar, for every stock priced between $20 and $200 with 60-session median dollar volume above $50m, let K = the nearest multiple of $5 to the current price (sweep $2.50 for stocks under $50). Let g = (price - K)/K. If 0 < g <= +0.015, enter short. If -0.015 <= g < 0, enter long. Skip if |g| < 0.002 (already pinned) or if the stock's 20-day ATR/price exceeds 4% (too volatile to pin).",
+  "exit_rule": "Exit at the 15:45 bar on the third Friday, before the post-expiration unpinning. Stop out immediately if price moves further than 2.0% away from K in the adverse direction. Do not carry into the following Monday.",
+  "inputs": [
+   "daily and 5-min OHLCV",
+   "price level to infer the $5/$2.50 strike grid",
+   "20-day ATR",
+   "dollar-volume filter",
+   "exchange calendar for the third Friday"
+  ],
+  "params": [
+   "strike grid ($2.50 vs $5 vs $10 by price bucket)",
+   "entry day (Tuesday/Wednesday/Thursday of expiration week)",
+   "distance band around the strike",
+   "ATR/price ceiling",
+   "exit Friday 15:45 vs Friday close"
+  ],
+  "why": "Ni, Pearson and Poteshman document that on expiration dates, optionable stocks cluster at strike prices far more than chance allows, driven by hedge rebalancing by option market makers and by directional trading intended to move the price toward a strike. Between mid-week and Friday's close, the pinning force is a real order-flow gradient pointed at the nearest heavily-open-interest strike, which for most US equities sits on the $5 grid.",
+  "source": "Ni, Pearson & Poteshman, \"Stock price clustering on option expiration dates,\" Journal of Financial Economics 78(1), 2005, 49-87",
+  "novelty": "The target price is derived from a fixed dollar grid rather than from any price history - a support/resistance level that exists because of contract specifications, not because of past trading. Round-number levels appear nowhere in the existing 32, and the effect switches on only in one week of each month.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Bayesian Run-Length Collapse",
+  "category": "change-point detection / Bayesian",
+  "side": "both",
+  "timeframe": "daily or 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "log returns",
+   "20-bar realised volatility"
+  ],
+  "entry_rule": "Run Adams-MacKay Bayesian online change-point detection on log returns with a Gaussian observation model and a conjugate Normal-Inverse-Gamma prior (mu0 = 0, kappa0 = 1, alpha0 = 1, beta0 = variance of the first 100 returns) and constant hazard H = 1/250. At each bar propagate the run-length posterior P(r_t | data) by the standard message-passing recursion (growth probability = predictive * (1-H), changepoint probability = sum of predictive * H), cap run length at 500 and renormalise. Define R_t = argmax_r P(r_t = r). Declare a change point when R_t < R_{t-1} - 1 (the MAP run length collapses instead of incrementing by one) AND P(r_t <= 5) > 0.30. On a declared change point compute m = mean of the last 5 log returns. LONG entry at the next open if m > 0; SHORT if m < 0.",
+  "exit_rule": "Exit at the next declared change point, or after 20 bars, or on a stop at 2 * sigma_20 * sqrt(bars_held) adverse from entry - whichever first.",
+  "params": [
+   "hazard rate 1/lambda (1/100 to 1/500)",
+   "prior alpha0/beta0/kappa0",
+   "run-length cap",
+   "P(r<=5) confidence threshold",
+   "direction lookback for m (3-10)"
+  ],
+  "why": "CUSUM asks whether the mean moved; BOCPD asks whether the entire generating distribution changed, and returns a calibrated posterior over how long the current regime has been running. That posterior is a free confidence measure - you can require the model to be genuinely sure a break happened rather than trading every threshold touch. Direction is read from the NEW segment, so the strategy is agnostic about whether a break continues or reverses the prior trend, which is the honest position given that breaks do both.",
+  "novelty": "The tradeable object is a posterior over run length, not a statistic crossing a threshold. It gives an explicit probability that we are early in a fresh regime, which no indicator in the existing set can express, and the confidence gate P(r<=5) > 0.30 is a principled abstention that suppresses most marginal breaks.",
+  "source": "Adams & MacKay, 'Bayesian Online Changepoint Detection', arXiv:0710.3742 (2007) - run-length posterior, message-passing recursion, hazard function H(tau). Financial evaluation of detection rules and hazard-rate tuning: ACM DL doi 10.1145/3795154.3795291, 'Bayesian Online Changepoint Detection for Financial Time Series'.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Copula Mispricing-Index Flags",
+  "category": "pairs trading - copula",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "MULTI-SYMBOL. Training window = 252 bars of daily returns for the two names. Build empirical marginal CDFs F_X, F_Y (ECDF with the standard n/(n+1) plotting position). Fit candidate bivariate copulas - Gaussian, Student-t, Clayton, Gumbel, Frank, Joe, N14 - by maximum likelihood on the pseudo-observations, and select by lowest AIC. Each trading bar, compute the two conditional probabilities MI_X(t) = P(U_X <= u_X | U_Y = u_Y) and MI_Y(t) = P(U_Y <= u_Y | U_X = u_X), each obtained from the fitted copula's partial derivative. Accumulate running flags: FlagX(t) = FlagX(t-1) + (MI_X(t) - 0.5), FlagY(t) = FlagY(t-1) + (MI_Y(t) - 0.5), both starting at 0. ENTER: if FlagX >= +0.6 OR FlagY <= -0.6, short X and long Y in equal dollars. If FlagX <= -0.6 OR FlagY >= +0.6, long X and short Y. (Sweep the stricter AND-OR variant the authors recommend for stability.)",
+  "exit_rule": "Close when EITHER flag returns to zero (crosses it from the entry side), OR when either flag reaches +/-2.0, which is the stop-loss. On any exit, reset BOTH FlagX and FlagY to 0 - the accumulator restarts flat, so the next signal is independent of the losing one. Re-fit the copula every 252 bars.",
+  "inputs": [
+   "daily returns of both names",
+   "empirical marginal CDFs",
+   "fitted bivariate copula and its conditional distribution",
+   "running flag accumulators"
+  ],
+  "params": [
+   "training window (252)",
+   "copula family selection criterion (AIC)",
+   "open threshold D (0.6)",
+   "stop threshold S (2.0)",
+   "OR-OR vs AND-OR opening logic",
+   "flag reset on exit (on/off)"
+  ],
+  "why": "A z-score on a spread implicitly assumes the joint distribution of the two names is elliptical, so it treats a large joint down-move exactly like a large joint up-move. Equities are not elliptical - they exhibit strong lower-tail dependence, crashing together far more reliably than they rally together. A copula separates the marginal behaviour of each name from the dependence structure linking them, so 'X is unusually weak GIVEN what Y did today' can be evaluated correctly in the tail where a Gaussian spread model is most wrong and where pairs strategies suffer their worst losses. Accumulating the daily conditional-probability surplus rather than reading a level also means a long string of small, persistent one-sided surprises triggers a trade, which a single-day z-score would miss entirely.",
+  "source": "Xie, Liew, Wu & Zou (2016), 'Pairs Trading with Copulas', Journal of Trading 11(3), 41-52; and Liew & Wu (2013), 'Pairs Trading: A Copula Approach', Journal of Derivatives & Hedge Funds 19, 12-30. Flag accumulation formula, D=0.6 open threshold, S=2 stop, zero-crossing exit, flag-reset rule and the OR-OR vs AND-OR variants from the Hudson & Thames arbitragelab mispricing-index-strategy documentation.",
+  "novelty": "MULTI-SYMBOL. Entirely different entry logic from every band strategy: the state variable is a cumulative sum of conditional-probability deviations from 0.5 under a fitted non-elliptical dependence model, not a standardized price difference. The path-dependent accumulator with a hard reset on exit is also a distinct EXIT STRUCTURE - the same spread level can be a signal or not depending on how the pair got there.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ }
+]

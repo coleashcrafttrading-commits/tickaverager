@@ -1,0 +1,208 @@
+[
+ {
+  "name": "Joint Cross-Asset Position Network",
+  "category": "deep learning / unified time-series and cross-sectional",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "At each daily close, build the feature matrix for the entire universe at once: for each of N symbols compute the 8 features (five volatility-normalised returns at k in {1,20,63,126,252}, three volatility-normalised MACD signals), and concatenate into a single input vector of length 8N. Feed it to a single-hidden-layer perceptron (one fully connected hidden layer, then a tanh output layer of width N) that emits the ENTIRE position vector X_t in [-1,1]^N in one forward pass. Train by maximising the annualised Sharpe ratio of sum_i X_{i,t} * (sigma_tgt/sigma_{i,t}) * r_{i,t,t+1}. Take every component whose magnitude exceeds 0.05 as a position, sized by X_{i,t} * (sigma_tgt/sigma_{i,t}).",
+  "exit_rule": "The whole vector is replaced daily; a symbol exits when its component crosses zero or falls under the 0.05 deadband. Cross-sectionally demean the output before trading (X_i <- X_i - mean(X)) so the book is dollar-neutral - which changes the exit condition from 'this symbol's own signal turned negative' to 'this symbol fell below the universe average signal'.",
+  "inputs": [
+   "daily OHLCV for all N symbols",
+   "volatility-normalised returns at 1/20/63/126/252 days per symbol",
+   "volatility-normalised MACD per symbol",
+   "single-layer perceptron with width-N tanh output",
+   "annualised Sharpe loss"
+  ],
+  "params": [
+   "hidden layer width",
+   "deadband",
+   "volatility target",
+   "whether to cross-sectionally demean",
+   "universe size N",
+   "feature horizon set"
+  ],
+  "why": "Time-series momentum treats each symbol in isolation and cross-sectional momentum uses only rank order; neither can express 'go long A because B is doing X'. Letting one network see the whole cross-section in a single input lets it learn lead-lag and hedging relationships directly. Tan et al. find a single-layer perceptron suffices - the gain comes from the joint input geometry, not from depth, which also makes this cheap enough to fit on a small fleet's history.",
+  "source": "Tan, Roberts & Zohren (2023), 'Spatio-Temporal Momentum: Jointly Learning Time-Series and Cross-Sectional Strategies', arXiv:2302.10175. Read the full text (ar5iv) and verified: signals for different assets treated as multiple related prediction tasks solved simultaneously; a single-layer perceptron as the simplest effective architecture; volatility-normalised returns at k in {1,20,63,126,252}; volatility-normalised MACD signals; annualised Sharpe as the loss; and direct output of positions X_t in [-1,1]^{N_t} with per-position volatility scaling.",
+  "novelty": "One model, one forward pass, produces the entire book. It unifies time-series and cross-sectional momentum rather than choosing between them, and its input dimension scales with the universe - structurally impossible for any per-symbol indicator.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "Bar Location Gate",
+  "category": "entry timing / intrabar confirmation",
+  "timeframe": "any",
+  "side": "both",
+  "entry_rule": "Signal S fires at bar t. Compute CLV_t = (close_t - low_t) / (high_t - low_t), with CLV_t set to 0.5 when high_t == low_t. For longs, enter at close_t only if CLV_t > 0.7 - the bar closed in the top 30% of its own range. If the gate fails, do not abandon the signal: re-evaluate on bars t+1 and t+2, entering at the close of the first of those bars that satisfies both CLV > 0.7 and S still true; if none of the three bars qualifies, drop the signal. For shorts, mirror with CLV < 0.3. Reference S = close_t > max(high over t-20..t-1).",
+  "exit_rule": "Inherited unchanged from the base strategy so the gate is the only manipulated variable; for the reference implementation use a hard stop at entry - 2*ATR(14) and a time stop 30 bars after entry. Report the base strategy, the gated strategy, and - as the diagnostic that matters - the standalone expectancy of the signals the gate rejected outright, which tells you whether the gate is removing losers or removing winners.",
+  "inputs": [
+   "donchian(20)",
+   "atr(14)",
+   "bar high",
+   "bar low",
+   "bar close",
+   "any of the 32 signals"
+  ],
+  "why": "Cont, Kukanov and Stoikov show a near-linear relationship between order flow imbalance and price change, with the coefficient inversely related to market depth, and Gould and Bonart show that top-of-book queue imbalance is a statistically strong predictor of the next mid-price move, more so for large-tick stocks. We have no order book, but the close's position within the bar's own high-low range is the standard OHLCV proxy for which side won that bar. The economic content is specific rather than generic: a breakout bar that closes on its low is a breakout that already failed within the bar, and the signal is being generated by the high rather than by any sustained buying. Gating on close location is the cheapest available approximation to 'did the imbalance that triggered this signal survive to the end of the bar'.",
+  "novelty": "It is a timing gate, not a filter that changes what is traded - the deferral branch means a signal rejected on bar t can still be taken on bar t+1 or t+2, so the gate mostly shifts entries by a bar or two rather than removing them. Distinct from any volume-confirmed signal in the existing 32, which condition on volume magnitude rather than on where within the bar the price came to rest.",
+  "source": "Cont, Kukanov & Stoikov (2014), 'The Price Impact of Order Book Events', Journal of Financial Econometrics 12(1):47-88, arXiv:1011.6402 - fetched and confirmed, linear imbalance-to-price relation with coefficient inverse to depth. Gould & Bonart (2016), 'Queue Imbalance as a One-Tick-Ahead Price Predictor in a Limit Order Book', arXiv:1512.03492 - fetched and confirmed. The CLV substitution for book imbalance is my own proxy, since we have no level 2.",
+  "params": [
+   "CLV threshold for entry",
+   "number of deferral bars allowed",
+   "whether the deferral requires S to still be true",
+   "which signal"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Net-The-Book Internal Crossing",
+  "category": "cost-aware rebalancing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "This is a portfolio-level pre-trade rule sitting in front of every signal. Each rebalance bar: (1) let d_{k,i} be the desired position change in shares that signal k wants in ticker i; (2) compute the net D_i = SUM_k d_{k,i} and the gross Gr_i = SUM_k |d_{k,i}|; (3) SEND ONLY D_i to the market, never the individual d_{k,i}; (4) suppress the trade entirely unless |D_i| * C_i > max(min_ticket_notional, band_i), where band_i = k_band * c_i^(1/3) * |current position notional| with c_i the estimated round-trip cost fraction (EDGE spread + square-root impact). (5) Apply the margin rule: if D_i < 0 (net sell) but at least one signal in the book independently wants to be LONG ticker i, halve |D_i|; symmetrically for net buys against a standing short view. Log the internalisation ratio 1 - SUM|D| / SUM Gr as a first-class diagnostic.",
+  "exit_rule": "Exits net through the same pipe: a signal wanting to exit does not force a trade if another signal wants in, and the position simply persists at the netted level. Two bypasses: a portfolio-level risk breach and a per-ticker stop both liquidate D_i in full, ignoring the band and the margin rule.",
+  "inputs": [
+   "close and volume per ticker",
+   "ohlc for EDGE spread per ticker",
+   "desired position changes from all K signals",
+   "current positions"
+  ],
+  "params": [
+   "k_band band constant",
+   "min ticket notional",
+   "margin-rule slowdown factor (0.25-0.75)",
+   "rebalance frequency",
+   "K number of signals"
+  ],
+  "why": "With hundreds of signals on overlapping tickers, most of the gross turnover is signals trading against each other inside your own book \u2014 you pay a full round trip twice to end up flat. Netting first makes that free. Novy-Marx & Velikov go further and show that deliberately slowing sales when a second signal is bullish (what the industry calls screens or filters) lets you take a position in a second strategy at effectively NEGATIVE transaction costs, because the trade you skip was going to cost you anyway. This is the single highest-leverage change available to a 578-signal book.",
+  "novelty": "Every one of the 32 is specified and tested in isolation, so the marginal cost of adding signal 579 is assumed to be its own standalone cost. Under this rule that marginal cost is near zero when the new signal correlates with the existing book and can be negative when it is anti-correlated with a pending sell. It changes what it even means to evaluate a signal.",
+  "source": "Novy-Marx, R. & Velikov, M., 'A Taxonomy of Anomalies and their Trading Costs' (NBER w20721), section 6, 'Alternative Cost Mitigation Strategies': 'an alternative cost mitigation technique that allows investors trading one strategy to opportunistically take small positions in another at effectively negative trading costs. We call this technique trading one strategy on the margin of another, but it is also known in the industry as screens or filters. The screened strategies are enhanced by slowing sales (purchases) and short covers (shorts) when the screening variable is in the top (bottom) x%.'",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Live Deflated Sharpe Re-Gate",
+  "category": "multiple-testing correction / promotion-demotion",
+  "side": "both",
+  "timeframe": "monthly evaluation; base signals any timeframe",
+  "entry_rule": "Once per month, build the matrix of daily return series for all N candidate ideas in the corpus (backtest history and live history concatenated per idea). Compute N_eff, the effective number of independent trials, by eigen-decomposing the correlation matrix of those series and taking N_eff = the number of leading eigenvalues required to explain 95% of total variance. Compute sigma_SR = the cross-sectional standard deviation of the candidates' Sharpe ratios. Expected maximum Sharpe under the null: E[maxSR] = sigma_SR * [ (1 - g) * Phi^{-1}(1 - 1/N_eff) + g * Phi^{-1}(1 - 1/(N_eff * e)) ] with g = 0.5772 (Euler-Mascheroni). For each idea i with per-bar Sharpe SR_i over T_i bars, skewness g3_i and raw kurtosis g4_i on the COMBINED series, compute DSR_i = Phi[ (SR_i - E[maxSR]) * sqrt(T_i - 1) / sqrt(1 - g3_i*SR_i + ((g4_i - 1)/4) * SR_i^2) ]. Idea i is ADMITTED and may place trades at full base size for the coming month only if DSR_i >= 0.95; otherwise it is paper-only and places no orders.",
+  "exit_rule": "Each admitted idea uses its own exit rule for individual trades. At the gate level: an idea demoted to paper-only has all of its open positions flattened at the next open on the rebalance day. An idea that has been paper-only for 12 consecutive monthly evaluations is deleted from the corpus. Because live returns are appended to the combined series each month, the gate is a live monitor: an idea whose live returns are weak will see DSR fall below 0.95 and be demoted without any separate decay test.",
+  "inputs": [
+   "OHLCV bars",
+   "per-idea daily return series (backtest + live concatenated)",
+   "cross-idea correlation matrix and its eigenvalues",
+   "skewness and raw kurtosis of each idea's returns",
+   "inverse normal CDF"
+  ],
+  "params": [
+   "variance-explained cut for N_eff (90% / 95% / 99%)",
+   "DSR admission threshold (0.90 / 0.95 / 0.99)",
+   "demotion threshold (0.85 / 0.90)",
+   "paper-only patience before deletion (6 / 12 / 24 months)",
+   "whether N_eff uses eigenvalues or raw trial count"
+  ],
+  "why": "With 578 ideas the corpus IS a multiple-testing problem, and the single largest reason a backtested edge fails live is that it was the maximum of many noisy draws rather than a real effect. The Deflated Sharpe Ratio corrects for exactly this by comparing the observed Sharpe against the expected MAXIMUM under the null over the number of trials, with a skew/kurtosis correction. The two design choices that make it a decay monitor rather than a one-off screen are: computing it on the backtest-plus-live series so accumulating live data can either confirm or condemn each idea month by month, and using N_eff from eigenvalue decorrelation rather than the raw count of 578, because a corpus of highly correlated trend-following variants is nowhere near 578 independent trials and treating it as such would deflate every idea to nothing.",
+  "source": "Bailey, D.H. & Lopez de Prado, M. (2014), the Deflated Sharpe Ratio. Implementation details taken from Santoni, M.L., Jouanne, V. & Scullin, M.L., arXiv:2608.23808 sections 3-4: the tau_DSR = 0.95 gate, the Mertens i.i.d. skew/kurtosis variance correction, and the effective-number-of-independent-trials construction obtained by decorrelating the searched parameter vectors with an eigenvalue-based approach. The paper also reports the sobering result that its full five-gate composite showed no significant forward relationship on unseen real market data (Spearman rho = 0.013, p = 0.40) - so this gate should be read as a floor on statistical support, not a predictor of profit.",
+  "novelty": "Turns a one-shot backtest screen into a recurring live gate by appending live returns to the evaluated series, and uses eigenvalue-based N_eff so a large correlated corpus is not over-penalised. Distinct from every other idea here in what it tests: not whether the strategy changed, but whether it was ever real given how many things were tried.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "Shaved Heikin-Ashi Body Expansion",
+  "category": "candlestick-structure",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "Heikin-Ashi open/high/low/close derived from raw OHLC"
+  ],
+  "params": [
+   "direction mode (shaved-bottom long vs shaved-top long)",
+   "body expansion ratio (default 1.0)",
+   "tick tolerance for the shaved test",
+   "max pyramided units"
+  ],
+  "entry_rule": "Build Heikin-Ashi bars: HAclose = (O+H+L+C)/4; HAopen = (HAopen[t-1] + HAclose[t-1])/2 (seed with (O[0]+C[0])/2); HAhigh = max(H, HAopen, HAclose); HAlow = min(L, HAopen, HAclose). LONG at bar t when ALL hold: HAclose[t] > HAopen[t] (up bar); HAopen[t] == HAlow[t] within one tick (no lower shadow \u2014 a shaved bottom); |HAclose[t] - HAopen[t]| > |HAclose[t-1] - HAopen[t-1]| (body strictly larger than the previous bar's body); HAclose[t-1] > HAopen[t-1] (previous bar was also up). SHORT is the exact mirror: HAclose[t] < HAopen[t]; HAopen[t] == HAhigh[t] within one tick; body expanding; HAclose[t-1] < HAopen[t-1].",
+  "exit_rule": "Close the long on the first bar where HAclose < HAopen AND HAopen == HAhigh within one tick AND HAclose[t-1] < HAopen[t-1] (the mirror-image shaved-top signal). Mirror for shorts. Positions accumulated on repeated entries are all closed at once on the exit signal.",
+  "why": "A shaved Heikin-Ashi bar means that across the whole averaging window price never traded back through the open \u2014 every attempt to retrace failed. Pairing that with a strictly larger body and a same-direction predecessor filters out one-off spikes and isolates the segment of a trend where participation is accelerating rather than merely continuing.",
+  "source": "je-suis-tm/quant-trading, file 'Heikin-Ashi backtest.py' \u2014 the four-condition entry block (HAopen equals HA extreme, body larger than prior body, prior bar same direction) and the three-condition mirror exit",
+  "novelty": "Heikin-Ashi is normally used as a colour-flip trend filter. Here the signal is the candle's GEOMETRY \u2014 absence of a shadow plus body expansion versus the previous bar \u2014 which is a shape condition on the smoothed bar, not a crossover or a threshold on an indicator.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Diurnal Relative Volume Thrust",
+  "category": "intraday seasonality normalization",
+  "side": "both",
+  "timeframe": "5-minute",
+  "entry_rule": "For each 5-minute slot s of the session (09:30, 09:35, ..., 15:55), compute expected volume E_s = the median volume in slot s over the previous 20 sessions, and RVOL = current bar volume / E_s. Enter long at the next bar's open when: RVOL >= 3.0, the bar closes in the top 25% of its own high-low range, and the bar's close exceeds the highest high of the preceding 6 bars. Mirror for short. No entries before 09:45 or after 15:15.",
+  "exit_rule": "Exit at the earlier of: 12 bars (60 minutes) elapsed; RVOL below 1.0 for 3 consecutive bars; a stop at the entry bar's opposite extreme; or 15:55 ET. Never hold overnight.",
+  "inputs": [
+   "5-min OHLCV",
+   "20-session per-slot median volume table",
+   "6-bar rolling high/low",
+   "session clock"
+  ],
+  "params": [
+   "RVOL threshold (2/3/5)",
+   "baseline statistic (median vs trimmed mean) and lookback (10/20/60 sessions)",
+   "breakout confirmation length",
+   "time-stop length",
+   "session windows excluded"
+  ],
+  "why": "Volume follows a pronounced and highly stable U-shape (Admati and Pfleiderer's concentrated-trading equilibrium; Andersen and Bollerslev's measurement of the diurnal factor). A flat 20-bar volume average is therefore dominated by the shape of the day, not by information: any 'volume surge' filter measured against a flat average fires almost exclusively in the first and last thirty minutes and is nearly blind at midday. Dividing by the slot's own historical median removes the seasonal factor, so the filter detects genuinely abnormal participation whenever it occurs - and abnormal participation at an unusual hour is a far stronger information signal than the same raw volume at 09:35.",
+  "source": "Admati & Pfleiderer, \"A Theory of Intraday Patterns: Volume and Price Variability,\" Review of Financial Studies 1(1), 1988; Andersen & Bollerslev, \"Intraday periodicity and volatility persistence in financial markets,\" Journal of Empirical Finance 4(2-3), 1997, 115-158 (Fourier Flexible Form deseasonalization); synthesis of the two for a trading rule",
+  "novelty": "The volume baseline is a time-of-day profile rather than a rolling average, which changes which bars fire, not just how often. This is categorically different from the existing 'Bollinger with volume', whose volume term is a flat moving average and therefore mostly re-expresses time of day.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Principal-Component SDF (trade the eigenvectors of the signal set)",
+  "category": "multi-signal combination / dimension reduction",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "the same H rank-transformed characteristic-managed portfolio return series F_j",
+   "eigen-decomposition of the H x H covariance of F",
+   "LARS-EN (elastic net) solver"
+  ],
+  "entry_rule": "Build the H managed portfolios exactly as in the shrunk-SDF idea. On a trailing 1260-session window compute Sigma = cov(F) and its eigen-decomposition Sigma = Q D Q'. Form PC return series P = F Q. Solve the dual-penalty problem bhat = argmin_b (mu_bar_P - D b)' D^{-1} (mu_bar_P - D b) + gamma_2 b'b + gamma_1 sum_j |b_j| by LARS-EN, choosing (gamma_1, gamma_2) on the 3-fold chronological cross-validated OOS R2 grid, with gamma_1 pushed until at most k PCs retain non-zero coefficients (start k = 5). The stock weight is w_{i,t} = sum over retained PCs p of bhat_p * (sum_j Q_{j,p} * z_{i,j,t}). Enter every stock with |w_i| >= 0.05% of gross, sized so sum|w| = 2.",
+  "exit_rule": "Re-estimate monthly and trade the difference. Force a full re-estimation of Q (not just b) if the correlation between this month's top eigenvector and last month's falls below 0.8, and skip trading that month. Go flat if the retained PCs' combined trailing 12-month Sharpe is below -0.5.",
+  "why": "Signals are massively collinear. A handful of principal components of the signal set carries almost all the priceable variation, and the remaining components are dominated by estimation noise. Selecting in PC space rather than in characteristic space is also better behaved for L1: lasso applied to highly correlated raw predictors arbitrarily picks one and discards the rest, whereas the PCs are orthogonal by construction.",
+  "novelty": "The traded object is an eigenvector of the signal covariance matrix - a linear combination of every signal in the corpus - not any individual signal. Distinct from the ridge-SDF idea because sparsity is imposed in PC space and only k factors survive, which makes the live book small and cheap to trade.",
+  "source": "Kozak, Nagel & Santosh, 'Shrinking the Cross Section', NBER WP 24070, section 3.2 and Figures 1b/3b; JFE 135(2):271-292 (2019). Their finding on Fama-French test assets: 'even one PC is already sufficient to get close to the maximum OOS R2 and two PCs are sufficient to attain the maximum', while unregularised models with all factors 'perform extremely poorly'. Solver: Zou & Hastie (2005) LARS-EN.",
+  "params": [
+   "k (number of retained PCs: 1 / 3 / 5 / 10)",
+   "gamma_1 and gamma_2 grids",
+   "whether PCs come from covariance or correlation matrix",
+   "eigenvector estimation window",
+   "sign convention / stability filter for eigenvectors"
+  ],
+  "_agent": "v2:ea925ed25b6af9d1d174935a23471f0383024a2b532396e09ec39a411346d203"
+ },
+ {
+  "name": "Point-and-Figure Triple Top with Vertical Count Target",
+  "category": "alternative bar construction / point-and-figure",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily high, low",
+   "ATR(20) daily for box sizing"
+  ],
+  "entry_rule": "Build a point-and-figure grid from daily highs and lows (high/low method, not close). Box size b = 0.5 * ATR(20), rounded to two decimals, recomputed on the first trading day of each month and held fixed for that month. Reversal = 3 boxes. In an X (up) column, add a box for every full b that the daily HIGH exceeds the current column top; the column reverses to O only when the daily LOW falls to (column top - 3b) or lower, at which point O boxes are filled down from one box below the top. Symmetric rule for O columns using lows and highs. ENTER LONG on the day the current X column posts a box strictly above the tops of BOTH of the two preceding X columns (the classic triple-top buy: three X columns, current top > each of the prior two tops). Mirror for short on a triple-bottom sell.",
+  "exit_rule": "Two-part exit, whichever fires first: (a) VERTICAL COUNT TARGET \u2014 count the number of boxes N in the breakout X column measured from the bottom of that column, target price = (bottom of breakout column) + N * b * 3 (the reversal size is the multiplier); exit the full position when the daily high touches the target. (b) STRUCTURAL STOP \u2014 exit when an O column prints one box below the low of the immediately preceding O column (a double-bottom sell). No time stop.",
+  "why": "Box quantisation plus a 3-box reversal filter means a column only forms after a move that is large relative to recent volatility, which mechanically discards small oscillations that would trigger a continuous-price breakout. Requiring three ascending X columns means supply has been tested and cleared at three separate points, which is a stronger statement about absorbed inventory than a single new high. The vertical count is the distinctive part: it makes the profit target a function of the accumulated congestion height rather than of a fixed R multiple or ATR distance.",
+  "novelty": "A Donchian breakout fires on any new N-day high; this fires only when the price grid itself has produced three completed X columns in ascending order, which typically requires weeks of structure and is a far rarer, more selective event. The exit is genuinely different from anything on the exclusion list: the target is derived from the breakout column's own box count (an implied congestion measure), not from ATR, a trailing stop, or an indicator flip.",
+  "params": [
+   "box multiple (0.25/0.5/1.0 x ATR)",
+   "ATR length (14/20/50)",
+   "reversal boxes (2/3/5)",
+   "high-low vs close construction method",
+   "vertical count multiplier (3 = reversal size, or 2/4)",
+   "triple vs double top requirement"
+  ],
+  "source": "Thomas Dorsey, 'Point and Figure Charting' (Wiley) for the triple-top/bottom signals and the vertical count; Jeremy du Plessis, 'The Definitive Guide to Point and Figure' (Harriman House) for the high/low construction method and count mechanics. On formalising chart patterns into testable algorithms: Lo, Mamaysky & Wang, 'Foundations of Technical Analysis', NBER WP 7613 (2000), DOI 10.3386/w7613.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ }
+]

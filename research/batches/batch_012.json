@@ -1,0 +1,202 @@
+[
+ {
+  "name": "Ariel Semi-Month Exposure Split",
+  "category": "intra-month calendar",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "Partition each calendar month by trading-day index. Long leg: buy the index proxy at the 16:00 close of the LAST trading day of month m-1 and hold. Short leg: at the 16:00 close of the 9th trading day of month m, close the long and open an equal-size short in the same instrument. Both legs are unconditional on price - the only input is the position of the session in the month, from the exchange session calendar.",
+  "exit_rule": "Close the long at the 16:00 close of the 9th trading day of month m (which is also the short entry). Close the short at the 16:00 close of the SECOND-TO-LAST trading day of month m, going flat for one session so the last trading day rolls into the next month's long leg. Softened form: run full gross in the first half and 0-30% gross in the second half instead of an outright short.",
+  "inputs": [
+   "daily close",
+   "exchange session calendar",
+   "trading-day-of-month index"
+  ],
+  "params": [
+   "split point (8th, 9th or 10th trading day)",
+   "hard short vs reduced-gross second half",
+   "index proxy vs equal-weight basket",
+   "whether the last day of month m-1 is included in the long leg"
+  ],
+  "why": "Ariel found that the entire positive mean return of the US market accrued in the first half of the month, defined as the last trading day of the prior month plus roughly the first nine trading days, with the second half flat to negative. Whether the cause is cash-flow timing, information release clustering, or something else, the partition is a clean unconditional test that costs one round trip a month.",
+  "novelty": "Deliberately picked because it CONTRADICTS an idea already in the set. The existing turn-of-month cash-cycle window shorts on the 3rd trading day of the new month; Ariel says trading days 1-9 are the strongest long stretch of the month. Those two rules take opposite positions on the same sessions, so running both is a direct horse race rather than a duplication. The 9-trading-day span and the second-half short leg are also a different partition from any turn-of-month window in the set.",
+  "ohlcv_only": true,
+  "source": "Ariel, 'A Monthly Effect in Stock Returns', Journal of Financial Economics 18(1), 1987 - cited from the literature; not re-fetched this session (search budget exhausted). The exact split point (Ariel uses the last day of the prior month plus the first half of the month by trading-day count) is pinned to the 9th trading day here so the rule is unambiguous; sweep it.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Conditional Monday By Week-Of-Month",
+  "category": "day-of-week, conditional",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "At the 16:00 close of the last trading session of each calendar week (normally Friday), compute W = the index proxy's return over that trading week (this session's close / the close of the last session of the previous trading week - 1) and let D = the calendar day-of-month of the NEXT trading session. Rule A: if W < 0 AND D >= 18, SHORT the index proxy at this session's 16:00 close. Rule B: if W > 0 AND D <= 14, BUY the index proxy at this session's 16:00 close. Otherwise no trade. Generalise 'Monday' properly: apply the rule whenever the gap in calendar days between the current session and the next session is >= 3, so Tuesdays following a Monday holiday are treated as week-opens too.",
+  "exit_rule": "Close the position at the 16:00 close of the next trading session (the week-open session). One-session hold, always, no stop.",
+  "inputs": [
+   "daily close",
+   "exchange session calendar",
+   "calendar day-of-month",
+   "weekly return of the index proxy"
+  ],
+  "params": [
+   "day-of-month split (14/18 vs 15/15)",
+   "prior-week return threshold (0 vs -0.5%)",
+   "index proxy vs equal-weight basket",
+   "whether to include the long leg at all",
+   "calendar-gap definition of a week-open (>=3 vs exactly weekend)"
+  ],
+  "why": "The unconditional Monday effect has weakened to the point of being untradeable, but the conditional version has held up better in the published work: negative Monday returns are concentrated in the last two weeks of the month, and cluster after weeks that already ended down. The proposed mechanisms - settlement and cash-timing effects late in the month, and information processing over a weekend that follows bad news - both predict conditioning rather than an unconditional day dummy.",
+  "novelty": "The existing Friday-to-Monday rotation is a cross-sectional trade on a speculativeness score, and it always fires. This is index-level, fires only on the conditional subset (roughly a quarter of weeks), takes a sign from the prior week's return, and generalises the weekend to any session preceded by a multi-day calendar gap - which the existing weekday ideas do not do. Two different conditioning variables and a different instrument.",
+  "ohlcv_only": true,
+  "source": "Wang, Li & Erickson, 'A New Look at the Monday Effect', Journal of Finance 52(5), 1997 - documents that the Monday effect is concentrated in the last two weeks of the month; cited from the literature, not re-fetched this session (search budget exhausted). The prior-week-sign conditioning follows the conditional-weekend-effect literature (Jaffe, Westerfield & Ma and successors); the multi-day-gap generalisation of 'Monday' is my own tightening.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Half-Day Session Effect",
+  "category": "holiday calendar / shortened sessions",
+  "timeframe": "daily plus a 12:45 intraday leg",
+  "side": "long",
+  "entry_rule": "Detect half-days from the bars themselves, no external table needed: a session is a half-day if its last regular-hours one-minute bar is 12:59 rather than 15:59 (US equity early closes are 13:00 ET). Verified current examples: the day after Thanksgiving every year (27 Nov 2026, 26 Nov 2027) and 3 July when it falls on a weekday and is not itself the observed holiday. Leg A (the crossover): buy the index proxy at the 16:00 close of the session BEFORE the half-day and hold. Leg B (the shortened session's own drift): buy the index proxy at the 09:30 open of the half-day itself. Run A and B as separate books so their contributions are separable.",
+  "exit_rule": "Leg A: sell at the 13:00 official close of the half-day. Leg B: sell at the same 13:00 close. Optional Leg C: at the 12:45 bar open on the half-day, take a position in the direction of the session's move so far (last price versus the 09:30 open) and exit at the 13:00 close, since the whole day's closing auction is compressed into those fifteen minutes.",
+  "inputs": [
+   "1-minute bar timestamps (to detect the 12:59 last bar)",
+   "daily open and close",
+   "official closing price",
+   "exchange session calendar"
+  ],
+  "params": [
+   "which legs to run (A / B / C)",
+   "index proxy vs small-cap-tilted basket",
+   "Leg C trigger time (12:40 / 12:45 / 12:50)",
+   "whether to require a positive Leg-A entry-day return"
+  ],
+  "why": "Half-days combine every ingredient of the pre-holiday effect - thin participation, no institutional appetite to initiate risk, short-sellers reluctant to carry exposure across a long weekend - with a compressed session in which the entire day's closing auction demand has to clear in fifteen minutes against a very thin book. They are also the sessions professional desks most often skip, so whatever flow does arrive faces less competition than usual.",
+  "novelty": "The half-day is invisible to the rule already in the set: the existing pre-holiday trade keys on the session before a full-day CLOSURE, and a half-day is a session, not a closure, so that rule never fires on these dates. This adds a distinct set of dates, and Leg C is a time-of-day trade that only exists on a shortened session because 12:45-13:00 is the only fifteen-minute window in the year that is simultaneously a lunch-hour slot and a closing auction run-up.",
+  "ohlcv_only": true,
+  "source": "Half-day schedule verified this session from nyse.com/markets/hours-calendars: markets close early at 1:00 p.m. on the day after Thanksgiving (27 Nov 2026, 26 Nov 2027) and on Independence Day observed 3 July 2026, with the full 2026-2027 closure list also confirmed there. The underlying pre-holiday return literature is Ariel, 'High Stock Returns Before Holidays', Journal of Business 63(4), 1990, and Lakonishok & Smidt, 'Are Seasonal Anomalies Real?', Review of Financial Studies 1(4), 1988 - cited from the literature. The half-day-specific legs are my construction.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Santa Window Signal Not Just Trade",
+  "category": "turn-of-year calendar, conditional",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "Define the Santa window S as the last 5 trading days of December plus the first 2 trading days of January - 7 sessions, fixed by the exchange calendar. Leg 1 (the trade): buy the index proxy at the 16:00 close of the 6th-to-last trading day of December. Leg 2 (the signal, which is the real point): at the 16:00 close of the 2nd trading day of January, compute the window return r_S = (that close / the close of the 6th-to-last December session) - 1. If r_S < 0, SHORT the index proxy at that close; if r_S > +1.0%, go LONG at that close. If 0 <= r_S <= +1.0%, no January position.",
+  "exit_rule": "Leg 1: sell at the 16:00 close of the 2nd trading day of January (which is also the Leg 2 evaluation point). Leg 2: hold the conditional January position for exactly 15 trading sessions and close at the 16:00 close of session 15. No stop on either leg.",
+  "inputs": [
+   "daily close",
+   "exchange session calendar (December/January trading-day indices)",
+   "index proxy price series"
+  ],
+  "params": [
+   "window definition (5+2 vs 4+3 sessions)",
+   "the r_S thresholds (0% and +1.0%)",
+   "Leg 2 hold length (10 / 15 / 21 sessions)",
+   "whether Leg 2 shorts or merely goes flat on a negative window"
+  ],
+  "why": "The seven-session window sits in the thinnest liquidity of the year: institutional books are closed for the year, tax-loss selling has finished, and the remaining flow is retail and bonus money. The mean return over the window is genuinely positive. The more interesting claim, and the one that makes this worth coding, is the conditional one: when a window this reliably positive fails to deliver, it is evidence that a large seller is present who could not wait for better liquidity, which is informative about January.",
+  "novelty": "The existing December ideas are cross-sectional (tax-loss losers) and month-end (turn-of-month). This is an index-level, precisely-dated 7-session window that straddles the year boundary, and its main content is Leg 2 - using the window's realised return as a conditioning SIGNAL for a subsequent position, not just harvesting the window. That signal-not-just-trade structure appears nowhere in the set. Honest caveat: the window overlaps the already-found turn-of-month December dates, so run them as separate books and check the correlation before stacking them.",
+  "ohlcv_only": true,
+  "source": "Window definition verified this session from the Wikipedia entry on the Santa Claus rally: 'the last 5 trading days in December and the first 2 trading days in the following January', first documented by Yale Hirsch in the 1972 Stock Trader's Almanac; the 2019 Almanac reports an average 1.3% gain over the seven days and a 76% hit rate since 1950/1969. Practitioner source, not peer-reviewed - treat the base rate accordingly. Leg 2 (the conditional January signal) is Hirsch's 'if Santa Claus should fail to call' heuristic, pinned down here into a testable rule by me.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Inventory Retracement Bar (wrong-wick continuation)",
+  "category": "single-bar continuation, counter-intuitive wick logic",
+  "side": "both",
+  "timeframe": "any (designed for 5-15 minute and daily)",
+  "entry_rule": "Let rng = high - low; skip bars where rng == 0. BULLISH IRB requires ALL: (a) uptrend: close > SMA(20) AND SMA(20) > SMA(20)[5]; (b) max(open, close) <= low + 0.45 x rng - the ENTIRE real body sits in the bottom 45% of the bar, so the upper shadow spans at least 55% of the range; (c) rng >= 0.80 x ATR(14). Place a BUY STOP at high + 0.01, live for the next 2 bars, then cancel. BEARISH IRB requires: close < SMA(20) AND SMA(20) < SMA(20)[5]; min(open, close) >= high - 0.45 x rng (body in the top 45%, lower shadow at least 55% of the range); rng >= 0.80 x ATR(14); place a SELL STOP at low - 0.01, live 2 bars.",
+  "exit_rule": "Stop at the signal bar's opposite extreme: low - 0.01 for longs, high + 0.01 for shorts. Target = entry + R x rng(signal bar) for longs, with R swept 1.0-3.0. Time stop: exit at the close of the 10th bar after entry if neither level is hit.",
+  "inputs": [
+   "ohlcv any timeframe",
+   "sma(20) and its 5-bar slope",
+   "atr(14)"
+  ],
+  "params": [
+   "wick threshold (0.45, sweep 0.35-0.60)",
+   "reward multiple R (1.0-3.0)",
+   "order validity (2 bars)",
+   "minimum range in ATR (0.80)",
+   "MA length (20)"
+  ],
+  "why": "In an established uptrend, a bar whose entire body sits at the bottom of its range with a dominant upper shadow is counter-trend inventory: someone tried to sell into strength and could not hold the level. Trading through that bar's HIGH proves the selling was absorbed. This is precisely the inverse of the textbook shooting-star reading, which is why the setups it produces are the ones everyone else is fading.",
+  "source": "Rob Hoffman's Inventory Retracement Bar. The 45% threshold and the 20-period MA trend filter as implemented in https://github.com/m-marqx/Inventory.Retracement.Bar.APP (signal when the wick reaches 45%, 20-period SMA trend filter, entry on a break of the signal candle's extreme, target as a payoff multiple of the signal candle's amplitude, stop at the signal candle's extreme) and the open-source TradingView implementations (e.g. script khxEdmoy, 'Rob Hoffman Inventory Retracement Bar', which computes x = low + 0.45*(high-low) and signals when open and close are both beyond x). Hoffman's original '45-degree MA angle' filter is unquantifiable and is replaced here with an explicit SMA slope test.",
+  "novelty": "Buys the bar with the large UPPER wick and shorts the bar with the large LOWER wick - the opposite sign to the excluded quantified pin bar, which buys long-lower-wick bars. The threshold is on where the whole body sits within the range (both open and close inside the bottom 45%), not on a wick-to-body ratio.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "TD Sequential Buy Setup 9 with Perfection",
+  "category": "bar-counting exhaustion (no indicator)",
+  "side": "both",
+  "timeframe": "daily and 15-minute",
+  "entry_rule": "BUY SETUP: maintain a counter; increment it on each bar where close < close[-4]; reset it to 0 on any bar where close >= close[-4]. The count must be consecutive. When the counter reaches 9, that bar is the candidate signal bar. PERFECTION FILTER (required): min(low of setup bar 8, low of setup bar 9) <= min(low of setup bar 6, low of setup bar 7). If bar 9 is not perfected, continue extending the count and take the first later bar that satisfies the perfection inequality, up to bar 13; abandon the setup if none does. Enter LONG at the close of the qualifying bar. SELL SETUP is the exact mirror: 9 consecutive bars with close > close[-4], perfected when max(high8, high9) >= max(high6, high7); short at that close. Entry variant to sweep (the coded 'Method 2'): instead of entering at bar 9, enter at the close of the first bar after the setup completes on which close > close[-4] (longs).",
+  "exit_rule": "TDST target: exit the long at the first close above the highest high of the 9 setup bars. Stop: the lowest low of the setup minus the true range of the bar that made it (DeMark's risk rule). Hard time stop at 12 bars. Continuation variant to sweep: rather than entering at setup 9, run the Countdown - starting the bar after setup 9, count bars (NOT necessarily consecutive) where close <= low[-2] until the count reaches 13, and enter at the close of countdown bar 13.",
+  "inputs": [
+   "ohlcv (close, high, low) at chosen timeframe",
+   "true range for the stop"
+  ],
+  "params": [
+   "comparison offset (4, sweep 2-6)",
+   "setup length (9, sweep 7-13)",
+   "perfection on/off",
+   "countdown on/off and its offset (close vs low[-2])",
+   "time stop (12 bars)"
+  ],
+  "why": "Pure bar counting. Close-versus-close-four-bars-ago measures how long a directional impulse has been continuously renewing itself; nine uninterrupted renewals is empirically where a short-term trend has consumed its marginal participant, and the perfection rule additionally demands that the last two bars actually made new extremes rather than merely closing weakly. Nothing in the rule references a moving average, an oscillator, a channel or a volume statistic, so its signal timing is close to orthogonal to all 32 strategies already in the book - which makes it valuable as a portfolio diversifier even at modest standalone edge.",
+  "source": "Thomas DeMark, 'The New Science of Technical Analysis' (1994). Setup rule (9 consecutive closes with Close[i] < Close[i-4]) and the countdown's switch to a close[2]-based comparison confirmed in the open-source implementation https://github.com/Forte11Cuba/TD-Sequential-Tom-DeMark. Independent backtest with the same 4-bar offset, 9-bar count and 'Method 2' entry, across 42 futures markets 1980-2013: https://oxfordstrat.com/trading-strategies/td-sequential-1/ - note performance deteriorates markedly at $100 round-turn costs, so this needs liquid names and passive fills.",
+  "novelty": "An exhaustion signal built entirely from ordinal bar comparisons with no smoothing, no threshold on magnitude and no reference to any level. The perfection rule and the TDST target are both defined by the setup's own bars, so the risk and target scale with whatever volatility produced the sequence.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Distribution Into Strength",
+  "category": "short-flow proxy / OHLCV",
+  "side": "short",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily open, high, low, close, volume",
+   "SMA(volume, 20)",
+   "ATR(14)"
+  ],
+  "entry_rule": "Enter SHORT at the next open when ALL of the following hold on bar t: (1) the cumulative return from close[t-6] to close[t-1] is greater than +3.0%; (2) volume[t] > 1.5 * SMA(volume,20)[t-1]; (3) high[t] > high[t-1]; (4) close[t] < open[t]; (5) (close[t] - low[t]) / (high[t] - low[t]) < 0.30, with the bar skipped if high[t] == low[t].",
+  "exit_rule": "Cover at the first of: 10 trading days elapsed; close > high[t] of the signal bar (stop); or price reaching close[t] - 1.5*ATR(14)[t] (target).",
+  "why": "Diether, Lee & Werner establish that short sellers are CONTRARIAN in the short run - they increase shorting after positive returns - and that their activity correctly predicts negative abnormal returns, with a daily short-selling strategy generating significant profits. We have no short-volume feed, so this is the OHLCV signature that activity leaves: a stock that has advanced for a week, then prints a heavy-volume day that makes a new high, reverses below its open, and closes in the bottom third of its range. That is supply being met into strength. Boehmer, Jones & Zhang independently document that heavily shorted stocks underperform lightly shorted ones by 1.16% over the following 20 trading days.",
+  "source": "Diether, Lee & Werner (2009), 'Short-Sale Strategies and Return Predictability', Review of Financial Studies 22(2), 575-607 - full text read at https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=10102&context=facpub, where relss_t is defined as shorted shares divided by traded shares on day t and the contrarian-then-predictive pattern is shown in their Table 3. Complementary magnitude from Boehmer, Jones & Zhang (2008), 'Which Shorts Are Informed?', Journal of Finance 63(2) - abstract via the OpenAlex works API. The OHLCV bar signature is my own proxy for their short-volume measure, stated explicitly as a proxy.",
+  "novelty": "Conditions jointly on prior-week direction, volume expansion, a new high, an open-to-close reversal AND close location within the range. It is not a reversal oscillator or a wick-through-a-swing-level pattern - the volume expansion plus close-location test is what proxies the short-flow, and the multi-day prior advance is what makes it contrarian in the sense the paper documents.",
+  "params": [
+   "prior 5-day return threshold (2%/3%/5%)",
+   "volume multiple (1.3/1.5/2.0)",
+   "close-location cutoff (0.20/0.30/0.40)",
+   "hold length (5/10/21 days)",
+   "ATR target multiple (1.0/1.5/2.5)"
+  ],
+  "_agent": "v2:b8152197ed8b35ef958418264459b827f25607a6e0ac042171e01a7ba4117755"
+ },
+ {
+  "name": "Alpha-Threshold Smoothed Labelling",
+  "category": "machine learning / supervision target design",
+  "timeframe": "intraday (5-minute bars)",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "The distinguishing element is the SUPERVISION TARGET, not the entry threshold. For each 5-minute bar t, compute m_minus(t) = the mean of the previous k closes and m_plus(t) = the mean of the next k closes, then l_t = (m_plus(t) - m_minus(t)) / m_minus(t). Label +1 if l_t > alpha, -1 if l_t < -alpha, and 0 otherwise, with alpha set to the 67th percentile of |l| over the training set so the three classes are roughly balanced, and k in {10, 20, 50}. Train a CNN over the (log return, CLV, CLV-signed volume, normalised range) channels of the last 100 bars, followed by an Inception block with parallel 1x3 and 1x5 convolutions plus max-pooling, then 64 LSTM units and a 3-way softmax. Go long when P(+1) > 0.55 AND a second model trained at the next-longer k also predicts +1.",
+  "exit_rule": "Exit after k bars - the exact horizon the label was defined over - or earlier if P(-1) > 0.50. No fixed price stop: alpha already encodes the minimum move worth trading, so any move that fails to reach alpha is by construction a class-0 event and gets closed on the horizon rather than at an arbitrary price level.",
+  "inputs": [
+   "5-minute OHLCV",
+   "smoothed forward and backward mean closes over k bars",
+   "alpha threshold from the training-set |l| distribution",
+   "CNN + Inception (1x3, 1x5, max-pool) + 64-unit LSTM + 3-class softmax"
+  ],
+  "params": [
+   "smoothing/horizon k",
+   "alpha (or the percentile that sets it)",
+   "probability threshold",
+   "number of input channels",
+   "CNN filter sizes",
+   "multi-horizon agreement requirement"
+  ],
+  "why": "Labelling 'next bar up or down' makes the target almost pure microstructure noise and the model dutifully learns the bid-ask bounce. Smoothing BOTH sides - averaging the previous k and the next k prices rather than comparing two single prints - and then requiring the change to exceed alpha before it counts as a signal removes noise from the label itself. That matters more than the architecture: a clean target with a mediocre model beats a noisy target with a good one. Zhang et al. report this labelling produces markedly more consistent signals.",
+  "source": "Zhang, Zohren & Roberts (2019), 'DeepLOB: Deep Convolutional Neural Networks for Limit Order Books', IEEE Transactions on Signal Processing 67(11):3001-3012; arXiv:1808.03668. Read the full text (ar5iv) and verified: m_minus(t) as the mean of the previous k mid-prices, m_plus(t) as the mean of the next k, l_t = (m_plus - m_minus)/m_minus, three-class labelling at threshold alpha, horizons k in {20,50,100}, and the architecture (1x2 stride-2 convolutions over price-volume pairs, a 1x10 integrating filter, Inception@32 with 1x3 and 1x5 branches plus max-pooling, then 64 LSTM units). Applied here to OHLCV bars rather than LOB levels.",
+  "novelty": "The innovation lives in the label, not the trade trigger: a two-sided smoothed, threshold-gated target. It is distinct from triple-barrier labelling, which is path-dependent and asymmetric, and from plain next-bar direction, which is dominated by noise. It also makes the exit horizon and the label horizon the same object, which most supervised trading setups get wrong.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ }
+]

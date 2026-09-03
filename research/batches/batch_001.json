@@ -1,0 +1,222 @@
+[
+ {
+  "name": "Network Momentum from Neighbours' Trend Signals",
+  "category": "lead-lag / cross-sectional momentum spillover",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close prices across the universe",
+   "Levy-area or DTW lead-lag matrix",
+   "EMA-based normalized trend signals",
+   "22-bar EWM volatility"
+  ],
+  "entry_rule": "MULTI-SYMBOL cross-sectional. STEP 1, build the graph: from the ensemble-averaged normalized Levy areas Abar (as defined above), keep for each node m only its 10 largest-|Abar| edges, symmetrize A_mn = A_nm = max(|Abar_mn|, |Abar_nm|) over kept edges, zero the diagonal, then graph-normalize Atilde = D^(-1/2) A D^(-1/2) with D = diag(A * 1). STEP 2, compute each name's OWN trend signals: for (short, long) in {(8,24), (16,48), (32,96)} let q = (EMA_short(P) - EMA_long(P)) / sd_63(P), then R^k = q / sd_252(q), giving K = 3 signals per name. STEP 3, and this is the whole idea: the signal TRADED for name m is not its own trend but its NEIGHBOURS' trends, Rtilde^k_m = sum over n in neighbours(m) of Atilde_mn * R^k_n. ENTER LONG m when (1/K) * sum_k r(Rtilde^k_m) > 0 and ENTER SHORT when it is < 0, where r is a REVERTING response function r(x) = c_lambda * x * exp(-lambda^2 * x^2 / 2) with lambda = sqrt(2) - size grows with signal strength up to a point and then SHRINKS BACK toward zero for extreme signals, because an extreme aggregate reading usually means the spillover has already been absorbed. Position size for m: (1/M) * (1/K) * sum_k r(Rtilde^k_m) * (1 / sigma^22_m) * sigma_target / sqrt(252), with M the universe size, sigma^22 the 22-bar EWM volatility of m's returns, and sigma_target = 10% annualized.",
+  "exit_rule": "Rebalance daily to the target sizes; a position closes naturally when its network signal crosses zero, and shrinks automatically as the signal becomes extreme via the reverting response. Rebuild the lead-lag graph every 21 bars. Optional hard risk gate: halve gross exposure whenever the realized 21-bar volatility of the equal-weighted universe exceeds its 90th percentile over 756 bars.",
+  "why": "Trend-following on a name uses only that name's own history and therefore cannot see information that has already arrived at its neighbours and not yet at it. If leadership structure is real, the neighbours' trend state is a forecast of the name's own next move that its own price has not yet expressed. Replacing the own-trend feature with the degree-normalized neighbour-average is a clean test of exactly that proposition, holding the sizing machinery constant. The reverting response function additionally encodes the empirical fact that very strong momentum readings mark late-stage trends.",
+  "novelty": "The traded signal for a stock contains NONE of its own trend - it is entirely its graph neighbours' trend signals, degree-normalized. The sizing function is non-monotone, deliberately de-sizing extreme signals, which is a different exposure profile from any standard trend or reversal rule.",
+  "params": [
+   "number of neighbours retained per node (5-20)",
+   "trend signal EMA pairs",
+   "K",
+   "lambda in the response function (sqrt(2))",
+   "sigma_target (10%)",
+   "volatility lookback (22)",
+   "graph rebuild period (21)",
+   "lead-lag estimator (Levy area vs DTW/DDTW/shapeDTW)"
+  ],
+  "source": "Linze Li and William Ferreira, 'Follow the Leader: Enhancing Systematic Trend-Following Using Network Momentum', arXiv:2501.07135 - network momentum feature, graph normalization, ensemble lookbacks {22,44,66,88,110,132}, the reverting response r(x) = c_lambda x exp(-lambda^2 x^2/2) with lambda = sqrt(2), and the position-sizing formula all read from the arXiv HTML full text. I substituted a top-k thresholded adjacency for the paper's Kalofolias graph-learning step to make it directly implementable.",
+  "_agent": "v2:a1639122361ba21f547792bd5221bffb0c601a33c6b712ef6c9421a3847e346b"
+ },
+ {
+  "name": "Point-and-figure triple-top breakout on ATR-scaled boxes",
+  "category": "chart-construction breakout (time removed)",
+  "side": "both",
+  "timeframe": "daily bars in, time-independent chart out",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily high",
+   "daily low",
+   "ATR(20) for box sizing"
+  ],
+  "entry_rule": "CONSTRUCT the P&F chart with A.W. Cohen's high/low method. Box size B is set on the first trading day of each calendar quarter as B = round(0.5 * ATR(20), 2), minimum 0.01, and held fixed for that quarter. Reversal = 3 boxes. State machine, one action per daily bar, extension taking priority over reversal: (a) if in an X column whose top is T: if High_t >= T + B then T := T + floor((High_t - T)/B) * B; else if Low_t <= T - 3B then start a new O column whose bottom D := T - floor((T - Low_t)/B) * B. (b) if in an O column whose bottom is D: if Low_t <= D - B then D := D - floor((D - Low_t)/B) * B; else if High_t >= D + 3B then start a new X column whose top T := D + floor((High_t - D)/B) * B. ENTRY LONG: at the instant the current X column's top exceeds the tops of BOTH of the two immediately preceding X columns - a Triple Top Breakout. Place the order as a buy stop at (max of those two prior X tops) + B, so the fill happens intrabar on the breakout day. SHORT mirror: current O column's bottom falls below the bottoms of both of the two preceding O columns (Triple Bottom Breakdown).",
+  "exit_rule": "Exit the long on a Double Bottom Breakdown: the current O column's bottom falls below the bottom of the immediately preceding O column. That is the whole exit - there is no ATR stop and no time stop, because the 3-box reversal already embeds a volatility-scaled stop distance of 3B = 1.5 * ATR(20).",
+  "params": [
+   "box size ATR multiple (default 0.5)",
+   "ATR period for sizing (default 20)",
+   "box resize frequency (quarterly / monthly / fixed)",
+   "reversal boxes (default 3)",
+   "tops required (2 for double top, 3 for triple top)"
+  ],
+  "why": "P&F throws away time entirely: a bar that does not move price by a box does not exist on the chart. That removes the single largest source of noise in a breakout system - the many small bars that repeatedly re-arm and disarm a Donchian channel. A triple top additionally requires that the level has already turned the market away twice, so the breakout is through a level with demonstrated supply behind it, which a Donchian high does not require.",
+  "novelty": "Not a rolling-window breakout at all. The trigger level is endogenous (a price the market has visited and been rejected from in two separate columns), the chart advances only on filtered price movement, and the exit is a structural column event rather than a stop distance.",
+  "source": "A.W. Cohen's high/low point-and-figure method; Double Top Breakout and Triple Top Breakout definitions verified from StockCharts ChartSchool 'P&F Classic Patterns' (fetched 2026-09-02): a Double Top Breakout is 'an X-column breaks above the high of the prior X-column' with an O-column between; the Triple Top requires two prior X-columns at equal highs and a third exceeding both, spanning five columns. Traditional box scaling from the ChartCraft table popularised by Thomas Dorsey; I substituted ATR-proportional boxes so the rule is symbol-agnostic and sweepable.",
+  "_agent": "v2:28e034d84f2a9fadfe2cd37476ed1f0fe31299b3ab96ab30d97df90c3ec92854"
+ },
+ {
+  "name": "Patell Standardized Residual Reversion",
+  "category": "event-study methodology",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of symbol",
+   "daily OHLCV of SPY as market proxy",
+   "OLS single-factor regression",
+   "residual standard error"
+  ],
+  "entry_rule": "Fit OLS market model r_i,s = a + b*r_SPY,s over the estimation window of the 250 daily sessions ending 21 sessions before today (window [-270,-21], disjoint from the event window). Record s = residual standard error, M = 250, Rm_bar = mean SPY return in the window, SS = sum of squared deviations of SPY return in the window, and R2 = regression R-squared. Today's abnormal return AR = r_i,today - (a + b*r_SPY,today). Patell prediction-error standard deviation S = s * sqrt(1 + 1/M + (r_SPY,today - Rm_bar)^2 / SS). Standardized abnormal return SAR = AR / S. LONG at the next session's open when SAR <= -3.0 AND |r_SPY,today| <= 0.010 AND R2 >= 0.05. SHORT at the next session's open when SAR >= +3.0 under the same two side conditions.",
+  "exit_rule": "Freeze a and b at entry. Each subsequent session accumulate CAR = sum of daily AR since entry. Exit at the next open after the first session on which CAR crosses back through 0 in the favourable direction (CAR >= 0 for longs, CAR <= 0 for shorts). Hard time exit at the close of the 10th session held. Hard stop when CAR reaches -8% (longs) or +8% (shorts).",
+  "why": "Patell's standardization divides by the FORECAST error, not the fitted residual sd: the (r_m - Rm_bar)^2/SS term inflates the denominator on days when the market itself is far from its estimation-window mean, so the same raw move counts as a smaller surprise on a wild market day. What survives a -3 SAR filter is therefore genuinely idiosyncratic, not a beta-driven or vol-regime artefact. Idiosyncratic price shocks that carry no market component are largely liquidity events - a forced seller paying for immediacy - and the compensation to the immediacy provider is the reversion over the following days.",
+  "source": "Kothari & Warner, 'Econometrics of Event Studies', Handbook of Corporate Finance vol. A ch.1 (2006) - read the full PDF directly (bu.edu/econ/files/2011/01/KothariWarner2.pdf); return decomposition eqs (1)-(2), CAR eq (4), test statistic eqs (5)-(6). Patell (1976) standardized-residual formula S^2_AR = s^2[1 + 1/M + (Rm0-Rm_bar)^2/sum(Rmt-Rm_bar)^2] as documented at https://eventstudytools.com/significance-tests.",
+  "novelty": "The trigger is a regression residual standardized by the prediction error, not a price z-score or an oscillator: it removes the market component AND widens the bar when the market itself was extreme. The exit is also stated in abnormal-return space (CAR crossing zero with beta frozen at entry), so the position closes when the event has been undone relative to the market, not when a price level is touched.",
+  "params": [
+   "estimation window length (150/250/500)",
+   "estimation gap before event (5/21/40)",
+   "SAR entry threshold (2.5/3.0/3.5)",
+   "market-quiet threshold (0.5%/1.0%/2.0%)",
+   "min R2 (0.0/0.05/0.15)",
+   "max hold (5/10/20)",
+   "CAR stop (-5%/-8%/-12%)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Haircut Sharpe Position Sizing",
+  "category": "multiple-testing control / position sizing",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "For each candidate rule k with T bars of history and non-annualised Sharpe SR_k, form the single-test statistic t_k = SR_k * sqrt(T) and the one-sided single-test p-value p_S,k = 1 - Phi(t_k). Adjust all M of them for multiplicity with Holm: sort ascending, p_Holm(i) = min{ max_{j<=i} [ (M - j + 1) * p_(j) ], 1 }. Invert the adjusted p-value back to a t: t_H,k = Phi^{-1}(1 - p_Holm(k)), and back to a Sharpe: HSR_k = t_H,k / sqrt(T). The haircut is (SR_k - HSR_k)/SR_k. Rule k then trades its OWN entry signals, but at risk fraction w_k = clip( HSR_k / SR_target, 0, w_max ) with SR_target = 1.0/sqrt(252) (a 1.0 annualised Sharpe) and w_max = 0.25 of the book. Rules with HSR_k <= 0 get w_k = 0 and never fire. Run the same computation with Bonferroni (p_Bonf(i) = min[M*p_(i), 1]) and with BHY (start from the LARGEST p-value: p_BHY(M) = p_(M); p_BHY(i) = min[ p_BHY(i+1), (M*c(M)/i)*p_(i) ] with c(M) = sum_{j=1..M} 1/j) and size on the MINIMUM of the three HSRs.",
+  "exit_rule": "Each rule exits on its own signal. Recompute the haircut monthly on an expanding window and rescale live position size to the new w_k at the next bar's open - a rule whose haircut deepens is trimmed rather than switched off, and a rule whose haircut lifts is scaled up, both continuously. Close out entirely and permanently retire a rule the first time w_k reaches 0 on two consecutive monthly recomputes.",
+  "inputs": [
+   "per-bar returns of every candidate rule",
+   "sample Sharpe and bar count per rule",
+   "sorted p-value vector across all M rules",
+   "normal CDF and its inverse"
+  ],
+  "why": "Every other gate in this area is binary: the rule trades or it does not. That throws information away and creates a cliff edge where a rule oscillates on and off as its p-value jitters around a threshold. The haircut Sharpe is naturally continuous - it answers 'what single-test Sharpe should I assign this rule as if there had been no data mining?' - so it maps directly onto a risk fraction. Harvey and Liu's key empirical finding is that the haircut is strongly NON-LINEAR in the reported Sharpe: a marginal 0.5 Sharpe strategy is haircut nearly to nothing after a few hundred trials while a 1.5 Sharpe strategy loses far less than the folk-rule 50%. Sizing on the haircut therefore concentrates capital in exactly the right place automatically.",
+  "novelty": "Continuous capital allocation as a function of multiple-testing-adjusted significance, rather than an on/off gate. Taking the minimum across Bonferroni, Holm and BHY is a deliberate belt-and-braces construction that avoids depending on any single error-rate philosophy.",
+  "source": "Harvey, C. & Liu, Y. (2015), 'Backtesting', Journal of Portfolio Management 42(1), 13-28 - the haircut Sharpe ratio and the exact Bonferroni / Holm / BHY adjusted p-value formulas, plus the finding that the haircut is non-linear and that the customary 50% haircut is too punitive for high-Sharpe and too lenient for low-Sharpe strategies. PDF: https://people.duke.edu/~charvey/Research/Published_Papers/P120_Backtesting.PDF . Companion: Harvey, C. & Liu, Y. (2014), 'Evaluating Trading Strategies', JPM 40(5), 108-118.",
+  "ohlcv_only": true,
+  "params": [
+   "M (the honest trial count - sweep 100 / 578 / 5000 to see sensitivity)",
+   "SR_target",
+   "w_max",
+   "adjustment method (Bonferroni / Holm / BHY / min of three)",
+   "recompute cadence"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "TPO Count Control Ratio",
+  "category": "auction-theory",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "ATRd = ATR(14) daily; row width w = 0.05*ATRd. Build the intraday TPO profile from RTH 30-minute bars: each 30-minute period 'marks' every row between its own low and high inclusive; TPO(row) = the number of periods marking that row. At the close of the 12:00-12:30 ET period (six periods completed), let POC = the row with the highest TPO count, breaking ties in favour of the row nearest the session's midpoint (SL+SH)/2. Let TPOabove = sum of TPO counts over all rows strictly above the POC row, TPObelow = sum over all rows strictly below. Ratio = TPOabove/TPObelow (treat TPObelow=0 as Ratio=infinity). LONG entry: Ratio >= 1.60 AND the 12:30 close > price(POC) AND the 12:00-12:30 bar's close > its open. Buy at the 12:30 close. SHORT entry: Ratio <= 0.625 AND the 12:30 close < price(POC) AND that bar's close < its open. Sell at the 12:30 close. If 0.625 < Ratio < 1.60, or if the price/POC condition disagrees with the ratio, take no trade that session. One trade per session.",
+  "exit_rule": "Stop at price(POC) - 0.15*ATRd for longs, price(POC) + 0.15*ATRd for shorts - the POC is the fair-value reference and losing it invalidates the control reading. Target = the session extreme in the trade's direction as of entry, plus 0.50*IBW in that direction (IBW = the 09:30-10:30 initial-balance width). Move the stop to price(POC) once price has travelled 0.50*IBW in favour. Flat at 15:55 ET.",
+  "inputs": [
+   "30-minute RTH ohlcv",
+   "daily atr(14)",
+   "TPO profile construction",
+   "initial balance width",
+   "session-time labels"
+  ],
+  "params": [
+   "row width (0.05*ATRd)",
+   "decision period (12:30)",
+   "ratio thresholds (1.60 / 0.625)",
+   "stop offset (0.15*ATRd)",
+   "target extension (0.50*IBW)"
+  ],
+  "why": "The TPO count is auction theory's direct measure of which side is doing the work. Time spent above the point of control is time the market has held prices that only buyers were willing to pay; time below is the mirror. Structurally, a market whose distribution has accumulated far more time-at-price above fair value than below has been repeatedly rejected on its attempts to go lower and has repeatedly found acceptance higher - the responsive sellers are not showing up. Measuring this by counting time marks rather than by looking at the price path filters out the fast, unaccepted excursions that dominate a bar-by-bar reading.",
+  "novelty": "A distribution-asymmetry statistic computed on the TPO histogram, evaluated once at a fixed decision time. The already-held Rotation Factor is a path statistic - it compares each period's high and low to the previous period's - and can be strongly positive on a day whose TPO count is balanced, and vice versa. Nothing in the existing set counts time-at-price either side of the POC.",
+  "source": "TPO count / 'who is in control' is standard Market Profile teaching from Peter Steidlmayer's CBOT Market Profile handbooks and James Dalton et al., 'Mind Over Markets' (Wiley). The Wikipedia Market Profile article confirms the TPO definition ('opportunity created by the market at a certain price at a certain time') and the 70% value area but gives no thresholds. The 1.60/0.625 ratio thresholds, the 12:30 decision time and the exit structure are my quantification (synthesis).",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Nine Buying Tests Composite Score",
+  "category": "wyckoff",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "ATR=ATR(14), AV=SMA(volume,20). Evaluate nine boolean tests on every bar; each is worth 1 point. T1 (downside objective met): close<=(120-bar highest high)-3.0*ATR. T2 (climax and secondary test present): there exists a bar c in the last 60 with volume(c)>=2.5*AV(c) and low(c)=lowest low of the last 60 bars, and a later bar t in c+3..c+40 with low(t) in [low(c), low(c)+0.75*ATR] and volume(t)<=0.60*AV. T3 (activity bullish on rallies): over the last 40 bars, mean volume of bars with close>close[1] > mean volume of bars with close<close[1]. T4 (downward stride broken): close > the value at the current index of the straight line through the two most recent 7-bar fractal swing highs, extended forward. T5 (higher supports): the two most recent 7-bar fractal swing lows satisfy L_recent > L_prior. T6 (higher tops): the two most recent 7-bar fractal swing highs satisfy H_recent > H_prior. T7 (stronger than the market): using SPY daily bars over the same 20 bars, (close/close[20]-1) for the symbol > the same quantity for SPY, AND the symbol's 20-bar lowest low > its 60-bar lowest low while SPY's 20-bar lowest low equals its 60-bar lowest low. T8 (base forming): (40-bar highest high - 40-bar lowest low)<=2.5*ATR. T9 (reward at least 3x risk): (60-bar highest high - close) >= 3.0*(close - 60-bar lowest low). LONG entry: buy at the close of the first bar on which the total score transitions from <=6 to >=7. SHORT entry uses the nine selling tests, which are the exact mirrors of T1-T9 (upside objective met, buying climax and secondary test, activity bearish on declines, upward stride broken, lower supports, lower tops, weaker than SPY, base forming, reward>=3x risk measured downward); sell at the close of the first bar on which the selling score transitions from <=6 to >=7.",
+  "exit_rule": "Exit at the close of the first bar on which the score falls back to <=4. Hard stop at (60-bar lowest low at entry)-0.25*ATR for longs, (60-bar highest high at entry)+0.25*ATR for shorts. Take profit at the T9 objective: the 60-bar highest high measured at entry (60-bar lowest low for shorts). No time stop - the score exit handles staleness.",
+  "inputs": [
+   "ohlcv",
+   "SPY daily ohlcv (benchmark)",
+   "atr(14)",
+   "sma(volume,20)",
+   "7-bar fractal swings",
+   "rolling 40/60/120-bar high/low"
+  ],
+  "params": [
+   "score threshold to enter (7 of 9)",
+   "score threshold to exit (4)",
+   "T1 objective in ATR (3.0)",
+   "T2 climax volume multiple (2.5)",
+   "T3 lookback (40)",
+   "T7 relative-strength window (20)",
+   "T8 base width (2.5*ATR)",
+   "T9 reward:risk (3.0)"
+  ],
+  "why": "Wyckoff explicitly refused to trade a single pattern; he required a battery of independent conditions to line up before committing, and the nine tests are the surviving checklist. Each test proxies a different piece of the same story - the decline has run its course, supply was exhausted in a climax, demand shows up on rallies and dries up on declines, structure has turned, and the stock is being supported when the market is not. As a portfolio of weakly-correlated conditions, the SCORE has a better signal-to-noise ratio than any one condition, and the crossing of the score is a genuinely different trigger from the firing of any component.",
+  "novelty": "An ensemble threshold-crossing entry rather than a pattern match: nothing fires unless seven distinct structural conditions hold simultaneously, and the entry bar is the bar on which the seventh arrives. Also the only rule here that uses cross-sectional relative strength against a benchmark's bars, which is Wyckoff's own comparative-strength test and is absent from every idea in the existing set. The exit is score-decay, not price - also unique here.",
+  "source": "The nine classic buying tests and nine selling tests are Wyckoff's, codified and published by Hank Pruden in 'The Three Skills of Top Trading: Behavioral Systems Building, Pattern Recognition, and Mental State Management' (Wiley, 2007), and taught in the Wyckoff Analytics / Wyckoff Stock Market Institute course material. The mapping of each qualitative test to a specific computable predicate, and the 7-of-9 threshold, are my quantification (synthesis).",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Sum-of-the-Parts Multiple Reversion",
+  "category": "return predictability econometrics / component forecasting",
+  "timeframe": "daily bars aggregated to monthly; monthly rebalance",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "PROXY NOTE UP FRONT: the original method decomposes the index return into dividend yield, earnings growth and price-earnings multiple growth. This bot has no dividends or earnings, so the fundamental anchor is replaced by a long moving average of price - a smoothed-price 'multiple' in the spirit of Campbell-Shiller's smoothed earnings-price ratio, where the 10-year average is doing the work of removing cyclical noise. At each month-end t: (1) Define the multiple m_t = ln(P_t) - ln( (1/120)*sum_{i=0..119} P_{t-i} ), the log ratio of the index level to its 120-month moving average. (2) Define the long-run drift component gd_t = the mean monthly log return of the 120-month moving average series itself over the trailing 240 months - this stands in for expected earnings growth and is assumed near-unforecastable. (3) CONTEMPORANEOUS ANCHOR REGRESSION: regress the multiple on a state variable available at the same time, m_s = a + b*z_s + u_s, where z is an OHLCV-computable state variable (use log RVOL as the base case). Both sides are known at s; this is not a predictive regression. The fitted value says what multiple historically prevailed when the economy looked like this. (4) The residual gives the expected multiple growth: -uhat_t = (a_hat + b_hat*z_t) - m_t. If the index sits above the multiple its state variable historically justified, expect the multiple to fall, and vice versa. (5) REVERSION-SPEED REGRESSION: reversion is slow and does not happen in one month, so regress realised multiple growth on the lagged residual, gm_{s+1} = c + d*uhat_s + v_s, and shrink the slope as d_shrunk = (s/(s+i))*d_hat with the shrinkage factor increasing with sample length (equivalently, set c = -d_shrunk * mean(gm) so the unconditional expected multiple growth is zero). (6) Expected multiple growth E[gm_{t+1}] = c + d_shrunk*uhat_t. (7) SUM THE PARTS: rhat_{t+1} = E[gm_{t+1}] + gd_t. (8) Truncate at zero and rebalance at the next open to w_t = clip((1/5)*rhat/sigmahat^2, 0, 1.5).",
+  "exit_rule": "No stop, no target. Hold one month; recompute the multiple, refit both regressions, rebalance. w = 0 exits fully. The position decays as the multiple reverts toward its state-conditional anchor rather than on any price trigger.",
+  "inputs": [
+   "SPY monthly close",
+   "120-month moving average of price",
+   "log price-to-smoothed-price multiple",
+   "a contemporaneous state variable z (log RVOL base case)",
+   "two OLS regressions with shrinkage",
+   "240-month drift estimate"
+  ],
+  "params": [
+   "smoothing window for the anchor (60, 120, 180 months)",
+   "choice of state variable z (log RVOL, aggregate illiquidity, avgcor, the Hill tail measure)",
+   "shrinkage schedule (the s/(s+i) form, or a fixed factor)",
+   "drift window (120, 240 months)",
+   "direct multiple-growth predictive regression as an alternative to the reversion route"
+  ],
+  "why": "Ferreira and Santa-Clara's argument is that the standard predictive regression estimates ONE coefficient on ONE noisy left-hand side - the total return, which is dominated by an unforecastable component - and so throws away most of the available structure. Decomposing the return into parts and forecasting each with the method best suited to it uses far more prior information: the near-unforecastable growth term gets a long moving average (no estimation risk), the carry term gets a random walk, and only the genuinely predictable multiple-growth term gets a regression. That means far fewer estimated parameters attached to the noisy part of the return, which is precisely where out-of-sample gains in this literature come from. The multiple-reversion variant adds the further idea that the anchor should be state-conditional: an elevated multiple is not automatically bearish if the current state historically justified an elevated multiple. Their reported result is substantial certainty-equivalent gains over the historical mean on the Goyal-Welch data.",
+  "novelty": "The 32 contain mean-reversion rules (Bollinger fade, VWAP z-score) but they all revert to a FIXED statistical band. Here the reversion target is itself a regression fitted value that moves with a state variable, so the same distance above the moving average is bearish in one volatility regime and neutral in another - and the expected reversion is deliberately slowed by an estimated, shrunk speed coefficient rather than assumed to complete in one bar. The additive decomposition of the forecast into a drift part and a reversion part has no analogue in the corpus.",
+  "source": "Ferreira, M.A. and Santa-Clara, P., 'Forecasting Stock Market Returns: The Sum of the Parts is More than the Whole', NBER Working Paper 14571 (Dec 2008), published JFE 100(3), 2011 - read directly at https://www.nber.org/system/files/working_papers/w14571/w14571.pdf. The decomposition is eqs. (13)-(15), the 20-year moving average for expected earnings growth and the random-walk treatment of the dividend-price ratio are on pp.6-7, and the multiple-reversion route with its contemporaneous anchor regression eq. (17), residual eq. (19), reversion-speed regression eq. (20) and shrinkage eqs. (21)-(23) are on p.7. The substitution of a 120-month moving average of price for the earnings-based multiple is my proxy, flagged as such - it is what makes the rule OHLCV-only, and it is the part most in need of validation.",
+  "_agent": "v2:2986ad60a64b30f5d6a1ab8fd871eb95cd89b5d6c01da660d34a55f6bf9aab82"
+ },
+ {
+  "name": "Transfer Coefficient Governor",
+  "category": "portfolio construction / constraint diagnostics",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "At every weekly rebalance, before placing any order, compute two active weight vectors relative to the equal-weighted fleet benchmark. (1) w_uncon = the unconstrained optimal active book: Sigma^{-1} * a, where a is the cross-sectional z-score of the composite entry signal and Sigma is the Ledoit-Wolf shrunk covariance, rescaled so that sqrt(w_uncon' Sigma w_uncon) equals the target active risk of 10% annualised. (2) w_impl = the weights that survive the fleet's real constraints: long-only, per-name cap 0.15, minimum position $500, whole-share rounding, and at most 12 concurrent names. (3) Transfer coefficient TC = (w_uncon' Sigma w_impl) / sqrt( (w_uncon' Sigma w_uncon) * (w_impl' Sigma w_impl) ) - the risk-weighted correlation between intended and implementable active positions. (4) Deploy the full book only if TC >= 0.50. If TC < 0.50, relax constraints in this fixed order, recomputing TC after each step: raise the per-name cap to 0.20, then to 0.25; then raise the max name count to 16, then to 20. (5) If TC is still below 0.50 after all relaxations, scale gross exposure by TC/0.50 (so a TC of 0.30 runs at 60% size), because expected information ratio is TC * IC * sqrt(BR) and half the transfer coefficient is half the expected IR for the same risk budget.",
+  "exit_rule": "Positions are exited by the underlying signal. This layer additionally forces a full flat if TC < 0.25 at two consecutive rebalances - at that point the implemented book has little relationship to the intended one and is best described as an uncompensated risk position. Log TC at every rebalance and, on a rolling 52-week basis, remove from the constraint set whichever single constraint has most often been the binding one.",
+  "inputs": [
+   "daily close (252 bars for the covariance)",
+   "the composite signal's cross-sectional z-scores",
+   "the unconstrained and constrained weight vectors",
+   "account equity and share prices (for the whole-share and minimum-position constraints)"
+  ],
+  "params": [
+   "target active risk",
+   "TC deploy threshold (0.4-0.7)",
+   "TC flatten threshold",
+   "the constraint-relaxation ladder and its ordering",
+   "IC lookback for diagnostics"
+  ],
+  "novelty": "The tradeable quantity is the gap between the portfolio you wanted and the portfolio you can actually hold. Nothing else in the collection measures implementation loss, and it produces both a sizing decision and a prescription for which constraint to relax - a control loop over the construction process itself rather than another weighting formula.",
+  "why": "Grinold and Kahn's fundamental law gives IR = IC * sqrt(BR) for an unconstrained manager. Clarke, de Silva and Thorley showed that once real constraints bind - and long-only plus a small position count binds hard on a retail-scale fleet - the law becomes IR = TC * IC * sqrt(BR), where the transfer coefficient is the correlation between the constrained and unconstrained active weights. Typical long-only equity mandates run TC around 0.3-0.5, meaning half or more of the signal's theoretical value is destroyed in implementation and never shows up in any per-trade metric. Measuring it converts an invisible structural leak into a number you can act on: either relax the binding constraint or stop paying full risk for a fraction of the expected return.",
+  "source": "Grinold & Kahn, 'Active Portfolio Management' (2nd ed., 2000), for IR = IC * sqrt(BR). Clarke, de Silva & Thorley (2002) 'Portfolio Constraints and the Fundamental Law of Active Management', Financial Analysts Journal 58(5), for the transfer coefficient and the generalised law IR = TC * IC * sqrt(BR). Note: the CFA Institute page for this article returned 404 after redirect this session; cited from the published journal article.",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ }
+]

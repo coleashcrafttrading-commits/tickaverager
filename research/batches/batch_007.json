@@ -1,0 +1,212 @@
+[
+ {
+  "name": "Conditional precision meta-gate",
+  "category": "signal-filter",
+  "side": "long",
+  "timeframe": "any",
+  "entry_rule": "Take any primary signal P (e.g. the CUSUM up-event or the Donchian breakout). Before acting on a new P signal at bar t, classify the current bar into a volatility tercile: compute v_t = EWM std of daily returns (span 100), rank v_t against its own trailing 252-bar distribution, and label LOW if percentile < 33, MID if 33-67, HIGH if > 67. Look back at the last 50 COMPLETED P-trades whose entry bar fell in the SAME tercile and count the fraction f that exited at the profit barrier rather than the stop barrier. Enter long only if f > 0.50 and at least 20 same-tercile trades exist; otherwise skip the signal entirely and record nothing. All completed trades, taken or skipped, are simulated forward and recorded so the statistic keeps updating.",
+  "exit_rule": "Triple barrier as in the volatility-scaled triple barrier idea: pt*trgt above, sl*trgt below, T bars, first touch wins.",
+  "inputs": [
+   "close",
+   "high",
+   "low",
+   "EWM std of returns (span 100)",
+   "rolling ledger of past simulated trade outcomes"
+  ],
+  "params": [
+   "ledger depth (50)",
+   "minimum sample (20)",
+   "precision threshold (0.50)",
+   "number of volatility buckets (3)",
+   "bucketing variable (vol vs trend strength vs time of day)"
+  ],
+  "why": "A primary signal usually has decent recall and poor precision - it catches the moves but also fires constantly in conditions where it does not work. Rather than degrade the signal by piling on filters, you keep it and learn, from its own realised track record, WHICH conditions it has recently been right in, then bet only there. This is the deterministic, no-machine-learning version of meta-labelling: it converts the primary signal's own history into a take/skip decision, so it adapts when the market regime that suited the signal disappears.",
+  "novelty": "The gate is not a market condition at all - it is the strategy's own recent conditional hit rate. Nothing in a standard indicator stack conditions on the historical precision of the signal being fired. It also degrades gracefully: below the minimum sample it simply refuses to trade rather than guessing.",
+  "ohlcv_only": true,
+  "source": "Lopez de Prado, 'Advances in Financial Machine Learning', ch.3 meta-labelling (getBins case 2: 'bin in (0,1) <- label by pnl (meta-labeling)'), snippet 3.5/3.7 as reproduced at https://raw.githubusercontent.com/BlackArbsCEO/Adv_Fin_ML_Exercises/master/src/features/snippets.py. The ML classifier is replaced here by an explicit bucketed frequency estimate so it is testable without a model - that substitution is mine.",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "Fade the Close-on-the-Low Candle in an Uptrend",
+  "category": "documented sign inversion of a named bearish pattern",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Daily bars. Let eps = 0.05 x (high - low); skip bars where high == low. The signal bar must satisfy the UPTREND condition close > EMA(10) of close AND match at least one of: (i) Black Marubozu - |high - open| <= eps AND |close - low| <= eps AND close < open; (ii) Closing Black Marubozu - |close - low| <= eps AND close < open AND (high - open) > eps; (iii) Gravestone Doji - |open - close| <= eps AND |close - low| <= eps AND (high - open) > 0.50 x (high - low). Take the LONG side - the opposite of the pattern's name. Buy at the OPEN of the next bar.",
+  "exit_rule": "Exit at the close of the 10th bar after entry (sweep 1/3/5/10 to reproduce the published horizon effect). Run the equal-tranche scale-out over the same window as a paired variant. Protective stop at entry - 2.0 x ATR(14).",
+  "inputs": [
+   "ohlcv daily",
+   "ema(10) of close",
+   "atr(14)"
+  ],
+  "params": [
+   "equality tolerance eps (0.05 of range, sweep 0.02-0.10)",
+   "hold horizon (1/3/5/10 bars)",
+   "exit mode: fixed date vs scale-out",
+   "which of the three bar types are included"
+  ],
+  "why": "This is a direct empirical inversion, not a hunch. Tharavanij et al. measured every bearish one-day pattern on SET50 constituents over 2006-2016 and every one produced a POSITIVE mean holding-period return - i.e. the nominal short loses money and its inverse makes it: Closing Black Marubozu +0.67% over 10 days (t-adjusted 9.38, n = 11,483), Gravestone Doji +0.75% (t = 5.51, n = 2,758), Black Marubozu +0.43% (t = 4.81, n = 7,370). The winning probability of the nominal short sits at 0.42-0.45, far below a coin flip, with Z statistics around -10 to -16. Mechanism: in an established uptrend a close pinned to the low is a liquidity event - index rebalancing, a block, a closing auction imbalance - not information, and it is systematically over-read as weakness by everyone scanning for shooting stars and marubozu. Two caveats worth carrying into the test: this is Thai large caps and must be re-measured on US equities, and the same tables show sub-0.5 win rates alongside positive means for nearly every pattern in both directions, which is a right-skew signature arguing against any fixed profit target on this family.",
+  "source": "Tharavanij, Siraprapasiri & Rajchamaha (2017), 'Profitability of Candlestick Charting Patterns in the Stock Exchange of Thailand', SAGE Open, doi:10.1177/2158244017736799, Table 2 (bearish single-day patterns, MYR and CL exits, 1/3/5/10-day holds, SET50 constituents 2006-07-03 to 2016-06-30). Pattern inequalities from Goo, Chen & Chang (2007), reproduced there. Trend definition EMA10 from Marshall, Young & Rose (2006).",
+  "novelty": "Trades a named bearish pattern from the long side on the strength of a measured sign flip. Distinct from the excluded close-location absorption run, which needs three bars closing near their HIGHS and trades with the close location, and from the excluded upthrust bar, which needs a 20-bar extreme and heavy volume.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Reflex Versus Trendflex",
+  "category": "cycle-oscillator",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "SuperSmoother filtered close",
+   "normalised difference-sum with slope removal",
+   "normalised difference-sum without slope removal"
+  ],
+  "params": [
+   "length n (20)",
+   "SuperSmoother period k (20)",
+   "alpha for the mean-square EWMA (0.04)",
+   "signal mode: Reflex/Trendflex cross vs Reflex zero cross"
+  ],
+  "entry_rule": "SuperSmoother the close: a1 = exp(-1.414*pi/k); b1 = 2*a1*cos(1.414*180/k in degrees); c2 = b1; c3 = -a1*a1; c1 = 1 - c2 - c3; F[i] = c1*(Close[i]+Close[i-1])/2 + c2*F[i-1] + c3*F[i-2]. REFLEX: slope = (F[i-n] - F[i]) / n; s = (1/n) * sum over j=1..n-1 of (F[i] - F[i-j] + j*slope); MS[i] = 0.04*s^2 + 0.96*MS[i-1]; Reflex[i] = s / sqrt(MS[i]). TRENDFLEX: identical but with the slope term omitted \u2014 s = (1/n) * sum over j=1..n-1 of (F[i] - F[i-j]); same MS recursion; Trendflex[i] = s / sqrt(MS[i]). GO LONG when Reflex crosses above Trendflex while Trendflex > 0. GO SHORT when Reflex crosses below Trendflex while Trendflex < 0.",
+  "exit_rule": "Exit the long when Reflex crosses back below zero; exit the short when Reflex crosses back above zero. Both indicators are self-normalised so the zero line is a stable, instrument-independent exit.",
+  "why": "Trendflex measures how far the smoothed price sits above its own recent history \u2014 a trend reading. Reflex measures the same quantity after removing the linear slope of that history \u2014 a pure cycle reading with the trend subtracted out. Their divergence isolates the moment a cyclical impulse begins that the trend has not yet absorbed. Dividing by the square root of an EWMA of the squared sum auto-scales both to roughly unit variance, so a single threshold works across instruments and volatility regimes.",
+  "source": "pandas-ta (fork gopalparashar421/pandas-ta), files pandas_ta/cycle/reflex.py (np_reflex, with the slope-detrended difference sum) and pandas_ta/trend/trendflex.py (nb_trendflex, without it); paired as a crossover system in StockSharp/AlgoTrading API/1501-1600/1587_Reflex_Trendflex. Ehlers, 'Reflex: A New Zero-Lag Indicator', TASC Feb 2020.",
+  "novelty": "Two oscillators that differ by exactly one term (the slope correction), traded against each other. Self-normalisation by a running RMS makes the zero line and thresholds portable across tickers without re-tuning \u2014 nothing in the existing set is scale-free in that way.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Corwin-Schultz spread spike fade",
+  "category": "liquidity",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Compute the Corwin-Schultz high-low spread estimator each bar. beta_t = rolling mean over W = 20 bars of [ln(H_t/L_t)^2 + ln(H_{t-1}/L_{t-1})^2]. gamma_t = ln( max(H_t, H_{t-1}) / min(L_t, L_{t-1}) )^2. den = 3 - 2*sqrt(2). alpha_t = (sqrt(2) - 1)*sqrt(beta_t)/den - sqrt(gamma_t/den), then floor alpha_t at 0. Spread S_t = 2*(exp(alpha_t) - 1)/(1 + exp(alpha_t)). Go long at the close when S_t is above its own 95th percentile over the trailing 252 bars AND the 5-bar return ln(close_t/close_{t-5}) < 0.",
+  "exit_rule": "Exit when S_t falls back below its 252-bar median, or after 10 bars, whichever comes first. Stop out at 2*ATR(14) below entry.",
+  "inputs": [
+   "high",
+   "low",
+   "close",
+   "ATR(14)",
+   "252-bar rolling percentiles"
+  ],
+  "params": [
+   "W (20)",
+   "entry percentile (95)",
+   "exit percentile (median)",
+   "5-bar return window",
+   "max hold (10)"
+  ],
+  "why": "The estimator separates the part of the high-low range caused by volatility (which scales with the length of the interval) from the part caused by the bid-ask spread (which does not), by comparing a single two-day range against the sum of two one-day ranges. A spike in the estimated spread while the price is falling is the OHLCV signature of liquidity withdrawal - market makers widening, not information arriving. Prices dislocated by a liquidity shortage rather than by news are the ones that revert, so entering into the widening and exiting on normalisation is a bet on being paid for supplying the liquidity that vanished.",
+  "novelty": "Uses high and low to estimate a microstructure quantity (the effective spread), not a volatility band. It is a liquidity-provision trigger, unavailable to any indicator that only reads close prices, and it fires on the WIDENING of the estimated spread rather than on any price level or momentum condition.",
+  "ohlcv_only": true,
+  "source": "Corwin & Schultz high-low spread estimator, implemented as AFML snippet 19.1 (p.285) in mlfinlab/microstructural_features/first_generation.py (_get_beta, _get_gamma, _get_alpha, get_corwin_schultz_estimator) - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB. Also documented in the open-access CRAN package 'bidask' (Ardia, Guidotti & Kroencke, JFE 2024).",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "V-Shaped Selling Pressure Overhang",
+  "category": "disposition effect / unsigned realisation pressure",
+  "side": "both",
+  "timeframe": "daily signal from weekly bars",
+  "entry_rule": "Use the same weekly turnover weights w_{t-n} = V_{t-n} * PRODUCT over tau=1..n-1 of (1 - V_{t-n+tau}), normalised to sum to 1 over n=1..260. Define VSP_t = SUM over n of w_{t-n} * |(close_t - close_{t-n}) / close_t| - the turnover-weighted mean ABSOLUTE unrealised gain. SHORT at the next open when: (1) VSP_t ranks in the top 20% of that ticker's own trailing 250-week history of VSP; AND (2) close_t / close_{t-5 sessions} - 1 >= +0.03 (a rally is running into the overhang). LONG at the next open when: (1) VSP_t ranks in the bottom 20% of its own history; AND (2) the same 5-session rally condition holds.",
+  "exit_rule": "Hold 10 trading sessions, then exit at the close. Stop at 1.5 * ATR(14) adverse from entry. Take profit at 2.5 * ATR(14).",
+  "inputs": [
+   "weekly close",
+   "weekly volume",
+   "daily close",
+   "atr(14)"
+  ],
+  "params": [
+   "VSP percentile cutoffs (20% / 80%)",
+   "rally trigger (+3% over 5 sessions)",
+   "history window for the percentile (250 weeks)",
+   "holding period (10 sessions)",
+   "ATR multiples"
+  ],
+  "why": "The plain disposition effect predicts investors sell winners and hold losers, but the empirical selling schedule is V-shaped: propensity to sell rises as the position moves away from the reference price in EITHER direction, because large losers get capitulated and tax-harvested while large winners get realised. That means the overhang that actually matters for near-term supply is the unsigned distance of holders' cost bases from the current price. A stock where a large mass of turnover-weighted cost basis sits far from today's price - above or below - has a deep reservoir of investors ready to hit any bid on strength. Rallying into that reservoir meets supply and stalls; rallying with no reservoir meets none and runs.",
+  "source": "Synthesis extending the verified Grinblatt-Han construction (NBER w8734, verified above) using the V-shaped selling schedule documented in Itzhak Ben-David and David Hirshleifer, 'Are Investors Really Reluctant to Realize Their Losses? Trading Responses to Past Returns and the Disposition Effect', Review of Financial Studies 25(8), 2012, 2485-2532. I was NOT able to open the Ben-David and Hirshleifer paper in this session - that citation is from background knowledge, not verified here. The VSP statistic and the trade construction are my own. Related: An, Ang, Bali and Cakici on V-shaped net selling propensity.",
+  "ohlcv_only": true,
+  "novelty": "Strictly distinct from the signed capital-gains-overhang idea: this takes the absolute value inside the sum, so a stock with half its holders deep in gains and half deep in losses scores HIGH here and near ZERO on the signed measure. The two can and will disagree, which is the point of running both. Neither is expressible as any moving average, oscillator or band.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Realized GARCH Measurement-Equation Surprise",
+  "category": "realized-measure surprise orthogonal to return",
+  "side": "both",
+  "timeframe": "daily, realized measure from 5-minute bars",
+  "entry_rule": "For each symbol fit the Realized GARCH(1,1) of Hansen, Huang and Shek on a 1000-day rolling window using daily log returns y_t and the daily realized measure x_t = RV from 5-minute returns: y_t = mu + sigma_t * z_t with z_t i.i.d. mean 0 variance 1; log(sigma_t^2) = w + a * log(x_{t-1}) + b * log(sigma_{t-1}^2); measurement equation log(x_t) = xi + d * log(sigma_t^2) + tau(z_t) + u_t with the leverage function tau(z) = e1*z + e2*(z^2 - 1) and u_t ~ N(0, lam). Each day compute z_hat_t = (y_t - mu_hat)/sigma_hat_t, the measurement residual u_hat_t = log(x_t) - xi_hat - d_hat*log(sigma_hat_t^2) - tau_hat(z_hat_t), and its standardised value utilde_t = u_hat_t / sqrt(lam_hat). QUIET-CHURN LONG: buy at the next open when utilde_t >= +2.0 AND |z_hat_t| <= 0.5. BAD-NEWS SHORT: sell short at the next open when utilde_t >= +2.0 AND z_hat_t <= -1.5.",
+  "exit_rule": "Exit at the close of day t+5. Exit earlier if the position moves +/- 1.5 * sigma_hat_{t+1} from entry (symmetric take-profit and stop). If a fresh utilde_t >= +2.0 signal in the same direction arrives while in the trade, reset the 5-day clock but do not add size.",
+  "inputs": [
+   "5-minute OHLCV (realized measure)",
+   "daily OHLCV",
+   "QML estimation of the joint return + measurement likelihood"
+  ],
+  "why": "tau(z) is the news-impact curve: it is exactly the part of today's realized volatility that today's own return direction and magnitude account for, including the leverage asymmetry through e1 < 0. What is left, u_t, is realized variation the price move cannot explain. A day with a huge positive u_t and a near-zero standardised return churned far more variance than either its own conditional volatility level or its direction justify: heavy two-sided flow with no net price change, the classic signature of institutional accumulation or distribution that resolves directionally within a week. The same large u_t alongside a strongly negative z is instead a genuine bad-news repricing where the volatility overshoot confirms rather than contradicts the direction.",
+  "source": "Hansen, Huang & Shek (2012), 'Realized GARCH: a joint model for returns and realized measures of volatility', Journal of Applied Econometrics 27, 877-906. Model equations, quadratic Hermite leverage function tau(z) = e1*z + e2*(z^2 - 1), news impact curve nu(z) = d*tau(z), and the factorised joint likelihood as reproduced in the rugarch package vignette 'Introduction to the rugarch package', Section 2.2.9, Eqs. (46)-(53): https://cran.r-project.org/web/packages/rugarch/vignettes/Introduction_to_the_rugarch_package.pdf",
+  "ohlcv_only": true,
+  "params": [
+   "realized measure x_t (RV5, BV, MedRV, realized kernel, pre-averaged MRC)",
+   "utilde threshold (1.5 / 2.0 / 2.5)",
+   "|z| band for the quiet-churn branch (0.3 / 0.5 / 0.75)",
+   "z threshold for the bad-news branch (-1.0 / -1.5 / -2.0)",
+   "holding horizon (3 / 5 / 10 days)",
+   "estimation window and re-estimation frequency",
+   "log vs level measurement equation"
+  ],
+  "novelty": "Trades the RESIDUAL of a volatility measurement equation, not the volatility level or its change. By construction the signal is orthogonal to the day's return, so it cannot be a reskin of any return-based oscillator, and it is orthogonal to the conditional volatility level, so it cannot be a reskin of a squeeze or ATR-expansion rule.",
+  "_agent": "v2:7553de6b0ec86a2f6842bf8a52309d6335e8a8ccb631ed57c8015c0d2345e01c"
+ },
+ {
+  "name": "Leveraged-ETF Rebalance Drift Into The Close",
+  "category": "time-of-day, mechanical flow",
+  "timeframe": "intraday (5-minute)",
+  "side": "both",
+  "entry_rule": "At the 15:15 ET bar on every session compute R = (SPY last price / SPY previous session's official 16:00 close) - 1 and sigma = the standard deviation of SPY daily close-to-close returns over the previous 60 sessions. If R > +1.0 x sigma, BUY at the 15:15 bar open. If R < -1.0 x sigma, SHORT at the 15:15 bar open. Otherwise no trade. Amplified variant: instead of SPY, trade the sector ETF (from a fixed list of the eleven liquid SPDR sector ETFs) with the largest 60-session beta to SPY, since levered products on that sector concentrate the same flow into a thinner book. Optional gate: require cumulative session volume through 15:15 to be above its 20-session median for that slot.",
+  "exit_rule": "Leg 1: exit at the official 16:00 close. Leg 2: immediately take the OPPOSITE position at the 16:00 close and exit at the next session's 09:30 open, capturing the partial give-back once the mechanical demand is gone.",
+  "inputs": [
+   "SPY 5-minute bars",
+   "SPY daily closes",
+   "60-session daily return standard deviation",
+   "slot-specific 20-session median volume",
+   "sector ETF daily bars for the beta variant"
+  ],
+  "params": [
+   "trigger time (15:00 / 15:15 / 15:30)",
+   "threshold (0.75 / 1.0 / 1.5 sigma)",
+   "SPY vs highest-beta sector ETF",
+   "whether to run the overnight give-back leg",
+   "volume gate on/off"
+  ],
+  "why": "A daily-reset leveraged or inverse ETF must end each day with exposure equal to its multiple times its new NAV. Because NAV moves with the index, the required rebalance is always in the SAME direction as the day's move, and its size scales with (leverage squared minus leverage) times AUM times the day's return - so it is convex in the magnitude of the move and effectively zero on quiet days. That trade has to be done near the close to track the daily reset, which produces same-direction pressure in the final 30-45 minutes on large-move days and a partial reversal once the non-information flow stops.",
+  "novelty": "The existing selloff-into-the-close idea is a long-only, asymmetric fade of a large last-hour DOWN move. This one is symmetric, is triggered by the size of the whole SESSION's move rather than the last hour's, goes WITH the move into the close rather than against it, and only then fades overnight. Opposite sign in the closing window, different conditioning variable, and a mechanical rather than behavioural story.",
+  "ohlcv_only": true,
+  "source": "Synthesis of a well-documented mechanism. Cheng & Madhavan, 'The Dynamics of Leveraged and Inverse Exchange-Traded Funds' (Barclays Global Investors, 2009), derive the (leverage^2 - leverage) x AUM x return rebalancing formula and the end-of-day concentration; the mechanism is also the subject of SEC/FINRA investor alerts on leveraged ETFs. I could not re-fetch these this session (search budget exhausted; arXiv returned HTTP 429), so the specific thresholds and the two-leg structure are my construction on top of the published mechanics, not a rule lifted from a paper.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Frozen-Parameter Holdout Symbol Binomial",
+  "category": "out-of-sample inference protocol / replication",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Partition the tradeable universe ONCE, by a fixed rule (e.g. hash of the ticker string), into a TUNE set of 20 liquid symbols and a HOLDOUT set of 40 different liquid symbols, and never swap them. Sweep every parameter of the rule ONLY on the TUNE set, using only tune-set bars. FREEZE the single winning parameter vector. Apply it, unchanged, to each of the 40 holdout symbols over the same calendar period and record the sign of each symbol's realised Sharpe. Under the null that the rule has no edge, each sign is a fair coin, so the count of positive signs K ~ Binomial(40, 0.5). Require the one-sided binomial p-value P(K >= k_obs) < 0.01, which means k_obs >= 27 of 40. ALSO require the median holdout Sharpe > 0.3 and the interquartile range of holdout Sharpes < 1.5 (a rule that works spectacularly on 3 symbols and fails on 37 is not a rule, it is 3 accidents). Only if all three conditions hold does the rule go live, and it goes live ONLY on the HOLDOUT symbols and on symbols never used in either set - never on the tune symbols, whose results are contaminated by the search.",
+  "exit_rule": "Each position exits on the rule's own signal. Re-run the holdout binomial test every 6 months on the trailing 2 years of holdout data; if k_obs falls below 20 of 40 (i.e. worse than a coin flip) flatten every position and retire the rule PERMANENTLY. The holdout set must never be re-tuned on - the moment you adjust a parameter using holdout results, that set becomes a tune set and a fresh holdout must be drawn from symbols never previously used, which is why the initial partition should reserve more symbols than you think you need.",
+  "inputs": [
+   "OHLCV bars for 60+ symbols",
+   "a fixed, pre-committed symbol partition",
+   "per-symbol out-of-sample Sharpe under one frozen parameter vector",
+   "binomial CDF"
+  ],
+  "why": "Every other test in this area fights the multiple-testing problem by inflating critical values. This one sidesteps it: it converts an N-trial selection problem into a SINGLE binomial test with 40 near-independent draws, because the parameter vector is frozen before the holdout symbols are ever touched. Cross-sectional replication also tests something no time-series test can - whether the effect is a property of the RULE or a property of one symbol's particular history. That distinction is precisely what a multi-ticker DCA-ladder fleet needs, since the whole premise of the fleet is that a rule generalises across symbols. The IQR condition is what stops a single explosive symbol from carrying the test.",
+  "novelty": "Uses cross-sectional replication rather than time-series resampling as the source of independent evidence, so it costs no extra history and no compute, and it directly answers the fleet-relevant question of transferability. The permanent-retirement and never-re-tune clauses are the operational teeth: without them the holdout silently becomes a tune set within two quarters.",
+  "source": "Synthesis. The reasoning follows directly from the false-strategy result in Bailey & Lopez de Prado (2014) 'The Deflated Sharpe Ratio' - it is the number of TRIALS that inflates the maximum Sharpe, so adding independent SAMPLES under a frozen parameter vector adds evidence without adding trials. The cross-sectional replication standard is the one urged in Harvey, Liu & Zhu (2016), 'and the Cross-Section of Expected Returns', RFS 29(1), 5-68, and the empirical case for it is Hou, K., Xue, C. & Zhang, L. (2020), 'Replicating Anomalies', RFS 33(5), 2019-2133, which finds 65% of 452 published anomalies fail to replicate.",
+  "ohlcv_only": true,
+  "params": [
+   "tune/holdout split sizes (20/40, 15/45, 10/50)",
+   "binomial alpha (0.01 / 0.05)",
+   "median Sharpe floor",
+   "IQR ceiling",
+   "re-test cadence",
+   "partition rule (hash / sector-stratified / liquidity-stratified)"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ }
+]

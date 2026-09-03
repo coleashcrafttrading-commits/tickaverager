@@ -1,0 +1,214 @@
+[
+ {
+  "name": "Universal Pooled Model with Zero-Shot Ticker Transfer",
+  "category": "deep learning / pooled panel, intraday",
+  "timeframe": "intraday (1-minute bars)",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "Train ONE model on the pooled 1-minute bars of every symbol in the universe, with no per-symbol parameters and no symbol identifier among the inputs. Features per bar, over a trailing window of 50 bars: (a) log return of the close; (b) a bar-level order-flow proxy, the close location value CLV = ((C - L) - (H - C)) / (H - L), which equals +1 when the bar closes on its high and -1 on its low; (c) signed volume = CLV * volume, standardised by the 50-bar mean absolute signed volume; (d) bar range (H - L) / C, standardised by its own 50-bar mean. Feed the 50x4 window to a 1-D CNN followed by an LSTM with a softmax over {up, flat, down} for the move over the next 20 bars. Go long when P(up) > 0.60 and P(up) - P(down) > 0.25; go short on the mirror condition.",
+  "exit_rule": "Exit after 20 bars, or earlier if the probability condition reverses (P(down) > 0.60 while long). The load-bearing rule is what does NOT change: the same trained weights and the same numeric thresholds are deployed on symbols that were never in the training set, with no per-symbol refitting and no per-symbol threshold calibration.",
+  "inputs": [
+   "1-minute OHLCV pooled across all symbols",
+   "50-bar window of log returns",
+   "close location value (CLV) as an order-flow proxy",
+   "CLV-signed volume",
+   "normalised bar range",
+   "CNN + LSTM with 3-class softmax"
+  ],
+  "params": [
+   "window length (50 bars)",
+   "prediction horizon (20 bars)",
+   "probability thresholds",
+   "universe composition for pooling",
+   "normalisation choices (or none)"
+  ],
+  "why": "Sirignano & Cont find that a model trained on data from all stocks outperforms asset-specific linear and nonlinear models, and that the result holds for stocks outside the training sample - price formation has universal features that are stationary across instruments and over time. For a small fleet this is decisive: it is the difference between a few thousand bars per ticker and a few thousand times N, which is the only way a deep model gets enough data to train at all. It also answers 'should I run this on a new ticker' for free - yes, with no refit.",
+  "source": "Sirignano & Cont (2019), 'Universal features of price formation in financial markets: perspectives from Deep Learning', Quantitative Finance 19(9):1449-1459; arXiv:1803.06917. Verified from the paper: the universal model trained on all stocks beats asset-specific models out of sample, results hold for stocks not in the training sample, including a long price and order-flow history improves accuracy, and standard normalisations (volatility, price level) proved unnecessary. Their inputs are the full limit order book; the CLV and CLV-signed-volume bar features here are my substitution for queue imbalance, since we have no level 2.",
+  "novelty": "The modelling unit is the pooled panel and generalisation to unseen tickers is the design goal rather than a side effect. Every other idea in the corpus fits per symbol; this one is a bet that the fitted object is a property of markets, not of a ticker, and it is directly falsifiable by holding out symbols.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "Inventory Absorption Overnight",
+  "category": "entry timing / overnight gate",
+  "timeframe": "daily",
+  "side": "long (the asymmetry predicts the short version fails; test it anyway as a control)",
+  "entry_rule": "At the close of day t compute the close location value CLV_t = (close_t - low_t) / (high_t - low_t), setting CLV_t = 0.5 if high_t == low_t, and relative volume RV_t = volume_t / SMA(volume, 20)_t. Enter long at close_t only when CLV_t < 0.25 AND RV_t > 1.2 - a day that closed in the bottom quarter of its own range on above-average volume. Control arm (predicted to be weak): enter short at close_t when CLV_t > 0.75 AND RV_t > 1.2. Apply as a standalone strategy first, then as a gate that decides whether an existing ladder position may be carried overnight.",
+  "exit_rule": "Exit unconditionally at open_{t+1}. No stop, no target - the position exists only across the closed-market window, so there is no bar on which a stop could be evaluated. Report the long arm and the short arm separately and test the null that their absolute mean returns are equal; the paper's asymmetry predicts rejection.",
+  "inputs": [
+   "daily open",
+   "daily high",
+   "daily low",
+   "daily close",
+   "volume",
+   "sma(volume,20)"
+  ],
+  "why": "Boyarchenko, Larsen and Whelan show US equity index overnight returns are not compensation for news but the price dealers charge for absorbing the order imbalance left over at the US close - risk-averse market makers take the other side of end-of-day flow and demand positive expected return for carrying that inventory until new participants arrive. They document an explicit asymmetry: market selloffs generate robust positive overnight reversals, while reversals following rallies are much more modest, which they attribute to time-varying dealer risk-bearing capacity. We cannot observe signed order imbalance, but the close's position within the day's own high-low range scaled by relative volume is the standard OHLCV proxy for which side won the session and how much stock had to be absorbed. A close pinned to the low on heavy volume is exactly the negative-imbalance state the paper says dealers get paid to absorb.",
+  "novelty": "This is a timing gate on the holding window, not a directional signal: it never decides what to buy, only whether the overnight window is worth being exposed in. It is also the rare idea whose source predicts in advance that the long and short versions will NOT be symmetric, which gives the backtest a real falsification condition rather than just a Sharpe ratio.",
+  "source": "Boyarchenko, Larsen & Whelan, 'The Overnight Drift', Federal Reserve Bank of New York Staff Reports no. 917, February 2020, revised August 2022. Read directly from newyorkfed.org; the inventory mechanism, the end-of-day order imbalance link and the selloff/rally asymmetry are all in the abstract and introduction. CLV as an imbalance proxy is my substitution, since the paper uses signed volume we do not have.",
+  "params": [
+   "CLV threshold",
+   "relative volume threshold",
+   "volume average lookback",
+   "whether to require a same-direction base signal as well"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Alpha Half-Life vs Cost-Recovery Admission",
+  "category": "cost-aware signal selection",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "This is a meta-rule applied to each candidate signal once per week, before any trading. For signal k on ticker i: (1) Fit an AR(1) to the signal's forward-return forecast over the trailing 1000 bars to get rho_k; the alpha half-life is HL_k = ln(2) / (-ln(rho_k)) bars. (2) Compute the cumulative expected edge curve E(h) = the mean forward h-bar log return conditional on the signal firing, for h = 1..200, estimated walk-forward on the trailing 1000 bars using only bars at least 200 bars old. (3) Compute round-trip cost RT = spread_hat (EDGE, 60 bars) + 2*Y*sigma_d*sqrt(Q/V20). (4) Cost-recovery horizon T_BE = the smallest h with E(h) > RT; if no such h <= 200 exists, T_BE = infinity. (5) ADMIT signal k for live trading this week only if HL_k > 2 * T_BE. Non-admitted signals are computed and logged but generate no orders. Entries for admitted signals use the signal's own base rule.",
+  "exit_rule": "Exit at h = min(HL_k, first bar on which the signal's z-score crosses zero). Additionally, force an exit if the signal is de-admitted at the weekly re-test (its HL has collapsed or costs have widened), unwinding over the next 5 bars.",
+  "inputs": [
+   "close",
+   "ohlc (EDGE spread)",
+   "volume",
+   "AR(1) fit of the signal forecast",
+   "conditional forward-return curve E(h)",
+   "stdev of daily log returns (20)"
+  ],
+  "params": [
+   "admission ratio (1.5-4)",
+   "AR fit window (500-2000)",
+   "max horizon searched (50-400)",
+   "Y",
+   "re-test frequency"
+  ],
+  "why": "Novy-Marx & Velikov's taxonomy sorts anomalies by turnover and finds that most of the high-turnover ones die after costs while the low-turnover ones survive. Garleanu & Pedersen make the same point structurally: under costs the relevant quantity is signal persistence, not raw predictive power. Combining the two gives a direct, testable admission criterion \u2014 a signal is only worth trading if its edge persists comfortably longer than the time it takes to earn back the round trip. Otherwise you are paying the spread to chase an edge that has already gone.",
+  "novelty": "This filters the SIGNAL BOOK, not the trade. With 578 signals the real question is which ones deserve capital at all, and no rule in the 32 answers it. It is also the only rule here where the decision variable is a measured decay rate compared against a measured cost-recovery time, so it will systematically de-admit the fast intraday signals on illiquid names and keep the slow ones on liquid names.",
+  "source": "Synthesis, built on two verified primary results: Novy-Marx & Velikov (RFS 2016, NBER w20721) turnover taxonomy and the finding that 'few of the strategies with higher turnover' survive costs; and Garleanu & Pedersen (2013) Proposition 4, 'the central relevance of signal persistence in the presence of transaction costs is one of the distinguishing features of our analysis'.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "CSCV Overfit Probability Gate with Median-Rank Parameter Choice",
+  "category": "multiple-testing control / meta-strategy",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "For each strategy FAMILY (one rule plus its parameter grid of N configurations), build the T x N matrix M of per-bar P&L, one column per configuration, rows synchronous. Partition the rows into S=16 contiguous, disjoint, equal-length blocks. Form all C(16,8)=12,870 combinations c of 8 blocks. For each c: (a) the training set J is the chosen 8 blocks concatenated in original time order, the test set J' is the complementary 8 blocks in original time order; (b) compute the Sharpe of every column on J and let n*(c) = argmax; (c) compute the rank rbar of column n*(c) among all N columns' Sharpes on J'; (d) set omega_c = rbar/(N+1) and logit lambda_c = ln(omega_c/(1-omega_c)). Define PBO = (#{c : lambda_c < 0}) / 12870. The family is TRADEABLE only if PBO < 0.30 AND the median across c of the OOS Sharpe of column n*(c) is > 0. The configuration actually deployed is NOT the full-sample argmax - it is the column with the highest MEDIAN rank across all 12,870 test sets. Enter exactly when that deployed configuration's own rule fires.",
+  "exit_rule": "The deployed configuration's own exit. Re-run CSCV every 63 trading days on the trailing window; if PBO rises above 0.50 the family is retired: flatten at the next open and take no further entries from any configuration of that family. Also monitor the 'performance degradation' regression of OOS Sharpe on IS Sharpe across the 12,870 combinations - a negative slope means the optimiser is actively loss-maximising (memory effect) and the family must be retired immediately regardless of PBO.",
+  "inputs": [
+   "per-bar P&L matrix across the whole parameter grid",
+   "Sharpe ratio computed on arbitrary row subsets",
+   "rank and logit transforms"
+  ],
+  "why": "A holdout split gives you one out-of-sample number, and if you run twenty holdouts you are guaranteed a good one. CSCV is symmetric: every block serves as both training and test set, so it produces a full DISTRIBUTION of in-sample-optimal-versus-out-of-sample-rank outcomes rather than a single draw, and PBO is the mass of that distribution below the median. It is non-parametric, deterministic (re-running gives identical results), respects time order within blocks, and it also answers a question no t-test answers: was the SELECTION PROCEDURE itself harmful? Deploying the median-rank configuration rather than the argmax is the operational payoff - it picks the parameter set that is robustly good instead of the one that best fits one particular slice.",
+  "novelty": "Distinct from every Sharpe-threshold gate: it scores the optimiser, not the strategy, and it changes which parameter set gets deployed. Distinct from the Deflated Sharpe gate in being non-parametric and requiring no assumption about the number of independent trials.",
+  "source": "Bailey, D., Borwein, J., Lopez de Prado, M. & Zhu, Q. (2017), 'The Probability of Backtest Overfitting', Journal of Computational Finance 20(4), 39-69 - Algorithm 2.3 (CSCV), Definition 2.2 (PBO), and Section 3 (performance degradation, probability of loss, stochastic dominance). Working paper PDF: https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf",
+  "ohlcv_only": true,
+  "params": [
+   "S (8 / 16 / 24 blocks)",
+   "PBO trade threshold (0.20 / 0.30 / 0.50)",
+   "performance metric (Sharpe / Sortino / return-over-max-drawdown; note order-dependent metrics require J and J' in original order)",
+   "re-test cadence"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Half-N Pyramid with Shared Ratcheting Stop",
+  "category": "scale-in structure",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "N = ATR(20) at the original entry, held fixed for the trade's life. First unit on the base signal at the next bar's open, size = floor(0.005 * equity / N). Then: each time the price trades 0.5 * N above the fill price of the MOST RECENT unit, add one more unit of the same share count at the next bar's open. Maximum 4 units. Adds are only made while the base entry condition has not gone false. Mirror for shorts.",
+  "exit_rule": "A SINGLE shared stop for the whole stack. On the original entry, stop = entry - 2N. Every time a unit is added, move the shared stop to (fill price of the newest unit - 2N) - so with four units at 0.5N spacing the shared stop sits 0.5N above the original entry and the whole stack is risk-free. The stop only ratchets in the favourable direction. Exit ALL units together at the shared stop, or at the next open after a close below the lowest low of the prior 10 bars.",
+  "inputs": [
+   "atr(20) at original entry",
+   "fill prices of each unit",
+   "shared stop level",
+   "donchian(10) low"
+  ],
+  "params": [
+   "add spacing (0.25N/0.5N/1N)",
+   "max units (2/3/4/6)",
+   "stop distance from newest add (1.5N/2N/3N)",
+   "equal vs decreasing add size (1,1,1,1 vs 4,3,2,1)",
+   "require the base signal still true to add"
+  ],
+  "why": "Pyramiding converts a linear payoff into a convex one: the position is largest precisely in the trades that trend furthest, and the shared ratcheting stop means the total dollars at risk stays roughly constant as units are added rather than growing with the stack. That combination - anti-martingale adds with a single stop that walks up behind them - is what makes trend-following payoff distributions fat on the right without fattening the left. Decreasing add sizes are worth sweeping because they lower the average entry drift.",
+  "source": "Original Turtle Trading Rules, 'Adding Units' (adds at 1/2 N intervals from the previous unit's fill, max 4 units per market) and 'Stops for Added Units' (all units share one stop, moved up as units are added). Public PDF: https://oxfordstrat.com/coasdfASD32/uploads/2016/01/turtle-rules.pdf",
+  "novelty": "Multiple entries per signal with one shared, stack-dependent stop - a structure the current one-entry-one-exit engine cannot express. Distinct from an EMA-pullback re-entry because the adds are triggered by price distance from the last fill, not by a fresh indicator condition.",
+  "ohlcv_only": true,
+  "_agent": "v2:4a185d6e6f4ebde3b5c17f4530685569479f2989c481d0290ba5129b10d040d1"
+ },
+ {
+  "name": "Quarterly Reaction Sign Ladder",
+  "category": "naive seasonal expectations / Bernard-Thomas autocorrelation",
+  "side": "both",
+  "timeframe": "daily, event-scheduled",
+  "entry_rule": "Maintain the four most recent earnings-like events e1 (latest) through e4, detected exactly as in the Earnings-Like Event Drift idea, each with its EAR. Let m = median spacing in sessions between consecutive flagged events (expected near 63). Define the anticipated next event date as e1_date + m. Compute S = sign(EAR_e1) + sign(EAR_e2) + sign(EAR_e3) - sign(EAR_e4). Enter at the close 2 sessions BEFORE the anticipated event date: LONG if S >= +2, SHORT if S <= -2, no trade otherwise. Require that all four events were detected and that m lies in [50, 80] sessions, else skip.",
+  "exit_rule": "Exit at the close of the 2nd session AFTER a new earnings-like event actually fires. If no event fires within 10 sessions of the anticipated date, exit at the close of that 10th session. Hard stop at 2 * ATR(20) adverse.",
+  "inputs": [
+   "open",
+   "close",
+   "volume",
+   "SPY close",
+   "atr(20)",
+   "session counting"
+  ],
+  "params": [
+   "lag-4 sign weight (currently -1)",
+   "score threshold (|S| >= 2)",
+   "entry lead (2 sessions)",
+   "abandon window (10 sessions)",
+   "acceptable spacing band (50-80 sessions)"
+  ],
+  "why": "Bernard and Thomas's naive-expectations result is that investors price earnings as if they followed a seasonal random walk. The consequence is a distinctive autocorrelation signature in surprises: positive at the first three quarterly lags and NEGATIVE at the fourth. Investors are repeatedly surprised in the same direction three quarters running, then the year-ago comparison base flips and the fourth-lag term works against them. Because we can only observe the market's reaction and not the earnings number, the sign of the announcement reaction is our observable, and the same lag structure should show up in it. The trade is to be positioned before the event in the direction that structure implies.",
+  "source": "Bernard and Thomas (1989, 1990). The naive-expectations mechanism - investors fail 'to recognize fully the implications of current earnings for future earnings' - and the seasonal random walk model were VERIFIED via https://en.wikipedia.org/wiki/Post-earnings-announcement_drift and the Quantpedia PEAD page (which specifies SUE 'calculated using a seasonal random walk model with drift'). The specific lags-1-to-3-positive, lag-4-negative sign pattern is from Bernard and Thomas (1990), 'Evidence that stock prices do not fully reflect the implications of current earnings for future earnings', Journal of Accounting and Economics 13 - I did NOT open that paper in this session; that lag detail is from background knowledge. The S-score ladder and the pre-positioning construction are my own.",
+  "ohlcv_only": true,
+  "novelty": "Entry timing is driven by a PREDICTED future event date extrapolated from the observed spacing of past inferred events, and the direction comes from a signed ladder across four such events with the fourth term deliberately inverted. Nothing in the existing 32 has any notion of event periodicity, and no oscillator can produce a term that flips sign at a specific lag.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Fitted Trend Factor",
+  "category": "multi-horizon moving-average regression",
+  "entry_rule": "At each month-end, for every symbol compute normalised moving-average signals A_L = SMA_L(close)/close_t for L in {3, 5, 10, 20, 50, 100, 200, 400} daily bars (division by the current close is what makes the signal stationary and comparable across symbols and price levels). Run a cross-sectional OLS regression across the universe of each symbol's realised return over month t on its A_L vector measured at the end of month t-1, producing eight slope coefficients b_L^t. Maintain an exponentially weighted forecast of each slope: E_t(b_L) = (1 - lambda)*E_{t-1}(b_L) + lambda*b_L^t with lambda = 0.02. Forecast each symbol's expected return as ER = sum over L of E_t(b_L) * A_L(t). Go long at the next open the top 30% by ER, short the bottom 30%.",
+  "exit_rule": "Hold one month. At the next month-end, re-run the cross-sectional regression, refresh the coefficient forecasts and recompute ER; a name is closed when its ER drops out of the top tercile (or rises out of the bottom tercile). The forecast is the exit - there is no price stop, and no individual moving average has any authority to close a position on its own.",
+  "inputs": [
+   "close (400+ daily bars)",
+   "simple moving averages at eight lags",
+   "cross-sectional OLS across the universe",
+   "EWMA of regression coefficients"
+  ],
+  "why": "Short-, intermediate- and long-term trends carry separate information, and the correct weight on each is not constant across regimes. Instead of picking one lookback and hard-coding a sign, this fits the weights from the recent cross-section and lets the data say whether the market is currently paying for 3-day or 400-day trends - including paying negatively, which is how it absorbs short-term reversal automatically. Han, Zhou and Zhu report it more than doubles the Sharpe ratios of the short-term reversal, momentum and long-term reversal factors combined. Only information up to month t is used, so the forecast is genuinely out-of-sample.",
+  "source": "Han, Zhou & Zhu, 'A trend factor: Any economic gains from using information over investment horizons?', Journal of Financial Economics 122(2), 2016, 352-375. Construction reproduced verbatim in Liu & Zhou, 'Trend Factor in China', equations (1)-(2) (MA of the last L closes, normalised by the closing price on the last trading day), (5) (cross-sectional forecasting regression) and (7) (EWMA coefficient forecast, lambda = 0.02, giving a roughly 4-year effective memory). PDF: https://wrds-www.wharton.upenn.edu/documents/1119/WARSP_TrendChina.pdf",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "novelty": "The moving averages are regressors in a fitted return forecast, not signals. The weight on each horizon is estimated and time-varying, so the identical price path can produce a long in one regime and a short in another. Every MA rule in the existing 32 hard-codes both which average matters and what sign its signal carries.",
+  "params": [
+   "lag set (drop 400, add 600/800/1000)",
+   "lambda (0.01 / 0.02 / 0.05)",
+   "tercile vs decile cut",
+   "monthly vs weekly re-estimation",
+   "winsorising A_L before regressing"
+  ],
+  "_agent": "v2:3015c5cfb4a7986cf3e71f8cb4e41a87dd61ac3aed15b09667260ff58e28e655"
+ },
+ {
+  "name": "Volume Run-Bar Polarity Flip",
+  "category": "alternative bar construction / information-driven bars",
+  "side": "both",
+  "timeframe": "intraday (run bars from 1-minute data)",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute OHLCV",
+   "standard normal CDF",
+   "EWMA state variables"
+  ],
+  "entry_rule": "Construct VOLUME RUN BARS per Lopez de Prado, using bulk volume classification for signs (as above: V_b = V*Phi(dP/sigma_dP) per 1-minute bar, V_s = V - V_b). Within the forming bar accumulate theta_buy = sum of V_b and theta_sell = sum of V_s since the bar opened, and T = the number of 1-minute bars consumed. Close the run bar when max(theta_buy, theta_sell) >= E[T] * max(P_b * E[V_b], (1 - P_b) * E[V_s]), where E[T] is an EWMA (span 50) of past bar tick counts, P_b is an EWMA (span 50) of the buy-volume fraction, and E[V_b], E[V_s] are EWMAs (span 50) of buy and sell volume per tick. Initialise E[T] = 30, P_b = 0.5. Label each closed bar BUY-SIDE or SELL-SIDE according to which side triggered the close. ENTER LONG at the close of a run bar when the last two closed run bars are both BUY-SIDE and they were immediately preceded by three or more consecutive SELL-SIDE run bars. Mirror for short.",
+  "exit_rule": "Exit at the close of the first SELL-SIDE run bar after entry, or after 5 run bars, whichever is first. Hard stop at 1.5 * ATR(14) on 5-minute bars against the entry.",
+  "why": "A run bar closes when one side's cumulative volume exceeds what the recent history says should be expected of it \u2014 that is, when a sustained one-sided sequence occurs that is statistically surprising given the current regime. The bars therefore self-adjust: in a quiet tape it takes little to close a bar, in a violent one it takes a lot. A polarity flip from a sell run to two buy runs is the moment the dominant side of a persistent sequence changes, which is when short-term liquidity providers who were leaning one way must reposition. The EWMA thresholds mean the signal is scale-free across tickers and across time of day, which matters a lot for a multi-ticker fleet.",
+  "novelty": "Distinct from the VPIN idea in the same family: VPIN fades a magnitude extreme, this trades a SIGN CHANGE in the sampling process itself. Distinct from any exclusion-list rule because the bar boundaries are endogenous \u2014 the number of bars per day varies with information flow, so 'the last two bars' is a variable amount of clock time. A three-bar momentum rule on time bars always looks at exactly three fixed intervals; here 'three consecutive sell runs' can span two minutes or two hours.",
+  "params": [
+   "EWMA span for E[T], P_b, E[V] (20/50/100)",
+   "initial E[T] (10/30/100)",
+   "confirming buy-side bars (1/2/3)",
+   "required preceding opposite run (2/3/5)",
+   "max holding run bars (3/5/10)"
+  ],
+  "source": "Marcos Lopez de Prado, 'Advances in Financial Machine Learning' (Wiley, 2018), Ch. 2, section 2.3.2.2 'Run Bars' \u2014 the threshold condition max(theta_buy, theta_sell) >= E[T] * max(P_b*E[V_b], (1-P_b)*E[V_s]) is his. Signing via bulk volume classification is the OHLCV proxy for his tick rule, from Easley, Lopez de Prado & O'Hara (2012). The polarity-flip entry is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ }
+]

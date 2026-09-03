@@ -1,0 +1,225 @@
+[
+ {
+  "name": "Volatility-Screened Momentum (Conservative Formula, OHLCV Proxy)",
+  "category": "risk-adjusted cross-sectional ranking",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Monthly, on the first trading day: (1) take a liquid universe (e.g. top 500 by 60-day average dollar volume); (2) for each name compute vol = stdev of the last 36 monthly returns (or, on daily bars, stdev of daily returns over 756 days, annualised); (3) keep only the 50% of the universe with the LOWEST vol; (4) within that surviving half, compute mom = close/close[252] - 1 and rank descending; (5) go LONG the top 10% of the surviving half, equal weight, holding 5% of capital in cash as a buffer against gaps and partial fills. The published formula is (momentum * net payout yield) / volatility; net payout yield is a fundamental field this bot does not have, so the OHLCV proxy drops that factor and keeps the sequential volatility screen followed by the momentum rank - I have pinned this substitution deliberately.",
+  "exit_rule": "Rebalance monthly in three ordered steps: first sell every holding that has dropped out of the current selection, then resize surviving holdings to the equal-weight target, then buy the new entrants with the freed capital. Ordering matters - selling first prevents rejected buys from insufficient buying power.",
+  "inputs": [
+   "daily close",
+   "daily volume",
+   "36-month (or 756-day) return standard deviation",
+   "12-month return",
+   "universe liquidity filter"
+  ],
+  "params": [
+   "volatility lookback (default 36 months)",
+   "momentum lookback (default 12 months)",
+   "volatility screen percentile (default keep lowest 50%)",
+   "selection percentage (default top 10%)",
+   "cash reserve (default 5%)",
+   "rebalance frequency"
+  ],
+  "why": "Momentum and low volatility are both robust cross-sectional premia, but they are negatively correlated in practice - the highest-momentum names are usually the most volatile. Screening on volatility FIRST and ranking on momentum SECOND is not the same as ranking on a combined score: the sequential screen hard-excludes the high-volatility tail where momentum crashes originate, then harvests momentum only inside the well-behaved half. That sequencing is why the published construction beats a naive risk-adjusted-momentum ratio.",
+  "source": "backtrader blog, 'Rebalancing - Conservative Formula', implementing Blitz and van Vliet, 'The Conservative Formula: Quantitative Investing Made Easy' (SSRN 3145152) - https://www.backtrader.com/blog/2019-07-19-rebalancing-conservative/rebalancing-conservative/",
+  "novelty": "A sequential screen-then-rank rather than a composite score, with the volatility measured over a deliberately long 36-month window so it captures regime behaviour rather than recent noise. The three-step rebalance ordering is itself part of the published specification.",
+  "_agent": "v2:16ef1dd18371885595dabbe3e4a4868e6c3a7e7fe0580d2da50702aa86e06460"
+ },
+ {
+  "name": "Correlated Cohort Decay Contagion",
+  "category": "cross-strategy decay detection / allocation",
+  "side": "both",
+  "timeframe": "daily evaluation; base signals any timeframe",
+  "entry_rule": "Once per quarter, cluster all live ideas by hierarchical clustering with average linkage on the distance d_ij = 1 - corr(r_i, r_j), using the last 750 days of daily strategy returns, cutting the dendrogram at correlation 0.5 (distance 0.5). This produces cohorts of ideas that are economically the same trade. Then daily, for each cohort c with n_c >= 4 members: compute each member's trailing 60-day annualised Sharpe, and let f_c = the fraction of members whose 60-day Sharpe is currently below that member's own 10th percentile of 60-day Sharpe measured over the last 750 days. Declare cohort c DEAD on any day when f_c >= 0.60. Trading rule: an idea may take its own entry signal at the next bar's open only if its cohort is not DEAD - INCLUDING ideas that individually still look healthy. Size = base * clip(1 - f_c, 0.3, 1.0).",
+  "exit_rule": "Each idea's own exit governs its trades. Cohort-level: on the bar a cohort is declared DEAD, flatten every position held by every member of that cohort at the next open. The cohort revives - and members resume at 50% size for 20 bars, then full size - once at least 60% of its members have had a 60-day Sharpe above their own 750-day median on each of 20 consecutive trading days. Singleton and small cohorts (n_c < 4) are exempt from the contagion rule and fall back to their individual monitors.",
+  "inputs": [
+   "OHLCV bars",
+   "daily return series for every live idea",
+   "cross-idea correlation matrix",
+   "hierarchical clustering (average linkage)",
+   "rolling 60-day Sharpe and its 750-day percentiles per idea"
+  ],
+  "params": [
+   "clustering correlation cut (0.3 / 0.5 / 0.7)",
+   "clustering window (500 / 750 / 1250 days)",
+   "re-clustering frequency (monthly / quarterly / annually)",
+   "member Sharpe window (40 / 60 / 120 days)",
+   "member percentile threshold (5th / 10th / 25th)",
+   "cohort fraction f_c for DEAD (0.5 / 0.6 / 0.75)",
+   "minimum cohort size (3 / 4 / 8)"
+  ],
+  "why": "This is the statistical-power argument, and it is the single biggest practical weakness of every per-strategy monitor above. Detecting a halving of a Sharpe of 0.5 on one strategy at conventional significance needs years of daily data - by which time the money is gone. But if twelve ideas in the corpus are all variants of the same mean-reversion trade, their decay is one event with twelve noisy measurements of it, and pooling gives roughly twelve times the observations. That is the difference between detecting death in two months and detecting it in two years. It is also the right economic model: McLean and Pontiff's and Chordia, Subrahmanyam and Tong's results are about whole categories of anomaly attenuating together as arbitrage capital and liquidity rise, not about individual rules failing independently. Killing a healthy-looking member of a dying cohort is the intended behaviour, not a bug - its apparent health is most likely noise.",
+  "source": "Synthesis. The power-pooling rationale is mine; the cohort-level decay premise follows McLean, R.D. & Pontiff, J. (2016), 'Does Academic Research Destroy Stock Return Predictability?', Journal of Finance 71(1):5-32, and Chordia, T., Subrahmanyam, A. & Tong, Q. (2014), 'Have Capital Market Anomalies Attenuated in the Recent Era of High Liquidity and Trading Activity?', Journal of Accounting and Economics 58(1):41-58, both of which document category-wide rather than idiosyncratic attenuation. The magnitude of the effect being pooled (post-publication returns roughly 50% below in-sample, non-statistical deterioration 34% of in-sample return) is from Chen & Zimmermann, FEDS 2018-033.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "Implementation Shortfall Abort",
+  "category": "optimal execution",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "At the signal bar, record the DECISION PRICE P0 = close of that bar, and the expected edge E_edge = k_edge * ATR(14) / P0. Begin executing X shares in N equal slices over N bars, each filled at that bar's (H+L+C)/3. After each slice j, compute the running realised shortfall IS_j = (VWAP_filled_j - P0) / P0 for a buy (sign-flipped for a sell), where VWAP_filled_j is the share-weighted average of fills so far. Then branch: (a) if IS_j > phi_abort * E_edge, CANCEL the entire unexecuted remainder and keep only what is filled \u2014 the trade is now a smaller position, permanently; (b) if IS_j < 0, i.e. price moved in your favour before you finished, ACCELERATE and execute the whole remainder on the next bar; (c) otherwise continue on schedule. phi_abort is swept in [0.3, 0.7].",
+  "exit_rule": "Hold the filled quantity to the normal exit (H bars, or 2*ATR stop, or signal reversal). On exit, run the same logic in reverse against a new decision price = the close of the exit-signal bar: if exit shortfall exceeds phi_abort * E_edge, stagger the remaining liquidation over an additional N bars rather than crossing; a stop-loss exit bypasses the abort logic entirely and liquidates at market.",
+  "inputs": [
+   "ohlc bars (1 or 5 minute)",
+   "atr(14)",
+   "running fill VWAP proxy from (H+L+C)/3",
+   "decision-bar close"
+  ],
+  "params": [
+   "N slices",
+   "phi_abort threshold (0.3-0.7)",
+   "k_edge ATR multiple",
+   "acceleration trigger level",
+   "H holding bars"
+  ],
+  "why": "Perold's implementation shortfall is the gap between the paper portfolio (which trades costlessly at the decision price) and the real one, and it decomposes into execution cost on what you filled plus opportunity cost on what you did not. The key insight for a signal book is that these two are substitutes: once the market has already moved most of your expected edge against you before you are done buying, the remaining shares have negative expected value and the correct action is to stop, not to complete the order. A partially filled position at a good price beats a fully filled one at a bad price.",
+  "novelty": "Every one of the 32 treats an entry as atomic \u2014 either the trade happens or it does not. This rule lets a trade be ABANDONED HALFWAY based on realised slippage against the decision price, producing variable, endogenous position sizes and an explicit opportunity-cost term. It also has an asymmetric accelerate branch, so favourable pre-fill drift is captured rather than surrendered to the schedule.",
+  "source": "Perold, A.F. (1988), 'The Implementation Shortfall: Paper versus Reality', Journal of Portfolio Management 14(3), 4-9 \u2014 the paper-versus-real-portfolio decomposition into execution cost and opportunity cost. Complemented by Almgren & Chriss (2000), which uses expected shortfall and its variance as the objective throughout.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Gap Already Paid",
+  "category": "entry timing / gap conditioning",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "Signal S fires long at close_t on the daily bar. At open_{t+1} compute the normalised gap g = (open_{t+1} - close_t) / ATR(14)_t. Three arms over identical signal dates. Arm A (unconditional): buy at open_{t+1} always. Arm B (gap-capped): buy at open_{t+1} only if g < 0.5, i.e. skip when the move has largely happened overnight. Arm C (adverse-gap only): buy at open_{t+1} only if g < 0, i.e. only when the open has moved against the signal. Mirror all thresholds for short signals. Reference S = close_t > EMA(20)_t with ADX(14)_t > 25.",
+  "exit_rule": "Identical across arms so the gap condition is the only difference: exit at close_{t+1}, giving a pure intraday holding period, with a hard stop at entry - 1.5*ATR(14)_t checked intrabar via the day's low. Also run a five-day-hold variant to check whether any effect is a one-day artefact. Report per-arm expectancy and, as the key diagnostic, the expectancy of the trades each arm skipped.",
+  "inputs": [
+   "ema(20)",
+   "adx(14)",
+   "atr(14)",
+   "daily open",
+   "daily close",
+   "daily low"
+  ],
+  "why": "Lou, Polk and Skouras show that momentum-family strategies earn their entire premium overnight and carry an offsetting negative intraday component. Read as an execution rule, that says something concrete and testable about gaps: when a momentum signal fires at the close and the next open gaps strongly in the signal's direction, the overnight premium has already been paid out to whoever was positioned into the close, and what remains for the intraday session is the negative half of their tug of war. Buying that open is buying the losing leg. Conversely an adverse gap means the overnight leg was not paid, so the intraday session is being entered from a better starting point. The prediction is therefore specific and directional - Arm C should beat Arm A for momentum-family signals, and the ordering should reverse or vanish for reversion-family signals. That is a genuine falsification test derived from a published decomposition rather than a threshold discovered by search.",
+  "novelty": "Distinct from the session-split idea, which chooses which session to hold; this one conditions on what the gap revealed and decides whether to participate at all. The conditioning variable is the realised overnight return, which is observable before the entry decision and is not used by any of the 32.",
+  "source": "Lou, Polk & Skouras (2019), 'A Tug of War: Overnight versus Intraday Expected Returns', Journal of Financial Economics 134:192-213. Read directly from the published PDF; the overnight-versus-intraday decomposition and the offsetting opposite-signed components for momentum-family strategies are stated in the abstract and introduction.",
+  "params": [
+   "gap threshold in ATR units",
+   "holding period (one day versus five days)",
+   "stop multiple",
+   "which signal family is used as S"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Rolling AdaBoost Stump Margin",
+  "category": "lightweight ML / boosted decision stumps",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "multi-horizon normalised returns",
+   "ATR ratio",
+   "ADX(14)",
+   "RSI(14)",
+   "volume ratio",
+   "close location value",
+   "distance to 20-bar high/low in ATR",
+   "20-bar realised skew"
+  ],
+  "entry_rule": "Every 21 bars, on the trailing 1000 bars, train AdaBoost.M1 with T = 50 depth-1 decision stumps. Candidate scalar features per bar: log return over 1, 3, 5, 10 and 20 bars each divided by sigma_20*sqrt(horizon); ATR14/ATR100; ADX(14); RSI(14); ln(V/mean(V,20)); close location value (C-L)/(H-L); overnight gap ln(O/C_prev)/sigma_20; (H_20 - C)/ATR14 and (C - L_20)/ATR14; realised skew of the last 20 returns. Each stump is a (feature, threshold, polarity) triple selected by exhaustive search over 32 within-feature quantile thresholds to minimise weighted error; boosting weight alpha_i = 0.5*ln((1-err_i)/err_i) with err_i clipped to [1e-6, 0.5-1e-6]. Labels y = sign of the triple-barrier outcome (+2*sigma up, -2*sigma down, 10-bar vertical), with vertical-barrier (flat) outcomes DROPPED from training. Define margin M_t = sum(alpha_i * h_i(x_t)) / sum(alpha_i), which lies in [-1,1]. LONG entry at the next open when M_t > +0.20; SHORT when M_t < -0.20.",
+  "exit_rule": "Exit when M_t crosses back through zero, or on the triple barrier (+/-2*sigma, 10-bar cap) - whichever first.",
+  "params": [
+   "number of stumps T (10-200)",
+   "refit interval",
+   "training window",
+   "margin threshold (0.10-0.40)",
+   "quantile grid resolution",
+   "barrier multiples",
+   "candidate feature list"
+  ],
+  "why": "Depth-1 stumps can only express 'feature > threshold', so every learner is an interpretable threshold rule of exactly the kind traders already use - and boosting discovers WHICH thresholds on WHICH features the current 1000 bars reward, then reweights them. Because it refits on a rolling window, the ensemble composition is itself a regime readout: when the momentum-feature stumps dominate the alpha mass you are in a trending regime. It captures feature interactions a linear model cannot, while needing no library beyond numpy.",
+  "novelty": "Different hypothesis class and different aggregation from the online linear model: an additive ensemble of axis-aligned threshold rules, traded on a continuous margin with an explicit abstention band, not on a class label. The stumps' selected thresholds are directly readable, which makes the model auditable in a way a black-box classifier is not.",
+  "source": "Freund & Schapire (1997), 'A Decision-Theoretic Generalization of On-Line Learning and an Application to Boosting', Journal of Computer and System Sciences 55(1). Finance instantiation on technical-indicator features (here deliberately simplified to depth-1 stumps so it runs in plain Python/numpy without sklearn): Zhang et al., Applied Soft Computing 84 (2019), 'Cascading logistic regression onto gradient boosted decision trees for forecasting and trading stock indices'. Labels via Lopez de Prado (2018) Ch. 3.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "CNN-Transformer Arbitrage on Factor Residuals",
+  "category": "deep learning / statistical arbitrage",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "(i) Each day compute the correlation matrix of daily returns over a rolling 252-day window across the universe and take the top K=5 eigenvectors as factor portfolios. (ii) Regress each symbol's last 60 days of returns on those factor returns to get loadings beta_i; the residual is eps_{i,t} = r_{i,t} - beta_i' F_t. (iii) Form the cumulative residual path over the last L=30 days, x_i = (sum of eps over 1 day, over 2 days, ..., over 30 days), divided by the 30-day std of eps_i. (iv) Pass x_i through a two-layer 1-D CNN (D=8 filters, kernel size 2, ReLU), then a 4-head self-attention layer, taking the final-timestep projection h in R^4. (v) Map h through a feedforward net to a raw residual-space weight. (vi) Project residual-space weights back to stock space and scale so that the sum of |w_i| equals 1. Enter every symbol at the close with its weight w_i.",
+  "exit_rule": "Fully re-solve the weight vector at every close and trade only the difference. A position exits when its weight reaches zero or flips sign. Train by maximising E[w'R]/sqrt(Var(w'R)) minus c * E[sum_i |delta w_i|] over a rolling 1000-day window, re-estimating network parameters every 125 trading days.",
+  "inputs": [
+   "daily returns panel",
+   "rolling PCA factors (252-day correlation window, 60-day loading window)",
+   "30-day cumulative residual path",
+   "1-D CNN (8 filters, size 2) + 4-head attention + feedforward allocator"
+  ],
+  "params": [
+   "number of factors K (1-15)",
+   "residual lookback L (30)",
+   "CNN filter count and kernel size",
+   "attention heads H",
+   "risk-aversion / Sharpe vs mean-variance objective",
+   "transaction-cost coefficient c",
+   "retraining interval"
+  ],
+  "why": "Mean reversion is only reliable in the part of a stock's return NOT explained by common factors - trading raw prices means fighting the market factor and calling it alpha. Projecting out the factors first makes the series close to stationary and weakly cross-correlated. The CNN then learns local shapes (up-trend, down-trend, up-reversal, down-reversal) and the attention layer decides which local shapes matter given the whole 30-day path, which is strictly more general than fitting an Ornstein-Uhlenbeck process and thresholding its z-score.",
+  "source": "Guijarro-Ordonez, Pelger & Zanotti, 'Deep Learning Statistical Arbitrage', arXiv:2106.04028. Read the full text (ar5iv) and verified: residual construction via Fama-French / PCA (252-day rolling window) / IPCA factors with 60-day loading estimation, cumulative-residual input of length L=30, benchmark CNN with D=8 filters of size 2, H=4 attention heads, the Sharpe and mean-variance equivalent objectives, L1-normalised weights mapped back through the projection matrix, daily rebalancing, retraining every 125 days on rolling 1000-day windows, and a universe of roughly the 550 largest US stocks.",
+  "novelty": "Signal extraction and capital allocation are a single differentiable object trained on a portfolio-level Sharpe ratio - there is no intermediate per-symbol forecast at all - and the network's input is a residual path rather than a price or an indicator.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "Tug-of-War Session Split",
+  "category": "entry timing / holding window",
+  "timeframe": "daily (uses daily open and close)",
+  "side": "both",
+  "entry_rule": "Let S be any of the 32 existing signals evaluated on daily bars; reference instantiation S = close_t > EMA(20)_t and ADX(14)_t > 25. On every day for which S is true at the close, take exactly one of two mutually exclusive expressions, run as separate backtests. Arm N (overnight only): buy at close_t, hold through the close, carry zero intraday exposure. Arm D (intraday only): buy at open_{t+1}, carry zero overnight exposure. Re-evaluate S each day; while S stays true the arm re-enters every session, and when S turns false the arm simply stops opening new positions.",
+  "exit_rule": "Arm N exits unconditionally at open_{t+1}. Arm D exits unconditionally at close_{t+1}. There are no stops, targets or trailing exits - the session boundary is the exit, which is the whole point. Compute for each of the 32 signals the mean per-day return of Arm N, of Arm D, and of the conventional close-to-close benchmark, and test whether Arm N + Arm D reconstructs the close-to-close number and whether the two components carry opposite signs.",
+  "inputs": [
+   "daily open",
+   "daily close",
+   "ema(20)",
+   "adx(14)",
+   "the 32 existing signals evaluated daily"
+  ],
+  "why": "Lou, Polk and Skouras decompose 14 well-known strategies and find that nine of them earn their entire premium intraday, while the five built on past returns - price momentum, industry momentum, earnings momentum, time-series momentum and short-term reversal - earn their entire premium overnight. Critically, wherever a strategy earns a significant premium in one session it tends to earn an economically significant premium of the OPPOSITE sign in the other. A conventional close-to-close backtest therefore nets a positive leg against a negative leg and reports the difference. If our momentum-family signals behave like their momentum-family strategies, holding only the overnight leg should roughly double the realised edge while cutting time-in-market to about a sixth, and the reversion-family signals should show the mirror pattern. That is a sharp, pre-registered, falsifiable prediction: classify each of the 32 as momentum-family or reversion-family before running it, and check the classification predicts which arm wins.",
+  "novelty": "Changes neither the signal nor its parameters - only which of the two daily sessions the exposure is held in. No entry in the existing 32 makes any statement about session, and the hypothesis being tested is that the session choice, not the signal, carries the sign of the edge.",
+  "source": "Lou, Polk & Skouras (2019), 'A Tug of War: Overnight versus Intraday Expected Returns', Journal of Financial Economics 134:192-213. Read directly from the published PDF at personal.lse.ac.uk/polk/research/tugofwar.pdf; the nine-intraday / five-overnight split and the opposite-sign offsetting components are stated in the paper's own introduction.",
+  "params": [
+   "which of the 32 signals is used as S",
+   "signal parameters held at defaults",
+   "optional minimum-liquidity filter on the ticker"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Net-Edge Admission Gate",
+  "category": "cost-aware signal filtering",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "On each bar, when a base signal fires, compute three quantities. (1) spread_hat = the EDGE effective-spread estimate (Ardia-Guidotti-Kroencke) over the trailing 60 OHLC bars, as a fraction of price; fallback if EDGE returns NaN is the Roll half-spread c = sqrt(max(0, -Cov(dlnC_t, dlnC_{t+1}))) over 60 bars, with round-trip spread cost = 2c. (2) impact_hat = Y * sigma_d * sqrt(Q / V20), with Y = 1.0, sigma_d = stdev of daily log returns over 20 days, Q = intended share count, V20 = 20-day average daily share volume. (3) roundtrip_cost = spread_hat + 2 * impact_hat. Then compute expected_edge = the median of the forward H-bar log return over all bars in the trailing 500-bar window on which this same signal fired, using only bars at least H bars in the past (strictly walk-forward, no lookahead). Take the trade ONLY IF expected_edge > hurdle * roundtrip_cost with hurdle = 3.0. If the inequality fails, the signal is logged but not traded.",
+  "exit_rule": "Close at the close of the H-th bar after entry, or immediately if price touches entry_price - 2*ATR(14) (long) / entry_price + 2*ATR(14) (short), whichever comes first.",
+  "inputs": [
+   "ohlc (for EDGE spread estimator)",
+   "close (for Roll autocovariance)",
+   "volume (20-bar average daily volume)",
+   "stdev of daily log returns (20)",
+   "atr(14)",
+   "the base signal being gated"
+  ],
+  "params": [
+   "H holding bars",
+   "hurdle multiple (1.5-5)",
+   "Y impact constant (0.5-2)",
+   "EDGE/Roll estimation window (40-120)",
+   "conditional-edge lookback (250-1000)",
+   "Q intended size"
+  ],
+  "why": "Novy-Marx & Velikov find that most published anomalies do not survive realistic effective spreads, and that the survivors are the low-turnover ones. The economic point is that an edge is not an edge until it clears the round trip, and the round trip is ticker-specific and size-specific. The same signal that is profitable on a liquid name is negative-expectancy on an illiquid one at the same dollar size. Gating on net rather than gross edge is the cheapest way to kill the negative-expectancy half of a signal book without touching the signal itself.",
+  "novelty": "Every filter in the existing 32 gates on signal strength or trend context (ADX, volume, trend direction). This one gates on a size-dependent cost estimate, so the identical signal is accepted on one ticker and refused on another purely because of estimated spread and the order's participation rate. Cost enters the entry condition, not the P&L accounting.",
+  "source": "Ardia, D., Guidotti, E., Kroencke, T.A. (2024), 'Efficient Estimation of Bid-Ask Spreads from Open, High, Low, and Close Prices', Journal of Financial Economics 161:103916 (reference implementation at github.com/eguidotti/bidask, verified); Roll (1984) model as restated verbatim in Novy-Marx & Velikov, 'A Taxonomy of Anomalies and their Trading Costs' (NBER w20721), p.4: 'c = sqrt(-Cov(dP_t, dP_{t+1}))'; Toth et al. (2011) square-root law for the impact term.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ }
+]

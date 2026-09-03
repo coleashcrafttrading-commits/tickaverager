@@ -1,0 +1,209 @@
+[
+ {
+  "name": "Novy-Marx Confluence Critical Value",
+  "category": "multiple-testing control / composite-signal gate",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Applies to any CONFLUENCE or composite rule that requires n component conditions to agree, where each component's DIRECTION was chosen using in-sample data. Do not test the composite against t = 2. Compute the composite's Newey-West t-statistic on the trailing 756 bars, then compare it to the correct null critical value at p = 0.05: (a) if the n components are equal-weighted after each was signed to predict positive in-sample returns, use t* = sqrt(2/pi)*sqrt(n) + sqrt(1 - 2/pi)*Phi^{-1}(1 - n*p/(n+1)) - which gives 2.23 for n=2, 2.46 for n=3, 2.83 for n=5, 3.54 for n=10; (b) if the composite weights components by their in-sample t-statistics (an ex-post mean-variance-efficient combination) use t** = sqrt( chi2inv(1 - p, n) ); (c) if you SELECTED the best k of n candidate components, treat it as selecting the single best of n^k candidates and use t* = Phi^{-1}[ (1 - p/2)^(1/(n^k)) ] - for the best 3 of 10 that is 4.05, not 2.0. ARM the confluence rule only if its t exceeds the applicable critical value, then enter exactly when the composite condition fires.",
+  "exit_rule": "The composite's own exit. Recompute the t and the critical value quarterly; disarm and flatten at the next open as soon as t falls below the critical value. Operationally, log the value of n and k that were actually used to build the composite at the moment it was built - retro-fitting a smaller n later is the single easiest way to cheat this gate, and the log is what prevents it.",
+  "inputs": [
+   "per-bar returns of the composite rule",
+   "the count n of components and the count k selected",
+   "Newey-West HAC t-statistic",
+   "inverse normal CDF and inverse chi-squared CDF"
+  ],
+  "why": "Confluence rules ('enter when RSI, MACD and volume all agree') are the most common way a rule corpus grows, and they are the most severely overfit construction in the whole space - because each component is silently signed to predict positive in-sample returns, the composite is fitted even when no component was individually selected. Novy-Marx's central empirical result is that combining the best k of n candidate signals produces a bias almost as large as selecting the single best of n^k candidates: a 3-of-10 confluence rule faces a 5% critical t of nearly 4, so a t of 2.5 that looks strongly significant is in fact unremarkable. For a 578-rule corpus that surely contains many multi-condition rules, this is the gate that will disqualify the most ideas, and it will disqualify exactly the ones that look best.",
+  "novelty": "Supplies critical values specific to composite/confluence construction, which no general multiple-testing correction gets right because the bias comes from signing components in-sample, not only from selecting among them. The n^k equivalence is a concrete, computable number that turns 'be careful with confluence' into a hard threshold.",
+  "source": "Novy-Marx, R. (2015), 'Backtesting Strategies Based on Multiple Signals', NBER Working Paper 21329 - eq. (5) for the best 1-of-n critical value, eq. (7) for the signal-weighted n-of-n chi-distribution result, eqs. (9) and (10) for the equal-weighted asymptotic approximation, and Fig. 4 plus the abstract for the 'best k of n is almost as biased as best 1 of n^k' finding and the near-4 critical t for best 3-of-10. https://www.nber.org/papers/w21329 . I verified eq. (10) numerically: it returns 3.54 for n=10 and the n^k equivalence returns 4.05 for 3-of-10, matching the paper's 'almost four'.",
+  "ohlcv_only": true,
+  "params": [
+   "p (0.01 / 0.05 / 0.10)",
+   "weighting scheme (equal vs signal-weighted, which changes the formula)",
+   "n and k as actually searched",
+   "t-statistic window and HAC bandwidth"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Three-Bar Play (ignition, hold, release)",
+  "category": "multi-bar structure",
+  "side": "both",
+  "timeframe": "5-minute or daily",
+  "entry_rule": "BAR 1 (ignition): range(1) >= 2.0 x ATR(14); close in the top 20% of its range, (close-low)/(high-low) >= 0.80; volume(1) >= 2.0 x the 20-bar average volume. BAR 2 (hold): high(2) <= high(1); low(2) >= low(1) + 0.60 x range(1) - i.e. bar 2 gives back no more than 40% of bar 1; range(2) <= 0.50 x range(1); volume(2) <= 0.60 x volume(1). ENTRY: buy stop at high(2) + 0.01, valid on the very next bar ONLY; cancel otherwise. Short setup is the exact mirror (close in the bottom 20%, bar 2 holding the low).",
+  "exit_rule": "Initial stop = low(2) - 0.01. Target = entry + 1.0 x range(1) (the ignition bar's range projected from the entry). If the target is not reached within 6 bars, exit at that bar's close. If bar 2's low is violated before entry, the setup is dead - do not re-arm on a later bar.",
+  "inputs": [
+   "OHLCV bars",
+   "ATR(14)",
+   "20-bar average volume"
+  ],
+  "params": [
+   "ignition range multiple (1.5-3.0)",
+   "ignition close-location floor (0.75-0.85)",
+   "give-back cap (30-50% of bar 1)",
+   "bar-2 range cap (0.4-0.6)",
+   "bar-2 volume cap",
+   "target multiple of bar 1's range"
+  ],
+  "why": "A wide bar on heavy volume with a close at its extreme is a repricing event. The informative question is what happens next: if the market immediately gives most of it back, the move was liquidity-driven; if it holds nearly all of it on materially lighter volume, no meaningful supply appeared at the new price and the repricing is being accepted. The narrow, quiet hold bar is the measurement of that acceptance.",
+  "novelty": "Not a momentum count - it is one large bar followed by a specified failure-to-retrace, with the entry at the small bar's extreme and the target scaled by the ignition bar's own range. Our three-bar momentum rule counts consecutive closes and would fire on three ordinary bars; this requires a specific size relationship (2:1 range contraction) and a volume contraction between adjacent bars, so the two almost never fire together.",
+  "source": "Bellafiore, M. (2010), 'One Good Trade' and SMB Capital training material, where the 'three bar play' is taught as an ignition bar, a small consolidation bar, and a break of the consolidation bar's high. Published as a discretionary pattern with no numeric thresholds; the range multiples, close-location floor, give-back cap and volume ratios above are my quantification so that it can be backtested at all.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "Earnings-Anniversary Volume Concentration",
+  "category": "stock-specific calendar seasonality",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "Announcement-month proxy (no earnings feed): flag any past calendar month for a stock if it contains at least one session with volume >= 3x that stock's trailing 60-session median volume AND |close-to-close return| >= 2x its trailing 60-session daily return standard deviation. Keep only stocks with EXACTLY 4 flagged months in the trailing 12 calendar months (quarterly-cadence check). Volume concentration ratio VCR = (total share volume falling in flagged months over calendar months m-27..m-4, i.e. a 24-month window lagged 3 months) / (total share volume over those same 24 months). At the 16:00 close of the last trading day of month m-1, a stock is an 'expected announcer' for month m if month m-12 was flagged. Go long equal dollar weight every expected announcer in the top tercile of VCR; go short equal dollar weight every non-expected-announcer in the bottom tercile of VCR. Universe filter: price > $5 and 60-session median dollar volume > $5m.",
+  "exit_rule": "Liquidate the entire book at the 16:00 close of the last trading day of month m, then re-form for month m+1. Fixed one-calendar-month hold, no stops.",
+  "inputs": [
+   "daily close",
+   "daily volume",
+   "60-session median volume",
+   "60-session daily return standard deviation",
+   "24 months of daily volume history",
+   "calendar-month index"
+  ],
+  "params": [
+   "volume spike multiple (3x)",
+   "return spike multiple (2 sigma)",
+   "VCR lag (3 months)",
+   "VCR window (24 months)",
+   "tercile vs quintile VCR cut",
+   "exactly-4-flagged-months requirement on/off",
+   "universe dollar-volume floor"
+  ],
+  "why": "Quarterly earnings are scheduled, and scheduled attention events attract predictable retail buying pressure with no offsetting short-selling. The price rise is not confined to the 3-day event window: there is a ~25bp run-up in the 10 days before, ~21bp over the 3-day window, and ~30bp of drift after, which is why a whole-month hold captures more than an event window. Sorting on volume concentration selects the names whose attention spike is largest, and the paper shows this cross-sectional difference is extremely persistent (still works when you use only data from 4-6 years ago).",
+  "novelty": "Nothing in the existing set is stock-specific calendar seasonality driven by a recurring firm event. It is not a moving-average or oscillator rule at all: the signal is 'which month of the year does this particular stock's volume cluster in', reconstructed from OHLCV alone via volume spikes. Distinct from the already-found same-calendar-month annual seasonality, which uses past RETURNS in the same month; this uses past VOLUME CONCENTRATION and a quarterly rather than annual cycle.",
+  "ohlcv_only": true,
+  "source": "Frazzini & Lamont, 'The Earnings Announcement Premium and Trading Volume', NBER Working Paper 13090 (May 2007) - PDF fetched and read directly this session. Verified specifics: long expected-announcers / short expected-non-announcers earns 61bp per month, t > 5, annual Sharpe 0.94 (higher than value, size, momentum or the market over the same period); 7-18% per year across specifications; announcement months predicted from last year's announcement month gives 93% accuracy for firms with 4 announcements in the prior year; the sorting variable is the volume concentration ratio (percent of total share volume over the previous four years occurring in announcement months), lagged 3 months; day-0 volume is more than 50% above normal, which is what makes the volume-spike proxy viable; effect present continuously since 1926.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "Three-Line Strike Traded Against Its Name",
+  "category": "multi-bar candlestick, contrarian to nominal signal",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Daily bars, four-bar pattern A=bar[-3], B=bar[-2], C=bar[-1], D=bar[0]. SHORT SIGNAL (the so-called BULLISH three-line strike): (a) A, B, C all white (close > open) with close(A) < close(B) < close(C) and low(A) < low(B) < low(C); (b) each of A, B, C has body >= 0.50 x its own range; (c) uptrend: close(C) > EMA(10) of close; (d) D is black: close(D) < open(D); (e) open(D) > close(C); (f) close(D) < open(A) - D erases all three prior bars; (g) range(D) >= 1.5 x ATR(14). Short at the close of D. LONG SIGNAL (the so-called BEARISH three-line strike) is the exact mirror: A, B, C all black with close(A) > close(B) > close(C) and high(A) > high(B) > high(C), downtrend close(C) < EMA(10), D white with open(D) < close(C) and close(D) > open(A), range(D) >= 1.5 x ATR(14); buy at the close of D. Variant to sweep: enter at the close of bar D+3 instead of D.",
+  "exit_rule": "Exit at the close of the 10th bar after entry. Stop at high(D) + 0.10 x ATR(14) for shorts, low(D) - 0.10 x ATR(14) for longs. No profit target - the pattern's edge sits in the tail, not the median.",
+  "inputs": [
+   "ohlcv daily",
+   "ema(10) of close",
+   "atr(14)"
+  ],
+  "params": [
+   "entry delay (0 or 3 bars)",
+   "hold bars (10)",
+   "minimum range(D) in ATR (1.5)",
+   "minimum body/range for A,B,C (0.50)"
+  ],
+  "why": "Bulkowski's census of 4.7 million candle lines found this pattern is anti-nominal in BOTH directions: the bullish three-line strike acts as a bearish reversal 65% of the time (overall performance rank 2 of 103) and the bearish three-line strike acts as a bullish reversal 84% of the time (overall performance rank 1 of 103). Mechanism: one bar erasing three sessions of directional progress leaves everyone who participated in the run underwater simultaneously, and the pattern's textbook 'continuation' label means the crowd is positioned exactly the wrong way. Caveat: only 69 and 85 samples respectively, so this is a low-confidence, high-payoff idea that must be validated on our own universe before sizing.",
+  "source": "Bulkowski, Encyclopedia of Candlestick Charts; https://thepatternsite.com/ThreeLineStrikeBull.html (rank 2/103, frequency rank 95, bearish reversal 65%, n=69, 'wait 3 days before selling after downward breakouts in uptrends') and https://thepatternsite.com/ThreeLineStrikeBear.html (overall rank 1/103, bullish reversal 84%, n=85).",
+  "novelty": "A four-bar pattern in which the trade is taken in the direction OPPOSITE the pattern's conventional name, on the strength of a large-sample census rather than folklore. No excluded idea uses a three-in-a-row run erased by a single fourth bar as its trigger.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "VPIN Toxicity Flush Fade (bulk-volume-classified)",
+  "category": "alternative bar construction / order-flow proxy",
+  "side": "long",
+  "timeframe": "intraday (volume bars from 1-minute data)",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute OHLCV",
+   "20-day median daily volume",
+   "standard normal CDF"
+  ],
+  "entry_rule": "Build volume bars exactly as above with threshold V = (20-day median daily volume)/78. For each volume bar j, apply BULK VOLUME CLASSIFICATION as the OHLCV proxy for signed order flow: buy volume V_b(j) = V * Phi((P_j - P_(j-1)) / sigma_dP), where Phi is the standard normal CDF, P_j is the bar's close and sigma_dP is the standard deviation of (P_j - P_(j-1)) over the last 50 volume bars; sell volume V_s(j) = V - V_b(j). Then VPIN(t) = sum over the last n=50 volume bars of |2*V_b(j) - V| divided by (n * V), which lies in [0,1]. ENTER LONG at the close of volume bar t when BOTH: (a) VPIN(t) crosses above its 95th percentile over the last 250 volume bars (it was below on bar t-1), and (b) the cumulative log return over those same last 50 volume bars is < -1.5 times the standard deviation of 50-volume-bar cumulative returns measured over the last 250 bars. Long only \u2014 this is a capitulation fade.",
+  "exit_rule": "Exit at the close of a volume bar when any of: (a) VPIN falls back below its 50th percentile over the last 250 volume bars, (b) 40 volume bars have elapsed, (c) price falls a further 1.0 * (standard deviation of 50-volume-bar returns) below the entry price \u2014 a hard stop, because a toxicity spike that keeps going is exactly the scenario this trade loses to.",
+  "why": "VPIN measures order-flow imbalance per unit of volume: it spikes when one side is consuming liquidity far faster than the other. Easley/Lopez de Prado/O'Hara document spikes preceding and during liquidity crises. The behavioural claim is that a toxicity spike combined with a large NEGATIVE return is forced selling \u2014 margin calls, index-fund rebalancing, stop cascades \u2014 rather than informed selling, and forced sellers are price-insensitive, so once the flow exhausts, the liquidity premium paid to absorb it is reclaimed. The conditioning on direction is essential: high VPIN alone is not a signal, high VPIN plus a flush is.",
+  "novelty": "Fades an ORDER-FLOW extreme, not a price extreme. RSI, Williams %R, CCI, MFI, Bollinger and VWAP z-score all measure how far price has travelled; VPIN measures how one-sided the volume was in getting there, and the two diverge constantly \u2014 a slow grind down produces a large RSI extreme and a low VPIN, while a fast one-sided flush produces a moderate RSI extreme and a huge VPIN. It is also sampled on volume bars, so the lookback is a fixed quantity of traded shares rather than a fixed number of minutes.",
+  "params": [
+   "n bars in the VPIN sum (25/50/100)",
+   "volume-bar threshold divisor",
+   "entry percentile (90/95/99)",
+   "return threshold (1.0/1.5/2.0 sigma)",
+   "exit percentile (30/50/70)",
+   "max holding bars (20/40/80)"
+  ],
+  "source": "Bulk volume classification and VPIN: Easley, Lopez de Prado & O'Hara, 'The Volume Clock: Insights into the High-Frequency Paradigm', Journal of Portfolio Management 39(1), 2012, and 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies 25(5), 2012. BVC is explicitly the authors' own OHLCV-level substitute for signed tick data, which is why this stays ohlcv_only. The flush-fade conditioning is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Ehlers Autocorrelation Reversal",
+  "category": "Ehlers DSP / spectral",
+  "side": "both",
+  "timeframe": "any (designed for daily; test 15-minute too)",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "ATR(14)"
+  ],
+  "entry_rule": "Step 1, ROOFING FILTER. High-pass with period 48: a1 = cos(sqrt(2)*pi/48); alpha1 = (a1 + sin(sqrt(2)*pi/48) - 1)/a1; HP = (1 - alpha1/2)^2 * (C - 2*C[1] + C[2]) + 2*(1 - alpha1)*HP[1] - (1 - alpha1)^2 * HP[2]. Step 2, SUPER SMOOTHER with period 10: a2 = exp(-sqrt(2)*pi/10); b2 = 2*a2*cos(sqrt(2)*pi/10); c2 = b2; c3 = -a2^2; c1 = 1 - c2 - c3; Filt = c1*(HP + HP[1])/2 + c2*Filt[1] + c3*Filt[2]. Step 3, AUTOCORRELATION. For each lag = 3 to 48, compute the Pearson correlation between the vector {Filt[0..lag-1]} and {Filt[lag..2*lag-1]} using the standard formula (m*Sxy - Sx*Sy)/sqrt((m*Sxx - Sx^2)*(m*Syy - Sy^2)) with m = lag, and scale it to [0,1] as corr01[lag] = 0.5*(corr + 1). Step 4, REVERSAL DETECTION. SumDeltas = the count of lags in 3..48 for which corr01[lag] and corr01_prev[lag] lie on opposite sides of 0.5. A REVERSAL is flagged on bar t when SumDeltas > 24. ENTER at the close of a reversal bar: LONG if Filt[t] > Filt[t-1], SHORT if Filt[t] < Filt[t-1].",
+  "exit_rule": "Exit at the close of the next bar that flags a reversal (SumDeltas > 24), regardless of its direction. Additional hard exits: 2.0 * ATR(14) stop against the entry, and a 30-bar time stop if no reversal has fired.",
+  "why": "The correlation of a band-limited series with its own lagged copy is high while the cycle phase is stable and collapses when the phase inverts. Ehlers' insight is that at a genuine turning point the correlations at MANY lags flip simultaneously, because the whole spectral structure of the recent data shifts at once \u2014 a single lag flipping is noise, half of them flipping is an event. Economically, this fires when the balance of participants across multiple horizons changes together, which is what a real regime turn looks like as opposed to a one-timeframe wiggle.",
+  "novelty": "There is no threshold on price and no moving average anywhere in the signal. The entry statistic is a COUNT OF SIMULTANEOUS SPECTRAL COHERENCE BREAKS across 46 lags \u2014 a fundamentally different object from any level-crossing or crossover rule. The reversal detector also has no direction of its own: it says 'a turn happened here', and the direction is read separately from the filter's slope. That structure (event detector plus direction reader) has no analogue on the exclusion list, and the exit \u2014 'hold until the next detected reversal' \u2014 makes holding period endogenous to the market's cycle structure rather than to a fixed target.",
+  "params": [
+   "HP period (40/48/80)",
+   "SS period (10/20)",
+   "lag range (3..48 vs 3..30)",
+   "SumDeltas threshold (18/24/30)",
+   "ATR stop multiple",
+   "time stop (20/30/60 bars)"
+  ],
+  "source": "John F. Ehlers, 'Cycle Analytics for Traders' (Wiley, 2013), autocorrelation and autocorrelation-reversals chapters. Constants and the exact SumDeltas > 24 rule verified against the open-source MQL5 implementation at github.com/thetestspecimen/ehlers-indicators-mql5, file mq5/ehlers_autocorrelation_reversals.mq5, which I fetched and read. Roofing filter reference: Ehlers, 'Predictive Indicators for Effective Trading Strategies' (mesasoftware.com/papers).",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Bai-Perron Last-Segment Allocator",
+  "category": "structural-break overlay / allocation",
+  "side": "both",
+  "timeframe": "daily evaluation; base signal any timeframe",
+  "entry_rule": "Once per month, for each sub-strategy s, fit a Bai-Perron multiple-mean-shift model to s's daily return series over the last 2000 bars: minimum segment length h = 60 bars, maximum number of breaks m = 5. Select the number of breaks m* by sequential sup-F(l+1|l) tests at the 5% level, confirmed by BIC (take the smaller of the two answers). This partitions the history into m*+1 segments. Compute the annualised Sharpe ratio of ONLY the most recent segment, SR_last = mean(r)/std(r) * sqrt(252), using just the bars since the last estimated break date. Set s's risk weight w_s = clip(SR_last / 1.0, 0, 1). If the last segment has fewer than 60 bars, use the pooled mean of the last two segments instead. Take s's own entry signal at the next bar's open, sized at w_s * base size. If w_s = 0, take no entries for s that month.",
+  "exit_rule": "s's own exit rule. Additionally, re-run the break detection daily on the last 500 bars only; if a NEW break is detected whose break date falls within the last 5 bars and whose post-break segment mean is negative, flatten all of s's positions at the next open and set w_s = 0 until the next monthly rebalance.",
+  "inputs": [
+   "OHLCV bars",
+   "per-strategy daily return series",
+   "Bai-Perron dynamic-programming break estimator with sequential sup-F(l+1|l) and BIC"
+  ],
+  "params": [
+   "minimum segment length h (40 / 60 / 120)",
+   "maximum breaks m (3 / 5 / 8)",
+   "history window (1000 / 2000 / 4000 bars)",
+   "Sharpe normaliser in w_s (0.5 / 1.0 / 1.5)",
+   "break-selection criterion (sequential sup-F / BIC / LWZ)"
+  ],
+  "why": "Every allocation decision in a 578-idea corpus defaults to using full-sample backtest Sharpe. If anomalies really lose a third to a half of their return after they become known, the full-sample number is a weighted average of a dead regime and a live one, and it systematically overweights the ideas whose alpha is furthest in the past. Estimating where the breaks actually are and then throwing away everything before the most recent one gives an allocation statistic that is unbiased for the regime the capital will actually be deployed in. Alexander & Fabozzi's split dates for factors such as Debt Issuance (2016), Seasonality (2016) and Momentum (2022) show these breaks are locatable and recent.",
+  "source": "Bai, J. & Perron, P. (1998) Econometrica 66:47-78 and (2003) Journal of Applied Econometrics 18:1-22, sequential sup-F(l+1|l) testing for multiple unknown breaks; empirical motivation from Alexander, N. & Fabozzi, F.J., 'Measuring Strategy-Decay Risk: Minimum Regime Performance and the Durability of Systematic Investing', arXiv:2604.08356, Exhibit 3 (per-factor split dates and left/right Sharpe ratios).",
+  "novelty": "Uses only the post-final-break sample to size the strategy, rather than a rolling window of arbitrary fixed length. A rolling window blends across breaks by construction; this one refuses to. It is also multiple-break rather than single-break, so a strategy that already died and partly recovered is not evaluated against its pre-death mean.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "High Volume Churn Bar Failure",
+  "category": "effort vs result / bar classification",
+  "side": "both",
+  "timeframe": "intraday 5-minute (daily variant also valid)",
+  "entry_rule": "Identify a CHURN bar: (a) its volume >= the 90th percentile of the same bar-of-day slot's volume over the prior 20 sessions; (b) its range (high - low) <= the 40th percentile of the last 100 bars' ranges; (c) its high equals the highest high of the last 20 bars, OR its low equals the lowest low of the last 20 bars. ENTRY: if the churn bar set the 20-bar HIGH, go SHORT on the first subsequent 5-minute bar that closes below the churn bar's LOW, provided that happens within 8 bars. If the churn bar set the 20-bar LOW, go LONG on the first subsequent bar that closes above the churn bar's HIGH within 8 bars. Cancel the setup if not triggered in 8 bars, or if a later churn bar replaces it.",
+  "exit_rule": "Target = 1.5 x the churn bar's range, measured from the entry price. Stop = the churn bar's own extreme (its high for shorts, its low for longs). Force flat 15:55 ET.",
+  "inputs": [
+   "5-minute OHLCV",
+   "per-slot volume percentiles over 20 sessions",
+   "rolling range percentiles",
+   "20-bar high/low"
+  ],
+  "params": [
+   "volume percentile (80-97)",
+   "range percentile ceiling (25-50)",
+   "extreme lookback bars (10-40)",
+   "trigger window bars (4-15)",
+   "target as multiple of churn range (1.0-3.0)"
+  ],
+  "why": "A bar that trades enormous volume at a swing extreme but goes nowhere is a fight that the initiator lost: the effort was expended, the result did not follow, so the incoming aggressive orders were fully met by resting size on the other side. The trade is not the churn bar itself - churn can precede continuation too - it is the subsequent FAILURE, when price closes back through the churn bar entirely. That confirms the absorbed side is now offside and must cover, which supplies the fuel for the move.",
+  "novelty": "Distinct from the residual-regression version above in that it is a discrete bar taxonomy with a structural trigger and a stop defined by the churn bar's own geometry, and distinct from ATR expansion because it selects for range CONTRACTION on record volume - the exact opposite condition.",
+  "ohlcv_only": true,
+  "source": "The 'High Volume Churn' bar type (high volume, low range) is one of the five classifications in the Better Volume indicator, documented at https://www.motivewave.com/studies/better_volume.htm and in the original description doc at https://c.mql5.com/forextsd/forum/147/better_volume_indicator__description.doc (the indicator originates from emini-watch.com). Those sources define the bar type and describe topping/bottoming sequences qualitatively; the percentile thresholds, the failure trigger and the exits are my specification.",
+  "_agent": "v2:74b72b10aad022b74885d9539dfb07c28d3f484da2b8b7010914406165497ee2"
+ }
+]

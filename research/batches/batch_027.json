@@ -1,0 +1,204 @@
+[
+ {
+  "name": "Liquidity Vacuum Depth Collapse",
+  "category": "illiquidity",
+  "side": "both",
+  "timeframe": "intraday 5-min or 15-min",
+  "entry_rule": "Depth proxy D_t = (C_t * V_t) / max((H_t - L_t)/C_t, 1e-6) - dollar volume per unit of relative range, an inverse of Kyle's lambda. Let z_t = (ln D_t - mean(ln D, 60)) / stdev(ln D, 60). Enter at the next bar's open when z_t <= -2.0 on two CONSECUTIVE bars AND the sum of the BVC signed imbalance OI over those two bars is positive - go LONG; go SHORT when that sum is negative.",
+  "exit_rule": "Exit when z_t returns to >= 0, OR after 10 bars, OR on a 1.5 x ATR(14) stop.",
+  "inputs": [
+   "OHLCV",
+   "log depth proxy and its 60-bar z-score",
+   "BVC signed imbalance for direction",
+   "ATR(14)"
+  ],
+  "why": "Depth is the amount of volume the book can absorb per unit of price movement, the reciprocal of price impact. When it collapses for two bars running, the resting size has been pulled and whatever flow arrives next travels much further than usual. The direction is taken from the classified imbalance rather than from price, so the trade is 'thin book plus one-sided flow' rather than 'price broke a level'. The Amivest ratio family - volume divided by absolute return - is the daily ancestor of this measure; using range in the denominator rather than the net return makes it responsive to intrabar liquidity withdrawal that leaves the close unchanged.",
+  "source": "Amivest liquidity ratio as introduced in Cooper, Groth & Avera (1985), Journal of Economics and Business 37(1); Kyle (1985) for depth as 1/lambda; the family of volume-to-range and volume-to-return liquidity proxies is surveyed in Fong, Holden & Trzcinka, 'What Are the Best Liquidity Proxies for Global Research?' (cicfconf.org/sites/default/files/paper_337.pdf). The two-bar depth-collapse entry is my synthesis.",
+  "novelty": "The trigger is a collapse in a LIQUIDITY measure, with direction supplied by classified flow - price plays no part in the trigger at all. Donchian and ATR-expansion breakouts both require price to have already done something; this fires while price can still be flat, on the disappearance of the resting size.",
+  "ohlcv_only": true,
+  "params": [
+   "z lookback (30/60/120)",
+   "z threshold (-1.5/-2.0/-2.5)",
+   "consecutive bars required (1/2/3)",
+   "range vs true range in the denominator",
+   "hold length"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Sign-Autocorrelation z Score",
+  "category": "trade-sign autocorrelation",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Let s_t = +1 if r_t > 0 and -1 if r_t < 0, dropping bars with r_t = 0. For lag m, let p_m = the fraction of the last N = 250 valid pairs for which s_t = s_{t-m}, and z_m = (2*p_m - 1) * sqrt(N). Enter at the next bar's open, requiring |r_t| >= 0.5 * stdev(r, 60): if z_m <= -2.0, take the OPPOSITE side to s_t; if z_m >= +2.0, take the SAME side as s_t. No trade when |z_m| < 2.",
+  "exit_rule": "Exit at the close of bar t+m (so a one-bar hold when m = 1), OR on a 1.5 x ATR(14) stop.",
+  "inputs": [
+   "closes",
+   "sign series of bar returns",
+   "250-bar sign continuation frequency",
+   "ATR(14)"
+  ],
+  "why": "Scalar return autocorrelation mixes direction and magnitude, and the recent evidence is that on liquid index ETFs a strongly significant lag-1 autocorrelation can come almost entirely from magnitude while the sign carries no information at all - and the reverse also happens: at lag 3 the sign test is significant while the scalar autocorrelation is not. Since a directional trade only monetises the sign, the sign-continuation frequency is the statistic that actually maps to P&L, and it identifies horizons the ordinary autocorrelation hides.",
+  "source": "arXiv 2606.29591, 'The Bounce Has No Direction' - the FRI sign test, rho_sign(m) = 2*p_{m,0} - 1 with p_{m,0} the continuation frequency and 0.5 the random-walk null; the paper reports z_sign = -1.59 at lag 1 (insignificant) alongside rho(1) = -0.081 with z* = -7.39, and z_sign = -2.32 at lag 3 where rho(3) is insignificant.",
+  "novelty": "Three-bar momentum hard-codes a fixed sign pattern. This estimates whether sign persistence exists at all, at each lag, and only trades when it is statistically significant - and it explicitly discards magnitude, which is the opposite of every momentum rule in the existing set.",
+  "ohlcv_only": true,
+  "params": [
+   "lag m (1/2/3/5)",
+   "sample N (125/250/500)",
+   "z threshold (1.65/2.0/2.5)",
+   "minimum |r_t| filter"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Vol-of-Vol Collapse",
+  "category": "vol-of-vol / uncertainty about risk",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "RV5_t = stdev of the last 5 daily log returns * sqrt(252). VoV_t = stdev of ln(RV5) over the last 20 sessions. Rank VoV_t against its own trailing 504-session distribution to get a percentile P_t. LONG at the next open when P_t crosses down through 50 today AND P_t was >= 90 at some point in the previous 10 sessions.",
+  "exit_rule": "Exit when P_t rises back above 80, or after 20 sessions held, or on a 3.0*ATR(14) stop.",
+  "inputs": [
+   "daily close",
+   "log returns",
+   "ATR(14)"
+  ],
+  "params": [
+   "RV window (5, 10, 21)",
+   "VoV window (20, 40, 60)",
+   "history for percentile (252, 504, 756)",
+   "entry/exit percentiles",
+   "direction (long-on-collapse vs short-on-spike - sweep both signs)"
+  ],
+  "why": "Vol-of-vol measures uncertainty about the level of risk itself, distinct from the level of risk. When it is extreme, position sizing across the market is unstable and risk budgets are being cut mechanically; when it collapses back to normal, that mechanical selling stops and mean-variance investors can re-lever. The entry is deliberately on the collapse, not the spike, because the spike itself carries no timing information - only its resolution does.",
+  "novelty": "Second-order volatility: the dispersion of the volatility series, not the dispersion of returns. No indicator in the existing set is a function of the variance of a variance estimate. The sign of the effect is genuinely uncertain in the literature (option-implied vol-of-vol predicts LOW returns cross-sectionally), so both directions should be swept rather than assumed.",
+  "source": "Synthesis - a realized-data analogue of the option-implied vol-of-vol effect documented in Baltussen, van Bekkum & van der Grient (2018), 'Unknown Unknowns: Uncertainty About Risk and Stock Returns', Journal of Financial and Quantitative Analysis 53(4). Since no option chain is available, the proxy replaces implied vol-of-vol with the standard deviation of log realized vol; the proxy is noisier and its sign is an empirical question, hence the two-sided parameter sweep.",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Range-Bar Flip Count Regime",
+  "category": "alternative bar construction / range bars",
+  "side": "both",
+  "timeframe": "intraday (range bars from 1-minute data)",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute OHLCV",
+   "ATR(14) on 5-minute bars"
+  ],
+  "entry_rule": "Build RANGE BARS of fixed price height S = 0.75 * ATR(14) of 5-minute bars, recomputed at 09:30 each day and fixed for the session. A range bar opens at the close of the previous range bar and closes as soon as (running high - running low) >= S; its close is set to whichever extreme was reached last. Classify each closed range bar as UP if its close > its open, DOWN otherwise. Define a FLIP as a range bar whose class differs from the previous range bar's class, and let F20 = the number of flips among the last 20 closed range bars (an integer in 0..19). ENTER LONG at the close of a range bar when F20 <= 6 AND the last 5 closed range bars are all UP. Mirror for short (F20 <= 6 and last 5 all DOWN).",
+  "exit_rule": "Exit at the close of a range bar when any of: (a) F20 >= 12 (the tape has become choppy), (b) three consecutive range bars close DOWN (for a long), (c) 20 range bars have elapsed. Hard stop at 2*S against the entry price.",
+  "why": "Because every range bar spans the same price distance, the count of direction flips over a fixed number of bars is a clean, unit-free measure of path efficiency: 19 flips means price covered 20*S of path and went nowhere, 0 flips means it went 20*S in a straight line. This is the definition of a trending versus a mean-reverting regime, expressed without any volatility normalisation because the normalisation is baked into the bar construction. Trading with the direction of a low-flip tape is a bet that path efficiency is autocorrelated, which is the core of why trend following works at all.",
+  "novelty": "ADX, the choppiness index and efficiency ratios all measure the same underlying idea on TIME bars, where a high reading can be produced either by directional movement or simply by higher volatility during that window. Range bars remove the volatility term entirely \u2014 the denominator is constant by construction \u2014 so the flip count is a pure path statistic. The entry gate and the exit gate are the same statistic at different thresholds, which gives a natural hysteresis that an ADX gate on a separate signal does not have.",
+  "params": [
+   "range-bar size S (0.5/0.75/1.0/1.5 x ATR)",
+   "ATR length (10/14/30)",
+   "flip window (10/20/40 bars)",
+   "entry flip threshold (4/6/8)",
+   "exit flip threshold (10/12/14)",
+   "confirming run length (3/5/7)"
+  ],
+  "source": "Range-bar construction is standard in futures platform documentation (constant-range bars); the flip-count statistic and the entry/exit thresholds are my synthesis. The path-efficiency reasoning follows Kaufman's efficiency ratio (Perry Kaufman, 'Trading Systems and Methods', Wiley) applied in range-bar space rather than time space.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Body-Dominant Engulfing with Close-Strength Exit",
+  "category": "candlestick",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "BULLISH: close[-1] < open[-1] (prior bar down); close[0] > open[0] (current bar up); open[0] <= close[-1]; close[0] > open[-1] (the body engulfs the prior body); |close[0] - open[0]| >= 1.5 x |close[-1] - open[-1]|; the current body >= 0.70 x its own range; range[0] >= 1.0 x ATR(14); and at least 3 of the previous 5 bars closed below their own prior close. Enter at the close of the engulfing bar. BEARISH is the exact mirror.",
+  "exit_rule": "Three-way exit, first to trigger: (1) hard stop at the engulfing bar's low - 0.05; (2) profit target at entry + 3.0 x ATR(14); (3) close-strength stop - exit at the close of any bar whose CLV = ((close-low)-(high-close))/(high-low) <= -0.40 AND whose range >= 1.0 x ATR(14). No time exit.",
+  "inputs": [
+   "OHLCV bars",
+   "ATR(14)"
+  ],
+  "params": [
+   "body dominance ratio (1.2-2.0)",
+   "body/range floor (0.60-0.80)",
+   "range floor in ATR",
+   "prior weakness count (3 of 5)",
+   "CLV exit threshold (-0.30 to -0.60)",
+   "ATR target multiple"
+  ],
+  "why": "Plain engulfing is a coin flip; the informative version is where a single session's body is large relative both to the prior body and to the stock's normal range, meaning one side did the whole day's work in one direction after several sessions of the opposite. The prior-weakness requirement supplies the context that makes it a reversal rather than a random large bar.",
+  "novelty": "The exit is the real idea: a close-strength stop that liquidates on the first decisive close-on-the-low wide bar, which is bar geometry rather than a price level or an indicator. That exit is transferable to other entries and is a different exit family from every stop/target/trail we currently run. It also deliberately trades the engulfing bar as a continuation-capable structure rather than assuming reversal.",
+  "source": "Bulkowski, T., thepatternsite.com/OutsideDays.html - an engulfing bar is an outside day with body constraints, and Bulkowski's data show outside days act as a CONTINUATION 63% of the time in bull markets with up breakouts (average rise 10%, 32% break-even failure rate, rank 6 of 23 small patterns), which is why this rule does not assume reversal. Null-result context: Marshall, Young and Rose (2006), Journal of Banking & Finance 30(8), 2303-2323.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "RSRS High-on-Low Regression Beta",
+  "category": "statistical-regression",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily high",
+   "daily low",
+   "rolling OLS slope",
+   "rolling mean and stdev of the slope",
+   "regression R-squared"
+  ],
+  "params": [
+   "regression window N (18)",
+   "z-score window M (600)",
+   "long threshold S (0.7)",
+   "exit threshold (-0.7)",
+   "R-squared weighting on/off"
+  ],
+  "entry_rule": "Each day fit an ordinary least squares regression of the daily HIGH on the daily LOW over the trailing N=18 bars: High_i = alpha + beta*Low_i. Record beta and the regression R-squared. Maintain a rolling series of the last M=600 beta values and compute z = (beta[t] - mean(beta, M)) / stdev(beta, M). Optionally weight it: z_w = z * R2[t]. GO LONG when z_w crosses above +S (S = 0.7). GO SHORT when z_w crosses below -S.",
+  "exit_rule": "Close the long when z_w falls below 0 (or below a separate exit threshold, default 0.0); close the short when z_w rises above 0. Hard stop at 2*ATR(14) against entry.",
+  "why": "Beta is how far the day's high extends for each unit the day's low extends. Beta large means buyers push the ceiling up faster than sellers push the floor down \u2014 support is winning and there is room above. Beta small means the high is capped while the low keeps sliding \u2014 resistance is winning. Because raw beta drifts with the instrument, standardising it against its own 600-day history turns it into a comparable regime score, and the R-squared weight discounts readings where the high/low relationship was noisy.",
+  "source": "whchien/ai-trader, file ai_trader/backtesting/strategies/strategies/indicators.py, classes RSRS and NormRSRS (OLS of high on low, z-score over a long window, R2-weighted variant), used by ai_trader/backtesting/strategies/classic/rsrs.py",
+  "novelty": "Uses the high and low series as regressor and regressand against EACH OTHER rather than against time or against price. No moving average, no oscillator \u2014 the signal is the slope of a cross-sectional relationship inside the bar range, standardised against its own multi-year distribution.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Turnaround Tuesday",
+  "category": "calendar / day-of-week",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Long. Identify the first trading day of each calendar week (Monday, or Tuesday when Monday is a market holiday). If that day's close < its own open AND that day's close < the previous session's close, buy at that day's close.",
+  "exit_rule": "Sell at the close of the first subsequent session whose close > the previous session's close. If no such day occurs, exit unconditionally at the close of the 5th trading day after entry. No stop (the time exit bounds the hold).",
+  "inputs": [
+   "daily OHLCV",
+   "day-of-week / trading calendar"
+  ],
+  "why": "Institutional flow is organised around the weekly cycle. A down first-day-of-week is disproportionately weekend-risk liquidation rather than new information, and the buy-side rebalancing that follows lands early in the week. The signal is a calendar position conditioned on a single price fact, so it is orthogonal to every trend and oscillator signal in the book \u2014 which makes it valuable for portfolio diversification even if its standalone edge is modest.",
+  "source": "Oddmund Groette / Quantified Strategies, 'The Turnaround Tuesday trading strategy' \u2014 listed on their public S&P 500 strategies index (verified via the mirrored index text at github.com/taashareef11112/Po3). Groette runs a YouTube channel and publishes rules plus backtests for each strategy. CAVEAT: the article body and its equity curve are behind a Cloudflare bot wall that blocked my fetch, so I can confirm the strategy name and construction but NOT their reported returns. Test from scratch.",
+  "novelty": "The primary entry variable is a calendar position, not a price feature \u2014 an entirely different signal family from all 32 existing strategies, none of which reference the trading calendar. Its likely low correlation to the rest of the book is the main reason to test it.",
+  "ohlcv_only": true,
+  "params": [
+   "require close<open yes/no",
+   "require close<prior close yes/no",
+   "exit on first up close vs fixed N days",
+   "time exit 3 / 5 / 10 days",
+   "restrict to close<SMA(200) (dip version) or close>SMA(200)"
+  ],
+  "_agent": "v2:5dc784de464dcafe06d80db0ae9fd6871328474257ca0af67140af46718388e3"
+ },
+ {
+  "name": "Pin Release Reversal",
+  "category": "pinning",
+  "side": "both",
+  "timeframe": "daily, entered the session after monthly expiry",
+  "entry_rule": "On monthly expiry Friday's close compute G and K as in Strike Grid Pin. Require the stock actually pinned: |close_Friday - K| <= 0.05*G. Require it was dragged there: let P5 = close 5 trading days before expiry Friday, require |P5 - K| >= 0.40*G. Enter at the next trading session's open (market-on-open) in the direction the stock came FROM: LONG if P5 > K, SHORT if P5 < K.",
+  "exit_rule": "Exit at the close of the 3rd trading day after entry. Stop at 1.5 * ATR(14, daily) against entry.",
+  "inputs": [
+   "daily OHLCV",
+   "bar timestamps for the third-Friday calendar",
+   "hardcoded strike-interval table"
+  ],
+  "params": [
+   "pin tolerance 0.05*G",
+   "drag threshold 0.40*G",
+   "lookback for P5 (3/5/10 days)",
+   "hold length 3 days",
+   "ATR stop multiple"
+  ],
+  "why": "Pinning is a temporary price distortion, not information. Ni, Pearson and Poteshman show clustering is elevated on trade dates -5 through -1, peaks on date 0, and drops immediately afterward - the hedging force that created the distortion expires with the options. The paper states plainly that any apparent gain from moving the price reverses when the stock reverts to its non-manipulated level. So the distance the stock was pulled is an estimate of the distortion, and the reversion runs back along the path it was pulled from.",
+  "source": "Ni, Pearson & Poteshman (2005), JFE 78(1), 49-87 - Figure 1 panels (clustering by trade date -10..+10) and the reversion-to-non-manipulated-level argument in Section 5.",
+  "novelty": "The direction is set by where the stock was five days ago relative to a strike, not by any trend, momentum or oversold reading. It is an explicit fade of a known, dated, mechanically-caused distortion, and it is the only entry here whose sign is determined by a price from a week earlier rather than by current conditions.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ }
+]

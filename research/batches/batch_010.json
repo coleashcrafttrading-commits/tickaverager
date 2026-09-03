@@ -1,0 +1,215 @@
+[
+ {
+  "name": "Relative-Strength Resilience Divergence",
+  "category": "sector-relative strength",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "SINGLE-SYMBOL TRADED, conditioned on the sector ETF. Define the relative-strength ratio RS_t = P_stock(t) / P_ETF(t). ENTER LONG when ALL FOUR hold on the same bar: (1) the sector ETF closes at a new 20-bar LOW; (2) the stock does NOT close at a new 20-bar low - specifically its close is at least 1.5% above its own 20-bar low; (3) RS_t closes at a new 20-bar HIGH; (4) the stock's 20-bar average dollar volume is at least $5M. ENTER SHORT on the exact mirror: sector ETF at a new 20-bar HIGH, stock not within 1.5% of its own 20-bar high, RS_t at a new 20-bar LOW, same liquidity floor.",
+  "exit_rule": "Close the long when RS_t closes below its own 20-bar SMA, OR on a price stop at entry price minus 2.0 * ATR(14) of the stock, OR after 15 bars. Mirror for shorts. Deliberately note the asymmetry from a plain breakout exit: the exit is triggered by the RATIO losing its trend, not by the stock's own price, so a long can be held through a stock drawdown as long as the sector fell further.",
+  "inputs": [
+   "daily OHLC of the stock",
+   "daily close of the sector ETF",
+   "20-bar high/low of the ETF, the stock, and the RS ratio",
+   "20-bar SMA of the RS ratio",
+   "ATR(14) of the stock",
+   "20-bar average dollar volume"
+  ],
+  "params": [
+   "lookback (20)",
+   "RS exit SMA length (20)",
+   "resilience buffer (1.5%)",
+   "ATR stop multiple (2.0)",
+   "time stop (15)",
+   "liquidity floor"
+  ],
+  "why": "A stock that refuses to make a new low while its whole sector is making one is revealing something the tape does not otherwise show: there is a persistent buyer absorbing the sector-wide selling in this specific name. That is genuine, observable relative demand rather than an artefact of the stock simply having a low beta. The conditioning is what makes the signal informative - if the stock were breaking out on its own price too, the ratio high would tell you nothing new beyond the price high. By requiring the stock NOT to be breaking out while the ratio does, the signal isolates outperformance that is entirely attributable to relative resilience, which is where the information about differential demand lives.",
+  "source": "Synthesis. It combines two documented components: the intra-industry lead-lag and relative-performance predictability of Hou (2007), 'Industry Information Diffusion and the Lead-Lag Effect in Stock Returns', RFS 20(4), with the standard practitioner relative-strength ratio line. The specific resilience conjunction - sector at an extreme, stock explicitly not at its own extreme, ratio at an extreme - is my construction, designed to make the signal non-redundant with a plain price breakout. It is the least literature-backed idea here and should be treated as the speculative one in the batch.",
+  "novelty": "SINGLE-SYMBOL TRADED. Explicitly built NOT to be a Donchian breakout reskin: condition (2) is a negative condition that forbids the stock's own price breakout, so the signal fires on a disjoint set of bars from any price-channel rule and the two cannot both trigger on the same bar. The exit is on the ratio's trend rather than the stock's price, which is a distinct exit structure. Longs are entered into sector weakness, so this reads as a fade at the sector level and a momentum trade at the relative level simultaneously.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ },
+ {
+  "name": "Confirmation Ladder",
+  "category": "delayed confirmation",
+  "timeframe": "any (test on 5-minute and daily)",
+  "side": "both",
+  "entry_rule": "Define the base state S_t = 1 when close_t > EMA(20)_t AND ADX(14)_t > 25, else 0 (swap in any of the 32 as the state function). Enter long at close_t only on the first bar of an N-bar confirmed run, i.e. when S_t = S_{t-1} = ... = S_{t-N+1} = 1 AND S_{t-N} = 0. Sweep N in {1,2,3,5,8}, N=1 being the unmodified base strategy. Each N is a separate backtest over the same underlying state series, and every signal run contributes to at most one entry per N, so the arms are directly comparable on trade count as well as on return.",
+  "exit_rule": "Hold exactly H bars and exit at the close of bar t+H, sweeping H in {5,10,20,40} independently of N, with a hard stop at entry - 2*ATR(14)_t checked on every bar. The deliverable is the full N-by-H grid of mean per-trade return, hit rate, trade count and t-statistic - the confirmation curve - not a single best cell. Also report, for each N, the return of the entries that N discarded relative to N=1, which is the direct measurement of what waiting cost you.",
+  "inputs": [
+   "ema(20)",
+   "adx(14)",
+   "atr(14)",
+   "bar close",
+   "any of the 32 signals as a boolean state"
+  ],
+  "why": "Requiring persistence trades two effects against each other and the point of the ladder is to measure both. False signals are filtered out as N rises, which raises the hit rate; but the signal's remaining edge decays as N rises, which lowers the payoff on the survivors. Because these move in opposite directions the optimum is interior, and it is a property of the strategy rather than of the indicator - which means it is a real parameter worth owning, not a curve-fit. Moskowitz, Ooi and Pedersen make the underlying methodological argument explicitly: autocorrelation studies examine predictability where the lookback period is forced to equal the holding period, and that restriction masks predictability that only appears once the two are allowed to differ. The same decoupling applies here between confirmation lag and holding horizon, which is why N and H must be swept as a grid and never tied together.",
+  "novelty": "The unit of study is the confirmation lag itself, and the output is a two-dimensional response surface rather than a single rule. It is explicitly not a threshold tweak: N=1 and N=3 are different strategies with different trade populations, because N=3 discards a set of trades that N=1 takes, and the ladder measures what that discarded set was worth.",
+  "source": "Moskowitz, Ooi & Pedersen (2012), 'Time Series Momentum', Journal of Financial Economics 104:228-250. Read directly from the published PDF; the argument that forcing lookback to equal holding period masks predictability is in the paper's literature-review section, and the 1-to-12-month persistence with longer-horizon partial reversal is in the abstract.",
+  "params": [
+   "N, confirmation bars",
+   "H, holding bars",
+   "stop multiple",
+   "which of the 32 supplies the state function"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Strong Close Into a New Low",
+  "category": "pullback-fade",
+  "side": "short",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "bar high",
+   "bar low",
+   "bar close",
+   "lowest low over N bars",
+   "ema(close,200)",
+   "session-time window"
+  ],
+  "params": [
+   "lowest-low lookback N (10)",
+   "IBS threshold (0.85)",
+   "EMA filter length (200)",
+   "EMA filter on/off",
+   "session start/end times"
+  ],
+  "entry_rule": "At bar t compute IBS[t] = (Close[t] - Low[t]) / (High[t] - Low[t]) and PriorLowest = min(Low over bars t-N..t-1) with N = 10. GO SHORT at the close of bar t when ALL hold: (1) Low[t] < PriorLowest (the bar made a genuinely new N-bar low); (2) IBS[t] > 0.85 (yet the bar closed in the top 15% of its own range); (3) if the trend filter is enabled, Close[t] < EMA(Close,200); (4) the bar's timestamp falls inside the configured intraday session window.",
+  "exit_rule": "Cover the short on the first subsequent bar whose Close < Low[t-1] (a close beneath the previous bar's low). No stop-loss in the reference implementation; add a stop at High[t] + 0.5*ATR(14) for live use.",
+  "why": "A bar that breaks to a new low but then closes at its high is a failed flush inside a downtrend \u2014 buyers stepped in intrabar, so the bounce is already spent by the close. Short sellers get to enter after the bounce rather than into it. The 200-EMA filter ensures this is a retracement being sold inside a downtrend rather than a genuine bottom.",
+  "source": "StockSharp/AlgoTrading, strategy API/1501-1600/1598_10_Bar_Low_Pullback \u2014 'Low breaks the previous LowestPeriod bars lowest low; IBS > IbsThreshold (0.85); optional close below EMA200; exit on close below previous low'",
+  "novelty": "Combines a breakdown (new N-bar low) with its own contradiction (a top-of-range close) in the SAME bar, and trades the contradiction. Most breakout systems would take this as a long-side rejection; here the conflicting close is the short trigger. The exit is a close-versus-prior-bar-low test, not an indicator.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Consecutive Close-Above-Prior-High Exhaustion",
+  "category": "streak-exhaustion",
+  "side": "short",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "bar high",
+   "bar low",
+   "bar close",
+   "ema(close,200)"
+  ],
+  "params": [
+   "streak threshold (3)",
+   "EMA filter length (200)",
+   "EMA filter on/off",
+   "optional ATR stop multiple"
+  ],
+  "entry_rule": "Maintain a counter K. On each completed bar t: if Close[t] > High[t-1], increment K by 1; otherwise reset K to 0. GO SHORT at the close of bar t when K >= 3 (three or more consecutive bars have each closed above the PREVIOUS bar's high) and, if the filter is enabled, Close[t] < EMA(Close,200). Take only one position per streak \u2014 do not re-enter until K has reset to 0.",
+  "exit_rule": "Cover on the first subsequent bar whose Close < Low[t-1] (a close beneath the previous bar's low). Optional protective stop at the highest high of the streak plus 0.25*ATR(14).",
+  "why": "Closing above the prior bar's high is a much stiffer test than merely closing up \u2014 it means the entire prior bar's trading range was engulfed and the marginal buyer paid above every price the previous session offered. Three in a row is a vertical move with no consolidation, which is where late momentum buyers are most crowded and least able to absorb the first pause. The mirrored exit (close below the prior low) is the first bar where that crowd loses the same test.",
+  "source": "StockSharp/AlgoTrading, strategy API/1601-1700/1601_Consecutive_Close_High1_Mean_Reversion \u2014 'counts consecutive closes above the prior high and sells once the count reaches a threshold; position exits when price falls below the prior low; optional 200 EMA filter'",
+  "novelty": "Three-bar momentum asks for three up bars and buys them. This asks for a strictly stronger condition (each close exceeds the prior bar's HIGH, not its close) and takes the opposite side. Entry and exit are both bar-versus-prior-bar relations with no indicator, no threshold and no lookback window.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Self-Adjusting RSI Bands",
+  "category": "adaptive-oscillator",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "r = rsi(close, 14). adjust = 2.0 * stdev(r, 14) (alternative estimator: 2.0 * sma(abs(r - sma(r,14)), 14)). obLevel = 50 + adjust; osLevel = 50 - adjust. ENTER LONG when r crosses ABOVE obLevel (breakout reading, trend mode) - or, for the fade variant, when r crosses BACK ABOVE osLevel after having been below it. Pick one variant per backtest and sweep it as a mode flag. ENTER SHORT mirrored around obLevel.",
+  "exit_rule": "Exit long when r crosses back below 50, or when r crosses below osLevel. Exit short mirrored. Optional: exit when adjust itself contracts below its own 50-bar median (bands collapsing = no more information in the reading).",
+  "inputs": [
+   "rsi(close,14)",
+   "stdev(rsi,14)",
+   "sma of |rsi - sma(rsi)|"
+  ],
+  "params": [
+   "RSI length (5-30)",
+   "band multiplier (1.0-3.0)",
+   "band estimator (stdev vs mean absolute deviation)",
+   "band length independent of RSI length",
+   "mode: breakout vs fade"
+  ],
+  "why": "A fixed 70/30 pair is wrong for any instrument whose RSI dispersion differs from the one Wilder happened to look at. A low-volatility mega-cap may never print 70; a small-cap may print 70 weekly. Standardising the threshold by the RSI's own recent dispersion makes 'extreme' mean the same statistical thing on every ticker, which is exactly what a multi-ticker fleet needs to avoid per-symbol threshold fitting.",
+  "novelty": "This is the textbook case of a genuinely different idea rather than a parameter change: the threshold is a statistic of the indicator itself, recomputed every bar, so the same code produces different effective levels per symbol and per regime. It also self-widens in high-dispersion regimes, which suppresses signals exactly when RSI is least informative.",
+  "source": "TradingView open-source: 'Self-Adjusting RSI (SARSI)' by everget. Exact Pine read from github.com/everget/tradingview-pinescript-indicators/blob/master/oscillators/self_adjusting_rsi.pine",
+  "_agent": "v2:c6d26b53adc796d5fdc1781976f0086807e6d93dc8c88198d7132491992e1d30"
+ },
+ {
+  "name": "Heikin-Ashi Shaven-Bottom Streak",
+  "category": "chart transform / Heikin-Ashi",
+  "side": "both",
+  "timeframe": "15-minute (also testable daily)",
+  "ohlcv_only": true,
+  "inputs": [
+   "OHLCV bars",
+   "ATR(14)",
+   "minimum tick size"
+  ],
+  "entry_rule": "Compute Heikin-Ashi bars: HA_close = (O + H + L + C)/4; HA_open = (HA_open[1] + HA_close[1])/2, seeded on the first bar with (O + C)/2; HA_high = max(H, HA_open, HA_close); HA_low = min(L, HA_open, HA_close). ENTER LONG at the close of bar t when ALL of: (a) HA_close[t] > HA_open[t] and HA_close[t-1] > HA_open[t-1] (two consecutive green HA candles); (b) both candles are SHAVEN-BOTTOM, i.e. (HA_open[t] - HA_low[t]) <= 1 tick and (HA_open[t-1] - HA_low[t-1]) <= 1 tick; (c) the current HA body |HA_close[t] - HA_open[t]| > the 20-bar mean HA body. Mirror for short: two consecutive red HA candles that are shaven-top ((HA_high - HA_open) <= 1 tick) with an above-average body.",
+  "exit_rule": "Exit at the close of the first bar where either (a) the HA candle prints a lower shadow greater than 0.25 * its own body, or (b) the HA candle is red (HA_close < HA_open) \u2014 whichever comes first. Hard stop at HA_low of the entry candle minus 0.5 * ATR(14).",
+  "why": "HA_open is the midpoint of the previous HA candle, so HA_low = HA_open means the raw low of the current bar never traded below that midpoint. Two such bars in a row is a precise statement that no intraday pullback penetrated the prior candle's centre of gravity twice running \u2014 buyers absorbed every attempt without giving back half the previous move. That is a real, checkable statement about the order book's behaviour during the bar, not a smoothed summary of it. The reappearance of a lower shadow is the first evidence that sellers regained the ability to trade through that midpoint, which is why it makes a natural exit.",
+  "novelty": "Not a moving-average or oscillator signal at all \u2014 it is a condition on the GEOMETRY of a transformed candle, specifically the absence of a shadow, which is a statement about the intrabar path relative to a recursively defined reference level. The exclusion list's 'three-bar momentum' compares raw closes; this compares transformed extremes against a recursive midpoint, and the exit fires on shadow reappearance rather than on a price or indicator level. Note the well-known catch this must be tested against: HA_close uses the current bar's close, so signals are only valid at bar close, never intrabar.",
+  "params": [
+   "timeframe (5/15/60 min, daily)",
+   "streak length (2/3 candles)",
+   "shadow tolerance (0/1/2 ticks)",
+   "body-size filter multiple (0.8/1.0/1.5 x 20-bar mean)",
+   "exit shadow-to-body ratio (0.1/0.25/0.5)",
+   "stop multiple of ATR (0.5/1.0/1.5)"
+  ],
+  "source": "Heikin-Ashi construction is standard; for its systematic use and noise-reduction properties see 'Smoothed Heikin-Ashi Algorithms Optimized for Automated Trading Systems' (2018), DOI 10.31410/itema.2018.514, and 'Study of Heiken Ashi Candlestick for Noise Reduction' (2022), DOI 10.31730/osf.io/phejd (open access). The shaven-bottom streak rule and the shadow-reappearance exit are my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Fractal Dimension Regime Gate",
+  "category": "fractal-adaptive / FRAMA internals",
+  "side": "both",
+  "timeframe": "daily and 60-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "high",
+   "low",
+   "close",
+   "ATR(14)"
+  ],
+  "entry_rule": "Compute the FRAMA FRACTAL DIMENSION with an even window N = 16. Over the MOST RECENT N/2 bars: N1 = (max High - min Low)/(N/2). Over the OLDER N/2 bars: N2 = (max High - min Low)/(N/2). Over all N bars: N3 = (max High - min Low)/N. Then D = log((N1 + N2)/N3)/log(2), clamped to [1.0, 2.0]. D approaches 1 for a straight line and 2 for a space-filling random path. Do NOT compute the FRAMA output itself \u2014 discard it. ENTER LONG at the close of bar t when: D[t] < 1.40 AND D[t-1] >= 1.40 (a fresh downward crossing), AND close[t] > close[t-N]. Mirror for short: same D crossing with close[t] < close[t-N].",
+  "exit_rule": "Exit at the close of the first bar where EITHER (a) D rises above 1.60 (the path has become noise-like again), or (b) close crosses back through close[t-N] against the position. Hard stop at 2.0 * ATR(14). No profit target \u2014 the trade is held for as long as the price path stays geometrically efficient.",
+  "why": "The Hausdorff-style dimension estimate compares the summed range of two half-windows against the range of the whole window. If price moved monotonically, the two halves tile the whole and D = 1; if it zig-zagged, the halves each covered nearly the full range and D approaches 2. So D is a scale-free measure of how much of the traveled distance was retraced. A fresh drop below 1.40 is the moment the market stopped retracing what it covered \u2014 the geometric signature of one side of the book being cleared out rather than two sides trading against each other.",
+  "novelty": "D is computed from RANGES OF SUB-WINDOWS, not from directional movement (ADX), not from bar-to-bar volatility (ATR, Bollinger width), and not from net-change-over-path (Kaufman efficiency). Crucially, D is insensitive to direction entirely \u2014 it is a pure geometry statistic, which is why the direction has to be supplied separately by the N-bar price comparison. This makes it a cleaner regime gate than ADX, which conflates trend strength with the amount of movement. The idea deliberately throws away the moving average that FRAMA exists to produce and keeps only its internal diagnostic, which is not how FRAMA is normally used.",
+  "params": [
+   "window N (10/16/32/64, must be even)",
+   "entry D threshold (1.30/1.40/1.50)",
+   "exit D threshold (1.55/1.60/1.70)",
+   "direction lookback (N vs N/2 vs 2N)",
+   "ATR stop multiple",
+   "require fresh crossing vs level only"
+  ],
+  "source": "John F. Ehlers, 'FRAMA - Fractal Adaptive Moving Average' (mesasoftware.com/papers/FRAMA.pdf). The exact N1/N2/N3 definitions, the D = log((N1+N2)/N3)/log(2) formula, and the alpha = exp(w*(D-1)) with w = ln(2/(1+198)) bounded to [0.01, 1.0] were verified against QuantConnect/Lean, file Indicators/FractalAdaptiveMovingAverage.cs, which I fetched and read. Using D alone as a standalone regime gate is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Kalman Local-Linear-Trend Slope t-Statistic",
+  "category": "Kalman-filtered price / state-space",
+  "side": "both",
+  "timeframe": "daily and 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "log close",
+   "high",
+   "low (for the Parkinson variance)",
+   "ATR(14)"
+  ],
+  "entry_rule": "Run a two-state KALMAN FILTER (local linear trend model) on y_t = ln(close_t). State x = [mu, beta]' with transition F = [[1, 1], [0, 1]], observation matrix H = [1, 0]. Observation noise is estimated from the bar's own range using the Parkinson estimator: R_t = (ln(High_t / Low_t))^2 / (4 * ln 2), floored at 1e-8. Process noise Q = diag(k1 * Rbar, k2 * Rbar) where Rbar is the 100-bar mean of R_t, with starting values k1 = 0.01 and k2 = 0.0001. Initialise mu_0 = ln(close_0), beta_0 = 0, P_0 = diag(Rbar, Rbar/100). Each bar: PREDICT x' = F x, P' = F P F' + Q; UPDATE with K = P' H' / (H P' H' + R_t), x = x' + K*(y_t - H x'), P = (I - K H) P'. After the update take beta_t and its posterior variance P22 = P[1][1], and form the t-statistic T_t = beta_t / sqrt(P22). ENTER LONG at the close of bar t when T_t > 2.0 AND T_(t-1) <= 2.0. Mirror for short when T_t < -2.0 crossing down.",
+  "exit_rule": "Exit at the close of the first bar where EITHER (a) T_t < 0.5 for a long (the slope is no longer statistically distinguishable from flat), or (b) beta_t < 0 (the estimated drift has turned negative). Hard stop at 2.0 * ATR(14). No fixed target.",
+  "why": "Every moving-average slope rule has to answer 'how much slope is enough', and the answer depends on the ticker and the volatility regime, which is why those thresholds never transfer. A state-space model answers the question internally: the filter tracks not only the estimated drift but its uncertainty, and demanding beta > 2 standard errors is a self-calibrating statement that the drift is real rather than a noise artefact. Feeding the Parkinson range estimator in as the per-bar observation noise makes the filter automatically distrust wide-range bars and trust narrow ones, which is the correct handling of a bar where the true price wandered a lot within the interval.",
+  "novelty": "The signal is a SIGNIFICANCE TEST, not a level or a crossover. A Hull MA slope rule fires when the slope exceeds a hand-picked number; this fires when the slope exceeds its own estimated standard error, so the same code works on a 3-dollar stock and a 300-dollar stock with no retuning \u2014 which matters directly for a multi-ticker fleet. Using an intrabar range statistic as the measurement-noise input is the second departure: it makes the OHLC bar's shape, not just its close, drive the filter's confidence. No moving average appears anywhere.",
+  "params": [
+   "k1 process noise on level (0.001/0.01/0.1)",
+   "k2 process noise on slope (1e-5/1e-4/1e-3)",
+   "entry t-threshold (1.5/2.0/2.5/3.0)",
+   "exit t-threshold (0/0.5/1.0)",
+   "Rbar lookback (50/100/250)",
+   "use Parkinson vs Garman-Klass vs constant R"
+  ],
+  "source": "Andrew Harvey, 'Forecasting, Structural Time Series Models and the Kalman Filter' (Cambridge University Press, 1989), the local linear trend model (state [level, slope] with F = [[1,1],[0,1]]) and its filtering recursions. Range-based observation-noise estimator: M. Parkinson, 'The Extreme Value Method for Estimating the Variance of the Rate of Return', Journal of Business 53(1), 1980, pp. 61-65 \u2014 the (ln(H/L))^2/(4 ln 2) estimator. Combining the two and trading the slope t-statistic is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ }
+]

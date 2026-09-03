@@ -1,0 +1,209 @@
+[
+ {
+  "name": "Even Better Sinewave Saturation Exit",
+  "category": "Ehlers DSP / normalised oscillator",
+  "side": "both",
+  "timeframe": "any (daily and 15-minute)",
+  "ohlcv_only": true,
+  "inputs": [
+   "close (or HL2)",
+   "ATR(14)"
+  ],
+  "entry_rule": "Step 1, HIGH-PASS with period 40: alpha1 = (cos(sqrt(2)*pi/40) + sin(sqrt(2)*pi/40) - 1)/cos(sqrt(2)*pi/40); HP = (1 - alpha1/2)^2 * (C - 2*C[1] + C[2]) + 2*(1 - alpha1)*HP[1] - (1 - alpha1)^2 * HP[2]. Step 2, SUPER SMOOTHER with period 10: a1 = exp(-sqrt(2)*pi/10); b1 = 2*a1*cos(sqrt(2)*pi/10); c2 = b1; c3 = -a1^2; c1 = 1 - c2 - c3; Filt = c1*(HP + HP[1])/2 + c2*Filt[1] + c3*Filt[2]. Step 3, THREE-BAR POWER NORMALISATION: Wave = (Filt + Filt[1] + Filt[2])/3; Pwr = (Filt^2 + Filt[1]^2 + Filt[2]^2)/3; EBSW = Wave / sqrt(Pwr), which is bounded in roughly [-1, +1]. ENTER LONG at the close of bar t when EBSW[t] > -0.9 and EBSW has been <= -0.9 for at least the two preceding bars (it is un-saturating from the oversold rail). Mirror for short: EBSW[t] < +0.9 after at least two bars >= +0.9.",
+  "exit_rule": "For a long, exit at the close of the first bar where EITHER (a) EBSW rises to >= +0.9 and then on a subsequent bar prints < +0.9 \u2014 i.e. exit on the un-saturation from the opposite rail, holding through the entire saturated stretch \u2014 OR (b) EBSW falls back below -0.9 (the entry failed). Hard stop at 1.5 * ATR(14). The point of the structure is that the position is held for as long as the indicator is pinned at +/-1, which is exactly when a trend is running.",
+  "why": "Dividing the 3-bar mean of the filtered series by the square root of its 3-bar mean square makes the output a normalised direction cosine: it saturates near +/-1 whenever the filtered wave is monotone over three bars, and only leaves the rails when the local waveform actually curves. So saturation is a direct, self-scaling detector of 'the cycle band is currently being dominated by a directional move'. The behavioural claim is that once a market has entered such a state, staying in it until the indicator leaves the opposite rail captures the whole excursion, whereas any fixed profit target truncates it.",
+  "novelty": "The distinctive element is the EXIT STRUCTURE, not the entry: instead of exiting at a level, the rule exits when a SATURATED indicator un-saturates, which converts a bounded oscillator into a trend-holding mechanism. Every oscillator rule on the exclusion list (RSI, Stochastic, Williams %R, CCI, MFI) exits at a level and therefore caps the winner; this deliberately does the opposite. The normalisation by RMS power is also unlike any of them \u2014 it is amplitude-invariant by construction, so no per-ticker threshold tuning is needed.",
+  "params": [
+   "HP period (30/40/60)",
+   "LP period (8/10/16)",
+   "normalisation window (3/5 bars)",
+   "saturation rail (0.85/0.9/0.95)",
+   "required saturated bars before entry (1/2/3)",
+   "ATR stop multiple"
+  ],
+  "source": "John F. Ehlers, 'Cycle Analytics for Traders' (Wiley, 2013), 'Even Better Sinewave Indicator' chapter. Formula, the hpPeriod = 40 / lpPeriod = 10 defaults, the 3-bar wave/pwr normalisation and the +/-1.2 plot bounds verified against github.com/thetestspecimen/ehlers-indicators-mql5, file mq5/ehlers_even_better_sinewave.mq5, which I fetched and read. The saturate-and-hold exit structure is my synthesis of Ehlers' stated intent.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Ross Hook After a Closing-Channel Breakout",
+  "category": "structural pullback continuation",
+  "side": "both",
+  "timeframe": "any (daily and 15-minute)",
+  "entry_rule": "Step 1 - BREAKOUT BAR B: close(B) > max(close over the 20 bars immediately before B), i.e. a fresh 20-bar CLOSING high. Step 2 - THE HOOK: scanning forward from B, the hook bar H is the FIRST bar with high(H) < high(H-1) - the first failure to extend. H must occur within Max_Hook = 10 bars of B (sweep 2-80); if no such bar appears in that window, abandon the setup. Step 3 - ENTRY: place a BUY STOP at (highest high from bar B through bar H) + 0.01, live for 10 bars after H, then cancel. INVALIDATION: cancel the order immediately if any bar closes below low(B) before it fills. SHORT is the exact mirror after close(B) < min(close over the previous 20 bars), with the hook being the first bar whose low > low of the bar before it, and a sell stop at (lowest low from B through H) - 0.01.",
+  "exit_rule": "Quick exit stop at the lowest low from B through the fill bar (highest high, for shorts). Time exit at the close of the 10th bar after entry (sweep 1-40). Disaster stop at entry - 6 x ATR(20). No profit target - the source catalogue's Kaufman study found fixed targets reduced both absolute and risk-adjusted returns across 42 markets.",
+  "inputs": [
+   "ohlcv any timeframe",
+   "20-bar rolling max/min of CLOSE",
+   "atr(20)"
+  ],
+  "params": [
+   "breakout channel length (20, sweep 5-100)",
+   "Max_Hook window (10, sweep 2-80)",
+   "order validity after the hook (10 bars)",
+   "hold bars (10, sweep 1-40)",
+   "ATR stop multiple (6)"
+  ],
+  "why": "The first bar that fails to extend a fresh breakout marks exactly where profit-taking met the new demand. Everyone who sold that first hesitation is wrong the instant the leg's running high is exceeded, and their stops are the entry's liquidity. Unlike a moving-average pullback, the reference level is generated by the structure of the breakout leg itself, so the trigger tracks the impulse instead of lagging behind a smoothed average - it fires within one or two bars of the pullback rather than after the average catches up.",
+  "source": "Joe Ross, 'Trading by the Book' (Ross Hook and the Traders Trick Entry). Coded rules, Min_Setup/Max_Hook parameters, buy stop one tick above the highest high of the hook, quick exit at the opposite hook extreme, and rating C across 42 futures markets 1980-2011: https://oxfordstrat.com/trading-strategies/ross-hook-1/ (filter variants at ross-hook-filter-1/2/3). Ross's original 1-2-3 precondition is judgement-dependent, so it is pinned here to a 20-bar CLOSING-channel breakout, which is testable.",
+  "novelty": "The trigger level is the running high of the breakout leg - a structure-derived level that ratchets - and the setup is anchored to the FIRST lower high after a closing breakout. The excluded EMA-pullback rule anchors to a moving average; the excluded break-of-structure rule anchors to a prior swing point, not to the first hesitation inside a live leg.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Effort Result Regression Residual",
+  "category": "effort vs result / statistical absorption",
+  "side": "both",
+  "timeframe": "daily (also works on 5-minute with per-slot fitting)",
+  "entry_rule": "Over a rolling window of the last 250 daily bars, fit OLS: |log(close_d / close_{d-1})| = a + b * log(volume_d) + e_d. Let sd_e be the residual standard deviation of that fit. For today's bar compute the residual r = actual |log return| - fitted. ENTRY when r <= -1.5 * sd_e (price moved far LESS than today's volume predicts) AND volume >= the 80th percentile of the last 250 days' volume AND the bar's range (high - low)/close >= the 50th percentile of the last 250 days (so it is a real bar, not a holiday). Direction from close location clv = (close - low)/(high - low): if clv >= 0.67, go LONG at the next open; if clv <= 0.33, go SHORT at the next open; otherwise no trade.",
+  "exit_rule": "Exit at the close of the 5th trading day after entry, OR earlier at a 2.0 x ATR14 target or a 1.0 x ATR14 stop, whichever is hit first.",
+  "inputs": [
+   "daily OHLCV",
+   "rolling 250-bar OLS of |log return| on log volume",
+   "residual stdev",
+   "close location value",
+   "ATR(14)"
+  ],
+  "params": [
+   "regression window (120-500)",
+   "residual threshold in sd (1.0-2.5)",
+   "volume percentile floor (70-95)",
+   "clv thresholds",
+   "holding days (3-10)"
+  ],
+  "why": "Amihud's illiquidity ratio is |return|/volume - the price response per unit of trading. Fitting |return| on log volume estimates the same relationship but lets it be nonlinear in scale and gives you a well-defined 'expected move for this much volume'. A large NEGATIVE residual means enormous volume produced almost no price change: someone with size absorbed the entire flow at a fixed price. That is exactly Wyckoff's absorption, but expressed as a studentised residual so the threshold is comparable across symbols and volatility regimes. The absorber's side is inferred from where the bar closed within its range.",
+  "novelty": "Turns 'high volume, small move' from an eyeball judgement into a residual from a fitted price-impact relationship, so the threshold self-calibrates to the symbol's own liquidity. No indicator in the existing 32 regresses price response on volume; the closest, ATR expansion, ignores volume entirely.",
+  "ohlcv_only": true,
+  "source": "Synthesis, built on two cited pillars: Amihud (2002), 'Illiquidity and stock returns: cross-section and time-series effects', Journal of Financial Markets 5, 31-56, https://www.cis.upenn.edu/~mkearns/finread/amihud.pdf , which establishes |return|/dollar-volume as the price response per unit of trading; and Wyckoff's effort-vs-result law as described at https://www.luxalgo.com/library/concept/effort-vs-result/ . The OLS-residual formulation and the clv direction rule are my own.",
+  "_agent": "v2:74b72b10aad022b74885d9539dfb07c28d3f484da2b8b7010914406165497ee2"
+ },
+ {
+  "name": "52-Week-High Recency Gate",
+  "category": "anchoring, time-since-extreme conditioning",
+  "entry_rule": "Compute NEAR = close_t / max(high over the last 252 bars) as above, and additionally AGE = the number of trading days between the bar that produced that 252-day high and today. Go long at the next open only symbols with NEAR in the top 30% of the universe AND AGE <= 21 trading days. Go short only symbols with NEAR in the bottom 30% AND whose 252-day low was set within the last 21 trading days.",
+  "exit_rule": "Hold 126 trading days in overlapping monthly tranches, but additionally force an exit on any position whose AGE exceeds 126 trading days before its tranche matures - the anchor has gone stale and the behavioural mechanism no longer applies.",
+  "inputs": [
+   "close (daily)",
+   "high and low (252 daily bars)",
+   "bar index of the running 252-day extreme"
+  ],
+  "why": "Anchoring only works if the anchor is salient. A 52-week high set last week is vivid in investors' minds; one set eleven months ago has been forgotten and exerts no pull. Bhootra and Hur report that the nearness-to-high strategy earns about twice as much per month among stocks whose 52-week high is recent as among those whose high is distant, so recency roughly doubles the signal without changing the underlying variable.",
+  "source": "Bhootra & Hur, 'The timing of 52-week high price and momentum', Journal of Banking & Finance, 2013 - defines a 'recency ratio' from the number of days since the 52-week high was formed and shows the anchoring effect is far stronger for recent highs.",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "novelty": "Introduces a time-since-extreme coordinate. Nothing in the existing 32 measures how long ago an extreme was set - Donchian, liquidity sweep and premium/discount all use where price is relative to a range, never when the range boundary was made. The exit is also driven by the age of the anchor rather than by price.",
+  "params": [
+   "recency threshold (10 / 21 / 42 bars)",
+   "stale-anchor exit age (63 / 126 / 189 bars)",
+   "NEAR percentile cut",
+   "whether to require both recency and a rising 252-day high"
+  ],
+  "_agent": "v2:3015c5cfb4a7986cf3e71f8cb4e41a87dd61ac3aed15b09667260ff58e28e655"
+ },
+ {
+  "name": "Close-Auction Hedging Reversal",
+  "category": "dealer-gamma",
+  "side": "both",
+  "timeframe": "daily, signal from the last 30 minutes, 3-day hold",
+  "entry_rule": "At the close compute rLH = log(close / P_15:30). Let Q80 be the 80th percentile of |rLH| over the trailing 60 sessions. If rLH >= +Q80 enter SHORT at the NEXT session's open; if rLH <= -Q80 enter LONG at the next session's open. Take the opposite side of the closing move.",
+  "exit_rule": "Exit at the close of the 3rd trading day after entry. Stop at 2.0 * ATR(14, daily) against entry.",
+  "inputs": [
+   "5-min OHLCV to get the 15:30 price",
+   "daily OHLCV",
+   "ATR(14) daily"
+  ],
+  "params": [
+   "percentile cutoff (70/80/90)",
+   "percentile lookback (30/60/120 sessions)",
+   "hold length (1/3/5 days)",
+   "ATR stop multiple"
+  ],
+  "why": "The same paper that documents the last-30-minute hedging push shows it is transitory price pressure, not information: returns over the next three days run opposite to the last-half-hour return, with highly significant mean reversion in equities, bonds and commodities. They use this specifically to distinguish hedging from informed trading - information would produce permanent impact and no reversal. A large closing move is therefore an estimate of how much delta had to be hedged, and that pressure unwinds once the hedgers are flat.",
+  "source": "Baltussen, Da, Lammers & Martens (2021), JFE 142(1), 377-403 - the reversal test: 'in all four asset classes, returns in the next three days are opposite to those of rLH'.",
+  "novelty": "The signal is a single 30-minute slice of the day rather than any daily bar statistic - a daily bar cannot express it, since the close-relative-to-15:30 move is invisible in OHLC. It is also the deliberate counterparty to Rest-of-Day Hedging Momentum: same underlying flow, opposite side, one holding period later.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Ex-Dividend Overshoot Reversal",
+  "category": "corporate action",
+  "side": "long",
+  "timeframe": "daily entry with intraday exit",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV requested split-adjusted (adjustment=split)",
+   "daily OHLCV requested fully adjusted (adjustment=all)",
+   "1-minute bars on the ex-date for the intraday stop"
+  ],
+  "entry_rule": "Form the cash-distribution factor F_s = split_adjusted_close_s / fully_adjusted_close_s (using split-adjusted as the numerator isolates cash distributions from splits). Let k_t = F_t/F_{t-1}. An ex-dividend session is any session with 0.9800 <= k_t < 0.9995, and the implied dividend per share is D = split_adjusted_close_{t-1} * (1 - k_t) (verified: a $0.50 dividend on a $100 prior close gives k = 0.9950 and D = 0.50). Require D / split_adjusted_close_{t-1} >= 0.004. On the ex-date, BUY at the open when open_t <= close_{t-1} - 1.5*D.",
+  "exit_rule": "Sell at the close of the same ex-date session. Intraday hard stop: exit immediately if the price trades at or below close_{t-1} - 4.0*D (monitored on 1-minute bars). No overnight hold under any circumstance.",
+  "why": "The theoretical ex-day price drop is exactly the dividend, but the empirical drop is systematically SMALLER. Bali & Hite show that because prices move in discrete ticks while dividends are essentially continuous, the expected price drop is strictly less than the dividend though within one tick of it, producing a price-drop-to-dividend ratio below one with a characteristic sawtooth in the data; the tax-clientele literature (Elton & Gruber) reaches the same sign by a different route. An opening print already down 1.5x the dividend is therefore a mechanical overshoot by ex-date liquidity-driven sellers rather than an efficient reprice, and the documented tendency is for it to be recovered within the session. Measuring the entry threshold in units of D rather than in ATR or percent is what makes the rule scale-correct across yields.",
+  "source": "Bali & Hite (1998) 'Ex dividend day stock price behavior: discreteness or tax-induced clienteles?', JFE - abstract retrieved verbatim via the OpenAlex API: the expected price drop is strictly less than the dividend but within one tick, the price-drop-to-dividend ratio is less than one and shows a sawtooth pattern. Elton & Gruber tax-clientele literature on the same ratio. Ex-date and dividend-amount detection is a synthesis using the Alpaca bars `adjustment` parameter, verified numerically.",
+  "novelty": "Reconstructs the exact ex-date AND the exact dividend amount from the divergence between two adjustment versions of the same bars, then trades a same-day mean reversion whose entry threshold, stop and target are all denominated in multiples of the dividend rather than in ATR, percent or standard deviations. No existing rule uses a corporate-action quantity as its unit of measurement.",
+  "params": [
+   "overshoot multiple for entry (1.2/1.5/2.0 x D)",
+   "minimum yield per payment (0.2%/0.4%/1.0%)",
+   "intraday stop multiple (3/4/6 x D)",
+   "k-band for regular dividends ([0.98,0.9995] / [0.95,0.9995])",
+   "exit time (close / 15:45 / 12:00)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Relative Strength Line New High Before Price",
+  "category": "cross-series divergence / leadership",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Long. Define RS[t] = close_stock[t] / close_SPY[t]. Require ALL of: (a) RS[t] == max(RS over the last 252 sessions) \u2014 the ratio series is at a new 52-week high; (b) close_stock[t] < 0.95 * max(high_stock over the last 252 sessions) \u2014 the stock's own price is NOT at a new high; (c) close_stock > SMA(close,50); (d) SMA(close,50) > SMA(close,200); (e) volume[t] > SMA(volume,50). Enter on a buy-stop at max(high, last 10 sessions) + 0.02, valid for 10 sessions then cancel.",
+  "exit_rule": "Initial stop below min(low, last 10 sessions) as measured at entry. Exit at the next open after RS closes below SMA(RS,21). Take 50% off at +3.0 * ATR(14) and trail the remainder on the RS-versus-SMA(RS,21) rule.",
+  "inputs": [
+   "daily OHLCV",
+   "SPY daily close",
+   "RS ratio series and its 252-session max and 21-session SMA",
+   "sma(close,50)",
+   "sma(close,200)",
+   "sma(volume,50)",
+   "atr(14)"
+  ],
+  "why": "A stock whose ratio to the index sets a new 52-week high while its own price is still 5%+ below its high is one that fell materially less than the market during the last drawdown \u2014 a direct measurement of which names are being defended by real buyers. The divergence between the ratio's high and price's high is the leadership signal, and by construction it appears BEFORE the price breakout that everyone else has an alert set on.",
+  "source": "The Relative Strength Line new-high concept (IBD's 'blue dot'), taught free by TraderLion on YouTube and in IBD's Investor's Corner column. The RS-line construction is corroborated as condition 8 of the open-source Minervini trend-template screener I fetched: github.com/marco-hui-95/vcp_screener.github.io, vcp_screener.py \u2014 df['RS'] = df['Close']/df_spx['Close'] with a slope test. CAVEAT: IBD's and TraderLion's published win-rate claims for the blue dot are marketing collateral with no disclosed methodology or sample; the rule is precise and testable, the claims are not.",
+  "novelty": "The signal is a new extreme in a RATIO of two different price series, combined with an explicit requirement that the underlying price series is NOT at an extreme. That is a divergence between two instruments \u2014 structurally different from RSI divergence, which compares a price series to an oscillator derived from that same series.",
+  "ohlcv_only": true,
+  "params": [
+   "RS lookback 126 / 252 sessions",
+   "price-below-high margin 3% / 5% / 10%",
+   "benchmark SPY / QQQ / equal-weight proxy",
+   "breakout trigger lookback 5 / 10 / 20 sessions",
+   "RS exit SMA 10 / 21 / 50"
+  ],
+  "_agent": "v2:5dc784de464dcafe06d80db0ae9fd6871328474257ca0af67140af46718388e3"
+ },
+ {
+  "name": "Cumulative Delta Extreme Break",
+  "category": "order-flow-proxy",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "inputs": [
+   "bar high",
+   "bar low",
+   "bar close",
+   "volume",
+   "running cumulative signed volume",
+   "rolling max/min of the cumulative series"
+  ],
+  "params": [
+   "lookback for the cumulative series' own extreme (20)",
+   "reset frequency of the cumulative sum (per session vs continuous)",
+   "bar size",
+   "stop-loss percent"
+  ],
+  "entry_rule": "For each completed bar compute the close-location-value weighted signed volume: Delta[t] = Volume[t] * ((Close[t]-Low[t]) - (High[t]-Close[t])) / (High[t]-Low[t]), treating a zero range as Delta = 0. Maintain CumDelta[t] = sum of Delta from the session open (reset each session). GO LONG when CumDelta[t] > max(CumDelta over the previous 20 bars). GO SHORT when CumDelta[t] < min(CumDelta over the previous 20 bars).",
+  "exit_rule": "Exit when CumDelta crosses back through zero (i.e. the session's net signed volume flips sign against the position), or on a 2% stop-loss, whichever comes first. Flatten at session close.",
+  "why": "Where a bar closes inside its own range is the best OHLCV-available estimate of whether volume was transacted into bids or into offers. Accumulating that across the session builds a proxy for net aggressive participation. A new extreme in the ACCUMULATED series says buyers (or sellers) have committed more than at any point today, which frequently precedes the price follow-through rather than lagging it. The zero-cross exit means the position lives exactly as long as the session's net flow agrees with it.",
+  "source": "StockSharp/AlgoTrading, strategy API/0001-0100/0054_Cumulative_Delta_Breakout \u2014 'Cumulative Delta sums the difference between buy and sell volume... trades when it breaks above its highest value or below its lowest value within the lookback period; exit when delta crosses back through zero'. The repo's own PY file uses a coarse sign(Close-Open)*Volume proxy; the close-location-value weighting specified above is the standard OHLCV refinement.",
+  "ohlcv_only_note": "true \u2014 real bid/ask delta is unavailable, so the close-location-value weighted volume is the proxy",
+  "novelty": "The breakout is taken on a DERIVED accumulator series, not on price. Price may be flat while CumDelta makes a new extreme, and that divergence is the signal. Neither OBV-style rules nor volume-confirmed price breakouts fire on an extreme of the accumulator itself.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ }
+]

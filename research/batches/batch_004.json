@@ -1,0 +1,214 @@
+[
+ {
+  "name": "Closing-Bell Round Number Pin",
+  "category": "anchoring / end-of-day magnet effect",
+  "side": "both",
+  "timeframe": "intraday minutes (5-minute), one decision per day",
+  "entry_rule": "At 15:30 America/New_York: let R = the nearest grid level to the last price (grid G by tier as above). Enter TOWARD R when ALL hold: (1) 0.02*G <= |last_price - R| <= 0.15*G; (2) the realised volatility of the last six 5-minute bars, measured as stdev of log returns, is below its own 20-day median for that same 15:00-15:30 window; (3) the ticker's clustering intensity CI >= 1.3, where CI = (fraction of the last 4000 five-minute bar closes whose final two cents digits fall in {00, 25, 50, 75}) / 0.04. Direction: LONG if last_price < R, SHORT if last_price > R.",
+  "exit_rule": "Exit at market when price touches R, or at 15:58 America/New_York, whichever comes first. Stop if price moves 0.30*G away from R in the adverse direction (the pin has failed).",
+  "inputs": [
+   "close",
+   "volume",
+   "session-time",
+   "5-minute bar closes for the digit histogram"
+  ],
+  "params": [
+   "entry window start (15:30)",
+   "distance band (0.02G to 0.15G)",
+   "clustering-intensity threshold (1.3)",
+   "volatility percentile gate",
+   "failure stop (0.30G)",
+   "digit set for clustering"
+  ],
+  "why": "Two documented behavioural regularities compound into the close. First, prices cluster on round ticks far above what a uniform digit distribution implies - Harris's classic result on stock price clustering and discreteness. Second, Osler shows resting limit orders bunch at exactly those levels. Late in the session, order flow is dominated by closing-oriented and marking activity rather than by information, so the resting limit-order structure dominates and price is drawn to the salient level. The clustering-intensity gate is the point: it measures, per ticker, how strongly that specific name's own trading is anchored to the grid, so the strategy only fires on names that demonstrably exhibit the bias.",
+  "source": "Synthesis. Grounded in two verified/established sources: (a) Osler, FRBNY Staff Report (VERIFIED above) for round-number limit-order clustering; (b) Lawrence Harris, 'Stock Price Clustering and Discreteness', Review of Financial Studies 4(3), 1991, 389-415, for the equity price-clustering evidence - I was NOT able to open this paper in this session, so treat the Harris citation as from background knowledge rather than verified here. The end-of-day timing, the CI statistic and the trade construction are my own synthesis.",
+  "novelty": "The signal is a digit histogram of past closes - a distributional property of the price grid, not a function of price levels or returns at all. Nothing in the existing 32 reads the cents digits. Distinct from the round-number rejection idea because it trades TOWARD the level rather than away from it, and is gated by a per-ticker measurement of how anchored that name actually is.",
+  "ohlcv_only": true,
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Gamma Regime Router",
+  "category": "dealer-gamma",
+  "side": "both",
+  "timeframe": "intraday 15-minute, regime set daily before the open",
+  "entry_rule": "Before each open compute rho = lag-1 Pearson autocorrelation of 15-minute log returns over the trailing 5 regular sessions (130 returns; compute returns within sessions only, never across the overnight gap). SHORT-GAMMA REGIME if rho > +0.10: go LONG when a 15-min bar closes above the highest high of the prior 8 bars, SHORT when it closes below the lowest low of the prior 8. LONG-GAMMA REGIME if rho < -0.10: go LONG when a bar closes below the lowest low of the prior 8 bars AND the very next bar closes back above that prior low, mirror for SHORT. No trades if |rho| <= 0.10. Additional filter: trade only symbols whose 20-day median dollar volume is below the tradable universe median.",
+  "exit_rule": "Exit after 6 bars (90 minutes), or on an opposite-regime signal, or at a 1.2 * ATR(14, 15-min) stop, whichever comes first. Flat by the close.",
+  "inputs": [
+   "15-minute OHLCV",
+   "5 sessions of intraday history for rho",
+   "daily dollar volume for the liquidity filter",
+   "ATR(14) on 15-min bars"
+  ],
+  "params": [
+   "return horizon h for rho (15/30/60 min)",
+   "rho lookback (3/5/10 sessions)",
+   "regime thresholds (+/-0.05, +/-0.10, +/-0.20)",
+   "breakout lookback (5/8/12 bars)",
+   "hold length",
+   "liquidity percentile cutoff"
+  ],
+  "why": "Barbon and Buraschi show the sign of dealers' aggregate gamma imbalance maps directly onto the sign of the underlying's intraday return autocorrelation: negative gamma imbalance produces intraday momentum (positive autocorrelation) and higher volatility, positive gamma imbalance produces reversal (negative autocorrelation) and lower volatility. Two facts make this tradable without any options data. First, realised autocorrelation is a direct read-out of the latent gamma state. Second, they show rho is strongly persistent - regressing rho on its own lag gives a positive slope with t = 32.17 - so yesterday's reading forecasts today's. They also report the effect peaks at a 60-minute return horizon and is strongest for the least liquid underlyings, which is where the dollar-volume filter comes from.",
+  "source": "Barbon & Buraschi (2021), 'Gamma Fragility', working paper. Full text read at https://abarbon.com/assets/Barbon_Buraschi_2021_Gamma_Fragility.pdf - autocorrelation/gamma-imbalance panel regressions, persistence of rho (t=32.17), peak at h=60 minutes, stronger for illiquid stocks.",
+  "novelty": "The regime variable is a second-order statistic of returns - their serial correlation - not a level, slope or volatility measure. It selects WHICH strategy runs rather than generating a signal itself, and it flips the same price pattern (a break of an 8-bar extreme) between a breakout and a fade depending on an estimate of dealer positioning. Nothing in a standard indicator library measures return autocorrelation.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Special-Distribution Spinoff Parent Hold",
+  "category": "corporate action",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV requested split-adjusted (adjustment=split)",
+   "daily OHLCV requested fully adjusted (adjustment=all)",
+   "adjustment-factor ratio history",
+   "trailing high-water close"
+  ],
+  "entry_rule": "Form F_s = split_adjusted_close_s / fully_adjusted_close_s and k_t = F_t/F_{t-1}, so the implied one-off distribution as a fraction of the prior close is (1 - k_t) (verified: an 8%-of-value distribution gives k = 0.92). Flag a SPECIAL DISTRIBUTION when ALL of: 0.75 <= k_t <= 0.97 (a distribution worth 3%-25% of price, far too large for a regular dividend); no session in the prior 200 had k <= 0.99 with an implied distribution above 2% (this is a genuine one-off, not a habitual large payer); and 1/k_t is NOT within 1% of 1.5, 2, 3, 4 or 5 (so it is not a forward split leaking through the wrong adjustment channel). Enter LONG the parent at the close of the ex-distribution session.",
+  "exit_rule": "Exit at the close of the 250th session after entry. Trailing exit: close the position when the close falls more than 20% below the highest close recorded since entry. Hard stop at -25% from the entry fill.",
+  "why": "Cusatis, Miles & Woolridge document significant positive abnormal returns for up to three years for both spun-off subsidiaries and their parent companies, attributing the gains to the removal of a conglomerate discount, to sharper managerial incentives in the separated units, and to a markedly elevated rate of subsequent takeover activity among restructured entities. A spinoff or large special distribution is unmistakable in the adjustment factor: a regular dividend is far too small (under 2% of price), and a split produces a clean round ratio, so an irregular one-off distribution worth 3%-25% of value with no precedent in the prior year is a restructuring event. The 250-session horizon with a trailing stop matches the documented multi-year drift while capping the downside of the long-horizon methods that Lyon, Barber & Tsai warn are treacherous.",
+  "source": "Cusatis, Miles & Woolridge (1993) 'Restructuring through spinoffs: The stock market evidence', Journal of Financial Economics 33, on positive abnormal returns to parents and subsidiaries for up to three years and elevated subsequent takeover activity. Lyon, Barber & Tsai (1999) 'Measuring long-horizon security price performance' - abstract via OpenAlex, on the severe misspecification of long-horizon tests and the need for extreme caution, which is why this rule carries a trailing stop rather than a pure buy-and-hold. Distribution-detection method is a synthesis from the Alpaca bars `adjustment` parameter, verified numerically.",
+  "novelty": "Performs a three-way CLASSIFICATION of corporate actions - forward/reverse split versus regular dividend versus irregular special distribution - purely from the size and roundness of the adjustment-factor ratio, then trades the least-covered leg of the event literature over a one-year horizon with a trailing stop. No existing rule classifies corporate actions at all, let alone from bar data alone.",
+  "params": [
+   "distribution band k ([0.85,0.97] / [0.75,0.97] / [0.60,0.98])",
+   "one-off lookback (100/200/500 sessions)",
+   "split-ratio exclusion tolerance (0.5%/1%/3%)",
+   "hold horizon (120/250/500 sessions)",
+   "trailing stop (15%/20%/30%)",
+   "hard stop (-20%/-25%/-40%)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Credit Non-Confirmation of Equity Highs",
+  "category": "credit-intermarket-divergence",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "HYG daily close (dividend-adjusted)",
+   "IEF daily close (dividend-adjusted)",
+   "SPY daily open/close",
+   "sma(20) of the HYG/IEF ratio",
+   "20-session rolling max/min of SPY close"
+  ],
+  "entry_rule": "Define the credit ratio C_t = close(HYG)/close(IEF), using dividend-adjusted bars for both (both pay monthly and the unadjusted ratio drifts). Short signal: today close(SPY) equals the highest close of the trailing 20 sessions (inclusive), AND C_t < SMA(C,20), AND C_t < C_{t-20}. Sell SPY short at the next session's open, or if long-only, exit all longs at the next open. Long signal (mirror): today close(SPY) equals the lowest close of the trailing 20 sessions, AND C_t > SMA(C,20), AND C_t > C_{t-20}. Buy SPY at the next open.",
+  "exit_rule": "Short: cover at the next open on the first session where C_t crosses back above SMA(C,20); hard time stop of 10 sessions; hard risk stop if SPY closes 3% above the entry price. Long: exit at the next open on the first session where C_t crosses back below SMA(C,20); hard time stop of 10 sessions; hard risk stop if SPY closes 3% below entry.",
+  "why": "High-yield credit and equity are claims on the same corporate cash flows, but credit holders are paid to worry about solvency rather than growth, and the high-yield market is dominated by institutions with credit research rather than by index flows. Dividing HYG by IEF cancels the duration component, isolating the spread. When the index prints a new high while the credit spread proxy is deteriorating, the equity high is being made without the participation of the investors most exposed to the downside - a documented precursor to equity weakness. The IEF leg is essential: HYG alone conflates a spread signal with a rates signal.",
+  "source": "The HYG-versus-IEF spread signal is formalised in 'Credit-Spread Timing between High-Yield Bonds and Treasuries' (SSRN 5815822), which tests a price ratio versus its lookback moving average and a return-spread threshold, rebalanced monthly, against a 50/50 HYG/IEF benchmark. The non-confirmation framing (credit weakens ahead of equity at turning points) is standard intermarket practice, described for example at stockcharts.com/articles/arthurhill/2016/01 on measuring stock, economic and credit risk. Converting the monthly ratio-versus-MA rotation into a daily divergence-at-extremes trigger is my construction.",
+  "novelty": "It is not a breakout and not a fade of the traded instrument. It requires a specific two-market disagreement - a new extreme in one market that a second, causally related market refuses to confirm - and the exit is defined entirely by the second market's behaviour, not by the traded instrument's price.",
+  "params": [
+   "divergence lookback (10/20/40 sessions)",
+   "credit MA length (10/20/50)",
+   "the C_{t-20} slope lookback (10/20/40)",
+   "risky-asset instrument (SPY/QQQ/IWM - IWM should be more sensitive)",
+   "alternative credit ratio (HYG/LQD, JNK/IEF, HYG/TLT)",
+   "time stop (5/10/20)"
+  ],
+  "_agent": "v2:ace0102422e727c7e04dff379b63c92968054af0ad5011a5f348056e83babce2"
+ },
+ {
+  "name": "BVC-VPIN Toxicity Continuation",
+  "category": "order flow toxicity",
+  "side": "both",
+  "timeframe": "intraday minutes (5-min bars, volume-bucketed)",
+  "entry_rule": "On 5-min bars compute dP_t = C_t - C_{t-1} and sigma_t = stdev(dP, 50). Bulk Volume Classification: buy volume V^B_t = V_t * Phi(dP_t / sigma_t) where Phi is the standard normal CDF; sell volume V^S_t = V_t - V^B_t. Accumulate bar volume into volume buckets of size V* = ADV(20 days)/50, pro-rating a bar's volume (and its buy fraction) across a bucket boundary. On completion of bucket k: VPIN_k = (1/50) * sum_{j=k-49..k} |V^B_j - V^S_j| / V*. Enter LONG at the open of the next 5-min bar when (a) VPIN_k >= the 90th percentile of VPIN over the prior 250 buckets, (b) the bucket's signed imbalance sum(V^B - V^S) > 0, and (c) the bucket's last price > its first price. Mirror exactly for SHORT.",
+  "exit_rule": "Exit when VPIN falls back below its 50th percentile of the trailing 250 buckets, OR after 3 completed volume buckets, OR on a 1.5 x ATR(14, 5-min) stop from entry - whichever comes first.",
+  "inputs": [
+   "1-min or 5-min OHLCV",
+   "rolling stdev of bar close-to-close price changes",
+   "20-day average daily volume",
+   "ATR(14)"
+  ],
+  "why": "Easley, Lopez de Prado and O'Hara argue that persistently one-sided volume adversely selects market makers, who widen or withdraw. Once liquidity providers step back, the informed side faces less resistance and the move extends rather than reverting. The measure is deliberately built in volume time, not clock time, so it fires when information is arriving fast regardless of the hour.",
+  "source": "Easley, Lopez de Prado & O'Hara (2012), 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies 25(5); SSRN 1695596 and the NYU Stern working copy at stern.nyu.edu/sites/default/files/assets/documents/con_035928.pdf. BVC buy-fraction f = Phi(dP/sigma_dP) and VPIN = (1/n) sum |V^B - V^S| / V confirmed against the same paper's implementations.",
+  "novelty": "Nothing in the existing 32 signs volume. This classifies each bar's volume into buy and sell halves probabilistically and trades the persistence of the imbalance, not the price pattern. It is also the only idea here that runs on a volume clock rather than a time clock.",
+  "ohlcv_only": true,
+  "params": [
+   "bucket size divisor (25/50/100 buckets per day)",
+   "VPIN window n (25/50/100 buckets)",
+   "percentile threshold (85/90/95)",
+   "sigma lookback (25/50/100)",
+   "normal CDF vs Student-t CDF with nu = 0.25"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Overnight vs Intraday Amihud Gap Fade",
+  "category": "illiquidity",
+  "side": "both",
+  "timeframe": "daily with a 30-minute intraday trigger",
+  "entry_rule": "For each session compute ILLIQ_on = |ln(O_t/C_{t-1})| / (dollar volume in the first 30 minutes of day t) * 1e9, and ILLIQ_id = |ln(C_t/O_t)| / (dollar volume from 10:00 ET to the close) * 1e9. Take z-scores of each over the trailing 250 sessions. At 10:00 ET on day t, enter AGAINST the overnight gap when z(ILLIQ_on, day t) >= 2.0 AND z(ILLIQ_id, day t-1) <= 0.5 AND |ln(O_t/C_{t-1})| >= 0.5 * ATR(14, daily)/C_{t-1}. So a gap UP on thin opening volume with a normally-liquid prior session is a SHORT.",
+  "exit_rule": "Exit at the close of day t, OR when price has retraced 75% of the gap back toward C_{t-1}, OR on a stop placed one full gap width beyond O_t.",
+  "inputs": [
+   "daily OHLC",
+   "1-min or 5-min bars to split first-30-minute volume from rest-of-day volume",
+   "250-day z-scores",
+   "ATR(14) daily"
+  ],
+  "why": "Amihud's ratio behaves very differently overnight than intraday - the overnight component is dominated by the opening auction and by a small number of participants, not by continuous price discovery. A gap that is large relative to the volume that produced it, on a stock whose regular-session liquidity is normal, is a repricing done by very few hands, and it tends to be walked back once the full complement of liquidity providers arrives. Requiring the PRIOR session's intraday illiquidity to be normal separates 'thin open' from 'thin stock'.",
+  "source": "Bernhardt, Davies and co-authors, 'The Night and Day of Amihud's (2002) Liquidity Measure', University of Warwick Working Paper 1211 (warwick.ac.uk/fac/soc/economics/research/workingpapers/2019/twerp_1211_bernhardt.pdf), which decomposes the measure into overnight and intraday components and shows they carry different information; Amihud (2002), Journal of Financial Markets 5(1).",
+  "novelty": "Opening range fade uses the first N minutes of PRICE. This uses the ratio of overnight price move to opening VOLUME, cross-filtered against the prior session's intraday illiquidity - a two-component liquidity decomposition, and it can decline to trade a large gap that came on heavy volume, which a range-based rule cannot.",
+  "ohlcv_only": true,
+  "params": [
+   "opening volume window (15/30/60 min)",
+   "z thresholds (1.5/2.0/2.5)",
+   "minimum gap size in ATR",
+   "retrace target (50/75/100%)"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "Order-Sign Long-Memory Follow",
+  "category": "trade-sign autocorrelation",
+  "side": "both",
+  "timeframe": "intraday 5-min",
+  "entry_rule": "Build the BVC signed-imbalance series OI_t = V_t*(2*Phi(dP_t/sigma_t) - 1) on 5-min bars and take u_t = sign(OI_t). Estimate the Hurst exponent H of {u_t} by detrended fluctuation analysis over the trailing 512 bars: for scales n in {8,16,32,64,128}, integrate the mean-centred series, fit and remove a linear trend within each non-overlapping window of length n, compute the RMS residual F(n), and take H as the OLS slope of log F(n) on log n. Enter LONG at the next bar's open when H >= 0.60 AND sum(u) over the last 20 bars >= +8. Mirror for SHORT with sum(u) <= -8.",
+  "exit_rule": "Exit when H falls below 0.55, OR when sum(u) over the trailing 20 bars changes sign, OR after 30 bars, OR on a 2.0 x ATR(14) stop.",
+  "inputs": [
+   "5-min OHLCV",
+   "BVC signed imbalance",
+   "DFA Hurst estimate of the sign series",
+   "ATR(14)"
+  ],
+  "why": "Lillo and Farmer showed that order signs are a long-memory process - the autocorrelation decays as a power law with exponent about 0.6, corresponding to H around 0.7 - because large institutional metaorders are split into many small child orders that arrive over hours. Crucially, in normal conditions the resulting sign predictability is offset by anti-correlated liquidity, so returns stay close to a martingale. The trade is on the episodes where H rises above its baseline in one direction: that is a metaorder being worked, and the offsetting liquidity is not always sufficient. Standing aside when H is near 0.5 is as important as entering when it is high.",
+  "source": "Lillo & Farmer (2004), 'The Long Memory of the Efficient Market', Studies in Nonlinear Dynamics & Econometrics 8(3); Santa Fe Institute working paper 03-12-066 (sfi-edu.s3.amazonaws.com/sfi-edu/production/uploads/sfi-com/dev/uploads/filer/d0/d9/d0d92e50-17b7-4072-98a7-293ca01b8d89/03-12-066.pdf); the order-splitting mechanism is from Lillo, Mike & Farmer (2005).",
+  "novelty": "The state variable is the memory EXPONENT of a signed-flow series, estimated by DFA - a long-range-dependence statistic, not a level, slope or oscillator. It answers 'is someone working a large order right now' rather than 'has price moved'. Nothing in the existing 32 estimates a scaling exponent.",
+  "ohlcv_only": true,
+  "params": [
+   "DFA window (256/512/1024)",
+   "scale grid",
+   "H threshold (0.55/0.60/0.65)",
+   "imbalance-run threshold",
+   "R/S vs DFA vs GPH estimator"
+  ],
+  "_agent": "v2:d658cb1189f9e7249f2c73267b1ce2c76df142cc6f634295fa19da9bab06fe0a"
+ },
+ {
+  "name": "ETP Variance Risk Premium",
+  "category": "vol-risk-premium",
+  "side": "long",
+  "timeframe": "daily, multi-week hold",
+  "entry_rule": "Implied-vol proxy from a traded volatility ETP: IVp = VIXY_close / SMA(VIXY_close, 63) - dividing by its own 63-day average removes the roll-decay drift that makes the raw ETP price meaningless as a level. Realized-vol proxy: RV21 = stdev(SPY daily log returns, 21) * sqrt(252), then RVp = RV21 / SMA(RV21, 63). Signal VRP = pctrank_252(IVp) - pctrank_252(RVp), where pctrank_252 is the percentile rank within the trailing 252 observations. At the close, enter LONG SPY (or the traded symbol) when VRP > +0.20.",
+  "exit_rule": "Exit when VRP falls below 0, or after 21 trading days in the position, whichever comes first. Stop at 2.5 * ATR(14, daily) below entry.",
+  "inputs": [
+   "daily OHLCV for VIXY (or VXX)",
+   "daily OHLCV for SPY",
+   "252 sessions of history for the percentile ranks"
+  ],
+  "params": [
+   "ETP choice (VIXY / VXX)",
+   "detrend window (42/63/126)",
+   "realized-vol window (10/21/42)",
+   "percentile lookback (252/504)",
+   "entry threshold (0.15/0.20/0.30)",
+   "max hold (10/21/42 days)"
+  ],
+  "why": "Bollerslev, Tauchen and Zhou show the difference between option-implied and realized variance - the variance risk premium - predicts aggregate stock returns, with the strongest predictability at the quarterly horizon, and that this beats standard predictors like P/E and the default spread. We have no VIX, but VIXY and VXX are ordinary listed equities whose price tracks near-term S&P implied variance through VIX futures. The problem is that their level is corrupted by roll decay, which is exactly what dividing by a trailing average and then percentile-ranking removes: what survives is whether implied vol is rich or cheap relative to its own recent history, which is then differenced against realized vol treated identically.",
+  "source": "Bollerslev, Tauchen & Zhou (2009), 'Expected Stock Returns and Variance Risk Premia', Review of Financial Studies 22(11), 4463-4492. Full text read at https://public.econ.duke.edu/~boller/Published_Papers/rfs_09.pdf. The ETP substitution and the detrend-then-rank construction are my synthesis, needed because the raw ETP price is not an implied-vol level.",
+  "novelty": "The only idea here whose signal comes from a DIFFERENT instrument than the one traded, and the only one that compares a forward-looking market price against a backward-looking statistic of a second instrument. It is not a volatility filter - VRP high means implied is rich relative to realized, which is a bullish state, the opposite of what a naive 'high VIX means danger' rule would do. Honest caveat: VIXY tracks 30-day VIX futures, not VIX itself, so this is a proxy of a proxy and the detrending is doing real work; verify the constructed series against VIX history before trusting it.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ }
+]

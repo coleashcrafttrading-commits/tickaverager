@@ -1,0 +1,220 @@
+[
+ {
+  "name": "Online Logistic Regression with Dead Band",
+  "category": "lightweight ML / online linear model",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "EMA(20)",
+   "ATR(14)",
+   "RSI(14)",
+   "volume",
+   "20-bar realised vol",
+   "close location value",
+   "overnight gap"
+  ],
+  "entry_rule": "Feature vector x_t, every element standardised by an EXPANDING mean/sd using only data up to t-1: x1 = (C_t - EMA20_t)/ATR14_t; x2 = ln(C_t/C_{t-5})/(sigma_20 * sqrt(5)); x3 = RSI(14)/100 - 0.5; x4 = ln(V_t / mean(V,20)); x5 = (C_t - L_t)/(H_t - L_t) - 0.5; x6 = ATR14_t/mean(ATR14,100) - 1; x7 = ln(O_t/C_{t-1})/sigma_20; x8 = 1 (bias). Target y_t = 1 if ln(C_{t+5}/C_t) > 0 else 0. Weights w updated by online SGD ONLY when a label matures - at bar t+5 apply w += eta*(y_t - sigmoid(w.x_t))*x_t - eta*l2*w with eta = 0.01, l2 = 1e-4. Warm up on the first 500 bars with no trading. LONG entry at the next open when sigmoid(w.x_t) > 0.58; SHORT when sigmoid(w.x_t) < 0.42; no trade in between.",
+  "exit_rule": "Fixed 5-bar horizon exit matching the label definition, overridden by a 2*ATR(14) stop. If the probability condition still holds at the exit bar, re-enter at the next open, so a persistent signal rolls the position rather than flipping flat.",
+  "params": [
+   "learning rate eta (0.001-0.05)",
+   "L2 penalty",
+   "probability dead band half-width (0.04-0.15)",
+   "label horizon (3-20 bars)",
+   "feature subset",
+   "warm-up length"
+  ],
+  "why": "The weights are never batch-refit, so they drift continuously with the market and the model reinterprets its own features: in a trending regime the coefficient on x2 (5-bar momentum) goes positive, and in a choppy one it goes negative, so one piece of code is a momentum model and a reversion model at different times without any regime classifier bolted on. The dead band around 0.5 means the model is silent when its features disagree, which is most of the time.",
+  "novelty": "An adaptive, sign-flipping linear combination of features rather than a fixed rule over one indicator. The delayed-label update (weights only learn from bar t at bar t+5) is the causally honest version that most published implementations get wrong, and the probability dead band is an explicit abstention region no threshold indicator has.",
+  "source": "Standard online SGD logistic regression. Finance instantiation with technical-indicator features and a cascaded architecture: Zhang, Zhang et al., 'Cascading logistic regression onto gradient boosted decision trees for forecasting and trading stock indices', Applied Soft Computing 84 (2019). Adaptive online mid-price learning with Hessian-based adaptive rate: PLOS ONE 15(6): e0234107, 'Mid-price prediction based on machine learning methods with technical and quantitative indicators'.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Turnover-Penalised Sharpe Trainer",
+  "category": "deep learning / cost-aware objective",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "Identical architecture and features to the Deep Momentum Network, but the training objective is the COST-ADJUSTED Sharpe ratio. Define the net return R_{t+1} = (sigma_tgt / N_t) * sum_i [ (X_{i,t}/sigma_{i,t}) * r_{i,t,t+1} - c * | X_{i,t}/sigma_{i,t} - X_{i,t-1}/sigma_{i,t-1} | ] and minimise L = -sqrt(252) * E[R] / sqrt(Var(R)), with c set to the expected round-trip cost as a decimal fraction (start at c = 0.0010, i.e. 10bp, for retail equities rather than the 2-3bp used for futures). Take the position the network outputs at each daily close when |X_t| > 0.05.",
+  "exit_rule": "The exit is emergent rather than rule-based: because turnover is priced inside the loss, the network becomes reluctant to change X_t and positions turn sticky - it only reverses when the change in signal is large enough to pay for the round trip. Go flat when |X_t| < 0.05. Sweep c upward across training runs until realised turnover falls to a level the account can actually bear, and select c on out-of-sample net Sharpe.",
+  "inputs": [
+   "volatility-normalised returns at 1/21/63/126/252 days",
+   "MACD (8,24), (16,48), (32,96)",
+   "previous-day scaled position X_{t-1}/sigma_{t-1}",
+   "LSTM with tanh output",
+   "cost-adjusted Sharpe loss"
+  ],
+  "params": [
+   "transaction-cost coefficient c",
+   "deadband (0.05)",
+   "LSTM hidden size",
+   "sequence length",
+   "volatility target"
+  ],
+  "why": "Every other approach here trains a signal and then discovers that costs eat it. Putting cost inside the loss changes what the model learns rather than what it earns: it learns to ignore small signal fluctuations instead of trading them and losing. Lim et al. introduce exactly this turnover regularisation term and note the DMN advantage survives 2-3bp; at retail equity cost levels the term matters far more, which makes this the variant worth testing first on a live account.",
+  "source": "Lim, Zohren & Roberts (2019), arXiv:1904.04912, turnover regularisation section - the cost-adjusted return formula with the c*|X_t/sigma_t - X_{t-1}/sigma_{t-1}| penalty is quoted from the paper's full text (ar5iv). Raising c to retail equity levels and selecting it on net out-of-sample Sharpe is my adaptation.",
+  "novelty": "Cost is a training-time constraint that reshapes the position path, not a post-hoc subtraction from a backtest. With features identical to the base Deep Momentum Network, this is purely a different EXIT structure - positions persist through noise that would otherwise flip them.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "Honest Pullback Test",
+  "category": "entry timing / pullback versus immediate",
+  "timeframe": "any",
+  "side": "both",
+  "entry_rule": "Signal S fires at close_t (reference S = close crosses above EMA(20) while ADX(14) > 25). Arm I (immediate): buy at close_t. Arm P (pullback): place a buy limit at the lesser of EMA(20)_t and close_t - 0.5*ATR(14)_t, valid for the next 5 bars, filling on the first bar whose low touches it. The design rule that makes this test valid: Arm P may not drop unfilled signals. Every signal that Arm P fails to fill is carried in a parallel ledger and scored at the return Arm I earned on that same signal.",
+  "exit_rule": "Identical for both arms: trail a stop at (highest close since entry) - 2*ATR(14), evaluated at each bar's close, with an unconditional time stop at 30 bars after entry. Report three numbers - Arm I's mean return, Arm P's mean return over filled trades only, and Arm P's mean return over filled-plus-unfilled. The difference between the second and third is the entry-timing alpha, and if the second beats Arm I while the third does not, the pullback edge was pure selection bias.",
+  "inputs": [
+   "ema(20)",
+   "adx(14)",
+   "atr(14)",
+   "bar low",
+   "bar close"
+  ],
+  "why": "'Wait for the pullback' is near-universal folklore and is almost always evaluated only on the trades that actually pulled back, which is survivorship bias in the entry dimension - the signals that never pull back are exactly the ones that ran, and deleting them from the sample deletes the best outcomes. This is Perold's opportunity cost term appearing in a place practitioners do not usually look for it. Once the missed set is scored, the test becomes a clean question about information diffusion: if the signal's information is impounded quickly, the pullback never comes on the good trades and waiting is expensive; if it diffuses slowly, the pullback is a genuine discount on the same move. Different signals among our 32 should fall on different sides of that line, and knowing which is which is directly actionable.",
+  "novelty": "Distinct from EMA-pullback-in-trend, which is a signal that requires a pullback as part of its definition. Here the signal is already complete and the pullback is only an execution choice, so the counterfactual - what the unfilled trades did - is well defined and is the actual measurement.",
+  "source": "Perold (1988) implementation shortfall opportunity-cost term, framework confirmed via the implementation shortfall literature; the survivorship-in-entries critique and the test design are my own synthesis.",
+  "params": [
+   "pullback depth in ATR units",
+   "limit lifetime in bars",
+   "trailing stop multiple",
+   "time stop length"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Cube-Root No-Trade Band",
+  "category": "cost-aware rebalancing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Maintain a continuous target weight w*_t = clip(z_t / 3, -1, +1), where z_t = (C_t - SMA(50)) / stdev(C - SMA(50), 50). Each bar, estimate the round-trip cost fraction c_t = spread_hat_t + 2 * Y * sigma_d * sqrt(Q/V20), with spread_hat_t the EDGE estimate over 60 bars, Y = 1, sigma_d = 20-day return stdev, V20 the 20-day average volume, Q the shares implied by w*_t. Set the no-trade half-width Delta_t = k * c_t^(1/3), k swept. Trade ONLY when |w_actual - w*_t| > Delta_t. When you trade, move only to the NEAR EDGE of the band, i.e. to w*_t + Delta_t if you were below it, or w*_t - Delta_t if above \u2014 never all the way to w*_t.",
+  "exit_rule": "Symmetric and automatic: the position is reduced only when w*_t drifts far enough that w_actual exits the band on the other side, and a position is fully closed only when w*_t crosses zero by more than Delta_t. A hard stop at 3*ATR(14) adverse excursion bypasses the band entirely.",
+  "inputs": [
+   "close",
+   "sma(50)",
+   "stdev(close - sma, 50)",
+   "ohlc for EDGE spread",
+   "volume (20-day average)",
+   "stdev of daily log returns (20)"
+  ],
+  "params": [
+   "k band scaling constant",
+   "Y impact constant",
+   "z-score divisor",
+   "SMA and stdev lookbacks",
+   "EDGE window"
+  ],
+  "why": "Under proportional transaction costs the optimal policy is an impulse-control policy: an inaction region around the target, with rebalancing back to the nearest boundary rather than to the target. The width of that region is not proportional to cost \u2014 it scales as the CUBE ROOT of cost, which means even tiny costs justify a surprisingly wide band (the derivative of band width with respect to cost is infinite at zero). Rebalancing to the near edge rather than the target roughly halves turnover again for the same tracking error.",
+  "novelty": "Distinct from a fixed percentage rebalance band because the width is recomputed each bar from a live cost estimate and follows a specific non-linear law, and distinct from every entry rule in the 32 because it makes the trade/no-trade decision a function of estimated cost rather than of the signal. The rebalance-to-edge rather than rebalance-to-target detail is itself a separate structural change.",
+  "source": "Novy-Marx, R. & Velikov, M., 'A Taxonomy of Anomalies and their Trading Costs' (NBER w20721), footnote 6, which cites Arrow, Harris & Marschak (1951) for the sS inaction region, Davis & Norman (1990) for 'an inaction region and a return to the closer boundary when rebalancing', and Abel & Eberly (1996) which shows 'the size of this region is proportional to the cube-root of the price wedge for small wedges, which makes its derivative with respect to the wedge infinite'.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Romano-Wolf Stepdown Multi-Rule Book",
+  "category": "multiple-testing control / portfolio construction",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Compute studentised statistics t_k = sqrt(n)*f_bar_k / omega_hat_k for all l candidate rules (f and omega defined as in the SPA gate) and sort descending. STEP 1: with the active set S = {all l rules}, use B=1000 shared stationary-bootstrap paths to build the null distribution of max_{k in S} sqrt(n)*(f_bar*_k - f_bar_k)/omega_hat_k; let c_1 be its (1-alpha) quantile, alpha=0.05. REJECT (declare genuine) every rule with t_k > c_1. STEP 2: remove the rejected rules from S and rebuild the max-statistic null over the REMAINING rules only - this gives c_2 <= c_1 - and reject any further rules with t_k > c_2. Iterate until a step produces no new rejections. Let R = number of rejected rules. Allocate 1/R of the risk budget to each rejected rule and take each one's own entry signals at that weight. Rules that were never rejected generate no orders, ever.",
+  "exit_rule": "Each rule exits on its own signal. Re-run the full stepdown every 63 bars on a trailing 3-year window. A rule that drops out of the rejected set is flattened at the next open and its weight redistributed equally among the survivors; a newly rejected rule is added at the next open with the book re-weighted to 1/R. If R falls to 0 the entire book goes flat and stays flat until the next re-run produces at least one rejection.",
+  "inputs": [
+   "per-bar returns of every candidate rule",
+   "Newey-West HAC standard errors",
+   "stationary bootstrap with shared index paths across rules",
+   "empirical quantile function"
+  ],
+  "why": "Bonferroni and the Reality Check answer 'is the best one real?'. That is the wrong question for a fleet: you want to identify EVERY rule that is real, and to allocate across them. A single-step max test is badly under-powered for the second, third, and fourth best rules because they are all judged against the null distribution of the maximum over all 578. The stepdown recovers that power - once the obvious winners are removed the critical value drops, so genuinely good but not-best rules can still be found - while still controlling the family-wise error rate at alpha in the strong sense. Because the bootstrap uses a common index path, the procedure automatically exploits the fact that near-duplicate rules in the corpus are highly correlated, which a Bonferroni correction would ignore and be crushed by.",
+  "novelty": "Produces a SET of rules and an allocation, not a single winner. Distinct exit structure: capital is continuously reallocated as the rejected set changes, so the book is an explicit function of what is currently statistically defensible.",
+  "source": "Romano, J. P. & Wolf, M. (2005), 'Stepwise Multiple Testing as Formalized Data Snooping', Econometrica 73(4), 1237-1282. Also Romano, J. P., Shaikh, A. & Wolf, M. (2008), 'Formalized Data Snooping Based on Generalized Error Rates', Econometric Theory 24(2), 404-447 (k-FWER and FDP-controlling variants that let you tolerate a few false positives in exchange for far more power).",
+  "ohlcv_only": true,
+  "params": [
+   "alpha (0.05 / 0.10)",
+   "B resamples",
+   "block length",
+   "stepdown vs k-FWER variant (allow k=1,2,3 false rejections)",
+   "re-run cadence",
+   "weighting (equal vs t-proportional across survivors)"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Price-Impact Compression (Amihud)",
+  "category": "volatility",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close",
+   "daily volume",
+   "ATR(14)"
+  ],
+  "params": [
+   "ILLIQ window 20",
+   "percentile history 252",
+   "impact percentile 80",
+   "volatility percentile cap 60",
+   "arm window 5",
+   "close-in-range 0.20",
+   "volume confirm 1.5x",
+   "liquidity-return exit percentile 40"
+  ],
+  "entry_rule": "Daily. ILLIQ_t = (1/20) * SUM over i = t-19..t of |r_i| / (C_i * V_i), where r_i is the daily log return and C_i * V_i is dollar volume; scale by 1e6 for numerical convenience. This is price move per dollar traded - impact per unit of flow. Rank ILLIQ_t against its trailing 252-session history to get percentile P_I. Separately rank ATR(14)/C_t against its trailing 252-session history to get P_V. ARM the setup for the next 5 sessions whenever P_I >= 80 AND P_V <= 60 - high impact with ordinary volatility, meaning the book has thinned without the price having moved yet. On any armed session, at the close: LONG when (C_t - L_t)/(H_t - L_t) >= 0.80 AND volume_t >= 1.5 * the 20-session average volume; SHORT when (C_t - L_t)/(H_t - L_t) <= 0.20 AND volume_t >= 1.5 * the 20-session average volume. Disarm after a fill or after 5 sessions, whichever first.",
+  "exit_rule": "Trailing stop 2.0*ATR(14) from the extreme close reached since entry, re-evaluated each close. Hard time stop of 10 sessions. Additionally exit at the next open if P_I falls below 40 - liquidity has returned and the impact edge is gone regardless of the position's P&L.",
+  "why": "Amihud's ratio is the only widely-validated liquidity measure computable from daily bars alone, and it is measuring something no price-only estimator can see: the SLOPE of the demand curve, not the amount price has already moved. The distinctive cell is high impact with ordinary volatility. Ordinary ATR says the tape is calm; high ILLIQ says the calm is being produced by an absence of participants rather than an absence of disagreement. In that state the next genuinely sized order travels much further than its size would normally warrant, so the volume-confirmed directional close is a far stronger continuation signal than the same close in a thick book.",
+  "novelty": "Volume enters as the DENOMINATOR of the signal, not as a confirmation multiplier. The entry condition is a divergence between two normalized series - impact high, volatility ordinary - which is structurally unavailable to any single-estimator system. Distinct from the microstructure noise ratio, which compares realized variances at two sampling grids and says nothing about size.",
+  "source": "Amihud (2002), 'Illiquidity and stock returns: cross-section and time-series effects', Journal of Financial Markets 5(1) - the ILLIQ measure, defined as the daily average of |return| divided by dollar volume. Cited from knowledge; I attempted to fetch a reference page for it this session and got a 404, and the web search budget was already exhausted. The impact-versus-volatility divergence condition and the entry structure are my synthesis.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "Naked POC Magnet",
+  "category": "volume profile / level reversion",
+  "side": "both",
+  "timeframe": "intraday 1-5 minute, levels built from prior daily sessions",
+  "entry_rule": "Build a per-session volume profile from 1-minute bars: price bins of width 0.05% of that session's open, each bar's volume spread evenly across the bins its [low, high] covers. POC = highest-volume bin's midpoint. Mark a session's POC 'naked' if no LATER session's [low, high] has ever contained that price. Maintain the list of naked POCs from the last 60 sessions. At every 5-minute bar close between 10:00 and 15:00 ET, with no open position: let U = nearest naked POC strictly above last price, D = nearest naked POC strictly below. Compute dU = (U - price)/ATR14_daily and dD = (price - D)/ATR14_daily. If 0.4 <= dU <= 2.0 and dU < dD, go LONG at market. If 0.4 <= dD <= 2.0 and dD < dU, go SHORT at market. Only one naked-POC trade per level per day.",
+  "exit_rule": "Limit exit at the target naked POC price. Hard stop at 1.0 x ATR14_daily against entry. Force flat at 15:55 ET. Once price trades through it, the POC stops being naked and is removed from the list.",
+  "inputs": [
+   "1-minute OHLCV",
+   "daily ATR(14)",
+   "session volume profile with 0.05%-of-open bins",
+   "session POC history, 60 sessions"
+  ],
+  "params": [
+   "bin width as % of open (0.02-0.10)",
+   "profile lookback sessions (20-120)",
+   "min distance in ATR (0.2-0.8)",
+   "max distance in ATR (1.0-3.0)",
+   "stop in ATR (0.5-2.0)",
+   "entry window start/end time"
+  ],
+  "why": "A POC is the price at which the largest quantity of contracts changed hands in a session, i.e. the price the most participants agreed on. When price leaves that level without ever retesting it, a large cohort of positions was opened there and never got a chance to be added to, scaled out of, or defended. Unfinished business at a heavily-traded price acts as a liquidity magnet: resting orders from that cohort sit near it, so price tends to be drawn back. This is a distribution-of-volume level, not a price-extreme level, which is why it does not coincide with Donchian/pivot/S-R levels.",
+  "novelty": "Not an MA or oscillator at all. The level is derived from where volume was transacted (the mode of the volume-at-price histogram), and the tradeable condition is a topological one - the level has never been revisited - which no price-only indicator can express.",
+  "ohlcv_only": true,
+  "source": "Market Profile / volume profile lineage (Steidlmayer, CBOT Liquidity Data Bank). Definitions and the naked/virgin POC concept per LuxAlgo concept library, https://www.luxalgo.com/library/concept/naked-poc/ and https://www.luxalgo.com/library/concept/point-of-control/ ; profile construction per TradingView docs, https://www.tradingview.com/support/solutions/43000502040-volume-profile-indicators-basic-concepts/ . Exact bin widths, ATR gating and the 60-session horizon are my specification (the sources describe the concept, not testable thresholds).",
+  "_agent": "v2:74b72b10aad022b74885d9539dfb07c28d3f484da2b8b7010914406165497ee2"
+ },
+ {
+  "name": "Volatility-targeted time-series momentum",
+  "category": "trend following / position sizing as the signal",
+  "side": "both",
+  "timeframe": "daily bars, monthly rebalance",
+  "entry_rule": "On the last trading day of each month t, for each instrument compute r_12 = Close_t / Close_{t-252} - 1. Signal s = +1 if r_12 > 0, -1 if r_12 < 0. Compute ex-ante annualised volatility sigma_t = sqrt(261 * EWMA of squared daily returns), where the EWMA uses exponentially decaying weights with a 60-day centre of mass (delta = 60/61, weights proportional to delta^i normalised to sum to 1, applied to (r_{t-i} - rbar)^2). Target position notional = s * (0.40 / sigma_t) * (capital allocated to that instrument), capped at the broker's leverage limit and at 4x. Trade the difference into the new target at the monthly close. Positions are held for one month and re-evaluated only at month end.",
+  "exit_rule": "There is no discrete exit \u2014 the position size is recomputed monthly and goes to zero-crossing-and-flip when sign(r_12) flips. Size also shrinks automatically as sigma_t rises, so a volatility spike reduces exposure before any price signal changes. Optional overlay: cut the whole position to zero intramonth if the drawdown from the position's high-water mark exceeds 3 * sigma_t / sqrt(12).",
+  "inputs": [
+   "daily close series (252-day lookback)",
+   "daily returns for the EWMA volatility estimate",
+   "monthly rebalance calendar"
+  ],
+  "params": [
+   "lookback 252 days (the paper shows 1-12 month lookbacks all work; sweep 21-252)",
+   "holding period 1 month (sweep 1-12)",
+   "volatility target 0.40 (scale to the account's risk budget)",
+   "EWMA centre of mass 60 days",
+   "leverage cap"
+  ],
+  "why": "The documented result is that the sign of an instrument's own past 12-month return predicts the sign of its next month's return across dozens of futures and equity markets, and that the effect reverses beyond about 12 months \u2014 consistent with initial underreaction followed by delayed overreaction. The volatility scaling is what makes it tradeable: it equalises risk contribution across instruments and across time, so a quiet regime gets levered up and a violent one gets cut automatically. In an equity book this means the strategy de-risks into a volatility spike without needing a stop to be hit.",
+  "source": "Moskowitz, T.J., Ooi, Y.H., and Pedersen, L.H., 'Time Series Momentum', Journal of Financial Economics 104(2), 2012, pp. 228-250 \u2014 sign of the past 12-month excess return, one-month holding period, position scaled to a 40% annualised volatility target using an exponentially weighted ex-ante volatility estimate with a 60-day centre of mass. (I could not extract text from the hosted PDF at w4.stern.nyu.edu; the parameters above are the published specification and should be re-checked against the paper before implementation.)",
+  "novelty": "EMA cross is a price-versus-price rule with a binary in/out. This uses the sign of a raw 252-day return as the only entry condition and puts all the sophistication in a continuously varying, volatility-inverse position size that is itself the risk control \u2014 a different exit structure, since exposure decays on volatility rather than on price.",
+  "ohlcv_only": true,
+  "_agent": "v2:f5f032cda86046734ffcad9e8f804d90c918533489aa540fb34b2254c98c8019"
+ }
+]

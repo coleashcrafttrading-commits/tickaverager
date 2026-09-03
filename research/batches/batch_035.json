@@ -1,0 +1,210 @@
+[
+ {
+  "name": "Three-Fifths Power Execution Horizon",
+  "category": "optimal execution",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "On a signal with target size X shares, the decision variable is the execution HORIZON T, not the entry price. Using Almgren et al.'s fitted temporary-impact model, expected cost as a function of horizon is Cost(T) = eta * sigma_d * |X / (V20 * T)|^(3/5) + lambda_risk * sigma_d * (X / V20) * sqrt(T), with eta = 0.142 (the fitted universal coefficient), sigma_d = 20-day daily return stdev, V20 = 20-day average daily volume, T measured in trading days, and lambda_risk a swept delay-risk aversion. Grid-search T over {0.05, 0.1, 0.2, 0.35, 0.5, 1.0, 2.0} days, pick T* = argmin Cost(T), convert to N = round(T* * bars_per_day) bars, and execute X/N shares per bar as a market order at each bar's (H+L+C)/3. If N < 1, fill in one bar.",
+  "exit_rule": "At the exit trigger, recompute T* with the then-current sigma_d and V20 and liquidate over that many bars, again in equal slices. A stop-loss breach overrides and liquidates immediately in one slice. If the signal reverses mid-execution, cancel the unexecuted remainder.",
+  "inputs": [
+   "ohlc bars (1 or 5 minute)",
+   "volume (20-day average daily volume)",
+   "stdev of daily log returns (20)",
+   "atr(14) for stops"
+  ],
+  "params": [
+   "lambda_risk delay-risk aversion",
+   "eta (fix at 0.142 or sweep 0.08-0.25)",
+   "impact exponent (fix at 3/5, sweep 0.5-0.7)",
+   "horizon grid",
+   "X target size"
+  ],
+  "why": "Almgren, Thum, Hauptmann & Li fit permanent and temporary impact directly to 700,000 real US equity orders and reject the square-root exponent at 95% confidence in favour of 3/5 for the temporary term. Their fitted realised cost is J = I/2 + sgn(X)*eta*sigma*|X/(V*T)|^(3/5) with eta = 0.142. This gives a real, empirically calibrated tradeoff: stretching the execution reduces impact as T^(-3/5) but increases the volatility risk of not being filled as sqrt(T). The minimum is interior and depends on size, volume and volatility, so the right horizon is different for every trade.",
+  "novelty": "The existing execution-timing family tests fill assumptions at fixed points in time. This makes the DURATION the optimised quantity, from a published, empirically fitted impact model with a non-obvious exponent. Note the permanent-impact term I = gamma*sigma*(X/V)*(Theta/V)^(1/4) needs shares outstanding Theta, which we do not have \u2014 but it does not appear in the horizon minimisation at all (permanent impact is independent of execution time), so the rule is fully OHLCV-computable as written.",
+  "source": "Almgren, R., Thum, C., Hauptmann, E. & Li, H. (2005), 'Direct Estimation of Equity Market Impact': fitted exponents alpha = 0.891 +/- 0.10 (permanent, linear not rejected), delta = 0.267 +/- 0.22 (liquidity factor ~ 1/4), beta = 0.600 +/- 0.038 (temporary); coefficients gamma = 0.314 +/- 0.041 (t = 7.7) and eta = 0.142 +/- 0.0062 (t = 23); 'At the 95% confidence level, the square-root model beta = 1/2 is rejected.'",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Out-of-Range Gap-and-Go Level Retest",
+  "category": "gap",
+  "side": "both",
+  "timeframe": "5-minute (daily context)",
+  "entry_rule": "GAP UP CASE: today's open > yesterday's high + 0.20 x daily ATR(14) - the gap clears the prior day's range entirely. Then wait, from 09:35 to 11:00 ET, for the FIRST 5-minute bar that satisfies both: its low <= yesterday_high + 0.10 x daily ATR(14) (price returns to retest the prior day's high) AND its close > yesterday_high (the level holds). Buy at that bar's close. Invalidate the whole setup for the day if any 5-minute bar closes below yesterday_high - 0.25 x daily ATR before the retest bar forms. One attempt per day. GAP DOWN CASE is the mirror at yesterday's low.",
+  "exit_rule": "Initial stop = yesterday's high - 0.25 x daily ATR(14) (longs). Once open profit reaches 1.0 x initial risk, trail beneath the lowest low of the last three 5-minute bars, updated every bar. Hard exit at 15:55 ET. No fixed target.",
+  "inputs": [
+   "daily OHLC (prior day high/low)",
+   "5-minute bars",
+   "daily ATR(14)",
+   "session clock"
+  ],
+  "params": [
+   "minimum gap clearance in ATR (0.1-0.4)",
+   "retest tolerance in ATR (0.10)",
+   "retest window end (10:30 / 11:00 / 12:00)",
+   "trail length (2-5 bars)"
+  ],
+  "why": "When the open clears the whole prior session, yesterday's extreme flips from resistance to the nearest reference price with known two-sided interest; holders of the gap defend it because a loss of that level means the gap is failing. The retest supplies both a cheap entry and an unambiguous invalidation, which is why the reward-to-risk is far better than chasing the open.",
+  "novelty": "The entry level is YESTERDAY'S EXTREME, a level formed before today began, and the trigger is a pullback into it rather than a breakout away from it. Our opening-range breakout uses a level built from today's first N minutes and enters on expansion; this enters on retracement, at a different price, with a different invalidation.",
+  "source": "Supporting evidence for gap continuation: Bulkowski, T., thepatternsite.com/Gap2H.html - the Gap 2H pattern (a price gap followed by a higher high and higher low) acts as a CONTINUATION 72% of the time, with a 34% break-even failure rate and 10% average rise in bull markets, and Bulkowski reports the pattern stop (a penny beyond the pattern extreme, as used here) wins 62% versus 55% for a percentage stop. Gap taxonomy from Edwards and Magee, 'Technical Analysis of Stock Trends'.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "Analogue Forecast with Distance Abstention",
+  "category": "lightweight ML / k-nearest neighbour",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "close (z-normalised m-bar windows)",
+   "forward H-bar returns",
+   "rolling sd of H-bar returns"
+  ],
+  "entry_rule": "Let w_t be the last m = 20 closes z-normalised (subtract window mean, divide by window sd). For every historical index j in the trailing 2000 bars satisfying j <= t - m - H (H = 10, which enforces that the neighbour's forward return was already fully observed) and |j - t| > m (no self-overlap), compute d_j = Euclidean distance between w_t and the z-normalised window ending at j. Take the k = 25 smallest d_j. Let f_j = ln(C_{j+H}/C_j). LONG entry at the next open when ALL of: (a) mean of f_j over the k neighbours > 0.25 * sigma_H, where sigma_H = sd of H-bar log returns over the trailing 250 bars; (b) at least 65% of the k neighbours have f_j > 0; (c) the mean of the k neighbour distances is below its own 20th percentile over the trailing 250 bars. SHORT is the exact mirror.",
+  "exit_rule": "Hard time exit after exactly H = 10 bars (matching the forecast horizon the neighbours voted on), plus a stop at 2 * sigma_H adverse.",
+  "params": [
+   "window length m (10-60)",
+   "horizon H (3-20)",
+   "k (10-100)",
+   "mean-forward-return threshold in sigma_H",
+   "agreement fraction (0.55-0.80)",
+   "distance percentile for condition (c)",
+   "history depth"
+  ],
+  "why": "There is no model - the history IS the model, so it can express any nonlinear shape-to-outcome mapping without a functional form or a fitting step. Condition (c) is the part that matters: standard k-NN always returns k neighbours no matter how far away they are, and so always produces a forecast even when the current shape is unprecedented. Requiring the neighbours to be genuinely close turns k-NN into a system that abstains most of the time and speaks only when the market is repeating itself.",
+  "novelty": "Distinct from any indicator: the feature is the whole z-normalised price path shape, and the signal is a vote of historical analogues' realised forward returns. The distance-percentile abstention gate is the substantive addition over textbook k-NN implementations, which have no notion of 'I have never seen this before'.",
+  "source": "Yeh, Zhu, Ulanova, Begum, Ding, Dau, Silva, Mueen & Keogh, 'Matrix Profile I: All Pairs Similarity Joins for Time Series', IEEE ICDM 2016 - the z-normalised nearest-neighbour machinery and MASS. Discretised (SAX) variant: Lin, Keogh, Lonardi & Chiu (2003), 'A Symbolic Representation of Time Series, with Implications for Streaming Algorithms', ACM SIGMOD DMKD Workshop. Financial k-NN evidence: Alkhatib & Najadat, 'Stock Price Prediction Using K-Nearest Neighbor (kNN) Algorithm'.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Direct Softmax Allocation Network",
+  "category": "deep learning / end-to-end portfolio construction",
+  "timeframe": "daily",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "There is no per-symbol signal at all. Stack the last 50 daily bars of close price and daily return for each of N instruments into a 50 x 2N input tensor; feed it to an LSTM with 64 units; pass the final hidden state through a dense layer with a SOFTMAX of width N, producing long-only weights w_t that sum to 1. Train by gradient ascent on the Sharpe ratio of the realised portfolio return sum_i w_{i,t} * r_{i,t+1}, minus c * sum_i |w_{i,t} - w_{i,t-1}| with c = 0.001. At each close, allocate capital to the resulting weights - any symbol with a non-trivial weight is a position.",
+  "exit_rule": "The allocation is fully replaced each day; a symbol exits when its softmax weight falls below 1/(5N), at which point its capital is redistributed by the network itself rather than by a rule. Overlay volatility scaling on the whole book: multiply every weight by sigma_tgt / (realised 63-day portfolio volatility), capped at 2x gross leverage.",
+  "inputs": [
+   "daily close and daily return for N instruments",
+   "50-day lookback window",
+   "LSTM 64 units",
+   "softmax output layer of width N",
+   "Sharpe objective with a turnover penalty"
+  ],
+  "params": [
+   "lookback window (50)",
+   "LSTM units",
+   "transaction-cost coefficient c",
+   "minimum-weight exit floor",
+   "volatility target and leverage cap",
+   "universe composition N"
+  ],
+  "why": "Every forecasting approach optimises a metric - accuracy, MSE, log-loss - that is not the metric the account is paid on, then converts the forecast into a position through a separate, un-optimised step. Optimising the weights directly makes the loss surface the actual objective. It also lets the model learn to hold a diversifier that has a poor standalone forecast but reduces portfolio variance, which no per-symbol signal can ever discover. Zhang et al. beat mean-variance optimisation, maximum diversification and fixed allocation on a four-instrument universe over 2011 to April 2020, with contained drawdowns through the COVID shock.",
+  "source": "Zhang, Zohren & Roberts (2020), 'Deep Learning for Portfolio Optimization', The Journal of Financial Data Science 2(4); arXiv:2005.13665. Read the full text (ar5iv) and verified: a single LSTM layer of 64 units over a 50-day lookback of concatenated prices and returns across four ETFs, a softmax output layer producing weights that sum to one, direct gradient ascent on the Sharpe ratio rather than return forecasting, daily rebalancing, transaction costs modelled as the absolute change in scaled positions times a cost rate (tested at 0.01% and 0.1%), and inverse-volatility position scaling.",
+  "novelty": "There is no signal and no threshold anywhere - the model's output IS the book, and diversification is learned rather than imposed by a covariance estimate. Long-only by construction of the softmax, which happens to suit a cash equity account with no shorting.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "Auction Blackout",
+  "category": "entry timing / session filter",
+  "timeframe": "intraday (1, 5 or 15 minute)",
+  "side": "both",
+  "entry_rule": "Overlay on any of the 32 intraday signals. A signal firing on a bar whose timestamp falls within the first K minutes after 09:30 ET is not actionable and generates no order; the signal must fire again on a bar at or after 09:30+K to be traded. Sweep K in {0,5,15,30}, where K=0 is the unmodified base strategy. Symmetric closing variant: block signals on bars within the last K minutes before 16:00 ET. Run open-blackout, close-blackout and both-blackout as separate arms so the two windows are attributed separately.",
+  "exit_rule": "Exit rules are inherited unchanged from whatever the base strategy uses, and exits are explicitly NOT blocked during the blackout window - only new entries are. This asymmetry is deliberate: the hypothesis is about the reliability of signals formed during the auction, not about the tradability of the window. Report per-arm Sharpe, expectancy per trade and the number of trades removed, and separately report the standalone expectancy of the removed trades, which is what the blackout is actually giving up.",
+  "inputs": [
+   "bar timestamp",
+   "session open and close times (09:30 and 16:00 ET)",
+   "any of the 32 intraday signals"
+  ],
+  "why": "Boyarchenko, Larsen and Whelan document that the opening hour behaves unlike any other part of the day: returns in the 09:00-10:00 window are on average large and negative, but only during recessionary periods, and flat otherwise. That is the signature of a regime-dependent, high-variance, low-unconditional-expectancy window - the worst possible environment for indicator signals, because every moving average, band and oscillator computed on 1 or 5 minute bars is being fed prices that are still resolving the overnight auction rather than reflecting continuous trading. A breakout at 09:32 is measured against a range that does not yet exist. The blackout tests whether the signals we already own are quietly being degraded by a window we never chose to exclude.",
+  "novelty": "This is the exact inverse of the opening range breakout and opening range fade strategies we already run: rather than a rule that trades the open, it is a rule that forbids everything else from trading the open. Because it is a pure overlay, it can be applied to all 32 at once and evaluated by whether it raises or lowers each one's Sharpe, which makes it unusually cheap to test relative to its potential fleet-wide effect.",
+  "source": "Boyarchenko, Larsen & Whelan, 'The Overnight Drift', Federal Reserve Bank of New York Staff Reports no. 917, February 2020, revised August 2022. Read directly from newyorkfed.org - the characterisation of the 09:00-10:00 hour as large and negative only in recessions and flat otherwise, in contrast to the consistently significant 02:00-03:00 window, is in the paper's introduction.",
+  "params": [
+   "K, blackout minutes after the open",
+   "K, blackout minutes before the close",
+   "whether exits are also blocked (default no)",
+   "which signals the overlay is applied to"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Turnover Budget Greedy Queue",
+  "category": "cost-aware rebalancing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Treat daily turnover as a hard constrained resource. Each rebalance: (1) for every candidate trade j, compute expected net edge E_j = the walk-forward conditional expected log return over the signal's holding horizon (estimated on a trailing 500-bar window, using only bars at least H bars old); (2) compute expected cost C_j = spread_hat_j (EDGE, 60 bars) + eta * sigma_d * |Q_j / (V20_j * T_j)|^(3/5) with eta = 0.142; (3) rank all candidates by R_j = E_j / C_j, descending; (4) fill greedily down the ranking until cumulative traded notional reaches the budget B = b * portfolio_equity, with b swept in [0.02, 0.20] per day; (5) every candidate below the cut is DROPPED for the day, not queued, and is re-ranked from scratch tomorrow against the new opportunity set.",
+  "exit_rule": "Exits join the same queue and compete for the same budget, but their score is multiplied by a priority factor m > 1 (swept in [1.0, 3.0]) so that risk reduction outranks risk addition at equal edge-per-cost. Two categories bypass the budget entirely and are always filled: stop-loss exits, and any liquidation required by a portfolio-level risk limit.",
+  "inputs": [
+   "close and volume per ticker",
+   "ohlc for EDGE spread",
+   "stdev of daily log returns (20)",
+   "conditional expected-return estimates per signal",
+   "current positions and equity"
+  ],
+  "params": [
+   "b daily turnover budget (2%-20% of equity)",
+   "m exit priority multiplier (1.0-3.0)",
+   "edge estimation window",
+   "eta impact coefficient",
+   "rebalance frequency"
+  ],
+  "why": "The literature's core finding is that anomalies do not fail because the signals are wrong, they fail because the aggregate turnover is unaffordable. If turnover is the binding constraint, then the correct object to maximise is not expected return but expected return per unit of trading cost, subject to a budget \u2014 a straightforward knapsack. Ranking by E/C rather than by E means a modest edge in a liquid, tight-spread name beats a large edge in an illiquid one, which is exactly the reordering the cost literature says you should make.",
+  "novelty": "Nothing in the 32 has any concept of a shared, exhaustible resource across signals; each fires independently. This makes signals compete, so the book self-limits and the composition of what actually gets traded shifts toward liquidity as the budget tightens. Sweeping b traces out the net-of-cost efficient frontier of the entire 578-signal book in one experiment.",
+  "source": "Synthesis. Grounded in Novy-Marx & Velikov (RFS 2016) turnover taxonomy and cost-mitigation results, and in the cost-penalised model-comparison objective of Detzel, A., Novy-Marx, R. & Velikov, M. (2023), 'Model Comparison with Transaction Costs', Journal of Finance \u2014 which argues that models must be ranked on net-of-cost rather than gross efficient frontiers.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Benjamini-Yekutieli False Discovery Allocator",
+  "category": "multiple-testing control / portfolio construction",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Every quarter, for each of the M candidate rules compute a one-sided p-value p_k for the null of zero mean bar return, using the stationary bootstrap null (p_k = fraction of bootstrap means at or above the observed mean) or, as a cheaper proxy, p_k = 1 - Phi(t_k) with t_k the Newey-West t of the rule's bar returns. Sort ascending: p_(1) <= p_(2) <= ... <= p_(M). Compute c(M) = sum_{j=1..M} 1/j (the Benjamini-Yekutieli constant, which makes the procedure valid under ARBITRARY dependence - use c(M)=1 for plain Benjamini-Hochberg only if you are willing to assume positive dependence). Find the largest index i such that p_(i) <= (i / (M * c(M))) * q, with target false discovery rate q = 0.10. Rules ranked 1..i are DISCOVERIES; every other rule is silent. Each discovery is allocated 1/i of the risk budget and takes its own entry signals at that weight. If no i satisfies the inequality, the book is flat for the quarter.",
+  "exit_rule": "Each discovery exits on its own signal. At the next quarterly recompute, any rule that falls out of the discovery set is flattened at the next open and its capital redistributed equally; newly discovered rules are added at the next open. Track the realised out-of-sample hit rate of the discovery set: if fewer than (1-q) of the discoveries are profitable over two consecutive quarters, tighten q to 0.05 rather than adding more rules.",
+  "inputs": [
+   "per-bar returns of every candidate rule",
+   "Newey-West HAC t-statistics or bootstrap p-values",
+   "sorted p-value vector"
+  ],
+  "why": "Family-wise error control (Bonferroni, Holm, Reality Check, Romano-Wolf) asks 'what is the chance I make even one false discovery?'. With 578 candidates that is a brutal standard and it will throw away every real but modest edge. FDR asks the question an allocator actually cares about: 'what fraction of the rules I am funding are junk?' Setting q=0.10 means you consciously accept that about one in ten funded rules is noise, which is a rational trade when the funded rules are diversified across 1/i weights and the cost of a false positive is a small drawdown rather than a blown fund. The Yekutieli c(M) correction is essential here because the 578 rules are heavily dependent - many are re-parameterisations of the same idea - and plain BH is only valid under positive dependence.",
+  "novelty": "Controls a different error rate from every other gate here (FDR, not FWER), which yields a materially larger and different funded set. The allocation is an explicit function of the discovery count i, so the book automatically concentrates when evidence is thin and diversifies when it is broad.",
+  "source": "Benjamini, Y. & Hochberg, Y. (1995), 'Controlling the False Discovery Rate', JRSS-B 57(1), 289-300; Benjamini, Y. & Yekutieli, D. (2001), 'The Control of the False Discovery Rate in Multiple Testing under Dependency', Annals of Statistics 29(4), 1165-1188. Applied to trading and factor discovery in Harvey, C., Liu, Y. & Zhu, H. (2016), '...and the Cross-Section of Expected Returns', Review of Financial Studies 29(1), 5-68 (their BHY-implied t-hurdle is 3.39 at FDR 1% as of 2012, versus 3.78 for Holm/FWER 5%): https://people.duke.edu/~charvey/Research/Published_Papers/P118_and_the_cross.PDF",
+  "ohlcv_only": true,
+  "params": [
+   "q (0.05 / 0.10 / 0.20)",
+   "c(M)=1 (BH) vs sum 1/j (BY)",
+   "p-value source (bootstrap vs HAC-normal)",
+   "recompute cadence",
+   "weighting across discoveries"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Overnight-Only Holding (Close-to-Open Capture)",
+  "category": "session structure / holding-period edge",
+  "side": "long",
+  "timeframe": "daily with session-boundary execution",
+  "entry_rule": "Long. At 15:55 ET compute today's IBS = (close - low)/(high - low) using the session's running high, low and current price. Buy market-on-close if IBS < 0.40 AND close > SMA(close,200). Position is opened in the final minutes of the regular session only.",
+  "exit_rule": "Sell market-on-open at the next regular session open, unconditionally and with no exceptions. The holding period is exactly one overnight gap. No stop is used \u2014 the position is not manageable while held, so risk is controlled by size and by never holding through a second session.",
+  "inputs": [
+   "daily OHLCV",
+   "intraday price at 15:55 ET",
+   "sma(close,200)",
+   "session-time (market close / market open)"
+  ],
+  "why": "US equity returns decompose into a close-to-open component that carries nearly all of the long-run drift and an open-to-close component that contributes close to zero. Restricting exposure to the overnight window keeps the drift and discards the intraday drag, while cutting time-in-market by roughly three quarters. The weak-close gate selects nights that follow forced end-of-day liquidation, where the overnight rebound is largest.",
+  "source": "Overnight-edge strategies are a standing published category at quantifiedstrategies.com \u2014 their index states the construction directly: 'buying at the close of the stock exchange until the open the next day'. Oddmund Groette publishes several such backtests free and covers them on YouTube. The underlying close-to-open versus open-to-close return decomposition is one of the most widely replicated results in equity microstructure. CAVEAT: their specific equity curves are behind a bot wall and unverified here; also, this strategy is uniquely sensitive to realistic modelling of MOC/MOO fills and gap slippage \u2014 backtest it with explicit auction-price assumptions or the result will be fiction.",
+  "novelty": "The exit is a SESSION BOUNDARY, not a price, a level, an indicator or a bar count. Holding-period structure is itself the edge, and it is a clean control: run any existing entry signal with an overnight-only hold and compare against the same signal held through the day.",
+  "ohlcv_only": true,
+  "params": [
+   "IBS gate 0.30 / 0.40 / 0.50 / none",
+   "trend gate SMA 200 / none",
+   "entry time 15:45 / 15:55 ET",
+   "also require down day yes/no",
+   "skip nights before known holidays yes/no"
+  ],
+  "_agent": "v2:5dc784de464dcafe06d80db0ae9fd6871328474257ca0af67140af46718388e3"
+ }
+]

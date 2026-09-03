@@ -1,0 +1,228 @@
+[
+ {
+  "name": "Volatility Contraction Pattern (pinned down)",
+  "category": "volatility",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV",
+   "ATR(14)",
+   "50-session average volume"
+  ],
+  "params": [
+   "scan window 60",
+   "fractal half-width 2",
+   "contraction ratio D3<=0.5*D1",
+   "D1 cap 0.35",
+   "D3 floor 0.03",
+   "volume dry-up 0.65",
+   "breakout volume 1.5x",
+   "pivot lookback 5",
+   "order validity 10 sessions"
+  ],
+  "entry_rule": "Daily bars, long only. Define a swing high at bar i if H_i is the highest high of bars i-2 through i+2 (a 5-bar fractal, confirmed two bars later); a swing low symmetrically on lows. A CONTRACTION is a confirmed swing high at bar a followed by the next confirmed swing low at bar b > a, with depth D = (H_a - L_b) / H_a. Scan the last 60 sessions for the three most recent completed contractions, oldest first: D1, D2, D3 with swing highs H_a1, H_a2, H_a3 and swing lows L_b1, L_b2, L_b3. SETUP requires ALL of: (a) D1 > D2 > D3; (b) D3 <= 0.5 * D1; (c) D1 <= 0.35; (d) D3 >= 0.03; (e) H_a1 <= 1.02*H_a2 and H_a2 <= 1.02*H_a3 (the highs are not making lower highs); (f) mean volume over the bars of the third contraction (a3 through b3 inclusive) <= 0.65 * mean volume over the bars of the first contraction (a1 through b1 inclusive). When the setup is present let PIV = the highest high of the last 5 sessions. ENTER on a buy-stop at PIV + 0.05*ATR(14), good for 10 sessions, but only accept a fill on a bar whose volume >= 1.5 * the 50-session average volume; if the stop fills on a lower-volume bar, exit at that bar's close and cancel the setup.",
+  "exit_rule": "Initial stop at L_b3 (the swing low of the third and tightest contraction). Once price trades at or above PIV + 2*(PIV - L_b3), replace it with a trailing stop at the lowest low of the last 5 sessions, re-evaluated at each close and only ever raised. Cancel the setup entirely if any close falls below L_b3 before the buy-stop fills.",
+  "why": "A Bollinger/Keltner squeeze is a single-scale statement: volatility is low right now. A contraction sequence is a multi-scale statement about how supply is being absorbed - each successive pullback is shallower because progressively fewer holders are willing to sell at progressively higher prices, and the volume dry-up on the tightest leg confirms that the remaining supply has actually been exhausted rather than merely deferred. That distinction determines whether the eventual breakout has anything overhead to fight. A single-window volatility statistic is mathematically incapable of expressing the SEQUENCE, because it averages over exactly the interval where the information lives.",
+  "novelty": "A structural, multi-scale compression measured by the monotone decrease of successive pullback depths, with a volume-exhaustion confirmation. Not a band-width percentile, not an ATR percentile, not a squeeze indicator - it requires three ordered events with a specific ordering relation between them, which no single-window statistic can encode.",
+  "source": "Mark Minervini (2013), 'Trade Like a Stock Market Wizard: How to Achieve Superperformance in Stocks in Any Market', McGraw-Hill - the Volatility Contraction Pattern (VCP), described there in terms of successive contractions of decreasing depth with diminishing volume. Cited from knowledge (web search budget exhausted). Minervini states the pattern qualitatively; the 5-bar fractal pivot definition, the D3 <= 0.5*D1 ratio, the 0.65 volume dry-up threshold, the 1.5x breakout volume requirement, and all numeric bounds above are my pinning-down of it into something a programmer can implement without judgement calls.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "Low Volume Node Acceleration",
+  "category": "volume-profile",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "ATRd = ATR(14) daily; row width w = 0.05*ATRd. Build a COMPOSITE volume-at-price profile over the last 20 completed RTH sessions from 1-minute bars (volume/(rows spanned) into each row between low and high), then smooth the row-volume vector with a centred 3-row moving average. Let P80 = the 80th percentile of the smoothed row volumes over occupied rows. A row r is a LOW VOLUME NODE if: vol(r) is a local minimum over r-2..r+2; there exists a row within 15 rows ABOVE r with vol >= P80 (call the largest such peak_up) and a row within 15 rows BELOW r with vol >= P80 (peak_down); and vol(r) <= 0.35*min(peak_up, peak_down). Discard any LVN that has another LVN within 8 rows. Let ATR15 = ATR(14) on 15-minute bars and AV15 = SMA(volume,20) on 15-minute bars. LONG entry: a 15-minute RTH bar whose low < price(LVN) AND whose close > price(LVN) + 0.15*ATRd AND whose (high-low) >= 1.30*ATR15 AND whose volume >= 1.50*AV15. Buy at that close. SHORT entry is the mirror: a 15-minute bar whose high > price(LVN), close < price(LVN) - 0.15*ATRd, range >= 1.30*ATR15 and volume >= 1.50*AV15; sell at that close. Recompute the composite profile once per day before the open; do not update it intraday.",
+  "exit_rule": "Target = price(HVN_next), the nearest row beyond the LVN in the trade's direction whose smoothed volume >= P80 - the trade is explicitly a traverse from a thin area to the next thick area. Stop on the far side of the LVN: price(LVN) - 0.20*ATRd for longs, price(LVN) + 0.20*ATRd for shorts, because re-entering the vacuum means the acceleration failed. Time stop: exit at market 12 bars (three hours) after entry if neither level is hit. Do not re-enter on the same LVN for the rest of the session after a stop-out.",
+  "inputs": [
+   "1-minute ohlcv for 20 sessions",
+   "15-minute ohlcv",
+   "daily atr(14)",
+   "15-minute atr(14) and sma(volume,20)",
+   "composite multi-session volume-at-price profile",
+   "percentile of row volumes"
+  ],
+  "params": [
+   "row width (0.05*ATRd)",
+   "composite lookback (20 sessions)",
+   "row smoothing (3)",
+   "HVN percentile (80th)",
+   "LVN depth ratio (0.35)",
+   "peak search radius (15 rows)",
+   "LVN isolation (8 rows)",
+   "breakout offset (0.15*ATRd)",
+   "expansion multiples (1.30*ATR15, 1.50*AV15)"
+  ],
+  "why": "A low volume node in a multi-session composite is a price band that the market has repeatedly refused to do business in. Because almost no inventory was accumulated there, there is nobody with a position to defend and nobody waiting to get out at breakeven - the usual sources of friction are absent. The auction-theory prediction is therefore asymmetric: price either rejects the node immediately or travels through it quickly to the next high-volume node, where the accumulated inventory does provide friction. Requiring range expansion and above-average volume on the traversing bar separates genuine acceleration from a drift that will stall inside the vacuum.",
+  "novelty": "Trades from one structural feature of a multi-session volume distribution to the next, with the target defined by the profile rather than by an ATR multiple or a swing level. Existing ideas use the POC (a single mode), the value area, and naked POCs; none identifies thin zones, and the composite 20-session construction is a different object from any per-session profile in the set.",
+  "source": "High volume node / low volume node structure and the 'price moves fast through thin areas, slowly through thick areas' principle are standard volume-profile practitioner material - Dalton et al., 'Mind Over Markets', and Trader Dale's volume-profile writing; confirmed as implemented instrumentation in the TradingView 'MarketMaulers Volume Profile' script description (VPOC, 70% value area, HVN and LVN identification) and in Sierra Chart's Volume by Price studies. The composite construction, the LVN depth and isolation tests, and the acceleration filter are my quantification (synthesis).",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Dunnigan thrust after a held retest",
+  "category": "event-driven trend, older literature",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "open",
+   "high",
+   "low",
+   "close",
+   "ATR(20)"
+  ],
+  "entry_rule": "Define an UP-THRUST on bar v as: High_v > High_{v-1} AND Close_v > Close_{v-1}. Define a DOWN-THRUST as: Low_v < Low_{v-1} AND Close_v < Close_{v-1}. LONG SEQUENCE: (1) Bar b makes a 20-bar low: Low_b = min(Low[b-19 .. b]). Record L0 = Low_b and A = ATR(20)_b. (2) Within bars b+1 .. b+15, find the first bar u that satisfies EITHER (2a) the TEST - Low_u >= L0 AND Low_u <= L0 + 0.25*A, after at least one intervening bar whose Low was above L0 + 0.5*A (so the market left the low and came back to it); OR (2b) the CLOSING PRICE REVERSAL - Low_u < L0 AND Close_u > Close_{u-1} AND Close_u > (High_u + Low_u)/2. (3) ENTER LONG at the close of the first bar v > u that is an UP-THRUST. If no up-thrust occurs within 5 bars of u, cancel the setup and wait for a new 20-bar low. REPEAT SIGNAL (pyramiding): if a further up-thrust occurs within 5 bars of v while the position is open and the position is profitable, add one more unit, to a maximum of 2 units. SHORT is the exact mirror around a 20-bar high.",
+  "exit_rule": "Initial stop at min(L0, Low_u) - 0.05. Once the position is up 1.5 * A, move the stop to breakeven. Trailing exit: close the whole position at the close of the first bar that is a DOWN-THRUST whose Close is also below the Low of the highest-closing bar recorded since entry. Hard time stop: exit at the close of bar v+30 if neither the trail nor the stop has fired.",
+  "params": [
+   "swing lookback (default 20 bars)",
+   "test tolerance as a fraction of ATR (default 0.25)",
+   "required departure before the retest (default 0.5 ATR)",
+   "test window (default 15 bars)",
+   "thrust window after the test (default 5 bars)",
+   "maximum units (default 2)",
+   "breakeven trigger",
+   "time stop"
+  ],
+  "why": "Dunnigan's insight, from the era before indicators existed, is that a valid turn has a specific bar grammar: the market must revisit its low and fail to make a new one (or make one and close strongly off it), and then it must show a bar that both extends higher and settles higher. Requiring BOTH a higher high and a higher close rejects the two common failure modes separately - an upside probe that closes weak, and a quiet inside bar that closes up. Counting repeat thrusts as an add signal makes position size a function of how many times the market has demonstrated that grammar, not of a fixed pyramid distance.",
+  "novelty": "Entry is a matched sequence of named bar relationships with a state machine, not an indicator level or a channel break, and the position scales by counting confirmations rather than by price distance. The retest-that-holds requirement means the system buys strength AFTER weakness was tested, which is structurally different from the breakout entries already in the book.",
+  "source": "William Dunnigan, 'One-Way Formula for Trading in Stocks and Commodities' (1954), and his earlier Thrust Method; the clearest modern restatement of the thrust definition (higher high plus higher close), the 'test of the low', the closing price reversal and the repeat-signal rule is in Perry J. Kaufman, 'Trading Systems and Methods', in the chapter on event-driven trends. Dunnigan's original tolerances were stated in points for 1950s commodity contracts, so I pinned all of them to ATR fractions and bar counts to make the rule symbol-agnostic and testable.",
+  "_agent": "v2:28e034d84f2a9fadfe2cd37476ed1f0fe31299b3ab96ab30d97df90c3ec92854"
+ },
+ {
+  "name": "Diurnal Volume-Pace Day Typing",
+  "category": "intraday U-shape / regime classification",
+  "timeframe": "intraday (5-minute)",
+  "side": "both",
+  "entry_rule": "Build the intraday volume-completion curve: for each 5-minute slot s from 09:30 to 15:55, compute F_s = the median over the previous 20 sessions of (cumulative regular-hours volume through slot s divided by that session's total regular-hours volume). This is the empirical U-shape and it is symbol-specific. Let V20 = the 20-session median of total regular-hours volume. At 12:00 ET compute the pace ratio p = (today's cumulative volume through 12:00) / (F_1200 x V20). Then, for every 5-minute bar from 12:00 to 15:30: if p >= 1.5, take TREND entries only - buy at the next bar's open when a bar closes above the highest high of the session so far, short at the next bar's open when a bar closes below the lowest low of the session so far. If p <= 0.70, take FADE entries only - short at the next bar's open when a bar closes above the session high so far, buy when a bar closes below the session low so far. If 0.70 < p < 1.5, no trades that afternoon. One position at a time; a reverse signal flips the position.",
+  "exit_rule": "All positions are liquidated at the 15:55 bar close, flat overnight. Optional protective stop at 1.5x the 20-session median 5-minute bar range for the current slot (a time-of-day-scaled stop rather than a fixed one). No profit target - the exit is the clock.",
+  "inputs": [
+   "5-minute bars (open, high, low, close, volume)",
+   "20-session slot-by-slot cumulative-volume-fraction curve F_s",
+   "20-session median total session volume",
+   "20-session median 5-minute range by slot",
+   "session high and low so far"
+  ],
+  "params": [
+   "pace measurement time (11:00 / 12:00 / 13:00)",
+   "hot threshold (1.3 / 1.5 / 2.0)",
+   "cold threshold (0.60 / 0.70 / 0.80)",
+   "curve lookback (10 / 20 / 40 sessions)",
+   "stop multiple",
+   "trading cutoff time"
+  ],
+  "why": "Intraday volume follows a very stable U-shape, so by midday you can estimate how the day's total participation compares with normal, and that estimate says which kind of day you are in. A day running 50% hot by noon is a day with real information flow and a large participant working an order, and breakouts on such days tend to extend. A day running 30% light is one where nobody is there, the book is thin, and any push through the session extreme is a small order walking a shallow book rather than genuine demand - so it snaps back. Same breakout trigger, opposite sign, chosen by the shape of the day's participation.",
+  "novelty": "The existing diurnal ideas use a slot-local measure: relative volume in one bar, or the median range of one slot. This uses the CUMULATIVE completion curve - the U-shape as an integral rather than a point - to classify the whole day, and then flips the SIGN of an otherwise ordinary session-extreme breakout. Nothing in the set flips the direction of a breakout rule based on participation. It also differs from the excluded opening-range breakout in that there is no fixed range window: the reference is the running session extreme, and the afternoon-only restriction plus the sign switch are the substance.",
+  "ohlcv_only": true,
+  "source": "Synthesis. Grounded in the intraday periodicity literature - Jain & Joh, 'The Dependence between Hourly Prices and Trading Volume', Journal of Financial and Quantitative Analysis 23(3), 1988 (the volume U-shape), and Andersen & Bollerslev, 'Intraday Periodicity and Volatility Persistence in Financial Markets', Journal of Empirical Finance 4(2-3), 1997 (the deterministic intraday volatility pattern and the case for deseasonalising by time of day before doing anything else). Cited from the literature, not re-fetched this session. The pace-ratio day-typing rule and the sign flip are mine.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "VPIN Toxicity Exhaustion Fade",
+  "category": "order-flow reversal",
+  "side": "both",
+  "timeframe": "intraday 1-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute close",
+   "1-minute volume",
+   "atr(14) daily",
+   "session clock"
+  ],
+  "params": [
+   "buckets per day 50 (try 25, 50, 100)",
+   "sample length n = 50 buckets",
+   "CDF threshold 0.90 (try 0.85, 0.95)",
+   "persistence 3 buckets (try 1, 3, 5)",
+   "episode move floor 1.5 x ATR (try 1.0, 2.0)",
+   "retracement target 50% (try 38%, 62%)"
+  ],
+  "entry_rule": "On 1-minute bars, set bucket size V = (mean daily volume over the trailing 20 sessions) / 50 and fill buckets sequentially with 1-minute bar volume, splitting a bar's volume across a bucket boundary. Bulk Volume Classification: for each 1-minute bar j, dP_j = close_j - close_{j-1} and sigma = stdev of dP over the trailing 250 one-minute bars; buy volume of bar j = volume_j * Z(dP_j / sigma) where Z is the standard normal CDF, sell volume = volume_j - buy volume. Sum within each bucket to get V_buy_tau and V_sell_tau. Then VPIN_tau = SUM over the last n = 50 buckets of |V_sell_tau - V_buy_tau| / (n * V). Define CDF(VPIN) as the percentile rank of the current VPIN within its own trailing 250-bucket history. ENTRY: when CDF(VPIN) has been >= 0.90 for at least 3 consecutive buckets and then crosses back DOWN through 0.90, measure MOVE = close of the current bar minus close of the bar at which CDF first crossed above 0.90, and FADE it - enter SHORT if MOVE > 0, LONG if MOVE < 0. Require |MOVE| >= 1.5 * ATR(14 daily) / close and current time between 10:00 and 15:30 ET.",
+  "exit_rule": "Take profit at a 50% retracement of MOVE back toward the episode's starting price. Stop at 1.0 * |MOVE| beyond the episode extreme. Hard exit at 15:55 ET the same session regardless. Cancel and stand aside if CDF(VPIN) re-crosses above 0.90 while the position is open - the toxic episode was not actually over.",
+  "why": "Easley, Lopez de Prado and O'Hara define order flow as toxic when it adversely selects the liquidity provider, and VPIN measures it as persistent volume imbalance in VOLUME time rather than clock time. Their central result is that high VPIN presages toxicity-induced volatility - it is a warning that supplying liquidity right now is unprofitable. The tradeable inference is the complement: once CDF(VPIN) falls back below its 0.90 threshold the informed flow has finished executing, the remaining price displacement is inventory-driven rather than information-driven, and the market maker's job becomes profitable again. Fading at the onset of toxicity is exactly what loses money; fading its decay is the liquidity-provision trade.",
+  "novelty": "The trigger is an order-flow statistic computed in volume time from bars alone, and the entry fires on the DECAY of the statistic rather than on any price threshold. No rule on the existing list uses volume-clock sampling, signed volume, or a condition that requires a prior state to have persisted and then ended. It is also distinct from a realized-semivariance sort, which is a monthly cross-sectional rank of squared returns rather than an intraday imbalance event.",
+  "source": "David Easley, Marcos Lopez de Prado, Maureen O'Hara, 'Flow Toxicity and Liquidity in a High Frequency World', Review of Financial Studies 25 (2012) 1457-1493. Full PDF opened this session - equation (9) for VPIN, the V = 1/50 of average daily volume and n = 50 baseline, the rolling-drop bucket update, the bulk volume classification of 1-minute time bars, and the CDF(VPIN) crossing 0.9 threshold used in their flash-crash analysis are all taken from the paper text. Parameter robustness confirmed in Song, Wu and Simon, 'Parameter Analysis of the VPIN Metric', Lawrence Berkeley National Laboratory (2014), also opened this session.",
+  "_agent": "v2:a5ae7559b8afe46008ea144e180e06b435128d76433946942f24be45b53033b9"
+ },
+ {
+  "name": "Sequential Probability Ratio Kill Switch",
+  "category": "live out-of-sample inference / exit structure",
+  "side": "both",
+  "timeframe": "any (updated per closed trade)",
+  "entry_rule": "When a rule is armed by any of the gates above, freeze from its validation sample the per-trade expected log return mu_b and per-trade log-return standard deviation sigma_b. Set L = 0 at arming. After each closed trade i with realised log return x_i, update the cumulative log-likelihood ratio for H1 (edge equals the backtested edge) against H0 (zero edge, same volatility): L <- L + (mu_b * x_i)/sigma_b^2 - mu_b^2/(2*sigma_b^2). Set Wald boundaries A = ln((1-beta)/alpha) and B = ln(beta/(1-alpha)) with alpha = 0.05 (probability of wrongly killing a genuinely good rule) and beta = 0.20 (probability of wrongly keeping a dead one); with these values A = 2.773 and B = -2.944. The rule KEEPS taking its own entry signals while B < L < A. When L >= A the rule is CONFIRMED: size up by a factor of 1.5 (capped at the book limit) and reset L = 0 to begin a fresh test cycle.",
+  "exit_rule": "Open positions exit on the rule's own signal. The rule is KILLED - flatten at the next bar's open and take no further entries - the first time L <= B. A killed rule cannot be revived by subsequent live P&L; it must be re-armed by a fresh CPCV or CSCV validation on data that includes the live period. A hard secondary floor also applies: kill immediately if the live cumulative return since arming falls below the 1st percentile of 10,000 stationary-bootstrap resamples of the validation equity curve evaluated at the SAME trade count, which catches the case where the rule fails by drawdown shape rather than by mean.",
+  "inputs": [
+   "per-trade realised log returns, live",
+   "mu_b and sigma_b from the validation sample",
+   "bootstrapped validation equity-path quantiles",
+   "running log-likelihood ratio"
+  ],
+  "why": "Fixed-horizon rules like 'review after 100 trades' waste evidence: a rule that is obviously broken after 12 trades keeps bleeding for another 88, and a rule that is obviously working gets no credit until the arbitrary bell rings. The SPRT is the optimal solution to exactly this problem - among all tests with the same error rates it minimises the expected number of observations needed to reach a decision - so it kills bad rules faster and confirms good ones sooner than any fixed-n alternative. It also disciplines the decision in advance: alpha and beta are chosen once, so the shutdown is not a judgement call made in the middle of a drawdown. Crucially, live trades are the only data in this entire programme that is genuinely, un-recyclably out-of-sample, so the test that consumes them should be the most efficient one available.",
+  "novelty": "A sequential, evidence-accumulating exit at the STRATEGY level rather than the position level, with an explicit and pre-committed error-rate budget. Every other exit in the corpus is a price or time condition on a single trade.",
+  "source": "Wald, A. (1945), 'Sequential Tests of Statistical Hypotheses', Annals of Mathematical Statistics 16(2), 117-186, and Wald (1947), 'Sequential Analysis'; the boundaries A = ln((1-beta)/alpha), B = ln(beta/(1-alpha)) are Wald's approximations. The application to deciding when to stop trading a discovered strategy follows the framing in Harvey, C. & Liu, Y. (2014), 'Evaluating Trading Strategies', JPM 40(5), 108-118. The specific per-trade Gaussian likelihood-ratio construction and the bootstrap equity-path floor are my synthesis.",
+  "ohlcv_only": true,
+  "params": [
+   "alpha (0.01 / 0.05 / 0.10)",
+   "beta (0.10 / 0.20 / 0.30)",
+   "mu_b haircut factor (test against mu_b, or against the more honest 0.5*mu_b)",
+   "confirm size-up multiple",
+   "equity-path floor percentile"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Expiration-Week Strike Pin and Monday Release",
+  "category": "calendar mean reversion",
+  "side": "both",
+  "timeframe": "daily bars with 15:45 ET intraday entry",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close",
+   "daily high/low",
+   "atr(14)",
+   "dollar volume",
+   "exchange calendar (third Friday)"
+  ],
+  "params": [
+   "pin band 0.4 x ATR (try 0.2, 0.4, 0.8)",
+   "reachability cap 1.5 x ATR (try 1.0, 2.0)",
+   "entry days Wed+Thu (try Thu only, Tue-Thu)",
+   "release proximity 0.25% (try 0.1%, 0.5%)",
+   "names per side 10"
+  ],
+  "entry_rule": "Strike grid: for a stock priced P the listed strike increment is $1.00 if P < $25, $2.50 if $25 <= P < $200, $5.00 if P >= $200. Nearest strike K = round(P / increment) * increment. Pin distance PD = (P - K) / P. Restrict to the Monday-Friday week containing the third Friday of the month, and to names with 20-session median dollar volume > $50M and close > $15 (a proxy for carrying liquid listed options). PIN LEG: at 15:45 ET on the Wednesday and the Thursday of expiration week, using P = the 15:45 price, enter SHORT if PD >= +0.4 * (ATR(14)/close) and LONG if PD <= -0.4 * (ATR(14)/close), and require |PD| <= 1.5 * (ATR(14)/close) so the strike is realistically reachable by Friday. Cap at 10 names per side, ranked by |PD|. RELEASE LEG: at the open on the Monday following expiration, for every name whose expiration-Friday close was within 0.25% of a strike, enter in the direction of the trailing 5-session drift measured up to the Wednesday BEFORE expiration (long if that drift was positive, short if negative).",
+  "exit_rule": "Pin leg: close market-on-close on expiration Friday, unconditionally. Release leg: close market-on-close on that following Monday, unconditionally. No position from this rule is ever carried into a second session. Abort a pin entry intraday if price moves more than 2.0 * ATR(14) further away from K.",
+  "why": "Ni, Pearson and Poteshman document that on expiration dates the closing prices of optionable stocks cluster at strike prices, and that on each expiration date the returns of optionable stocks are altered by an average of at least 16.5 basis points, worth roughly $9bn of market-cap displacement. Two mechanisms produce it: delta-hedge rebalancing of net purchased option positions, which mechanically pushes the stock toward the strike as gamma explodes near expiry (the Avellaneda-Lipkin pinning model), and deliberate price manipulation by traders short options who want them to expire at or just out of the money. Both are hedging constraints, not information, so both must release once the options expire - Klemkosky's early study finds roughly +0.4% in the week following expiration after about -1% in the week leading in.",
+  "novelty": "The attractor is a fixed price grid derived from the option strike ladder and the exchange calendar, not a moving average, band, VWAP or statistical mean - and crucially the attractor does not move when the price moves. It also has a defined expiry: the same rule flips from mean-reverting to trend-resuming at a known timestamp. No options data is required; the strike grid and the third-Friday calendar reconstruct it from price level alone.",
+  "source": "Sophie Xiaoyan Ni, Neil D. Pearson, Allen M. Poteshman, 'Stock Price Clustering on Option Expiration Dates', University of Illinois working paper 27 Aug 2004, published Journal of Financial Economics 78 (2005) 49-87. Full PDF opened this session - the 16.5bp / $9bn figures, the $5.00 and $2.50 strike grid, the third-Friday convention, the delta-hedging and manipulation mechanisms, and the citation to Klemkosky's -1% before / +0.4% after result are all taken from its text. Pinning model: Marco Avellaneda and Michael Lipkin, 'A market-induced mechanism for stock pinning', Quantitative Finance 3 (2003) 417-425.",
+  "_agent": "v2:a5ae7559b8afe46008ea144e180e06b435128d76433946942f24be45b53033b9"
+ },
+ {
+  "name": "VNET Depth Surprise",
+  "category": "microstructure / market depth from price durations",
+  "side": "both",
+  "timeframe": "5-minute",
+  "entry_rule": "Define a price event on 5-minute bars. Set P_ref to the first close of the session. Scan forward; the event completes at the first bar t where |ln(C_t / P_ref)| >= h with h = 0.5 * ATR(14, daily) / C_t. Over the bars of that span accumulate the tick-rule signed volume SV = sum over k in the span of sign(C_k - C_{k-1}) * V_k (carry the previous sign forward when C_k = C_{k-1}). VNET = |SV| - the net directional volume required to move price by h. Record also D = the number of bars in the span and Vbar = the mean bar volume over the span. Over the last 200 completed events fit OLS: ln(VNET) = a0 + a1*ln(D) + a2*ln(Vbar) + a3*(hour-of-day bucket dummies, 6 buckets from 09:30 to 16:00 ET). Let e = the current event's residual and z_e = e / stdev(residuals, 200). ENTRY at the open of the bar after the event completes: if z_e <= -1.5 (far LESS net volume than usual was needed to move price by h - the book was hollow), enter AGAINST the event's direction; if z_e >= +1.5 (far MORE volume was absorbed for the same h - the book was deep and demand persisted anyway), enter WITH the event's direction. No trade when |z_e| < 1.5. Reset P_ref to C_t and continue scanning.",
+  "exit_rule": "Exit when price has moved h in either direction from the entry price (symmetric target and stop at one event-threshold), or at the close of the 20th bar after entry, whichever comes first.",
+  "inputs": [
+   "5-minute OHLCV",
+   "ATR(14, daily)",
+   "tick-rule sign",
+   "time of day",
+   "200-event rolling regression"
+  ],
+  "params": [
+   "event threshold h in daily ATR (0.5)",
+   "regression window (200 events)",
+   "z threshold (1.5)",
+   "max hold (20 bars)",
+   "number of time-of-day buckets"
+  ],
+  "why": "Engle and Lange invert the usual question. Instead of asking how far price moves for a given quantity (Kyle's lambda), they fix the price move and ask how much net volume it consumed. That is the quantity a liquidity provider actually cares about, and it separates two very different events that produce identical returns: a move on thin flow (nobody was there, the print is not consensus) and a move that chewed through unusual size (real, persistent demand). Conditioning on duration, average volume and time of day strips out the mechanical determinants so the residual isolates the depth surprise. The fade branch is the liquidity-provision trade; the follow branch is the informed-flow trade.",
+  "source": "Robert F. Engle and Joe Lange, 'Predicting VNET: A model of the dynamics of market depth', Journal of Financial Markets 4(2), 113-142, 2001 (https://ideas.repec.org/a/eee/finmar/v4y2001i2p113-142.html). Bar-level construction of the price-duration and the residual entry rule are my synthesis.",
+  "novelty": "Every impact idea in the existing set fixes the time interval (a bar) and measures price per unit volume. This fixes the PRICE MOVE and measures volume per unit move, sampling in a price clock rather than a clock or volume clock. The existing volume-clock idea samples in a volume clock and measures duration; this is its dual and gives a genuinely different event set.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ }
+]

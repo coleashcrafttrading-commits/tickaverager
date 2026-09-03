@@ -1,0 +1,214 @@
+[
+ {
+  "name": "Alpha Half-Life Surface",
+  "category": "signal decay measurement",
+  "timeframe": "any (run separately per timeframe - the half-life is expected to differ)",
+  "side": "both",
+  "entry_rule": "When signal S fires at bar t, deliberately do NOT enter at t. Enter at the close of bar t+L, sweeping the entry lag L in {0,1,2,3,5,8,13,21}, provided the signal has not been invalidated by an opposite-direction fire in between (if it has, drop that observation and log it). Run this for each of the 32 signals independently. Reference S for the first pass = the 20-bar Donchian upside breakout, close_t > max(high over t-20..t-1).",
+  "exit_rule": "Two passes. Clean pass: hold exactly H bars and exit at the close of bar t+L+H with no stop and no target, sweeping H in {1,2,3,5,8,13,21,34}; this measures the raw conditional expectation without the path-dependence a stop introduces. Dirty pass: identical, plus a hard stop at entry - 2*ATR(14). The deliverable is an L-by-H matrix of mean return, standard error and t-statistic per signal. From it define the signal's half-life tau as the smallest L at which the mean return of the best H column has fallen to half its L=0 value. That tau then feeds the sizing and tranching in the other ideas here, so this is the measurement instrument the rest of the programme depends on.",
+  "inputs": [
+   "donchian(20)",
+   "atr(14)",
+   "bar close",
+   "all 32 signals"
+  ],
+  "why": "Every strategy silently assumes an answer to 'how long is this signal good for' and almost none measures it. Mapping the joint lag-by-horizon surface turns that assumption into an estimate, and the shape of the surface is itself diagnostic. A signal whose entire edge sits at L=0, H=1 is not a strategy, it is a latency race we will lose. A signal whose edge is flat in L out to 8 bars is one where entry timing genuinely does not matter and we should stop paying for urgency. A signal whose edge PEAKS at L=2 or L=3 is telling us something specific - the immediate post-signal bars are crowded with other systems reacting to the same pattern, and the durable move begins after they are done. Moskowitz, Ooi and Pedersen make the case for decoupling lookback from holding horizon, and Garleanu and Pedersen show why the decay rate is the economically relevant quantity: in their optimal policy, predictors with slower mean reversion, that is slower alpha decay, get more weight.",
+  "novelty": "It is a measurement programme promoted to a strategy: the tradeable output is the instruction to trade each signal only in its best (L,H) cell, which for some of the 32 will mean entering several bars late on purpose. Nothing in the existing set delays entry deliberately, and the surface is the object being estimated rather than a by-product.",
+  "source": "Moskowitz, Ooi & Pedersen (2012), Journal of Financial Economics 104:228-250, read directly - for the lookback/holding decoupling argument. Garleanu & Pedersen, 'Dynamic Trading with Predictable Returns and Transaction Costs', NBER Working Paper 15205, August 2009 (later Journal of Finance), abstract read directly from the NBER PDF - for alpha decay as the quantity that determines a predictor's weight.",
+  "params": [
+   "L, entry lag in bars",
+   "H, holding bars",
+   "which signal",
+   "stop multiple in the dirty pass"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Prior-Peak Reclaim With Volume Ramp",
+  "category": "chart-pattern",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "volume",
+   "highest close 60",
+   "sma(close,60)",
+   "sma(close,120)",
+   "sma(volume,5)",
+   "sma(volume,20)"
+  ],
+  "params": [
+   "peak window offset (30) and width (25)",
+   "pullback window (30)",
+   "required pullback depth (5%)",
+   "peak comparability band (10%)",
+   "new-high tolerance (2%)",
+   "trend MA lengths (60,120)",
+   "volume MA lengths (5,20)"
+  ],
+  "entry_rule": "At bar t compute FirstTop = max(Close over the 25 bars ending 30 bars ago, i.e. bars t-54..t-30) and PullbackLow = min(Close over bars t-30..t-1). GO LONG when ALL SEVEN hold: (1) Close[t] >= 0.98 * highest Close of the last 60 bars; (2) PullbackLow < 0.95 * FirstTop (a pullback of at least 5% actually occurred); (3) FirstTop >= 0.90 * Close[t] (the old peak is within 10% of today \u2014 the two peaks are comparable, not a random old spike); (4) Close[t] >= FirstTop (today reclaims the old peak); (5) Close[t] > SMA(Close,60); (6) Close[t] > SMA(Close,120); (7) SMA(Volume,5) > SMA(Volume,20).",
+  "exit_rule": "Exit on the first daily close below SMA(Close,60), or on a close below PullbackLow recorded at entry, whichever comes first.",
+  "why": "The old peak is where the last cohort of buyers became trapped. A measured pullback and then a reclaim of that exact level on rising short-term volume means the trapped supply has been absorbed rather than merely bypassed. Requiring the two peaks be within 10% of each other is what makes this a genuine double-structure and not an unrelated old high.",
+  "source": "whchien/ai-trader, file ai_trader/backtesting/strategies/strategies/indicators.py class DoubleTop \u2014 the seven numbered conditions (cond_1 through cond_7) in its next() method",
+  "novelty": "Donchian breakout only asks whether today exceeds an N-bar high. This requires a specific three-point geometry \u2014 an identified prior peak in a bounded historical window, a quantified trough between them, and a comparability test \u2014 plus a volume-MA ramp. Most Donchian breakouts fail all seven tests.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Ehlers Voss Predictive Filter Cross",
+  "category": "cycle-prediction",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "two-pole bandpass filter output",
+   "Voss predictor output"
+  ],
+  "params": [
+   "cycle period (20)",
+   "predict bars ahead (3)",
+   "bandwidth (0.25)",
+   "optional trend gate"
+  ],
+  "entry_rule": "Stage 1, two-pole bandpass on the close: F1 = cos(2*pi/Period); G1 = cos(Bandwidth*2*pi/Period); S1 = 1/G1 - sqrt(1/G1^2 - 1); Filt[n] = 0.5*(1-S1)*(Close[n] - Close[n-2]) + F1*(1+S1)*Filt[n-1] - S1*Filt[n-2], with Filt clamped to 0 for the first 6 bars. Stage 2, Voss predictor: Order = 3*Predict (=9 by default); SumC = sum over k=0..Order-1 of ((k+1)/Order) * Voss[n-(Order-k)]; Voss[n] = ((3+Order)/2)*Filt[n] - SumC. GO LONG when Voss crosses above Filt (Voss[n] > Filt[n] and Voss[n-1] <= Filt[n-1]). GO SHORT when Voss crosses below Filt.",
+  "exit_rule": "Exit and reverse on the opposite Voss/Filt cross. Add a hard stop at 2*ATR(14) since the filter has no built-in invalidation.",
+  "why": "The bandpass strips the trend and the noise and leaves only the component of price oscillating near the tuned period. The Voss stage applies a linearly ramped feedback over its own past outputs, which produces genuine negative group delay \u2014 it anticipates the bandpass's zero crossings by roughly Predict bars instead of overshooting the way zero-lag averages do. The cross of predictor against filter is therefore an early read on a cycle turn, degrading gracefully back toward the plain bandpass when no dominant cycle exists.",
+  "source": "StockSharp/AlgoTrading strategy API/1501-1600/1544_Voss_Predictor (entry on the predictive filter crossing the band-pass output); exact coefficients from mihakralj/QuanTAlib, lib/filters/voss/Voss.md, which documents the two-pole BPF recursion and the Order = 3*Predict weighted-feedback predictor from Ehlers' Aug 2019 TASC article 'A Peek Into the Future'",
+  "novelty": "An IIR filter whose output is a function of its OWN past outputs with a linear weight ramp, deliberately engineered for negative group delay. Nothing in the existing set anticipates \u2014 every listed indicator is causal-lagging by construction. Also has a real tunable (Bandwidth) that changes selectivity rather than just speed.",
+  "_agent": "v2:07b51aed86ac7d7f55e121c25d3af53b01d9354b6e33b5ea40238ce7fe677497"
+ },
+ {
+  "name": "Amihud illiquidity reversal",
+  "category": "liquidity",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Compute the bar-based Amihud illiquidity ratio ILLIQ_t = the rolling mean over the last 20 bars of [ |ln(close_t/close_{t-1})| / (close_t * volume_t) ]. Go long at the close when ILLIQ_t is above its 90th percentile over the trailing 252 bars AND close_t is more than 1.0*ATR(14) below the 20-bar simple moving average of close.",
+  "exit_rule": "Exit when ILLIQ_t falls back below its 252-bar median, OR when close crosses back above the 20-bar simple moving average, OR after 15 bars - whichever comes first.",
+  "inputs": [
+   "close",
+   "volume",
+   "dollar volume (close*volume)",
+   "ATR(14)",
+   "20-bar SMA",
+   "252-bar rolling percentiles"
+  ],
+  "params": [
+   "ILLIQ window (20)",
+   "entry percentile (90)",
+   "ATR distance (1.0)",
+   "max hold (15)"
+  ],
+  "why": "Amihud's ratio measures how much price movement each dollar of trading buys. When it is extreme, the observed decline was produced by very little actual money changing hands, so most of the move is a liquidity premium demanded by whoever had to take the other side rather than a revision of value. Liquidity premia are transient by construction - they are compensation for immediacy, and they are repaid once the forced seller is done. Requiring the price to also be extended below its own mean ensures you are being paid the premium rather than paying it.",
+  "novelty": "Volume enters as a DENOMINATOR normalising the return, not as a confirmation threshold. Low volume is the trigger here, the exact inverse of every volume-confirmed setup; and the exit is on the illiquidity measure normalising, not on a price target.",
+  "ohlcv_only": true,
+  "source": "Bar-based Amihud lambda, AFML pp.288-289, implemented as get_bar_based_amihud_lambda in mlfinlab/microstructural_features/second_generation.py - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB.",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "Turnover-Decayed Capital Gains Overhang",
+  "category": "disposition effect / prospect theory reference price",
+  "side": "both",
+  "timeframe": "daily signal built from weekly bars",
+  "entry_rule": "Aggregate OHLCV to weekly bars. Define a turnover proxy for week s: V_s = volume_s / (sum of volume over the trailing 52 weeks). Build the reference price over N=260 weeks: R_t = (1/k) * SUM over n=1..260 of [ V_{t-n} * PRODUCT over tau=1..n-1 of (1 - V_{t-n+tau}) ] * close_{t-n}, where k is the normalising constant equal to the sum of the bracketed weights so they total 1. Overhang g_t = (close_t - R_t) / close_t. LONG when g_t >= +0.10. SHORT when g_t <= -0.10. Evaluate weekly at the Friday close; enter on the next Monday open.",
+  "exit_rule": "Hold 21 trading sessions, or exit earlier when |g_t| falls below 0.02 (the reference price has caught up to the market price and the demand perturbation is spent). Hard stop at 3 * ATR(20) from entry.",
+  "inputs": [
+   "weekly close",
+   "weekly volume",
+   "atr(20) daily"
+  ],
+  "params": [
+   "reference-price horizon N (260 weeks)",
+   "turnover normalisation window (52 weeks)",
+   "entry thresholds on g (+/-0.10)",
+   "unwind threshold (0.02)",
+   "holding period (21 sessions)",
+   "ATR stop multiple"
+  ],
+  "why": "Grinblatt and Han show analytically and empirically that when a fixed fraction of investors exhibit the disposition effect, 'stocks with aggregate unrealized capital gains tend to outperform stocks with aggregate unrealized capital losses'. Holders sitting on gains supply the stock eagerly, capping the price below fundamental value; holders sitting on losses refuse to sell, so bad news is absorbed slowly. Prices are a weighted average of fundamental value and this reference price, and the predictable convergence IS the momentum. Their striking claim is that the gain variable subsumes past returns: 'in most of our regression specifications, there is no momentum effect once the disposition effect is controlled for with the gain regressor'.",
+  "source": "Mark Grinblatt and Bing Han, 'The Disposition Effect and Momentum', NBER Working Paper 8734 (published as 'Prospect theory, mental accounting, and momentum', Journal of Financial Economics 78, 2005) - VERIFIED via https://www.nber.org/papers/w8734 (abstract) and the full PDF. Equation (15): g_t = P_t - R_t. Equation (19) gives the recursive reference price R_t = w*nu_{t-1}*F_{t-1} + (1-w*nu_{t-1})*w*nu_{t-2}*F_{t-2} + ... , the turnover-decayed weighted average my formula implements. p.20: 'Our empirical work utilizes weekly returns, turnover (weekly trading volume divided by the number of outstanding shares)'. Foundational: Shefrin and Statman (1985); Odean (1998).",
+  "ohlcv_only": true,
+  "novelty": "The reference price is not a moving average and cannot be produced by any smoothing filter. The weight on each past price is the probability that a share bought in that week is still held - the product of survival terms (1 - V) makes recent heavy-volume weeks wipe out the weight on everything before them, so a single high-turnover week can reset the anchor entirely. Two stocks with identical price paths but different volume paths get completely different signals, which no price-only indicator in the existing 32 can distinguish. Grinblatt and Han use shares outstanding for turnover; we lack that field, so the volume-share proxy is the substitution and it preserves the ordering of the decay.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Realized Skewness Weekly Reversal",
+  "category": "realized higher moments",
+  "side": "both",
+  "timeframe": "5-minute bars aggregated to weekly",
+  "entry_rule": "At the close of the last session of each week, from that week's n intraday 5-minute log returns r_1..r_n compute RV = sum r_i^2 and RSkew = (sqrt(n) * sum r_i^3) / RV^(3/2). Maintain a rolling history of the last 104 weekly RSkew values for the symbol. ENTRY at the open of the first session of the following week: LONG when RSkew for the just-completed week is at or below the 20th percentile of those 104 values; SHORT when it is at or above the 80th percentile. Require n >= 60 valid 5-minute returns in the week (skip holiday-shortened weeks) and RV to be non-zero. No trade when RSkew falls between the 20th and 80th percentiles.",
+  "exit_rule": "Exit at the close of the last session of the holding week - a fixed one-week hold - with a hard stop at 2.0 * (weekly ATR(14) measured on weekly bars) against entry, and no re-entry until the next weekly signal.",
+  "inputs": [
+   "5-minute close",
+   "weekly aggregation",
+   "104-week rolling percentile of realized skewness",
+   "weekly ATR(14)"
+  ],
+  "params": [
+   "sampling frequency (5-min vs 15-min)",
+   "percentile window (104 weeks)",
+   "entry percentiles (20/80)",
+   "minimum returns per week (60)",
+   "stop multiple"
+  ],
+  "why": "Realized skewness computed from intraday returns is a measure of the asymmetry of the week's price path, and it is dominated by whether the week contained a few large same-signed moves against a background of small opposite ones. Amaya and co-authors find the relation to next-week returns is negative: a week with strongly positive realized skewness is followed by weak returns and vice versa. The microstructure reading is that a positively skewed week is one in which a handful of upward liquidity demands were paid for, i.e. the buyer paid the spread repeatedly, and that transitory pressure reverses. It is also consistent with investors overpaying for lottery-like payoffs, which realized skewness proxies at high frequency.",
+  "source": "Diego Amaya, Peter Christoffersen, Kris Jacobs, Aurelio Vasquez, 'Does realized skewness predict the cross-section of equity returns?', Journal of Financial Economics 118(1), 135-167, 2015 (https://ideas.repec.org/a/eee/jfinec/v118y2015i1p135-167.html) - the long-lowest-decile / short-highest-decile realized-skewness spread earned 19 bp the following week with t = 3.70. NOTE: their sort is cross-sectional; I have converted it to a per-symbol time-series percentile, which is a weaker but implementable form and should be tested as such.",
+  "novelty": "Third moment of intraday returns. Every existing volatility idea uses second moments (Parkinson, Garman-Klass, Rogers-Satchell, Yang-Zhang, bipower) or the first (returns). Nothing in the set touches skewness, and the weekly rebalance horizon is unlike anything else here.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ },
+ {
+  "name": "Closing-Imbalance Window Momentum",
+  "category": "time-of-day, last thirty minutes",
+  "timeframe": "intraday (1-minute)",
+  "side": "both",
+  "entry_rule": "Both primary US exchanges begin publishing closing-auction order imbalances at 15:50 ET. We cannot see that feed, but the price reaction to it is in the bars. Let P1 = close of the 15:49 one-minute bar and P2 = close of the 15:52 one-minute bar. Compute d = P2/P1 - 1. Let q = the 70th percentile of |d| over the previous 60 sessions for that symbol. Require participation confirmation: summed volume of the 15:50, 15:51 and 15:52 one-minute bars > 1.5x the 20-session median of that same three-slot sum. If d > q, BUY at the 15:53 bar open. If d < -q, SHORT at the 15:53 bar open. Otherwise no trade. Restrict to symbols with 60-session median dollar volume > $50m so the auction is meaningful.",
+  "exit_rule": "Exit at the official 16:00 closing print (submit as market-on-close). Never carried overnight. No intraday stop - the horizon is seven minutes.",
+  "inputs": [
+   "1-minute bars 15:49-16:00",
+   "official closing price",
+   "60-session distribution of |d|",
+   "20-session median volume for the 15:50-15:52 slots",
+   "60-session median dollar volume"
+  ],
+  "params": [
+   "reference bars (15:49/15:52 vs 15:50/15:53)",
+   "percentile threshold (60th / 70th / 80th)",
+   "volume confirmation multiple",
+   "entry bar (15:53 vs 15:55)",
+   "dollar-volume floor"
+  ],
+  "why": "The imbalance publication at 15:50 is a scheduled information release with a fixed clock time. When a large one-sided closing imbalance is published, liquidity providers and closing-auction arbitrageurs move the continuous market toward the expected auction clearing price over the following minutes, and the auction then prints at or beyond that level. The first two or three minutes after 15:50 are therefore a readable proxy for the sign and size of the imbalance itself, and the drift toward the auction has not finished by 15:53.",
+  "novelty": "Nothing in the existing set uses the 15:50 imbalance publication as a scheduled intraday event. It is the opposite trade to the already-found closing-auction deviation fade: that one waits for the auction print and fades the 15:59-to-auction dislocation, whereas this rides the pre-auction adjustment INTO the print. The two can be run together and will rarely both fire on the same side, which makes them a useful pair rather than a duplication.",
+  "ohlcv_only": true,
+  "source": "Synthesis. Grounded in the published exchange mechanics - NYSE and Nasdaq begin disseminating closing-auction imbalance information at 15:50 ET - and in the closing-auction price-discovery literature. The three-minute price-reaction proxy for the unobservable imbalance feed is my construction; no paper states this exact rule.",
+  "_agent": "v2:c23ceb1ae7898ed1c8ed4226260cd686c797ee80cadb7a527cb51c3d04bb5660"
+ },
+ {
+  "name": "CPCV Purged-Path Lower Bound",
+  "category": "out-of-sample inference protocol",
+  "side": "both",
+  "timeframe": "any (intraday to daily)",
+  "entry_rule": "Split the bar history into N=6 contiguous groups of equal bar count. Enumerate all C(6,2)=15 splits that hold out k=2 groups as test. For each split: (a) PURGE from the training set every bar whose label window [t_i0, t_i1] overlaps any test-set label window - for a strategy with an average holding period of H bars, drop every training bar within H bars of a test block boundary; (b) EMBARGO an additional h = ceil(0.01*T) bars immediately AFTER each test block from the training set, to kill serial-correlation leakage from the test block into subsequent training bars; (c) fit or select the rule's parameters on the purged, embargoed training portion only, then score on the test blocks. Recombine the 15 sets of test-block results into phi = k*C(N,k)/N = 5 complete, non-overlapping out-of-sample equity paths covering the whole history. Compute the annualised Sharpe of each of the 5 paths. ARM the rule only if min(path Sharpes) > 0 AND the 5th percentile of a 10,000-draw bootstrap over the 5 path Sharpes exceeds 0.5. When armed, take the rule's own entries.",
+  "exit_rule": "The rule's own exit. Position size = clip(SR_p05 / SR_median_path, 0, 1) of the normal risk unit, re-derived every quarter from a fresh CPCV run on the expanding sample. If min(path Sharpe) <= 0 at any quarterly re-fit, flatten at the next open and disarm.",
+  "inputs": [
+   "OHLCV bars",
+   "strategy label start/end times (entry bar and exit bar of each trade)",
+   "per-path equity curves",
+   "average holding period H"
+  ],
+  "why": "Standard walk-forward gives you exactly ONE out-of-sample path, so its Sharpe has enormous sampling error and you cannot tell a robust rule from a lucky ordering of regimes. CPCV gives 5 (or many more) full-length OOS paths from the same data, so you get a DISTRIBUTION of out-of-sample outcomes and can require the worst one to be positive. Purging and the embargo matter specifically for bar-based trading: a trade opened in the training set that is still open during the test set leaks the test set's information backwards, and serial correlation leaks it forwards - naive K-fold on overlapping trade labels is systematically optimistic.",
+  "novelty": "Sizes by the lower bound of a distribution of out-of-sample paths rather than by a point estimate, and gates on the MINIMUM path rather than the mean. Purge-and-embargo is the specific fix for the overlapping-holding-period leak that plain time-series CV does not address.",
+  "source": "Lopez de Prado, M. (2018), 'Advances in Financial Machine Learning', Wiley - ch.7 (purged K-fold with embargo, snippets 7.1-7.4) and ch.12 (Combinatorial Purged Cross-Validation, number of paths phi[N,k] = k*C(N,k)/N). Also Lopez de Prado, 'Backtesting II', Cornell ORIE 5256 lecture 6, https://ssrn.com/abstract=3261943",
+  "ohlcv_only": true,
+  "params": [
+   "N groups (6 / 8 / 10)",
+   "k held out (2 / 3)",
+   "embargo fraction h/T (0.005 / 0.01 / 0.02)",
+   "purge window as multiple of H",
+   "min-path Sharpe threshold"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ }
+]

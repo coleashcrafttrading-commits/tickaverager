@@ -1,0 +1,218 @@
+[
+ {
+  "name": "Rotation Factor Midday Continuation",
+  "category": "auction-market-theory",
+  "side": "both",
+  "timeframe": "intraday 30-minute",
+  "entry_rule": "On RTH 30-minute bars, for each period p from the second onward compute r_p = sign(high_p - high_{p-1}) + sign(low_p - low_{p-1}) with sign(0)=0 (so higher-high-and-higher-low = +2, lower-high-and-lower-low = -2, inside or outside bar = 0). RF = cumulative sum of r_p from the session's second period. Let IBmid = (IBH+IBL)/2 from the 09:30-10:30 initial balance. DECISION at the close of the 12:00-12:30 ET bar: LONG if RF >= +5 AND that close > IBmid AND that close > the 11:00-11:30 close; SHORT if RF <= -5 AND that close < IBmid AND that close < the 11:00-11:30 close. Enter at that close. No other entries that session.",
+  "exit_rule": "Stop = 1.0 * ATR(14) computed on 30-minute bars. Move the stop to breakeven once the position gains 1.0 * that ATR. Also exit immediately at the close of any subsequent 30-minute bar on which RF falls back below +3 (longs) or rises back above -3 (shorts). Hard exit at 15:55 ET.",
+  "inputs": [
+   "ohlcv (30-minute RTH bars)",
+   "period-over-period high and low comparisons",
+   "initial balance midpoint",
+   "atr(14) on 30-minute bars"
+  ],
+  "params": [
+   "RF entry threshold (+/-5)",
+   "RF exit threshold (+/-3)",
+   "decision time (12:30 ET)",
+   "stop (1.0 ATR30)",
+   "breakeven trigger (1.0 ATR30)"
+  ],
+  "why": "The rotation factor is Dalton's objective measure of the day's ATTEMPTED direction: it counts how many 30-minute auction periods rotated higher versus lower, independent of how far price actually travelled. A day that has rotated persistently in one direction through the morning has an other-timeframe participant working in that direction, and the afternoon typically extends the same attempt. Because it counts structure rather than distance, it stays valid on days where price has gone nowhere but every period has printed a higher high and higher low.",
+  "source": "Dalton, Jones & Dalton, 'Mind Over Markets' (1993) - rotation factor; calculation as documented in the mypivots.com dictionary entry 'Rotation Factor' (+1/-1/0 for the high comparison plus the same for the low, summed across TPO periods) and Sierra Chart's support board implementation.",
+  "ohlcv_only": true,
+  "novelty": "A directional score built entirely from the SEQUENCE of higher-highs and higher-lows across auction periods - it is scale-free and ignores magnitude completely, so it is uncorrelated with every distance-based momentum measure. Three-bar momentum looks at closes over three bars; RF looks at the count of rotations over the whole session and is bounded by the number of periods, not by price.",
+  "_agent": "v2:1db7bf8f003d6a64be250b11b84dc6de7bdcc59f0e1caf59d48acdf061b67153"
+ },
+ {
+  "name": "Automatic Rally Ratio Secondary Test",
+  "category": "wyckoff",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "Let ATR=ATR(14) and AV=SMA(volume,20). LONG: (1) Selling-climax bar SC at index c requires low(SC)=lowest low of bars c-39..c, volume(SC)>=2.5*AV(c), and (high(SC)-low(SC))>=1.5*ATR(c). (2) Automatic Rally: let AR=max(high) over bars c+1..c+15 occurring at index a; require AR-low(SC)>=2.0*ATR(c). (3) Ratio gate: ARratio=(AR-low(SC))/(high(SC)-low(SC)) must be >=1.5. (4) Secondary Test bar T at some index in a+3..a+30 requires low(T)>=low(SC) AND low(T)<=low(SC)+0.75*ATR AND volume(T)<=0.60*volume(SC) AND (high(T)-low(T))<=0.80*ATR. (5) Buy at the close of the first bar after T whose close>high(T) AND whose volume>=1.2*AV. Abort the whole setup if any close<low(SC) at any point after SC. SHORT is the exact mirror: buying-climax bar BC with high(BC)=40-bar highest high, same volume and spread conditions; Automatic Reaction AR=min(low) over c+1..c+15 with low(SC-analogue) drop>=2.0*ATR; ratio (high(BC)-AR)/(high(BC)-low(BC))>=1.5; secondary test with high(T)<=high(BC) AND high(T)>=high(BC)-0.75*ATR, volume<=0.60*volume(BC), spread<=0.80*ATR; sell at the close of the first bar closing<low(T) with volume>=1.2*AV; abort on any close>high(BC).",
+  "exit_rule": "Initial stop at low(SC)-0.25*ATR (mirror: high(BC)+0.25*ATR). First target = AR + (AR - low(SC)), i.e. a 1x measured move projected from the automatic-rally leg; scale out half there. After +1.5R, trail the remainder on the lowest low of the last 3 bars (highest high for shorts). Hard time stop: exit at market if neither target nor stop is hit within 40 bars of entry.",
+  "inputs": [
+   "ohlcv",
+   "atr(14)",
+   "sma(volume,20)",
+   "rolling 40-bar high/low"
+  ],
+  "params": [
+   "climax volume multiple (2.5)",
+   "climax spread multiple (1.5)",
+   "AR magnitude in ATR (2.0)",
+   "ARratio threshold (1.5)",
+   "ST volume fraction of climax (0.60)",
+   "ST proximity band (0.75*ATR)",
+   "AR search window (15 bars)",
+   "ST search window (3..30 bars)",
+   "measured-move multiple (1.0)"
+  ],
+  "why": "This is Wyckoff Phase A, not Phase C. The economic claim is about supply exhaustion measured by the SNAP-BACK rather than by a liquidity sweep: after panic selling clears the last motivated sellers, the removal of supply lets a comparatively small amount of demand lift price a long way. A large automatic rally relative to the climax bar's own range is therefore direct evidence that the offer stack is thin. The secondary test on materially lower volume then confirms that supply has not returned at the same prices. The ARratio gate is the discriminating variable: a weak automatic rally after a climax means sellers are still present and the low will be broken.",
+  "novelty": "Distinct from the previously catalogued Spring-Test sequence because no penetration below the range low is required or permitted - the secondary test must hold ABOVE the climax low. Distinct from Stopping Volume Climax Reversal because the trigger is not the bar after the climax but a two-stage AR-then-ST confirmation gated by the ratio of rally magnitude to climax-bar range. Not a moving-average or oscillator construct at all.",
+  "source": "Wyckoff accumulation schematic Phase A (PS, SC, AR, ST) as codified in the StockCharts ChartSchool 'The Wyckoff Method' article and reproduced in the TradingView 'Wyckoff Accumulation Phase Map' (AGProLabs) and 'Wyckoff Pattern Indicator' (Dr_AtulGoswami) script descriptions, which enumerate PS/SC/AR/ST/Spring/LPS/SOS labels. The ARratio gate and all numeric thresholds are my quantification (synthesis) - the source literature states the sequence qualitatively only.",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Technical Signal Principal Components Premium Regression",
+  "category": "return predictability econometrics / dimension reduction",
+  "timeframe": "daily bars aggregated to monthly; monthly rebalance",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "On the last trading day of month t, from SPY monthly closes P and monthly volume VOL, compute 14 binary signals, each 1 (buy) or 0 (sell): (a) SIX moving-average signals MA(s,l) for s in {1,2,3} and l in {9,12}: S = 1 if MA_s,t >= MA_l,t else 0, where MA_j,t = (1/j)*sum_{i=0..j-1} P_{t-i}. (b) TWO momentum signals MOM(m) for m in {9,12}: S = 1 if P_t >= P_{t-m} else 0. (c) SIX on-balance-volume signals VOL(s,l) for s in {1,2,3} and l in {9,12}: first OBV_t = sum_{k=1..t} VOL_k * D_k with D_k = +1 if P_k - P_{k-1} >= 0 else -1; then S = 1 if MAOBV_s,t >= MAOBV_l,t else 0, where MAOBV_j,t = (1/j)*sum_{i=0..j-1} OBV_{t-i}. Stack the 14 signals into a vector; standardise each column to zero mean and unit variance using only data through t; extract the first K = 3 principal components F1,F2,F3 (K chosen each month by adjusted R-squared over K in {1,2,3}). Run an expanding-window OLS r_{s+1} = a + c1*F1_s + c2*F2_s + c3*F3_s + e through s = t-1 and form rhat_{t+1} = a_hat + c1_hat*F1_t + c2_hat*F2_t + c3_hat*F3_t. Truncate rhat at 0 from below. Rebalance at the next open to w_t = clip((1/5) * rhat_{t+1} / sigmahat^2_{t+1}, 0, 1.5), with sigmahat^2 the variance of the last 60 monthly excess returns.",
+  "exit_rule": "No stop, no target. Hold to the last trading day of the next month, recompute the 14 signals, re-extract the PCs on the extended sample, re-estimate the regression, and rebalance to the new w. w = 0 exits fully.",
+  "inputs": [
+   "SPY monthly close",
+   "SPY monthly volume",
+   "on-balance volume series",
+   "14 binary technical signals",
+   "principal component decomposition",
+   "60-month return variance"
+  ],
+  "params": [
+   "short MA lengths s (1,2,3)",
+   "long MA lengths l (9,12)",
+   "momentum lookbacks m (9,12)",
+   "number of PCs K (1-3)",
+   "gamma (3, 5)",
+   "weight cap (1.0, 1.5)",
+   "signal coding: {0,1} vs {-1,+1}"
+  ],
+  "why": "Neely, Rapach, Tu and Zhou show that the in-sample R-squared of a regression on PCs of macro variables plus PCs of technical signals equals the SUM of the two separate R-squareds - the information is additive and orthogonal. Technical signals are not a worse version of macro predictors, they capture a different thing: they lead sentiment changes and detect the decline in the realised premium near business-cycle peaks, while macro variables pick up the rise near troughs. Extracting PCs from a panel of 14 correlated binary rules filters the idiosyncratic noise that makes any single crossover rule fragile, which is why the PC forecast survives out-of-sample where individual rules do not. Their reported figures: PC-TECH out-of-sample R-squared 0.65%, PC-ALL 1.79%, both significant by the Clark-West MSFE-adjusted statistic against the very stringent prevailing-mean benchmark. Goyal, Welch and Zafirov's 2024 audit independently found this 'tchi' variable to be one of only four post-2008 predictors that still passes both in-sample and Campbell-Thompson out-of-sample tests through 2021.",
+  "novelty": "The corpus already has EMA cross and similar rules, but they trade the crossover event. Here the crossovers are never traded. Fourteen crossover states are used only as inputs to a factor model, and what is traded is the sign and magnitude of a regression fitted value. Two indicators can both be on 'buy' and produce a bearish forecast if the loading pattern is unusual; that behaviour is impossible for any threshold rule.",
+  "source": "Neely, C.J., Rapach, D.E., Tu, J. and Zhou, G., 'Forecasting the Equity Risk Premium: The Role of Technical Indicators', Federal Reserve Bank of St. Louis Working Paper 2010-008 (Aug 2013 revision), published Management Science 60(7), 2014 - read directly at https://s3.amazonaws.com/real.stlouisfed.org/wp/2010/2010-008.pdf. Indicator definitions eqs. (4)-(9) and pp.7-8; PC regression eq. (12) and eq. (25); out-of-sample results Table 4. Survivorship confirmation: Goyal, Welch and Zafirov, 'A Comprehensive 2022 Look at the Empirical Performance of Equity Premium Prediction', RFS 37(11), 2024, p.3492.",
+  "_agent": "v2:2986ad60a64b30f5d6a1ab8fd871eb95cd89b5d6c01da660d34a55f6bf9aab82"
+ },
+ {
+  "name": "Black-Litterman with Signal-Supplied Views",
+  "category": "portfolio construction / return estimation",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Every Friday close. (1) Prior weights: w_prior_i = symbol i's share of the fleet's total 20-day median dollar volume (an OHLCV-only proxy for market-cap equilibrium weights). (2) Sigma = Ledoit-Wolf constant-correlation shrunk covariance over 252 daily returns, annualised. (3) Reverse-optimise implied equilibrium excess returns: Pi = delta * Sigma * w_prior with risk-aversion delta = 2.5. (4) Views from the trading signal: s_i = the cross-sectional z-score of 12-1 momentum (252-bar total return excluding the most recent 21 bars). Set P = I_N (one absolute view per symbol), Q_i = kappa * s_i * sigma_i_annual with view scale kappa = 0.02, and Omega = diag(tau * P Sigma P') with tau = 0.05. (5) Posterior: mu_BL = [ (tau*Sigma)^{-1} + P' Omega^{-1} P ]^{-1} [ (tau*Sigma)^{-1} Pi + P' Omega^{-1} Q ]. (6) Weights w = (1/delta) * Sigma^{-1} * mu_BL; set negatives to 0, clip to 0.15, renormalise to sum 1. Enter each w_i > 0.005 at Monday's open.",
+  "exit_rule": "Weekly rebalance, 0.02 no-trade band, exit a name when w_i < 0.005. Confidence-driven de-risking: recompute Omega each week from the trailing 52-week rolling information coefficient of the momentum score (Spearman correlation between s_i at t and the forward 21-day return). If that IC is <= 0, set Omega to 10x its formula value for that week, which collapses the posterior back onto the equilibrium prior and mechanically flattens the active book without a discretionary override.",
+  "inputs": [
+   "daily close (252+ bars)",
+   "daily volume (20-day median dollar volume for the prior)",
+   "Ledoit-Wolf shrunk covariance",
+   "rolling information coefficient of the signal"
+  ],
+  "params": [
+   "tau (0.01-0.10)",
+   "delta (1.5-5)",
+   "view scale kappa",
+   "signal used for views (momentum / reversal / composite)",
+   "IC lookback"
+  ],
+  "novelty": "Alpha enters as a view carrying an explicit uncertainty rather than as a point forecast fed straight to an optimiser. Because the posterior is a precision-weighted blend, a weak or unreliable signal shrinks toward the equilibrium portfolio automatically instead of producing the corner solutions raw mean-variance always produces.",
+  "why": "Feeding raw signal z-scores into Sigma^{-1} mu yields extreme, unstable weights because it treats the forecast as certain. Black-Litterman fixes the pathology at its root: the prior is a portfolio that is by construction sensible (the equilibrium book), views perturb it in proportion to their confidence, and the resulting posterior weights degrade gracefully as the signal degrades. Tying Omega to a measured rolling IC closes the loop, so the size of the active bet tracks the demonstrated accuracy of the signal rather than an assumed constant.",
+  "source": "Black & Litterman (1992) 'Global Portfolio Optimization', Financial Analysts Journal 48(5), and Black & Litterman (1991), Journal of Fixed Income. Idzorek (2007) 'A Step-by-Step Guide to the Black-Litterman Model' for the Omega = diag(tau P Sigma P') convention. Note: the Wikipedia Black-Litterman page fetched this session gives only the conceptual description and no formulas, and pointed to Idzorek and Walters for the mathematics; the equations above are quoted from those published sources. Ledoit-Wolf input per the shrinkage entry above.",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Notional-Equity Drawdown Ratchet",
+  "category": "risk management",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Base signal is the harness. Maintain a separate variable notional_equity, initialised to starting capital. Track peak_equity = running maximum of actual account equity. current_dd = (peak_equity - actual_equity)/peak_equity. Let k = floor(current_dd / 0.10). Set notional_equity = actual_equity * (0.80 ^ k). Size every trade off notional_equity, not actual equity: shares = floor(0.01 * notional_equity / (2*ATR(20))). notional_equity is only restored to actual_equity when actual_equity makes a new all-time high (k resets to 0).",
+  "exit_rule": "Base exit unchanged (2*ATR(20) stop, opposite-signal flat). The ratchet never closes a position early - it only starves new ones. Variant worth testing: also scale OUT of existing positions to the new notional size on the bar the ratchet steps down.",
+  "inputs": [
+   "account equity series",
+   "running peak equity",
+   "atr(20)"
+  ],
+  "params": [
+   "drawdown step (5%/10%/15%)",
+   "size cut per step (10%/20%/30%)",
+   "recovery rule (new all-time high vs recovering half the drawdown vs linear unwind)",
+   "floor on the multiplier (0.25/0.4)"
+  ],
+  "why": "Fixed-fractional sizing already shrinks with equity, but only linearly, which is far too slow to stop a strategy that has genuinely broken. A convex ratchet cuts size 20% per 10% of drawdown, so 30% down leaves you at 51% of normal size on 70% of the capital - about a third of the original risk. The asymmetric recovery rule (only reset on new highs) means you re-lever only after the strategy has proved it still works, which is the whole point.",
+  "source": "Original Turtle Trading Rules, 'Adjusting Trading Size' section - 'when the account dropped 10%, all unit sizes were cut by 20%, with further reductions at every additional 10% drawdown'. Public PDF: https://oxfordstrat.com/coasdfASD32/uploads/2016/01/turtle-rules.pdf",
+  "novelty": "State depends on the equity curve, not price. Note this is NOT the same as equity-curve trading (idea below) - it never switches the strategy off, it only makes it smaller, which avoids the binary on/off overfitting problem.",
+  "ohlcv_only": true,
+  "_agent": "v2:4a185d6e6f4ebde3b5c17f4530685569479f2989c481d0290ba5129b10d040d1"
+ },
+ {
+  "name": "Dynamic Lead-Lag Partner",
+  "category": "cross-asset lead-lag",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "Designate a leader instrument L and a candidate follower set F (e.g. leader = XLE, followers = USO, XOP, OIH, VDE; or leader = SPY, followers = sector ETFs). Every 30 calendar days recompute the 90-day Pearson correlation of daily closes between L and each candidate, and select the single candidate with the highest correlation as the active follower F*. Intraday, on each completed 5-minute bar compute roc_L = (close_L / close_L[5] - 1) * 100. If roc_L > +0.75, BUY F* at the next bar's open. If roc_L < -0.75, SHORT F*. Only one position in F* at a time.",
+  "exit_rule": "Exit 5 bars after entry at that bar's close - a pure time stop matched to the ROC lookback. Additionally liquidate any existing follower position immediately when the 30-day correlation refresh selects a different F*.",
+  "inputs": [
+   "5-minute close of leader and all candidates",
+   "daily close for the 90-day correlation",
+   "ROC over 5 bars",
+   "correlation matrix"
+  ],
+  "params": [
+   "ROC lookback bars (default 5)",
+   "trigger threshold (default 0.75%)",
+   "correlation window (default 90 days)",
+   "partner refresh frequency (default 30 days)",
+   "holding bars (default 5)",
+   "candidate set"
+  ],
+  "why": "Related instruments do not reprice simultaneously. The more liquid or more informationally central instrument absorbs a shock first, and the less liquid related name follows over the next few minutes. Rather than hard-coding a pair, the strategy re-selects the follower every month from realised correlation, which handles the fact that the tightest partner drifts as sector composition and flows change. The ROC threshold ensures only shocks large enough to propagate are traded.",
+  "source": "QuantConnect Lean, Algorithm.Python/Alphas/GasAndCrudeOilEnergyCorrelationAlpha.py - https://github.com/QuantConnect/Lean/blob/master/Algorithm.Python/Alphas/GasAndCrudeOilEnergyCorrelationAlpha.py",
+  "novelty": "The instrument traded is chosen dynamically by a rolling correlation search, and the trigger is computed on a DIFFERENT instrument entirely. Every one of the existing 32 computes its signal on the instrument it trades.",
+  "_agent": "v2:16ef1dd18371885595dabbe3e4a4868e6c3a7e7fe0580d2da50702aa86e06460"
+ },
+ {
+  "name": "Unfilled Order Ledger",
+  "category": "execution timing / order type",
+  "timeframe": "any (test on 5-minute and daily)",
+  "side": "both",
+  "entry_rule": "Reference signal S = Donchian(20) upside breakout, i.e. close_t > max(high over t-20..t-1). Hold S fixed and run three separate backtests over the identical set of signal dates. Arm A (market): fill long at open_{t+1}. Arm B (patient limit, cancel): at close_t place a buy limit at L = close_t - k*ATR(14)_t for k in {0.10, 0.25, 0.50}; it fills on the first bar in t+1..t+N whose low <= L, at price L, except that if that bar's open <= L the fill price is that open; N in {1,2,3,5}. If unfilled at the close of bar t+N, cancel and record the trade in a MISSED ledger rather than dropping it. Arm C (patient limit, chase): same limit as Arm B, but if unfilled at the close of bar t+N, fill at open_{t+N+1} at market.",
+  "exit_rule": "Identical across all three arms so that entry is the only difference: hard stop at fill_price - 2*ATR(14)_t, profit target at fill_price + 3*ATR(14)_t, unconditional time stop at the close of bar t+40, whichever comes first; stop and target checked on every bar with the stop taking priority if both are touched in one bar. For every MISSED trade in Arm B, compute the return it would have earned under Arm A's fill and exit rules and book it as opportunity cost. Report Arm B's mean per-signal return twice: over filled trades only, and over filled-plus-missed. The second number is the only valid comparison against Arm A.",
+  "inputs": [
+   "donchian(20)",
+   "atr(14)",
+   "bar open",
+   "bar high",
+   "bar low",
+   "bar close"
+  ],
+  "why": "A resting limit order is a free option written to the market. It fills preferentially when the signal is wrong (price comes back to you) and goes unfilled when the signal is right (price runs away), so the spread it saves is paid for with an adversely selected fill set. Perold's implementation shortfall framework makes the unfilled orders a first-class cost line - opportunity cost - alongside delay cost and execution cost. Naive backtests silently delete that line by simply not recording a trade that never filled, which makes every patient-limit strategy look better than it is. Forcing the missed trades into the ledger is what makes the test honest, and the sign of (Arm B including misses) minus (Arm A) is the actual answer to whether patience pays on this particular signal.",
+  "novelty": "Not a signal at all. The signal is frozen and only the order type varies, so the dependent variable is fill quality net of opportunity cost rather than predictive accuracy. Distinct from any of the 32 because none of them specify how the order reaches the market, and the design's entire point is that unfilled trades are recorded rather than discarded.",
+  "source": "Perold (1988), 'The Implementation Shortfall: Paper versus Reality', Journal of Portfolio Management 14(3):4-9 - I confirmed the three-way delay/execution/opportunity-cost decomposition via the implementation shortfall literature summary rather than the paywalled original, so treat the decomposition as verified and the page numbers as standard citation. The adverse-selection framing of resting limit orders is standard market microstructure.",
+  "params": [
+   "k, limit offset in ATR units",
+   "N, order lifetime in bars",
+   "stop multiple",
+   "target multiple",
+   "time stop length"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "In-Range Opening Gap Fade to Prior Close",
+  "category": "gap",
+  "side": "both",
+  "timeframe": "5-minute (daily context)",
+  "entry_rule": "At 09:30 ET compute G = today's open - yesterday's close, and require the gap to land INSIDE yesterday's range: yesterday_low < today_open < yesterday_high. Require |G| >= 0.30 x ATR(14) measured on daily bars. GAP UP CASE: if the 09:30-09:35 five-minute bar closes below its own open AND below today's open, sell short at that bar's close. GAP DOWN CASE is the mirror (first 5-minute bar closes above its open and above today's open, buy at its close). One attempt per symbol per day; if the first 5-minute bar does not satisfy the rejection condition, no trade.",
+  "exit_rule": "Target = yesterday's close (the gap fill), exit with a limit there. Stop = the first 5-minute bar's high + 0.10 x daily ATR(14) for shorts (mirror for longs). Hard time exit at 11:30 ET at the market. Never hold past 11:30 - the documented gap-fill tendency is concentrated in the first two hours.",
+  "inputs": [
+   "daily OHLC (prior day high/low/close)",
+   "5-minute bars",
+   "daily ATR(14)",
+   "session clock"
+  ],
+  "params": [
+   "minimum gap size in ATR (0.2-0.5)",
+   "rejection bar index (first vs first two 5-min bars)",
+   "time exit (11:00 / 11:30 / 12:00)",
+   "partial fill target (50% of gap vs full)"
+  ],
+  "why": "A gap that opens inside the prior day's range has not escaped the previous session's value area - the auction still has accepted two-sided trade at those prices, so there is a known population of participants willing to transact between the open and yesterday's close. That makes the prior close a genuine magnet. The first-bar rejection requirement is the confirmation that the gap had no initiative behind it.",
+  "novelty": "The classification variable is WHERE THE GAP OPENS RELATIVE TO YESTERDAY'S RANGE, not the opening range of today. It shares no levels with our opening-range fade: the target is yesterday's close, the stop is the first bar's extreme, and the trade can trigger on the first bar rather than requiring an opening range to form and then fail.",
+  "source": "Gap taxonomy (area/common gaps close inside the prior range and fill; breakaway gaps clear it and run) from Edwards, R. D. and Magee, J., 'Technical Analysis of Stock Trends', chapter on gaps. Note honestly: I was unable to retrieve a peer-reviewed quantified gap-fill study within this session's search budget, so the fill probabilities here are untested and this idea should be treated as a hypothesis to be measured on our own bars rather than as a documented effect.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ }
+]

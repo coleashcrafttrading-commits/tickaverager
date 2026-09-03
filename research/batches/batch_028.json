@@ -1,0 +1,207 @@
+[
+ {
+  "name": "Factor Momentum on OHLCV Factors",
+  "category": "factor timing",
+  "timeframe": "daily bars, monthly rebalance",
+  "side": "both",
+  "entry_rule": "Build five long-short factor proxies from OHLCV alone, each equal-weighted top-tercile minus bottom-tercile of the universe, rebalanced monthly, with their daily returns recorded: F1 = 12-1 momentum (close_{t-21}/close_{t-252} - 1); F2 = one-month reversal (negative of close_t/close_{t-21} - 1); F3 = low volatility (negative of stdev of daily returns over 252 bars); F4 = high dollar-volume growth (mean(close*volume) over 21 bars divided by mean over the prior 252 bars); F5 = 52-week-high proximity (close_t / max(high over 252 bars)). At each month end compute for each factor R_f = its own cumulative return over the last 252 trading days INCLUDING the most recent month (do NOT skip month t). Go long every factor with R_f > 0 and short every factor with R_f < 0, sizing each at min(0.06/sigma_f, cap) where sigma_f = stdev of that factor's daily returns over 126 bars * sqrt(252). Translate to stock orders by summing each symbol's signed weight across all active factor legs and trading the net at the next open.",
+  "exit_rule": "Re-derived every month end: a factor whose trailing 252-day return flips sign has its leg reversed; a symbol whose net weight crosses zero is flattened. No per-name stop.",
+  "inputs": [
+   "close",
+   "high",
+   "volume",
+   "daily returns of constructed long-short factor portfolios",
+   "rolling stdev(126) of factor returns"
+  ],
+  "params": [
+   "which factor proxies",
+   "factor lookback (252, including month t)",
+   "tercile vs quintile cuts",
+   "per-factor volatility target"
+  ],
+  "why": "Most equity factors are positively autocorrelated at annual horizons, and individual-stock momentum turns out to be an indirect and noisy way of betting on that autocorrelation - a stock is a winner largely because the factors it loads on have been winning. Timing the factors directly captures the same effect with far fewer names, far less turnover, and without the idiosyncratic noise that individual-stock momentum carries. The 'no skip' detail matters: implementations that omit the most recent month lose statistical significance once stock momentum is controlled for.",
+  "novelty": "Time-series momentum applied to constructed portfolio return series rather than to prices of tradeable instruments, then mapped back into stock weights. Every existing idea signals on a symbol's own price path; this signals on the return path of a spread portfolio and only then translates into positions.",
+  "source": "Ehsani & Linnainmaa (2022), 'Factor Momentum and the Momentum Factor', Journal of Finance 77(3); NBER Working Paper 25551 (abstract fetched and verified: 'factor momentum explains all forms of individual stock momentum', factors earn ~1bp/month after loss years vs ~53bp after positive years). The include-the-most-recent-month requirement is from Arnott, Clements, Kalesnik & Linnainmaa, 'Is Factor Momentum More than Stock Momentum?', arXiv:2009.04824 (abstract fetched: only implementations including the most recent month survive controls for stock momentum).",
+  "ohlcv_only": true,
+  "_agent": "v2:cfd30cfcc39909b0d50d86a5c465eddca78daa50c3cb3ba17ddf1d4a91a2525a"
+ },
+ {
+  "name": "Graphical Lasso Sparse Precision Allocation",
+  "category": "covariance estimation / sparse graphical model",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Every Friday close. (1) Standardise 252 daily log returns per symbol to zero mean, unit variance; form the empirical correlation matrix S. (2) Fit the graphical lasso: K_hat = argmin_K [ tr(SK) - log det(K) + alpha * ||K||_1 ] where the L1 penalty applies to off-diagonal entries only and K is constrained positive definite. (3) Select alpha by 5-fold cross-validated Gaussian log-likelihood over a 10-point logarithmic grid spanning alpha in [0.01, 0.5]; folds are contiguous time blocks, not shuffled rows, to respect serial dependence. (4) GMV weights on the correlation scale are proportional to K_hat * 1; convert back to the return scale: w_raw_i = (1/s_i) * sum_j K_hat_ij / s_j, with s_i the 252-day stdev of symbol i. (5) Set negative w_raw to 0 for a long-only book, clip to 0.20, renormalise to sum 1. Enter each w_i > 0.005 at Monday's open.",
+  "exit_rule": "Weekly rebalance with a 0.02 no-trade band; exit a name when its weight falls below 0.005. Graph-instability stop: track the sparsity pattern of K_hat week to week; if more than 30% of the off-diagonal support changes between consecutive fits, the graph is not identified from this sample - fall back to equal weighting over the current holdings for that week rather than trading into an unstable solution.",
+  "inputs": [
+   "daily close (252 bars, all fleet symbols)",
+   "empirical correlation matrix",
+   "graphical lasso solver with time-block cross-validation"
+  ],
+  "params": [
+   "alpha grid and range",
+   "lookback (126/252/504)",
+   "CV folds",
+   "support-change threshold for the instability stop"
+  ],
+  "novelty": "It is the only method here that produces exact zeros in the precision matrix. Shrinkage and eigenvalue clipping both return dense matrices; sparsity is a structurally different kind of regularisation and yields a structurally different weight vector, because a zero in K is an assertion of conditional independence, not merely a small number.",
+  "why": "The GMV weight vector is a function of the precision matrix, not the covariance matrix - so the object that should be regularised is K, and regularising Sigma only regularises K indirectly and imprecisely. A zero at K_ij says i and j are independent given every other name in the fleet, which is the statistically correct statement that two stocks in the same sector are related through the sector and not directly. Forcing those entries to zero prevents the optimiser from constructing a spurious hedge between them - the exact failure mode that makes GMV weights blow up out of sample. It is also well-defined when N is close to or exceeds T, where the sample covariance is singular and cannot be inverted at all.",
+  "source": "Friedman, Hastie & Tibshirani (2008) 'Sparse inverse covariance estimation with the graphical lasso', Biostatistics 9(3). The objective tr(SK) - log det(K) + alpha*||K||_1, the recommendation to standardise to the correlation matrix, the guidance that it suits the n_samples <= n_features regime, and the caveat that cross-validated alpha selection tends to choose too many edges were all verified at https://scikit-learn.org/stable/modules/covariance.html (fetched this session).",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Correlation-Volatility Corner Portfolio",
+  "category": "defensive / low-risk",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "252-day volatility of 1-day log returns",
+   "1250-day correlation of overlapping 3-day log returns vs SPY",
+   "daily closes"
+  ],
+  "params": [
+   "grid size (3x3 default, sweep 3x3 to 5x5)",
+   "rebalance period (21d)",
+   "equal-weight vs inverse-volatility weighting within corners"
+  ],
+  "entry_rule": "At each month end, independently double-sort the ETF universe into a 3x3 grid on rho_i (1250-day correlation with SPY using overlapping 3-day log returns) and sigma_i (252-day standard deviation of 1-day log returns). Go long the LOW-correlation / HIGH-volatility corner and short the HIGH-correlation / LOW-volatility corner, equal-weighting within each corner. Note that both corners contain assets with roughly the SAME beta, because beta = rho * sigma/sigma_m and the two sorts move in opposite directions - so this book is close to beta-neutral without any explicit scaling, and it is a pure bet on which half of beta carries the premium. Enter at the next open with equal dollars long and short.",
+  "exit_rule": "Full rebalance every 21 trading days. Additionally, verify the neutrality assumption each rebalance: compute the weighted-average shrunk beta of each corner, and if they differ by more than 0.15, scale the higher-beta corner down by the ratio of the two betas before entering. Flatten entirely if fewer than 3 assets populate either corner.",
+  "why": "If the low-risk effect is driven by leverage constraints then correlation is what matters and this book should make money; if it is driven by lottery demand for volatile assets then volatility is what matters and this book should lose money. Because the two corners are beta-matched, the trade is a clean horse race between the two competing explanations rather than another way of buying safety. That makes it informative even when it does not pay, which is unusual for a trading rule.",
+  "novelty": "A double sort producing a beta-neutral corner portfolio is an entry structure the corpus does not contain. Critically, it deliberately buys high-volatility assets, which is the opposite of what every defensive rule does, and is only sensible once beta is decomposed.",
+  "source": "Constructed from the beta decomposition beta = rho * sigma_i/sigma_m in Frazzini & Pedersen, 'Betting Against Beta' (JFE 2014), equation (14), applied to the research question posed by Asness, Frazzini, Gormsen & Pedersen, 'Betting Against Correlation' (JFE 2020), which separates the beta anomaly into correlation and volatility components. The specific corner-portfolio implementation is my own synthesis - I could not open the BAC paper's full text to check whether they use this exact form.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "ARCH-LM Clustering Gate",
+  "category": "volatility",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close",
+   "true range",
+   "ATR(20)",
+   "SMA10"
+  ],
+  "params": [
+   "window n=250",
+   "lags q=5",
+   "chi-square 1% 15.086",
+   "chi-square 5% 11.070",
+   "TR expansion multiple 2.0",
+   "stops 2.5 / 1.5 ATR"
+  ],
+  "entry_rule": "Take the last n = 250 daily log returns, demean to get e_t. Run the auxiliary OLS regression e_t^2 = b0 + b1*e_{t-1}^2 + b2*e_{t-2}^2 + b3*e_{t-3}^2 + b4*e_{t-4}^2 + b5*e_{t-5}^2 over the 245 usable observations, and take its R-squared. ARCH-LM statistic = 245 * R^2, which under the null of no ARCH effects is distributed chi-square with 5 degrees of freedom (5% critical value 11.070, 1% critical value 15.086). STRONG-CLUSTERING MODE when LM >= 15.086: volatility is demonstrably forecastable, so an expansion begets an expansion. Enter at the next open LONG when today's true range >= 2.0*ATR(20) AND C_t > O_t; SHORT when today's true range >= 2.0*ATR(20) AND C_t < O_t. NO-CLUSTERING MODE when LM <= 11.070: today's expansion carries no information about tomorrow's, so a large bar is an outlier to be faded. Enter at the next open AGAINST the bar under the identical true-range condition - SHORT if C_t > O_t, LONG if C_t < O_t. NO TRADE when 11.070 < LM < 15.086.",
+  "exit_rule": "Strong-clustering leg: trailing stop 2.5*ATR(20) from the extreme close since entry; hard time stop 8 sessions. No-clustering leg: exit at the close on the first touch of SMA10, or on a stop 1.5*ATR(20) from entry, or after 3 sessions.",
+  "why": "Every volatility breakout system in existence assumes volatility clustering is present. It usually is, but not always, and not in every name - and when it is absent, the identical trigger has the opposite correct response. The ARCH-LM test is the formal hypothesis test for exactly that assumption, computed on the very data the system is about to trade, with a known null distribution and a clean critical value. Rather than filtering the trigger, it selects which of two opposite trades to take, so the same setup makes money in both regimes instead of only one.",
+  "novelty": "A specification test for the model assumption used as the direction switch, not as a filter. The excluded GARCH strategy uses the FITTED conditional variance (assuming ARCH is there); this uses the TEST for whether ARCH is there at all, and takes the opposite trade when it is not. Distinct from ATR expansion breakout, which fires unconditionally on the same trigger.",
+  "source": "Engle (1982), 'Autoregressive Conditional Heteroscedasticity with Estimates of the Variance of United Kingdom Inflation', Econometrica 50(4) - the Lagrange multiplier test for ARCH effects, T*R^2 from the auxiliary regression of squared residuals on their own lags. Cited from knowledge (web search budget exhausted). The two-branch regime switch and the trading rules are my synthesis; chi-square critical values are standard table values.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "No Supply / No Demand Bar (low-volume absorption)",
+  "category": "volume spread analysis, absence-of-volume signal",
+  "side": "both",
+  "timeframe": "any (daily and 15-minute)",
+  "entry_rule": "NO SUPPLY (long setup). Signal bar S must satisfy ALL: (a) close(S) < close(S-1) - a down bar; (b) range(S) <= 0.70 x mean(range of the 5 bars immediately before S) - a narrow spread; (c) volume(S) < volume(S-1) AND volume(S) < volume(S-2) - lower than BOTH of the two preceding bars; (d) close(S) >= low(S) + 0.50 x range(S) - the close is in the upper half; (e) context: close(S) > SMA(20). CONFIRMATION IS MANDATORY on the very next bar C: close(C) > high(S) AND volume(C) > volume(S). Enter long at the close of C. If C fails either test, discard the setup entirely - do not wait. NO DEMAND (short setup) is the exact mirror: up bar close(S) > close(S-1); range(S) <= 0.70 x the 5-bar mean range; volume(S) below both prior bars; close(S) <= low(S) + 0.50 x range(S); close(S) < SMA(20); confirmation bar closes below low(S) on volume above volume(S); short at its close.",
+  "exit_rule": "Stop at low(S) - 0.05 x ATR(14) for longs, high(S) + 0.05 x ATR(14) for shorts. Exit at the close of the 8th bar after entry, or earlier on the first opposing signal (a qualifying No Demand bar while long). No fixed profit target.",
+  "inputs": [
+   "ohlcv any timeframe",
+   "volume",
+   "sma(20) of close",
+   "atr(14)",
+   "rolling 5-bar mean range"
+  ],
+  "params": [
+   "spread threshold vs 5-bar mean range (0.70, sweep 0.50-0.90)",
+   "close-position threshold (0.50, sweep 0.40-0.65)",
+   "number of prior bars volume must undercut (2, sweep 1-3)",
+   "hold bars (8)",
+   "confirmation required on bar 1 vs within 2 bars"
+  ],
+  "why": "Every volume rule already in the book demands HIGH volume. This one demands its absence, and the economic claim is different: a down bar that cannot attract sellers - narrow range, less participation than either of the two bars before it, and a close in the upper half - is evidence that the float willing to transact at that price is exhausted. Supply exhaustion and demand climax are distinct phenomena that fire at different moments, so this signal population should be nearly disjoint from the existing volume-gated strategies. The mandatory confirmation bar on rising volume is what converts a qualitative VSA read into a testable rule.",
+  "source": "Tom Williams, 'Master the Markets' (Volume Spread Analysis). Operational definition - up/down bar, narrow spread, volume lower than the previous TWO bars, close position within the bar, and a confirming next bar on rising volume - from https://www.tradingsetupsreview.com/guide-volume-spread-analysis-vsa/ ('No Demand: price closed higher than the previous bar, volume is lower than past two bars, spreads are narrow') and https://atas.net/volume-analysis/basics-of-volume-analysis/vsa-and-cluster-analysis-no-demand-and-no-supply/ (close position within the bar; confirmation by the next bar on growing volume). Both sources leave 'narrow spread' undefined, so it is pinned here to <= 0.70 x the 5-bar mean range; both sources also stress that VSA is normally judgement-based, so this is a deliberate quantification.",
+  "novelty": "The signal is LOW volume, and the qualifying comparison is against the two individual preceding bars rather than a moving average of volume. Nothing in either list uses an absence-of-participation condition.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Elder triple screen with a daily ratcheting entry stop",
+  "category": "multi-timeframe trend + pullback with pending-order entry",
+  "side": "both",
+  "timeframe": "weekly filter, daily trigger",
+  "entry_rule": "SCREEN 1 (tide): resample daily bars to weekly. Compute MACD histogram (12,26,9) on weekly closes. Tide is UP if hist[w] > hist[w-1] on the most recently completed week. SCREEN 2 (wave, must oppose the tide): on daily bars compute Force Index = Volume_t * (Close_t - Close_{t-1}) and its 2-period EMA. Setup arms when tide is UP and EMA2(ForceIndex) < 0. SCREEN 3 (trigger): on the first day after the setup arms, place a buy stop at High[t-1] + 0.01. If it does not fill by that day's close, REPLACE it the next day with a buy stop at the new High[t-1] + 0.01 \u2014 so if the market keeps falling the entry order walks DOWN with it, never up. Cancel the order if the weekly histogram slope turns down, or after 5 unfilled days. Mirror all three screens for shorts (tide DOWN, EMA2(ForceIndex) > 0, sell stop at Low[t-1] - 0.01 that walks up).",
+  "exit_rule": "Initial stop at Low[t-1] - 0.01 measured on the bar before the fill. Trail with the ratcheted chandelier: highest high since entry - 3*ATR(22), monotone. Also exit on the first completed week where the weekly MACD histogram slope turns down.",
+  "inputs": [
+   "daily OHLCV",
+   "weekly resampled OHLC",
+   "weekly MACD histogram (12,26,9)",
+   "Force Index and its 2-EMA",
+   "ATR(22)"
+  ],
+  "params": [
+   "higher timeframe 5 or 10 daily bars",
+   "MACD 12/26/9",
+   "Force Index EMA period 2 (sweep 2-13)",
+   "order-walk cancel window 5 days",
+   "trigger offset 0.01 or 0.05*ATR"
+  ],
+  "why": "The entry order that ratchets downward is the mechanism, not the filter stack. It refuses to buy strength during a pullback and instead lets the market keep marking down the trigger price for as long as the pullback continues, so the fill price improves the deeper the pullback goes while the trend filter still guarantees direction. The trade is only taken when the falling wave actually turns, and the stop is by construction a fraction of a day's range away, which produces very high reward-to-risk on the trades that do fill and simply no trade on the ones that keep falling.",
+  "source": "Alexander Elder, 'Trading for a Living' (1993) and 'Come Into My Trading Room' (2002) \u2014 the Triple Screen system; screen-3 trailing buy-stop rule ('place the buy order one tick above the previous day high... the order also moves down, one point above the high, until a buy opens or the main trend reverses') as documented at https://www.mql5.com/en/blogs/post/731016 and https://www.asktraders.com/learn-to-trade/trading-guide/elders-triple-screening-strategy/",
+  "novelty": "EMA pullback in trend enters on a signal bar at market. Here the entry is a resting stop order whose price is re-set lower every single day of the pullback, so the fill price and the trade set are both materially different \u2014 most EMA-pullback signals never fill under this rule, and the ones that do fill at the exact turn.",
+  "ohlcv_only": true,
+  "_agent": "v2:f5f032cda86046734ffcad9e8f804d90c918533489aa540fb34b2254c98c8019"
+ },
+ {
+  "name": "Jump-Penalised Regime Path (Statistical Jump Model)",
+  "category": "regime detection / penalised clustering",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily log returns",
+   "EWM mean / EWM std / EWM downside deviation at 3 half-lives"
+  ],
+  "entry_rule": "Build a 9-column feature matrix from daily log returns r_t: for each half-life h in {5, 21, 63} compute (a) EWM mean of r_t, (b) EWM mean of the downside deviation max(-r_t, 0), (c) EWM standard deviation of r_t. Standardise each column by its trailing 750-bar mean and sd. Over a trailing window of 750 bars fit a K=2 jump model: minimise sum_t ||x_t - mu_{s_t}||^2 + lambda * sum_t 1[s_t != s_{t-1}] by alternating (i) exact dynamic programming over the state path given fixed centroids (Viterbi-style, O(T*K^2)) and (ii) recomputing each centroid as the mean of its assigned rows; initialise with k-means++, 10 restarts, iterate to convergence. Default lambda = 50. Take the last state on the fitted path as today's regime; the centroid with the higher EWM mean and lower EWM sd is 'bull'. LONG entry at the next open when today's state is bull and yesterday's fitted state was bear.",
+  "exit_rule": "Go flat at the next open on the first bar whose fitted state is bear. No price stop - the regime path is the sole exit, which is the point of the L0 penalty.",
+  "params": [
+   "lambda jump penalty (10-200, the key knob)",
+   "K (2 or 3)",
+   "half-life set",
+   "training window",
+   "standardisation window"
+  ],
+  "why": "An HMM's persistence comes from a transition matrix whose geometric sojourn times are a modelling artefact; the jump model instead pays an explicit fixed cost lambda for every state change and solves for the globally optimal path by dynamic programming. That is a direct, tunable control on how many regime flips per year you are willing to trade, and it makes no distributional assumption at all. Downside-deviation features specifically target the asymmetry that drives drawdowns, so the bear state is defined by the risk you actually care about.",
+  "novelty": "L0 penalty on transitions solved by exact DP, rather than a probability threshold or a smoothing filter. It produces an order of magnitude fewer regime flips than a thresholded HMM posterior on the same data, and lambda is a single interpretable dial where an HMM offers none.",
+  "source": "Bemporad, Breschi, Piga & Boyd, 'Fitting jump models', Automatica 96 (2018) - the DP + centroid alternation algorithm. Financial instantiation and the risk/return feature set derived solely from the return series: arXiv:2402.05272, 'Downside Risk Reduction Using Regime-Switching Signals: A Statistical Jump Model Approach' (jump penalty chosen by time-series cross-validation on strategy performance; tested on US, German and Japanese indices 1990-2023).",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Pastor-Stambaugh Gamma Reversal",
+  "category": "microstructure / order-flow-induced reversal",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Let r_t be the daily log return and DV_t = C_t * V_t (dollar volume). Standardise dollar volume within the estimation window: dv_t = (DV_t - mean(DV, 60)) / stdev(DV, 60). Over a rolling 60-session window fit by OLS: r_{t+1} = alpha + phi * r_t + gamma * sign(r_t) * dv_t + e_{t+1}. Store the daily gamma estimate and maintain 250 trailing values of it. ENTRY at the open of session t+1, AGAINST sign(r_t), when ALL of: (a) the current gamma is at or below the 20th percentile of its trailing 250 values (this stock is in a strong order-flow-reversal regime), (b) gamma < 0 in absolute terms, (c) |r_t| >= 1.0 * ATR(14, daily) / C_t, and (d) dv_t >= +1.0 (the move was accompanied by unusually heavy dollar volume, which is what gamma prices). No trade otherwise.",
+  "exit_rule": "Exit at the close of session t+2 (a two-session hold), or on a stop at 1.5 * ATR(14, daily) against entry, or immediately at the next open if the position gapped more than 1.0 * ATR against entry.",
+  "inputs": [
+   "daily OHLCV",
+   "60-session rolling OLS",
+   "250-session percentile of gamma",
+   "ATR(14, daily)"
+  ],
+  "params": [
+   "regression window (60)",
+   "gamma percentile window (250)",
+   "entry percentile (20th)",
+   "return threshold in ATR (1.0)",
+   "volume z threshold (1.0)",
+   "hold (2 sessions)"
+  ],
+  "why": "Pastor and Stambaugh's liquidity measure is explicitly a REVERSAL coefficient, not an impact coefficient: gamma is the loading of tomorrow's return on today's signed dollar volume, and a more negative gamma means order flow pushes price further than fundamentals justify and it comes back. That is a fundamentally different object from Amihud (which is contemporaneous |return| per dollar) or Kyle's lambda (contemporaneous impact) - those measure how much a trade moves price; gamma measures how much of that move is given back. Estimating gamma per symbol and trading only when it is in the stock's own most-negative quintile means the reversal trade is taken when the stock's own recent history says reversals are what happens, and the heavy-volume condition selects the exact days gamma is about.",
+  "source": "Lubos Pastor and Robert F. Stambaugh, 'Liquidity Risk and Expected Stock Returns', Journal of Political Economy 111(3), 642-685, 2003 - the liquidity measure is the OLS gamma in a regression of next-period excess return on the current return and signed dollar volume. NOTE: their gamma is estimated monthly from daily data for an aggregate liquidity factor; converting it to a per-symbol rolling timing signal is my adaptation and should be tested as such.",
+  "novelty": "A predictive (t to t+1) coefficient rather than a contemporaneous one. Amihud illiquidity and Kyle lambda are both same-bar measures and both already in the set; gamma is the only one of the three that is about what happens NEXT, and its sign is the trading thesis rather than a filter on top of one.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ }
+]

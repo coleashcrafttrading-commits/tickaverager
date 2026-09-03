@@ -1,0 +1,216 @@
+[
+ {
+  "name": "Effective Bets Book Governor",
+  "category": "portfolio-level correlation-state gate and exit",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily closes of every currently held position",
+   "250-bar correlation matrix of held positions and its eigenvalues",
+   "first eigenvector loadings of held positions",
+   "sma(20) and sma(200) of each candidate"
+  ],
+  "params": [
+   "correlation window (250)",
+   "entry ENB floor (0.60 * (M+1))",
+   "exit ENB floor (0.50 * M)",
+   "candidate signal parameters (20/200 SMA)"
+  ],
+  "entry_rule": "Daily, portfolio level. Let the live book hold M positions. Take the correlation matrix of their daily returns over the trailing 250 bars, eigen-decompose it, let p_k = lambda_k / sum(lambda) be the normalised variance contribution of principal portfolio k, and compute the Effective Number of Bets ENB = exp(-sum_k p_k * ln p_k). A candidate that passes its own price signal - specify: close crosses above SMA20(close) while close > SMA200(close) - is entered at the next open ONLY IF the ENB recomputed with that candidate included is >= 0.60 * (M+1). Otherwise the signal is skipped and not queued.",
+  "exit_rule": "THE EXIT IS THE IDEA. If on any close the ENB of the live book falls below 0.50 * M, exit at the next open the single held position with the largest absolute loading on the first eigenvector, then re-test and repeat daily until ENB >= 0.50 * M. Positions not selected by that rule exit normally when close < SMA20(close).",
+  "why": "A fleet of independently-signalled ladders silently converges on one bet when correlations rise: the book can hold twelve tickers and carry the risk of two. The entropy of the eigenvalue distribution measures how many genuinely independent bets the book actually contains, so gating entries on it prevents concentration accumulating, and shedding the highest PC1-loading name when it breaches is the single trade that most restores independence.",
+  "novelty": "The state variable is computed from the BOOK's own holdings rather than from the market, and it governs both admission and forced liquidation. Every other idea in the corpus decides about one symbol in isolation; this one can refuse a perfectly good signal because of what is already held, and can close a profitable position purely because the book has become undiversified.",
+  "source": "Meucci (2009), 'Managing Diversification', Risk 22(5):74-79, which introduces the diversification distribution over principal portfolios and the Effective Number of Bets ENB = exp(-sum p_k ln p_k). The eigenvalue-concentration interpretation is the same statistic underlying the absorption ratio of Kritzman, Li, Page & Rigobon (2011). Applying it as a live admission-and-liquidation governor on a multi-ticker fleet is my synthesis; I did not verify the Meucci reference against its primary text in this session.",
+  "_agent": "v2:b60f7ccd09b2807a4699de50509bc5607bfc331632a1d961d462d14ae8fceee8"
+ },
+ {
+  "name": "Sector-ETF Residual S-Score",
+  "category": "factor-residual mean reversion",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "SINGLE-SYMBOL, conditioned on one ETF's data. For stock i and its sector ETF E: regress the last 60 daily returns, r_i(t) = alpha + beta*r_E(t) + eps(t), by OLS. Form the cumulative residual X(n) = sum_{k=1..n} eps(k) for n = 1..60. Fit an AR(1) to X: X(n+1) = a + b*X(n) + zeta(n+1). Derive kappa = -log(b)*252, m = a/(1-b), sigma_eq = sqrt( Var(zeta) / (1-b^2) ). Compute the s-score s = (X(60) - m) / sigma_eq. FILTER: trade only if b is in (0,1) and kappa > 8.4 (mean-reversion half-life shorter than half the 60-day estimation window). ENTER LONG stock i when s < -1.25. ENTER SHORT stock i when s > +1.25. Hedge by shorting beta dollars of E per dollar of stock (or trade the stock unhedged as a simpler variant).",
+  "exit_rule": "Close the LONG when s > -0.50. Close the SHORT when s < +0.75. Note the deliberate asymmetry - shorts are covered further from zero than longs are sold. Additional stop: exit if the kappa filter fails on a re-estimate (b <= 0 or kappa <= 8.4), i.e. the residual stopped mean-reverting.",
+  "inputs": [
+   "daily close of the stock",
+   "daily close of its sector ETF (XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLU, XLB, XLRE, XLC)",
+   "60-bar rolling OLS beta and residuals",
+   "AR(1) fit on the cumulative residual"
+  ],
+  "params": [
+   "regression window (60)",
+   "s-score open threshold (1.25)",
+   "long close (-0.50)",
+   "short close (+0.75)",
+   "kappa floor (8.4)",
+   "hedged vs unhedged leg"
+  ],
+  "why": "Decomposing a stock's return into a systematic part explained by its sector and an idiosyncratic residual isolates the component with no risk premium attached to it. A drifting cumulative residual means the stock has moved relative to its sector for reasons that are, by construction, sector-independent - typically single-name order flow. That is precisely the component that should be stationary in equilibrium, so pushing it far from its own mean creates a genuine expected-return edge that does not require taking sector or market risk. The kappa filter is the honest part: it refuses to trade names whose residual is behaving like a random walk rather than an OU process, which is where this family of strategies loses money.",
+  "source": "Avellaneda & Lee (2010), 'Statistical Arbitrage in the U.S. Equities Market', Quantitative Finance 10(7), 761-782 - ETF-regression variant; thresholds sbo=sso=1.25, sbc=0.75, ssc=0.50 and the kappa > 8.4 reversion-speed filter confirmed against the Hudson & Thames arbitragelab PCA-approach documentation (github.com/hudson-and-thames/arbitragelab, docs/source/other_approaches/pca_approach.rst).",
+  "novelty": "SINGLE-SYMBOL (needs only one extra ETF series). Unlike every mean-reversion entry in the existing 32, the quantity that reverts is not price - it is the cumulated regression residual against a benchmark, so market and sector moves are removed before the signal is computed. The units are also different: s is a distance to an OU equilibrium scaled by the OU's own stationary sigma, not by a rolling sample sd. Critically it carries an explicit no-trade condition (kappa > 8.4), which none of the 32 have.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ },
+ {
+  "name": "MRR Adverse-Selection Share",
+  "category": "microstructure / structural spread decomposition",
+  "side": "both",
+  "timeframe": "5-minute",
+  "entry_rule": "Trade-indicator proxy x_t = sign(C_t - C_{t-1}) with the previous sign carried forward when C_t = C_{t-1}, so x_t is in {-1, +1}. Over the trailing 500 bars estimate rho = the first-order sample autocorrelation of x. The Madhavan-Richardson-Roomans price equation is dp_t = (phi + theta) * x_t - (phi + rho*theta) * x_{t-1} + e_t, where theta is the asymmetric-information component and phi the order-processing/inventory component. Regress dp_t = ln(C_t / C_{t-1}) on x_t and x_{t-1} by OLS with an intercept over the same 500 bars, obtaining coefficients a (on x_t) and b (on x_{t-1}). Solve: theta = (a + b) / (1 - rho) and phi = a - theta, then ASH = clip(theta / (theta + phi), 0, 1); if theta + phi <= 0 take no trade. Let S5 = sum of x over the last 5 bars. ENTRY at the next bar's open, requiring |S5| >= 3: if ASH >= 0.60, take the side of sign(S5); if ASH <= 0.25, take the side OPPOSITE to sign(S5). No trade when 0.25 < ASH < 0.60.",
+  "exit_rule": "Exit at the close of the 10th bar after entry, or earlier when sign(S5) flips against the position, or on a stop at 1.5 * ATR(14) against entry.",
+  "inputs": [
+   "5-minute close",
+   "tick-rule trade indicator",
+   "500-bar OLS and autocorrelation",
+   "ATR(14)"
+  ],
+  "params": [
+   "estimation window (500)",
+   "ASH thresholds (0.60 / 0.25)",
+   "flow-run threshold (|S5| >= 3)",
+   "run length (5)",
+   "hold (10 bars)"
+  ],
+  "why": "MRR give a structural, estimable decomposition of every price change into three pieces: a permanent revision due to the information in the trade (theta), a transitory cost of providing liquidity (phi), and public news. Crucially, the model accounts for order-flow autocorrelation rho, so the expected component of flow is not double-counted as information - that is what separates it from a naive signed-flow regression. The share theta/(theta+phi) is then a direct read on whether this stock, right now, is trading on information or on inventory. When it is information, a run of same-signed flow is the informed side accumulating and should be followed; when it is inventory and order processing, the same run is a dealer being pushed off balance and it should be faded. The paper's own finding that information asymmetry falls and transaction costs rise across the trading day means the measure genuinely varies rather than sitting at a constant.",
+  "source": "Ananth Madhavan, Matthew Richardson, Mark Roomans, 'Why Do Security Prices Change? A Transaction-Level Analysis of NYSE Stocks', Review of Financial Studies 10(4), 1035-1064, 1997 (https://ideas.repec.org/a/oup/rfinst/v10y1997i4p1035-64.html) - the structural model of intraday price formation whose estimates show information asymmetry decreasing and transaction costs increasing over the day. PROXY NOTE: the paper signs trades against quotes; here the tick rule on bar closes is the substitute.",
+  "novelty": "A structural two-parameter decomposition solved from a constrained regression, not a single slope or ratio. The prior pass's temporary/permanent switch classifies event bars empirically by a reversal ratio; MRR separates the two components analytically from ALL bars and explicitly de-biases for flow autocorrelation, which nothing in the existing set does. The switch then applies to a flow-run condition rather than to a single large return.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ },
+ {
+  "name": "Dual-timeframe weighted-ROC (KST) trigger",
+  "category": "multi-horizon momentum trend system",
+  "side": "both",
+  "timeframe": "daily entries gated by monthly",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily closes",
+   "monthly closes (resampled)",
+   "rate of change",
+   "simple moving averages"
+  ],
+  "entry_rule": "Define RCMA_i = SMA(ROC(n_i), s_i) where ROC(n)[t] = 100*(Close_t/Close_{t-n} - 1). DAILY KST: (n,s) pairs (10,10), (15,10), (20,10), (30,15); KST_d = 1*RCMA1 + 2*RCMA2 + 3*RCMA3 + 4*RCMA4; Signal_d = SMA(KST_d, 9). MONTHLY KST on month-end closes: (n,s) pairs (9,6), (12,6), (18,6), (24,9); same 1/2/3/4 weights; Signal_m = SMA(KST_m, 9). ENTER LONG at the close of daily bar t when ALL of: (1) on the most recently COMPLETED month, KST_m > Signal_m; (2) KST_m > 0; (3) KST_d crosses above Signal_d on bar t (KST_d[t-1] <= Signal_d[t-1] and KST_d[t] > Signal_d[t]); (4) KST_d[t] > KST_d[t-1]. SHORT is the exact mirror with KST_m < Signal_m, KST_m < 0, and a downward daily signal-line cross.",
+  "exit_rule": "Exit the long on whichever comes first: (a) KST_d crosses below Signal_d, or (b) the newly completed month shows KST_m < Signal_m. Hard stop at entry - 2.5 * ATR(14) that never widens.",
+  "params": [
+   "daily ROC set (10,15,20,30) and smoothing (10,10,10,15)",
+   "monthly ROC set (9,12,18,24) and smoothing (6,6,6,9)",
+   "weights (default 1,2,3,4)",
+   "signal length (default 9)",
+   "hard stop ATR multiple"
+  ],
+  "why": "A single-horizon oscillator has to choose which cycle it is measuring. KST sums four smoothed rates of change spanning roughly two weeks to six weeks (daily) or nine to twenty-four months (monthly) and weights the longer horizons more heavily, so the composite only turns when several horizons agree, with the slow ones carrying the vote. Gating daily signals on the monthly composite means the fast trigger is only allowed to fire in the direction of the long cycle, which is the source of most of the edge in oscillator systems.",
+  "novelty": "MACD is a difference of two EMAs at one horizon and TRIX is a triple-smoothed single ROC. KST is a weighted SUM of four independently smoothed ROCs at four horizons with fixed 1:2:3:4 weights - a different functional form that cannot be reproduced by tuning MACD parameters. The monthly-gates-daily structure is also a different gating variable from the ADX gate already in the book.",
+  "source": "Martin J. Pring's Know Sure Thing. Parameters KST(10,15,20,30,10,10,10,15,9) for the short-term/daily version and KST(9,12,18,24,6,6,6,9,9) for the long-term/monthly version, the 1/2/3/4 weighting, the 9-period signal line, and Pring's preference for signal-line crossovers over centreline crossovers on longer timeframes - all verified from StockCharts ChartSchool 'Pring's Know Sure Thing (KST)' (fetched 2026-09-02).",
+  "_agent": "v2:28e034d84f2a9fadfe2cd37476ed1f0fe31299b3ab96ab30d97df90c3ec92854"
+ },
+ {
+  "name": "MedRV Jump-Fraction Split for Breakouts",
+  "category": "jump-robust realized measure / breakout regime split",
+  "side": "both",
+  "timeframe": "daily, built from 5-minute bars",
+  "entry_rule": "Each day compute from the M 5-minute log returns: RV_t = sum(r_i^2); the nearest-neighbour-truncation estimator MedRV_t = [pi / (6 - 4*sqrt(3) + pi)] * (M/(M-2)) * sum_{i=2..M-1} med(|r_{i-1}|, |r_i|, |r_{i+1}|)^2; bipower variation BV_t = (pi/2) * sum_{i=2..M} |r_i| * |r_{i-1}|; and tri-power quarticity TQ_t = M * (M/(M-2)) * (Gamma(0.5)/(2^(2/3)*Gamma(7/6)))^3 * sum_{i=3..M} |r_i|^(4/3)*|r_{i-1}|^(4/3)*|r_{i-2}|^(4/3). Form the Andersen-Bollerslev-Diebold jump statistic z_t = ((RV_t - BV_t)/RV_t) / sqrt(((pi/2)^2 + pi - 5) * (1/M) * max(1, TQ_t / BV_t^2)), which is asymptotically N(0,1), and the jump fraction JF_t = max(0, RV_t - MedRV_t)/RV_t. CONTINUOUS BRANCH: go LONG at the next open when today's close is the highest close of the last 20 days AND z_t < 1.96 AND JF_t <= 0.10. JUMP BRANCH: when today's close is the highest close of the last 20 days AND z_t > 2.58 AND JF_t >= 0.30, go SHORT at the next open instead.",
+  "exit_rule": "Long: exit on a close below the 10-day low, or after 10 trading days. Short (jump-fade branch): exit on a close above the entry-day high, or when JF over the following days drops below 0.10 for two consecutive sessions, or after 5 trading days - jump fades are shorter-lived than continuous trends, so the two branches deliberately have different exit structures.",
+  "inputs": [
+   "5-minute OHLCV",
+   "daily closes",
+   "20-day and 10-day close extremes"
+  ],
+  "why": "MinRV and MedRV estimate integrated variance using the minimum or median of adjacent absolute returns, so a single jump contaminates at most one of the three neighbours and is truncated away. Unlike bipower variation they degrade gracefully with zero returns and are far better behaved in finite samples. The RV minus MedRV difference is therefore a clean estimate of jump variation. The economic split: a 20-day breakout assembled out of continuous diffusive trading is a sustained order-flow imbalance and tends to persist, whereas a breakout produced by one discrete jump is a repricing that is already complete the moment it prints, so the marginal buyer arriving after it is the one who gets faded.",
+  "source": "Andersen, Dobrev & Schaumburg (2012), 'Jump-robust volatility estimation using nearest neighbor truncation', Journal of Econometrics 169, 75-93. MedRV/MinRV constants and tri-power quarticity exactly as implemented in the R highfrequency package (rMedRVar, rMinRVar, rTPQuar, BNSjumpTest), CRAN reference manual pp. 16-17 and 92-96: https://cran.r-project.org/web/packages/highfrequency/highfrequency.pdf. Jump statistic form from Andersen, Bollerslev & Diebold (2007), 'Roughing it up', Review of Economics and Statistics 89, 701-720.",
+  "ohlcv_only": true,
+  "params": [
+   "MedRV vs MinRV",
+   "jump z thresholds (1.64 / 1.96 / 2.58 / 3.09)",
+   "JF thresholds (0.05 / 0.10 / 0.20 / 0.30)",
+   "breakout lookback",
+   "bar size (1 / 5 / 15 min)",
+   "whether to require the jump be signed in the breakout direction using RS_plus - RS_minus"
+  ],
+  "novelty": "Existing ATR-expansion breakouts treat all variance as one thing. This asks whether the move was continuous or discontinuous and takes opposite sides in the two cases, so it is two entry logics and two exit structures out of one estimator, not a threshold tweak.",
+  "_agent": "v2:7553de6b0ec86a2f6842bf8a52309d6335e8a8ccb631ed57c8015c0d2345e01c"
+ },
+ {
+  "name": "Deal-Pinned Target Spread Convergence",
+  "category": "corporate event / merger arbitrage",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of symbol",
+   "daily OHLCV of SPY",
+   "50-session median volume",
+   "rolling realised volatility",
+   "rolling OLS beta to SPY"
+  ],
+  "entry_rule": "Day-0 candidate: open_0/close_-1 - 1 >= +0.12 AND volume_0 >= 5x the median volume of sessions -50..-1 AND close_0 >= 0.95*high_0. Set the implied deal ceiling P* = max(high) over sessions 0..+5. Confirm the PINNED STATE over sessions +1..+20, requiring all three: (a) realised volatility of daily log closes over +1..+20 <= 0.35x the realised volatility over -60..-1; (b) |OLS beta of daily returns to SPY estimated over +1..+20| <= 0.15; (c) every close in +1..+20 lies inside [0.85*P*, 1.02*P*]. If the pinned state holds, enter LONG at the first close on or after session +21 at which close <= 0.97*P*.",
+  "exit_rule": "Take profit when close >= 0.995*P*. Deal-break stop: exit at the next open after any session whose close < 0.90*P* AND whose volume >= 3x its 50-session median. Time exit after 180 sessions in the position (deals that drag past that are regulatory hostages). Re-arm the setup only after a fresh day-0 candidate.",
+  "why": "Once a cash acquisition is announced the target detaches from the market: its price is a claim on a fixed cash amount contingent on closing, so its idiosyncratic volatility collapses, its market beta collapses toward zero, and it trades in a narrow band capped by the offer. The residual spread is compensation for deal-break risk and for the arbitrageur's capital being tied up, and it converges mechanically as the closing date approaches. Mitchell & Pulvino, over 4,750 mergers from 1963 to 1998, find risk-arbitrage returns are uncorrelated with the market in flat and rising tapes but correlated in severely falling ones - a written-put payoff - and estimate roughly 4% per year of excess return after transaction costs. The bar signature used here (huge gap on huge volume, closing at the high, then a joint collapse of variance AND beta with the price capped) is the observable fingerprint of exactly that state, so no news feed is required.",
+  "source": "Mitchell & Pulvino (2001) 'Characteristics of Risk and Return in Risk Arbitrage', Journal of Finance - abstract retrieved verbatim via the OpenAlex API (4,750 mergers 1963-1998; returns like selling uncovered index puts; ~4% per year excess after transaction costs). Deal-break base rates from Baker & Savasoglu (2002) - 22.7% break rate over 1,901 mergers 1981-1996 - and the 8.0% break rate over 2,182 mergers 1990-2007, both as summarised at https://en.wikipedia.org/wiki/Risk_arbitrage, which also documents the hostile (38%) versus friendly (82%) completion split.",
+  "novelty": "Identifies an announced acquisition target from OHLCV alone through a JOINT variance-and-beta collapse underneath a reconstructed price ceiling, then trades the convergence of a bounded, capped payoff. There is nothing directional about it - it is the first capped-payoff convergence trade in the corpus, and the reference level (P*) is a reconstructed deal price rather than a moving average, channel or pivot.",
+  "params": [
+   "announcement gap threshold (8%/12%/20%)",
+   "volume multiple (3x/5x/10x)",
+   "ceiling window (0..+3 / 0..+5 / 0..+10)",
+   "vol-collapse ratio (0.25/0.35/0.50)",
+   "beta ceiling (0.10/0.15/0.30)",
+   "confirmation length (10/20/30 sessions)",
+   "entry discount to P* (1%/3%/6%)",
+   "break stop (0.85/0.90/0.93 x P*)",
+   "max hold (120/180/300 sessions)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Stationary Bootstrap Lower-Bound Kelly",
+  "category": "estimation-risk-aware position sizing",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "For each armed rule, take its per-bar P&L series over the trailing T = 1260 bars. Draw B = 2000 stationary-bootstrap resamples: start at a uniformly random index; at each step, with probability q jump to a new uniform random index, otherwise advance by one, wrapping at the end; the block length is therefore geometric with mean 1/q. Choose q by the Politis-White automatic rule, or as a simple default q = T^(-1/3) (about 1/11 at T=1260, i.e. 11-bar mean blocks). Compute the annualised Sharpe of each resample; let SR_lcb be the 10th percentile of that bootstrap distribution and SR_point the full-sample Sharpe. The rule takes its OWN entry signals at risk fraction w = clip(SR_lcb / SR_point, 0, 1) * f_kelly, with f_kelly = 0.25 (quarter-Kelly on the point estimate). A rule with SR_lcb <= 0 takes no positions at all.",
+  "exit_rule": "Each position exits on the rule's own signal. Re-bootstrap monthly and reset w at the next bar's open. Go and stay flat when SR_lcb <= 0 at two consecutive monthly recomputes. Additionally, compute the bootstrap distribution of maximum drawdown across the 2000 resamples and hard-stop the rule for the remainder of the quarter if the live drawdown exceeds the 95th percentile of that distribution - a drawdown deeper than 95% of what the rule's own resampled history can produce is evidence the edge is gone, not evidence of bad luck.",
+  "inputs": [
+   "per-bar P&L of the rule",
+   "stationary bootstrap resampler",
+   "annualised Sharpe and maximum drawdown of each resample",
+   "empirical quantile function"
+  ],
+  "why": "Full-Kelly on a POINT Sharpe estimate is a well-known route to ruin, because the estimate is itself a random variable and Kelly is convex in it - the loss from over-betting on an over-estimated edge exceeds the gain from under-betting. Sizing on a bootstrapped lower confidence bound makes the position an explicit function of estimation risk: a rule with 1260 clean bars and a stable edge gets nearly full size, a rule with the same point Sharpe but wild path dependence gets a fraction. The stationary bootstrap is the right resampler here specifically because trading P&L is autocorrelated and heteroskedastic - an IID bootstrap would produce far too tight a confidence interval and hand you exactly the over-sizing you were trying to avoid. The geometric (rather than fixed) block length is what keeps the resampled series stationary, which fixed-block methods do not guarantee.",
+  "novelty": "Position size is a function of the WIDTH of the Sharpe confidence interval, not just its centre - a sizing law that no rule in the corpus applies. The drawdown-percentile hard stop uses the rule's own resampled distribution as the reference, rather than a fixed dollar or percentage limit.",
+  "source": "Politis, D. N. & Romano, J. P. (1994), 'The Stationary Bootstrap', Journal of the American Statistical Association 89(428), 1303-1313. Automatic block-length selection: Politis, D. N. & White, H. (2004), 'Automatic Block-Length Selection for the Dependent Bootstrap', Econometric Reviews 23(1), 53-70 (with the correction in Patton, Politis & White 2009). The under-betting rationale is standard Kelly estimation-risk analysis; combining it with a stationary-bootstrap lower bound and a bootstrap-drawdown stop is my synthesis.",
+  "ohlcv_only": true,
+  "params": [
+   "q / mean block length (5 / 11 / 20 / 50 bars)",
+   "B resamples (500 / 2000 / 10000)",
+   "confidence percentile (5th / 10th / 25th)",
+   "f_kelly (0.10 / 0.25 / 0.50)",
+   "drawdown stop percentile"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Excess Tail Fade to POC",
+  "category": "auction-market-theory",
+  "side": "both",
+  "timeframe": "daily structure, 15-minute execution",
+  "entry_rule": "Build the same 30-minute TPO profile for a completed session. EXCESS HIGH: there are >= 2 consecutive topmost rows each with TPO count == 1 (single prints) and those rows together span >= 5% of the session range; the tail base TB = the lowest of those single-print rows. Record TB and that session's POC. ENTRY (within the next 5 sessions, tail not yet erased): if price trades above TB and then a 15-minute bar CLOSES back below TB, sell short at that close. Mirror for an excess low: price trades below the tail base and a 15-minute bar closes back above it - buy at that close. Erase the record if any session closes beyond the excess extreme.",
+  "exit_rule": "Target = the POC of the session that produced the excess tail; exit fully there. Stop = the excess extreme (session high for a short, session low for a long) + / - 0.10*ATRd. Exit at 15:55 ET of the 2nd session after entry if the POC is unreached.",
+  "inputs": [
+   "ohlcv (30-minute for the TPO profile, 15-minute for execution)",
+   "TPO counts per price row",
+   "register of excess tails and their session POCs",
+   "atr(14) daily"
+  ],
+  "params": [
+   "row width (0.05 ATRd)",
+   "minimum single-print rows (2)",
+   "minimum tail span (5% of session range)",
+   "register depth (5 sessions)",
+   "stop buffer (0.10 ATRd)",
+   "hold limit (2 sessions)"
+  ],
+  "why": "Excess is the auction-theory definition of a COMPLETED auction: a tail of prices touched by only one time period means aggressive opposing size appeared instantly and rejected the level. Where a poor high says 'come back and finish', an excess high says 'this is done'. Re-entering a rejected zone and failing to hold above its base is a re-confirmation of the original rejection, and the natural objective is the price the same session agreed was fair - its POC.",
+  "source": "Dalton, Jones & Dalton, 'Mind Over Markets'; excess/tail definitions per the 'Excess + Tails in TPO profile' tear sheet (webflow-hosted, 2020) and the ShadowTrader glossary entries for excess high/excess low ('the minimum number of TPOs necessary to define an excess low is two').",
+  "ohlcv_only": true,
+  "novelty": "Forms a mutually exclusive pair with Poor High/Low Repair: the same TPO machinery classifies a session extreme as either excess (fade it) or poor (trade toward it), producing opposite trades at price structures that look identical on a candlestick chart. The profit target is a prior session's modal price, not a swing level, ratio or ATR multiple.",
+  "_agent": "v2:1db7bf8f003d6a64be250b11b84dc6de7bdcc59f0e1caf59d48acdf061b67153"
+ }
+]

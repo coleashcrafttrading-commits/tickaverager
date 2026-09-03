@@ -1,0 +1,211 @@
+[
+ {
+  "name": "Reflex Displacement inside TrendFlex Regime",
+  "category": "Ehlers DSP / self-normalised zero-lag oscillators",
+  "side": "both",
+  "timeframe": "any (daily and 15-minute)",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "ATR(14)"
+  ],
+  "entry_rule": "Compute the SUPER SMOOTHER with period 20 on close: a1 = exp(-sqrt(2)*pi/20); b1 = 2*a1*cos(sqrt(2)*pi/20); c2 = b1; c3 = -a1^2; c1 = 1 - c2 - c3; Filt = c1*(C + C[1])/2 + c2*Filt[1] + c3*Filt[2]. REFLEX with window n = 20: slope = (Filt[n] - Filt)/n; sum = 0; for j = 1..n: sum += (Filt + j*slope) - Filt[j]; sum /= n; MS_r = 0.04*sum^2 + 0.96*MS_r[1]; Reflex = sum/sqrt(MS_r) when MS_r > 0. TRENDFLEX with the same n: sum2 = 0; for j = 1..n: sum2 += (Filt - Filt[j]); sum2 /= n; MS_t = 0.04*sum2^2 + 0.96*MS_t[1]; TrendFlex = sum2/sqrt(MS_t). ENTER LONG at the close of bar t when: TrendFlex[t] > 0 AND Reflex[t] <= -2.0 AND Reflex[t-1] > -2.0 (a fresh 2-sigma displacement below the fitted trend line, inside an up regime). Mirror for short: TrendFlex < 0 and Reflex crosses up through +2.0.",
+  "exit_rule": "Exit at the close of the first bar where any of: (a) Reflex >= +1.0 (the displacement has been fully reclaimed and then some), (b) TrendFlex crosses below 0 (the regime that justified the trade is gone), (c) 25 bars elapse. Hard stop at 2.0 * ATR(14).",
+  "why": "Reflex measures the vertical distance between the smoothed price and the straight line joining the smoothed price to its value n bars ago, then divides that distance by the square root of an EWMA of its own square \u2014 a self-calibrating standard-error. So Reflex = -2 literally means 'price is two of its own recent standard deviations below where a straight-line interpolation of the last 20 bars would put it', with essentially zero lag because the detrending removes the filter's group delay. TrendFlex, computed from the same filtered series, answers whether the longer drift is up. The pair therefore separates 'where the trend is going' from 'how far price has been displaced from it right now', which is exactly the decomposition a mean-reversion-in-trend trade needs.",
+  "novelty": "An EMA-pullback rule measures the pullback in price or ATR units against a lagging average; here the reference is a ZERO-LAG interpolated line and the pullback is measured in units of the statistic's OWN EWMA standard deviation (the 0.04/0.96 recursion), which makes the entry threshold genuinely comparable across tickers and volatility regimes with no per-symbol tuning. The two oscillators are also orthogonal constructions from one filtered series \u2014 Reflex detrends against the slope, TrendFlex does not \u2014 which is a different decomposition from 'fast MA vs slow MA'.",
+  "params": [
+   "SuperSmoother period (10/20/40)",
+   "Reflex/TrendFlex window n (10/20/30)",
+   "EWMA constants (0.04/0.96 vs 0.02/0.98)",
+   "entry displacement threshold (1.5/2.0/2.5)",
+   "Reflex exit level (0.5/1.0/2.0)",
+   "time stop (15/25/50)"
+  ],
+  "source": "John F. Ehlers, 'Reflex: A New Zero-Lag Indicator', Technical Analysis of Stocks & Commodities, February 2020 (Reflex and TrendFlex). The slope-detrended sum, the 0.04/0.96 mean-square EWMA and the division by sqrt(MS) were verified against github.com/MathisWellmann/go_ehlers_indicators, file re_flex.go, which I fetched and read. The TrendFlex-gated displacement entry is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "ICSS Variance Break Restart",
+  "category": "structural break test as signal",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Take the last T=250 daily log returns, demeaned. Let C_k = SUM_{t=1..k} r_t^2 and D_k = C_k/C_T - k/T. Inclan-Tiao statistic IT = sqrt(T/2) * max_k |D_k|; declare a variance break at k* = argmax_k |D_k| when IT > 1.358 (5% critical value; use 1.628 for 1%). TRADE when a break is declared with k* falling within the last 3 bars AND var(r) over the bars after k* < 0.6 * var(r) over the bars before k*, i.e. the volatility regime just contracted. LONG at the next open if the sum of log returns from k* to today > 0; SHORT if < 0. Ignore breaks where variance increased.",
+  "exit_rule": "Exit on the next declared break (in either direction), or after 30 sessions, or on a stop of 2.0 * post-break ATR(14) - note the stop is computed from post-break volatility only, so it tightens automatically when the regime contracts.",
+  "inputs": [
+   "daily close",
+   "log returns",
+   "ATR(14) computed on post-break bars"
+  ],
+  "params": [
+   "T (150, 250, 500)",
+   "critical value (1.358, 1.628)",
+   "variance contraction ratio (0.5, 0.6, 0.75)",
+   "recency of break (1, 3, 5 bars)",
+   "max hold"
+  ],
+  "why": "The ICSS statistic converges to the supremum of a Brownian bridge under constant variance, so it gives a calibrated answer to 'has the variance level actually changed, or is this just clustering?'. A confirmed downward break marks the end of a stress episode - the point at which risk models release capacity. Trading in the direction of drift measured only since the break avoids the classic error of measuring trend across a regime boundary, where pre-break volatility dominates the estimate.",
+  "novelty": "Both the entry timing and the stop distance are anchored to a detected change point rather than to a fixed lookback. Every lookback in the existing 32 is fixed-length and therefore straddles regime boundaries by construction.",
+  "source": "Inclan & Tiao (1994), 'Use of Cumulative Sums of Squares for Retrospective Detection of Changes of Variance', JASA 89(427), 913-923. GARCH-robust kappa_2 variant (recommended, since raw IT over-rejects on leptokurtic data): Sanso, Arago & Carrion (2004), 'Testing for changes in the unconditional variance of financial time series', https://dea.uib.eu/digitalAssets/128/128259_1.pdf . R reference implementation: https://cran.r-project.org/web/packages/ICSS/ICSS.pdf",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Ease Of Movement Air Pocket",
+  "category": "effort versus result / box ratio",
+  "side": "both",
+  "timeframe": "daily or 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "high",
+   "low",
+   "volume",
+   "box ratio = volume/(high-low)",
+   "ease of movement EMV",
+   "sma(EMV,14)",
+   "atr(14)",
+   "100-bar percentiles of box ratio"
+  ],
+  "params": [
+   "entry box-ratio percentile (15th)",
+   "exit box-ratio percentile (85th)",
+   "extreme lookback (20)",
+   "EMV smoothing (14)",
+   "trailing stop multiple (2 ATR)"
+  ],
+  "entry_rule": "Compute Arms's Ease of Movement exactly: box ratio BR_t = volume_t / (high_t - low_t); EMV_t = ((high_t - high_{t-1}) + (low_t - low_{t-1})) / 2 * (high_t - low_t) / volume_t, scaled by 1e8; skip any bar with high_t == low_t. LONG at the next bar's open when: BR_t <= the 15th percentile of BR over the trailing 100 bars, AND close_t > open_t, AND close_t is the highest close of the last 20 bars, AND SMA(EMV,14) at t > 0. SHORT at the next open when: BR_t <= the 15th percentile of BR over the trailing 100 bars, AND close_t < open_t, AND close_t is the lowest close of the last 20 bars, AND SMA(EMV,14) at t < 0.",
+  "exit_rule": "Exit when BR_t >= the 85th percentile of its trailing 100 values (heavy volume per unit range has returned - the pocket has been filled and someone is now defending the price), OR on a trailing stop of 2 * ATR(14) from the best close reached since entry.",
+  "why": "Box ratio is volume required per unit of price travel, i.e. the local depth of resting liquidity. A break to a 20-bar extreme achieved on an unusually LOW box ratio means the price level had almost nobody willing to trade there - the book was thin, so continuation is cheap. Arms's own framing is that the indicator rises when prices move easily on relatively low volume. The exit is symmetric: the trade is over the moment liquidity reappears at the price.",
+  "novelty": "Treats low volume-per-unit-range as the entry signal itself, the opposite of every volume-confirmation breakout rule and distinct from a volume dry-up setup (which uses quiet volume only as a precondition for a later expansion trigger). Both entry and exit are functions of the box ratio's own percentile, so the volume distribution defines the whole trade lifecycle.",
+  "source": "Ease of Movement / box ratio arithmetic verified from the open-source `ta` library source, https://raw.githubusercontent.com/bukosabino/ta/master/ta/volume.py (EaseOfMovementIndicator: emv = (high.diff(1) + low.diff(1)) * (high - low) / (2 * volume) * 1e8). Indicator originally Richard W. Arms Jr.; the air-pocket entry/exit is my synthesis.",
+  "_agent": "v2:d2c68c917bfc2191138a0a4fd2776864b6bac0b59fb98dd59663666fef7408af"
+ },
+ {
+  "name": "52-Week High Proximity Level",
+  "category": "anchoring to a salient reference price",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Daily, computed on the last session of each month. PH = close_t / max(high over sessions t-251..t). LONG when: (1) PH >= 0.92 and PH < 1.00; (2) close_t is NOT a new 252-session high, and no new 252-session high has been made in the last 5 sessions; (3) across the fleet, PH ranks in the top 30%. SHORT when PH <= 0.55 and PH ranks in the bottom 30% of the fleet.",
+  "exit_rule": "Hold 126 trading sessions, then exit at the close regardless. Early exit for longs if PH falls below 0.75; early exit for shorts if PH rises above 0.70. Rebalance one-sixth of the book each month so six overlapping cohorts run at once (the George-Hwang overlapping-portfolio construction).",
+  "inputs": [
+   "close",
+   "high (252-session rolling max)",
+   "cross-sectional ranking across the fleet"
+  ],
+  "params": [
+   "PH long band (0.92 to 1.00)",
+   "PH short threshold (0.55)",
+   "cross-sectional cutoff (30%)",
+   "holding period (126 sessions)",
+   "exclusion window for fresh highs (5 sessions)",
+   "early-exit PH levels"
+  ],
+  "why": "George and Hwang show that a stock's price relative to its 52-week high predicts future returns better than its own past return does, and that these forecasts do not reverse in the long run. Their mechanism is pure anchoring: 'traders use the 52-week high as a reference point against which they evaluate the potential impact of news. When good news has pushed a stock's price near or to a new 52-week high, traders are reluctant to bid the price of the stock higher even if the information warrants it. The information eventually prevails and the price moves up.' Grinblatt and Keloharju's Finnish account data corroborate the price-level effect directly: investors are much more likely to sell a stock near a historical high and to buy one near a historical low.",
+  "source": "Thomas J. George and Chuan-Yang Hwang, 'The 52-Week High and Momentum Investing', Journal of Finance 59(5), October 2004, 2145-2176 - VERIFIED by reading the PDF at https://www.bauer.uh.edu/tgeorge/papers/gh4-paper.pdf. p.5: 'stocks are ranked based on P_{i,t-1}/high_{i,t-1}, where P_{i,t-1} is the price of stock i at the end of month t-1 and high_{i,t-1} is the highest price of stock i during the 12-month period that ends on the last day of month t-1'. Table I: winner-minus-loser 0.45% per month (t=2.00), 30% cutoffs, 6-month hold, 1963-2001. Anchoring quote from p.2, Grinblatt-Keloharju corroboration in footnote 1.",
+  "novelty": "This is deliberately NOT a breakout, which is what separates it from the Donchian channel we already run. Condition (2) explicitly disqualifies the bar that makes the new high and the five sessions after it: the trade is on stocks sitting just under the anchor, unable to get through it. The signal is a price LEVEL ratio, not a price CHANGE - George and Hwang's own headline finding is that 'price levels are more important determinants of momentum effects than are past price changes'. Holding period is months, not bars.",
+  "ohlcv_only": true,
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Rest-of-Day Hedging Momentum",
+  "category": "dealer-gamma",
+  "side": "both",
+  "timeframe": "intraday, one decision per day at 15:30 ET",
+  "entry_rule": "At 15:30 ET compute rROD = log(P_15:30 / previous session's close) - this deliberately includes the overnight gap. If rROD > +0.0010 go LONG; if rROD < -0.0010 go SHORT. No trade if |rROD| <= 0.0010.",
+  "exit_rule": "Exit market-on-close the same session (single 30-minute hold, no overnight risk).",
+  "inputs": [
+   "5-min or 1-min OHLCV",
+   "previous daily close"
+  ],
+  "params": [
+   "threshold on |rROD| (0 / 0.0010 / 0.0025)",
+   "entry clock (15:25/15:30/15:40)",
+   "use rROD vs rONFH (overnight+first half hour) as predictor"
+  ],
+  "why": "Baltussen, Da, Lammers and Martens show the last-30-minute return is positively and significantly predicted by the rest-of-day return across 60+ futures markets from 1974-2020, with annualised Sharpe ratios of 0.87 to 1.73 at asset-class level. The mechanism is that option and leveraged-ETF market makers are net short gamma, so hedging requires trading in the direction the price already moved, and they defer the bulk of that hedge to the close because liquidity is best there, BIS capital requirements are driven by deltas at close, and overnight positions carry higher margin and financing. They verify the mechanism directly: intraday momentum is present when their negative-gamma-exposure proxy is negative, and absent when it is positive.",
+  "source": "Baltussen, Da, Lammers & Martens (2021), 'Hedging demand and market intraday momentum', Journal of Financial Economics 142(1), 377-403. Full text read at https://academicweb.nd.edu/~zda/intramom.pdf",
+  "novelty": "The predictor spans from the previous close through 15:30 - it is a fixed-clock cumulative return that includes the overnight session, not a bar-count lookback. The trade is a hard-scheduled 30-minute window with a market-on-close exit, so entry and exit times are constants rather than signal-driven. Nothing about it is a crossover or a threshold on an oscillator.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Reverse-Split Ex-Date Delayed Short",
+  "category": "corporate action",
+  "side": "short",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV requested unadjusted (adjustment=raw)",
+   "daily OHLCV requested split-adjusted (adjustment=split)",
+   "raw price level",
+   "250-session return"
+  ],
+  "entry_rule": "Using the same factor F_s = raw_close_s / split_adjusted_close_s and k_t = F_t/F_{t-1}, a reverse-split ex-date is any session with k_t >= 1.40 (the implied reverse ratio is k_t itself: a 1-for-10 reverse gives k = 10). Require additionally: the symbol's trailing 250-session split-adjusted return <= -50% AND the median RAW close over the 20 sessions preceding the ex-date < $5.00. Enter SHORT at the close of the session AFTER the ex-date - one full session of delay is part of the rule.",
+  "exit_rule": "Cover at the close of the 60th session after entry. Cover early on a +25% stop from the entry fill, or immediately at the next open if the split-adjusted close exceeds the ex-date session's split-adjusted high.",
+  "why": "A reverse split is almost never a discretionary signal of confidence: it is a listing-compliance action taken by a company whose share price has fallen below an exchange minimum, and it is very often the precursor to further dilutive issuance because the higher nominal price restores the ability to issue. Multiplying the price by ten changes nothing about the dilution path, and documented post-reverse-split returns are strongly negative. The deliberate one-session delay is the crux: reverse-split day itself frequently produces a sharp squeeze, because shares outstanding drop by the split factor overnight, existing borrow is recalled and re-established, and short interest as a percentage of float is mechanically distorted. Waiting one session lets that mechanical squeeze exhaust.",
+  "source": "Ikenberry, Rankine & Stice (1996) on the signalling content of splits (the reverse-split literature is its mirror image); Kim, Klein & Rosenfeld (2008) 'Return Performance Surrounding Reverse Stock Splits' on post-reverse-split underperformance. Detection method is a synthesis from the Alpaca bars `adjustment` parameter, verified numerically.",
+  "novelty": "Same raw-versus-adjusted detection primitive as the forward-split rule but with the opposite sign, a different qualifying population (sub-$5 raw price, heavy prior decline) and an explicit one-session entry delay written into the rule to sidestep a known mechanical squeeze - a distinct entry-timing structure, not a threshold flip.",
+  "params": [
+   "reverse-ratio floor (1.4/4.0/10.0)",
+   "prior-decline filter (-30%/-50%/-70%)",
+   "raw price ceiling ($1/$5/$10)",
+   "entry delay (0/1/3 sessions)",
+   "hold horizon (20/60/120 sessions)",
+   "stop (+15%/+25%/+40%)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Systematic Variance Share Regime",
+  "category": "volatility",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close of the traded symbol",
+   "daily close of SPY",
+   "OLS regression",
+   "ATR(14)",
+   "SMA20 and SMA50"
+  ],
+  "params": [
+   "regression window 60",
+   "percentile history 504",
+   "idiosyncratic percentile 25",
+   "systematic percentile 75",
+   "residual excursion 2.0 sigma",
+   "beta floor 1.0",
+   "time stop 10"
+  ],
+  "entry_rule": "Requires a second symbol from the same OHLCV feed - SPY. Over the last 60 sessions regress the stock's daily log returns r_t on SPY's daily log returns m_t with an intercept: r_t = alpha + beta*m_t + eps_t. Record beta, the residual standard deviation sigma_e, the residual series eps_t, and R^2. R^2 is the systematic variance share; 1 - R^2 is the idiosyncratic share. Rank R^2 against its own trailing 504-session history to get percentile P_R2. IDIOSYNCRATIC MODE when P_R2 <= 25: compute the 5-session cumulative residual CR = SUM of eps over the last 5 sessions. Enter LONG at the next open when CR <= -2.0 * sigma_e * sqrt(5); SHORT at the next open when CR >= +2.0 * sigma_e * sqrt(5). SYSTEMATIC MODE when P_R2 >= 75: enter LONG at the next open when SPY's close > SPY's SMA50 AND beta >= 1.0 AND the stock's close > its own SMA20; enter SHORT when SPY's close < SPY's SMA50 AND beta >= 1.0 AND the stock's close < its own SMA20. No trade when 25 < P_R2 < 75.",
+  "exit_rule": "Idiosyncratic leg: exit at the close when CR crosses back through 0, or on a stop 2.0*ATR(14) from entry, or after 10 sessions. Systematic leg: exit at the next open when SPY closes back through its own SMA50 against the position, or on a trailing stop 3.0*ATR(14) from the extreme close since entry.",
+  "why": "Total variance decomposes into a systematic part and an idiosyncratic part, and the two have opposite trading implications. When R^2 is high the name is a levered market proxy: fading its excursions means fading the index, which is a losing trade because index moves are the persistent component. When R^2 is low the name is trading on its own story and its excursions are genuinely idiosyncratic supply-demand imbalances, which do revert. The second refinement is that the idiosyncratic leg fades the RESIDUAL excursion, not the raw price excursion - so a stock down 6% in a week when the market is down 6% has a residual of roughly zero and is correctly left alone, while every ATR- or Bollinger-based fade would be screaming at it.",
+  "novelty": "Decomposes volatility into systematic and idiosyncratic components and uses the SHARE as the regime switch, then trades the residual rather than the price. Every listed strategy operates on a single symbol in isolation and cannot distinguish a stock-specific dislocation from a market move that the stock merely inherited.",
+  "source": "Campbell, Lettau, Malkiel & Xu (2001), 'Have Individual Stocks Become More Volatile? An Empirical Exploration of Idiosyncratic Risk', Journal of Finance 56(1) - the market/industry/idiosyncratic variance decomposition. Ang, Hodrick, Xing & Zhang (2006), 'The Cross-Section of Volatility and Expected Returns', Journal of Finance 61(1) - the idiosyncratic volatility measure from a market-model regression. Cited from knowledge (web search budget exhausted). Both are cross-sectional papers; the time-series regime-switch application and the residual-excursion entry are my synthesis.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "Volume-Clock vs Wall-Clock Volatility Ratio",
+  "category": "alternative bar construction / volume bars",
+  "side": "long",
+  "timeframe": "intraday (volume bars built from 1-minute data)",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute OHLCV",
+   "5-minute bars",
+   "20-day median daily volume"
+  ],
+  "entry_rule": "Build VOLUME BARS: threshold V = (median of the last 20 daily volumes) / 78. Accumulate 1-minute volume; when the running total crosses V, close a volume bar at that minute's close and reset the accumulator with the remainder. Record each volume bar's clock duration in seconds. Compute sigma_v = standard deviation of log returns over the last 50 volume bars. Compute sigma_t = standard deviation of log returns over the last 50 five-minute bars, then rescale to the volume-bar clock: sigma_t_scaled = sigma_t * sqrt(mean duration of the last 50 volume bars / 300). Define R = sigma_t_scaled / sigma_v. ENTER LONG at the close of a volume bar when: R < the 20th percentile of R over the last 500 volume bars, AND the cumulative log return over the last 10 volume bars is > 0.",
+  "exit_rule": "Exit at the close of a volume bar when any of: (a) R rises above its 80th percentile over the last 500 volume bars, (b) 30 volume bars have elapsed since entry, (c) price falls 1.5 * ATR(14) on 5-minute bars below the entry price.",
+  "why": "Easley, Lopez de Prado and O'Hara's argument is that returns sampled on the volume clock are much closer to IID normal than clock-time returns, because volume clustering is what makes clock-time returns fat-tailed and heteroskedastic. R is a direct measurement of how much of the observed clock-time volatility is an artefact of volume clustering versus real price discovery. A LOW R means the tape is participating smoothly \u2014 volume is arriving steadily and price is moving proportionally. That is the regime in which a modest positive drift is most likely to persist, because it is not being driven by a small number of violent, likely-to-be-reverted volume spikes.",
+  "novelty": "This is not a volatility breakout or a squeeze: the signal is a RATIO OF TWO SAMPLING CLOCKS, not the level or the width of anything. A Bollinger squeeze, an ATR expansion breakout and a Keltner rule all measure volatility on one clock; none of them can distinguish 'volatility is low' from 'volatility looks low because volume is even'. There is no moving average and no oscillator in the rule.",
+  "params": [
+   "volume-bar threshold divisor (39/78/156 bars per day)",
+   "volatility lookback (30/50/100 volume bars)",
+   "percentile lookback (250/500/1000)",
+   "entry/exit percentile pair (20/80, 10/90, 30/70)",
+   "momentum confirmation window (5/10/20 volume bars)"
+  ],
+  "source": "Easley, Lopez de Prado & O'Hara, 'The Volume Clock: Insights into the High-Frequency Paradigm', Journal of Portfolio Management 39(1), 2012 \u2014 for the volume clock and the IID-normalisation claim. Bar construction: Marcos Lopez de Prado, 'Advances in Financial Machine Learning' (Wiley, 2018), Ch. 2 'Financial Data Structures', section 2.3 on standard bars. The ratio statistic and the trading rule are my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ }
+]

@@ -1,0 +1,218 @@
+[
+ {
+  "name": "Bulk-Volume Imbalance at Range Edge",
+  "category": "wyckoff",
+  "side": "both",
+  "timeframe": "5-minute",
+  "entry_rule": "Compute Bulk Volume Classification per 5-minute bar: sigma = stdev of the last 50 bar-to-bar close changes; BuyVol_t = Volume_t * Phi((close_t - close_{t-1})/sigma) where Phi is the standard normal CDF (Student-t with low df is the paper's variant); SellVol_t = Volume_t - BuyVol_t. Accumulate bars into equal-volume buckets of size Vb = (median daily volume of the last 20 sessions)/50. Signed imbalance CI = sum over the last 20 completed buckets of (BuyVol - SellVol); z = (CI - mean(CI over last 250 buckets))/stdev(CI over last 250 buckets). LONG entry: (a) 60-bar range width (high-low) <= 3.0*ATR(14); (b) current close within 0.30*ATR of the 60-bar low; (c) z >= +1.50. Buy at the close of the bar where all three hold. SHORT mirror: within 0.30*ATR of the 60-bar high with z <= -1.50.",
+  "exit_rule": "Stop = 60-bar range low - 0.50*ATR (mirror: range high + 0.50*ATR). Target = the opposite boundary of the 60-bar range. Immediate exit if z crosses back through 0. Time stop: 60 bars.",
+  "inputs": [
+   "ohlcv (5-minute)",
+   "bulk volume classification (normal CDF of standardized close change)",
+   "equal-volume bucketing",
+   "atr(14)",
+   "rolling 60-bar high/low",
+   "250-bucket z-score"
+  ],
+  "params": [
+   "sigma window (50 bars)",
+   "bucket size divisor (50 buckets/day)",
+   "imbalance window (20 buckets)",
+   "z threshold (1.50)",
+   "range width cap (3.0 ATR)",
+   "proximity to boundary (0.30 ATR)"
+  ],
+  "why": "This is the composite-operator idea made measurable. Wyckoff asks who is on the other side of the tape; BVC estimates the buy/sell split of each bar's volume from the standardized price change, and the aggregate imbalance over volume-clock buckets estimates informed order flow. Net buying pressure recorded while price sits pinned at the bottom of a range is precisely 'effort without result in the seller's favour' - somebody is filling size without moving the price up yet.",
+  "source": "Easley, D., Lopez de Prado, M., O'Hara, M. (2012), 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies, and 'An Improved Version of the Volume-Synchronized Probability of Informed Trading' (Critical Finance Review) - BVC classifies bar volume via the CDF of the standardized price change; VPIN averages |Vbuy - Vsell| over n equal-volume buckets.",
+  "ohlcv_only": true,
+  "novelty": "BVC was designed specifically to work on BARS rather than individual trades, so it gives an order-flow imbalance estimate on exactly the data we have - no level 2 needed. The volume clock (equal-volume buckets) is a different sampling scheme from every calendar-time indicator in the existing set, and the entry is a deliberate DISAGREEMENT between flow direction and price location.",
+  "_agent": "v2:1db7bf8f003d6a64be250b11b84dc6de7bdcc59f0e1caf59d48acdf061b67153"
+ },
+ {
+  "name": "Kitchen-Sink Forecast Combination Timer",
+  "category": "return predictability econometrics / forecast combination",
+  "timeframe": "daily bars aggregated to monthly; monthly rebalance",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "Maintain N = 14 separate univariate predictive regressions of the next monthly SPY log excess return on a single OHLCV-derived predictor each: x1 = log RVOL (sqrt(pi/2)*sqrt(12)*(1/12)*sum_{i=0..11}|r_{t-i}|); x2 = 12-month total return; x3 = 1-month return; x4 = log(P_t / 120-month moving average of P); x5 = 60-month realised skewness of monthly returns; x6 = log(current month volume / 12-month average volume); x7 = the value-weighted average pairwise correlation of the top-500 names (see the Average Pairwise Correlation idea); x8 = the cross-sectional Hill tail measure (see the Hill Tail Risk idea); x9 = log aggregate Amihud illiquidity; x10 = the fraction of the top-500 names above their own 200-day moving average; x11 = the cross-sectional standard deviation of trailing 12-month stock returns; x12 = realised monthly variance from daily returns; x13 = the 12-month change in x12; x14 = drawdown depth, log(P_t / max P over the trailing 36 months). On the last trading day of month t, for each i estimate r_{s+1} = a_i + b_i*x_i,s by expanding-window OLS through s = t-1, form rhat_i,t+1, and apply the Campbell-Thompson zero truncation to each individual forecast. Combine: rhat_C = sum_i w_i,t * rhat_i,t+1. Under EQUAL WEIGHTING w_i,t = 1/N. Under DMSPE weighting w_i,t = (phi_i,t)^-1 / sum_j (phi_j,t)^-1 with phi_i,t = sum_{s=s0..t-1} theta^(t-1-s) * (r_{s+1} - rhat_i,s+1)^2 and theta in {1.0, 0.9}. Rebalance at the next open to w_t = clip((1/5)*rhat_C/sigmahat^2, 0, 1.5).",
+  "exit_rule": "No stop, no target. Hold one month; at the next month-end recompute all 14 forecasts, recompute the combining weights from the updated forecast-error history, and rebalance to the new w_t. w = 0 exits fully.",
+  "inputs": [
+   "14 OHLCV-derived predictor series",
+   "14 expanding-window univariate regressions",
+   "running discounted squared-forecast-error accumulator per model",
+   "60-month return variance"
+  ],
+  "params": [
+   "N and the membership of the predictor panel",
+   "weighting scheme: equal / median / 10%-trimmed mean / DMSPE",
+   "DMSPE discount theta (1.0, 0.95, 0.9)",
+   "holdout length s0 before weights go live",
+   "whether the CT truncation is applied per-model or only to the combination"
+  ],
+  "why": "Individual predictive regressions fail out of sample not because there is no signal but because each carries a large, largely independent estimation-error component. Averaging cancels that component while retaining the common signal, which is why combination survives where its members do not - it is a shrinkage device with a variance-reduction interpretation, and it also hedges against model instability, since a predictor that breaks down simply drifts toward zero weight rather than dominating. Neely et al. verify this directly on the Goyal-Welch panel: the simple mean of their 14 bivariate forecasts has an out-of-sample R-squared of 1.16%, versus positive values for only three of the 14 individual macro regressions taken alone. Pettenuzzo, Timmermann and Valkanov independently report an equal-weighted combination of unconstrained forecasts reaching 0.62% against -0.53% for the average individual model.",
+  "novelty": "This is a portfolio of forecasts, not a portfolio of trades. Every one of the 32 existing ideas is a single rule with a single opinion; here 14 disagreeing models are reconciled into one continuous exposure, and the combining weights themselves adapt from realised forecast error rather than from price. Nothing in the corpus has a meta-layer that reweights its own components.",
+  "source": "Rapach, D.E., Strauss, J.K. and Zhou, G., 'Out-of-Sample Equity Premium Prediction: Combination Forecasts and Links to the Real Economy', Review of Financial Studies 23(2), 2010, 821-862 - the paper is paywalled and I could not open it; its method and the 1.16% figure for the simple mean of 14 bivariate forecasts are verified from Neely et al. (FRB St. Louis WP 2010-008, Aug 2013), footnote 29 and surrounding text, which I read directly. The DMSPE weighting formula follows Stock and Watson (2004) as adopted by RSZ; I state it from standard practice rather than from the primary text, which I could not open - treat theta and the exact phi accumulator as the part to sanity-check against a reference implementation. Combination benchmark figure of 0.62% from Pettenuzzo, Timmermann and Valkanov, Brandeis WP 57 (2013), which I read directly.",
+  "_agent": "v2:2986ad60a64b30f5d6a1ab8fd871eb95cd89b5d6c01da660d34a55f6bf9aab82"
+ },
+ {
+  "name": "HERC with Tail-Risk Cluster Splits",
+  "category": "portfolio construction / hierarchical allocation",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Last trading day of each month. (1) Cluster as in HRP but with average linkage on d_ij = sqrt(0.5*(1-rho_ij)) over 252 daily returns. (2) Choose the cluster count K: for each k in 2..min(10, floor(N/2)), cut the dendrogram into k clusters and compute the mean silhouette score on the distance matrix d; take K = argmax silhouette. (3) Top-down allocation over the K-1 dendrogram splits that produce those K clusters, in order of decreasing merge height: at each split of parent P into children A and B, compute each child's risk as R = the 5% historical CVaR of the equal-weighted daily return series of that child's members over the trailing 252 bars (CVaR = the arithmetic mean of the worst 5% of daily returns, expressed positive). Allocate the parent's weight as w_A = w_P * R_B/(R_A+R_B) and w_B = w_P * R_A/(R_A+R_B). (4) Within each terminal cluster, split its weight across members in inverse proportion to each member's own 5% CVaR, normalised within the cluster. Enter every symbol with final weight > 0.005 at the next open.",
+  "exit_rule": "Monthly rebalance with a 0.015 no-trade band per name. Exit a name entirely when its weight falls below 0.005. Cluster-level stop: if any terminal cluster's realised 21-day CVaR exceeds 2.5x the CVaR used to size it at the last rebalance, zero that cluster's entire allocation and redistribute pro rata to the remaining clusters until the next rebalance.",
+  "inputs": [
+   "daily close (252 bars)",
+   "correlation matrix",
+   "dendrogram + silhouette scores",
+   "historical 5% CVaR per symbol and per cluster"
+  ],
+  "params": [
+   "K search range",
+   "risk measure at splits (CVaR / standard deviation / CDaR / Ulcer)",
+   "CVaR alpha (0.90/0.95/0.99)",
+   "linkage method"
+  ],
+  "novelty": "Differs from HRP in two structural ways, not in a parameter: it splits along the actual dendrogram topology at a statistically chosen number of clusters rather than bisecting the serialised ordering at its midpoint, and it equalises a tail-risk contribution rather than a variance contribution. HRP's midpoint bisection can cut straight through a real cluster; this cannot.",
+  "why": "HRP's recursive bisection splits the ordered list in half regardless of where the true cluster boundaries fall, which is an arbitrary choice the data can answer. Choosing K by silhouette lets the tree decide. Using CVaR instead of variance matters for a fleet of individual equities, where the risk that ends a strategy is a co-crash in the left tail, not the average squared deviation - and variance treats a name that gaps down 20% once the same as one that oscillates mildly.",
+  "source": "Raffinot (2017) 'Hierarchical Clustering-Based Asset Allocation', Journal of Portfolio Management 44(2), introduces HERC. Implementation confirmed available with 37 risk measures for HRP/HERC in Riskfolio-Lib (https://riskfolio-lib.readthedocs.io/en/latest/, fetched this session, which lists 'Hierarchical Clustering: HRP and HERC with 37 risk measures' and CVaR among its downside measures). Distance metric and clustering per Lopez de Prado (2016).",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "FZ-Loss GAS Tail-Only State Machine",
+  "category": "risk-model backtesting / dynamic tail state",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "1500 trailing daily returns",
+   "FZ0 loss minimisation",
+   "one-factor GAS recursion for joint VaR and ES"
+  ],
+  "entry_rule": "Fit the one-factor GAS model for joint VaR and ES to the trailing 1500 daily returns Y_t of SPY at alpha = 0.05. Specification: v_t = a*exp(kappa_t), e_t = b*exp(kappa_t) with b < a < 0, and kappa_t = omega + beta*kappa_{t-1} + gamma * (1/(b*exp(kappa_{t-1}))) * ( (1/alpha)*1{Y_{t-1} <= a*exp(kappa_{t-1})}*Y_{t-1} - b*exp(kappa_{t-1}) ). Estimate (a, b, beta, gamma) by minimising the FZ0 loss sum_t L(Y_t, v_t, e_t) with L(Y,v,e) = -(1/(alpha*e))*1{Y<=v}*(v-Y) + v/e + log(-e) - 1 (fix omega = 0; it is not separately identified). Update kappa_t daily with the fitted parameters. Take base long entries when kappa_t < the median of the trailing 250 kappa values AND kappa_t < kappa_{t-1} (tail risk is both low and falling).",
+  "exit_rule": "Exit all positions when kappa_t rises above the 80th percentile of the trailing 250 kappa values, or when kappa_t > kappa_{t-1} on three consecutive closes. Re-estimate the four parameters every 63 trading days by re-minimising FZ0 loss over the trailing 1500 bars. Optionally run the hybrid variant kappa_t = omega + beta*kappa_{t-1} + gamma*(forcing term) + delta*log|Y_{t-1}| and switch to whichever of the two has the lower average out-of-sample FZ0 loss over the last 250 days.",
+  "params": [
+   "alpha (0.025, 0.05, 0.10)",
+   "estimation window (1000/1500/2500 bars)",
+   "refit cadence (21/63/126 days)",
+   "kappa percentile gates (50th/80th)",
+   "consecutive-rise count (2/3/5)",
+   "one-factor GAS vs hybrid GAS/GARCH vs GARCH-FZ"
+  ],
+  "why": "The forcing variable in this recursion is derived from the FZ0 loss and, crucially, the term 1{Y_{t-1} <= v_{t-1}}*Y_{t-1} is ZERO on any day the return did not breach VaR - the news impact curve is flat above the VaR threshold and linear below it. So kappa_t is a persistent risk state that updates ONLY on tail days, in contrast to GARCH which updates on every squared return and is therefore dragged around by ordinary large-but-not-extreme moves. The FZ0 loss is the unique zero-homogeneous strictly consistent loss for the (VaR, ES) pair, so parameters fitted by minimising it are tuned to produce the best joint tail forecast rather than the best variance forecast - which is a different and, for a levered book, more relevant objective. Patton, Ziegel and Chen find the one-factor GAS and the hybrid GAS/GARCH beat rolling-window and GARCH-based alternatives on out-of-sample FZ0 loss across major equity indices.",
+  "source": "Patton, Ziegel & Chen (2019), 'Dynamic semiparametric models for expected shortfall (and Value-at-Risk)', Journal of Econometrics 211(2), 388-413 (https://public.econ.duke.edu/~ap172/Patton_Ziegel_Chen_JoE_2019.pdf) - FZ0 loss eq. (6), one-factor GAS eqs. (17)-(20), hybrid GAS/GARCH eq. (27), and the finding that omega is unidentified in the one-factor specifications.",
+  "novelty": "A latent risk state whose update equation IGNORES every non-tail observation. Its news impact curve is flat above VaR and linear below it - structurally different from any GARCH, ATR, or realised-volatility state variable in the existing 32.",
+  "_agent": "v2:6c9a27a7b9b617a4303b5edac46faea41cc4f0cce91accc1a836f0c1ce47f6d8"
+ },
+ {
+  "name": "Dollar-Volume Lead-Lag Within Group",
+  "category": "cross-sectional information diffusion",
+  "timeframe": "daily bars, weekly rebalance",
+  "side": "both",
+  "entry_rule": "Partition the universe into groups: use sector labels if available, otherwise cluster symbols into 8 groups by correlation of their daily returns over the last 252 bars (hierarchical clustering on 1 - correlation), recomputed quarterly - this keeps the rule OHLCV-only. Each Friday close, within each group rank symbols on ADV = mean(close * volume) over the last 63 bars. Let LEAD = the equal-weighted 5-day return of the top ADV tercile of that group, and let OWN = the symbol's own 5-day return. Go long at Monday's open every symbol in the BOTTOM ADV tercile of a group where LEAD > +0.01 AND OWN < LEAD. Go short every symbol in the bottom ADV tercile of a group where LEAD < -0.01 AND OWN > LEAD. The OWN condition enforces that the laggard has not already caught up.",
+  "exit_rule": "Close the position at the following Friday's close (a five-trading-day hold). Close early at the next open if OWN measured from entry exceeds the entry-week LEAD (the catch-up has happened), or if the group's LEAD reverses sign.",
+  "inputs": [
+   "close",
+   "volume",
+   "dollar volume",
+   "5-day group returns",
+   "return-correlation clustering (or sector labels)"
+  ],
+  "params": [
+   "group count",
+   "ADV window",
+   "tercile cuts",
+   "LEAD threshold",
+   "holding period (3/5/10 days)",
+   "weekly vs daily rebalance"
+  ],
+  "why": "Information diffuses gradually and unevenly: news that is relevant to a whole industry reaches the most heavily traded names in that industry first, because those are the names analysts cover and institutions trade. The thinly traded names in the same group price the same information days later. That gives a short-horizon, cross-sectional predictability that is not the same thing as the laggard's own momentum - the predictor is somebody else's price move.",
+  "novelty": "The signal for a symbol comes from OTHER symbols' returns, not from its own price path. Nothing in the existing set is cross-sectional in that sense; even relative-strength ranking uses each symbol's own history. Dollar volume stands in for firm size, which is the diffusion variable in the source literature and is not otherwise available from OHLCV.",
+  "source": "Hou (2007), 'Industry Information Diffusion and the Lead-Lag Effect in Stock Returns', Review of Financial Studies 20(4), 1113-1138 - big firms lead small firms within the same industry, and this intra-industry lead-lag subsumes most of the market-wide size lead-lag. Underlying effect: Lo & MacKinlay (1990), 'When Are Contrarian Profits Due to Stock Market Overreaction?', RFS 3(2). Industry-level momentum: Moskowitz & Grinblatt (1999), 'Do Industries Explain Momentum?', Journal of Finance 54(4). (Citations from knowledge of the literature; RFS/Wiley pages were not reachable this session.)",
+  "ohlcv_only": true,
+  "_agent": "v2:cfd30cfcc39909b0d50d86a5c465eddca78daa50c3cb3ba17ddf1d4a91a2525a"
+ },
+ {
+  "name": "Own-Footprint Decay Gate",
+  "category": "optimal execution",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "Maintain a running estimate of your own residual price footprint in the name: Fp_t = SUM over all your own past slices s of G(t - t_s) * sign_s * (q_s / V_bar_s)^psi, with psi = 0.5, decay kernel G(l) = (1 + l)^(-beta), beta = 0.25, l measured in bars, q_s the slice share count, V_bar_s the volume of the bar it traded in, and sign_s = +1 for buys, -1 for sells. Do NOT fire the next slice, pyramid add, or new position in that ticker until |Fp_t| has decayed below theta_foot * sigma_bar, where sigma_bar = stdev of per-bar log returns over 20 bars and theta_foot is swept in [0.1, 0.5]. When the gate opens and the signal is still live, execute the next slice. Slices whose gate never opens before the signal expires are simply never traded.",
+  "exit_rule": "Scale out under the same decay gate: each exit slice waits for the footprint to decay below threshold. Two exemptions that bypass the gate entirely: a stop-loss breach (2*ATR(14) adverse), and the final bar of the holding horizon, at which any residual is liquidated in one slice.",
+  "inputs": [
+   "ohlc bars (1 or 5 minute)",
+   "volume per bar",
+   "own trade log (slice size, sign, bar index)",
+   "stdev of per-bar log returns (20)",
+   "atr(14)"
+  ],
+  "params": [
+   "beta decay exponent (0.15-0.5)",
+   "psi size exponent (0.4-0.7)",
+   "theta_foot gate threshold (0.1-0.5)",
+   "volatility window",
+   "slice size"
+  ],
+  "why": "In the propagator model, price is the sum of your own and everyone else's past order flow weighted by a decaying kernel, so the impact you paid on your last slice has not vanished \u2014 it is still partly in the price you are about to pay for the next one. Adding again before it decays means buying your own footprint. The kernel decays slowly (a power law, not exponentially), which is precisely why the naive fixed-bar cooldown is the wrong shape. Gatheral's no-dynamic-arbitrage argument ties the concavity of impact to the speed of this decay, so the two exponents cannot be chosen independently \u2014 sweeping them jointly is itself an informative test.",
+  "novelty": "A cooldown between adds whose length is a function of HOW MUCH you traded and HOW LONG AGO, not a fixed bar count. It distinguishes a 100-share add from a 10,000-share add in the same name at the same moment, which no volume filter or cooldown in the 32 does. It is also the only rule here where your own past trading is a state variable in the entry condition.",
+  "source": "Bouchaud, J-P. (2009), 'Price Impact' (arXiv:0903.2428): the propagator model p_T = p_{-inf} + lambda * SUM G(N-n) * eps_n * v_n^psi, with G(l) ~ l^(-beta), beta = (1-gamma)/2 and order-flow autocorrelation exponent gamma ~ 0.5 (giving beta ~ 0.25), and the BARRA-style single-trade response R(dt, v) = A*sigma*sqrt(v/V). Motivated by Gatheral, J. (2010), 'No-Dynamic-Arbitrage and Market Impact', Quantitative Finance 10(7), which constrains impact concavity against decay speed. Zarinelli, Treccani, Farmer & Lillo (2014, arXiv:1412.2152) report that impact relaxes to roughly 2/3 of peak impact, which gives a sanity target for the kernel's long-run level.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Weekday-Normalized Gap Fill",
+  "category": "day-of-week gap behaviour",
+  "side": "both",
+  "timeframe": "daily gap, 5-minute execution",
+  "entry_rule": "At 09:35 ET compute the gap g = (today's 09:30 open / previous session's close) - 1. Compute sigma_w = the standard deviation of g over the last 26 occurrences of the SAME weekday (so Monday gaps, which span a weekend and often a three-day weekend, are scored against Monday gaps only). Let z = g / sigma_w. If z > 1.5 and the first 5-minute bar closes below its open, enter short at the 09:35 open. If z < -1.5 and the first 5-minute bar closes above its open, enter long.",
+  "exit_rule": "Target: the previous session's close (complete gap fill). Stop: beyond the session extreme set in the first 5 minutes by 0.15 x daily ATR(14). Time exit at 12:00 ET if neither is hit. Flat by the close in all cases.",
+  "inputs": [
+   "daily open/close",
+   "5-min bars for the 09:30-09:35 bar",
+   "26-observation same-weekday gap distribution",
+   "daily ATR(14)",
+   "weekday label"
+  ],
+  "params": [
+   "z threshold (1.0/1.5/2.5)",
+   "same-weekday history length (13/26/52)",
+   "require the first-bar reversal confirmation or not",
+   "target full fill vs 50% fill",
+   "time exit hour",
+   "separate parameter sets per weekday"
+  ],
+  "why": "Overnight gap variance is structurally weekday-dependent: a Monday open follows roughly 65 hours of accumulated news while a Wednesday open follows 17.5, and the calendar adds three-day weekends and holiday closures on top. Pooling all gaps into one distribution means Monday gaps are systematically under-flagged and midweek gaps over-flagged. The literature also documents that overnight returns dominate intraday returns on every weekday but with distinct weekday profiles - Monday-to-Tuesday overnight consistently positive, Friday-to-Monday negative - so the sign and the dispersion both vary with the weekday.",
+  "source": "Synthesis, built on the weekday-decomposition evidence: Birru, \"Day of the week and the cross-section of returns,\" Journal of Financial Economics 130(1), 2018; CXO Advisory, \"SPY by Day of the Week and Overnight\" (1993-2017 decomposition); \"Weekly Seasonality in Overnight Effects of the Stock Market,\" Applied Economics and Finance (redfame.com/journal/index.php/aef/article/download/7705/6965). The weekday-specific normalization is my construction, and the CXO analysis explicitly warns the weekday overnight edge is unstable across subperiods, so treat the z-scoring as the durable part and any weekday directional tilt as the fragile part.",
+  "novelty": "The gap is scored against its own weekday's distribution rather than a pooled one, which changes which gaps qualify as extreme. The target is the prior close - a gap fill - which is a different exit structure from the opening range fade already in the set, and the entry needs no range to have formed.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Split-Conformal Zero-Exclusion",
+  "category": "lightweight ML / distribution-free uncertainty",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "standardised technical feature vector",
+   "ridge regression forecast",
+   "ATR(14)",
+   "calibration residuals"
+  ],
+  "entry_rule": "Base predictor: ridge regression (alpha = 1.0, closed-form normal equations in numpy) of the forward 5-bar log return on the standardised 7-feature vector from the online logistic idea. Every 21 bars refit on the trailing 750 bars, split as the OLDER 500 for training and the MOST RECENT 250 as a conformal calibration set (the model never sees the calibration rows). On the calibration set compute normalised nonconformity scores s_i = |y_i - yhat_i| / u_i with the uncertainty proxy u_i = ATR14_i / C_i. Let q = the ceil((250+1)*(1-alpha))/250 empirical quantile of the s_i with alpha = 0.20. For the live bar the 80% prediction interval is yhat_t +/- q*u_t. LONG entry at the next open when the entire interval lies above zero, i.e. yhat_t - q*u_t > 0. SHORT when yhat_t + q*u_t < 0. Otherwise abstain.",
+  "exit_rule": "Exit after 5 bars (the prediction horizon), or immediately if the live interval straddles zero on 2 consecutive bars, or on a stop placed at q*u_t adverse from entry - the model's own calibrated uncertainty scale rather than an arbitrary ATR multiple.",
+  "params": [
+   "alpha miscoverage (0.05-0.35)",
+   "calibration set size",
+   "refit interval",
+   "ridge penalty",
+   "uncertainty proxy u (ATR/C vs EWM return sd)",
+   "forecast horizon"
+  ],
+  "why": "A point forecast of 0.3% is meaningless without knowing whether the model's typical error is 0.1% or 3%. Split conformal gives a finite-sample, distribution-free coverage guarantee under exchangeability with essentially no assumptions and no extra fitting - just a quantile of held-out residuals. Requiring the whole interval to exclude zero means you trade only when the calibrated uncertainty is small enough that the sign of the move is not in doubt, which automatically stands the strategy down in high-noise periods. Normalising the residual by ATR is the Mondrian/locally-adaptive variant, which keeps interval width proportional to current volatility.",
+  "novelty": "The decision comes from an interval, not a point estimate or a probability threshold - so abstention is the default and trading is the exception, and the stop distance is derived from the same calibrated quantile that authorised the trade. Nothing else in the set sizes or gates on a distribution-free uncertainty estimate.",
+  "source": "Vovk, Gammerman & Shafer, Algorithmic Learning in a Random World (Springer, 2005); Lei, G'Sell, Rinaldo, Tibshirani & Wasserman (2018) split conformal. Coverage under the non-exchangeability of financial series (the caveat that matters here): Barber, Candes, Ramdas & Tibshirani, 'Conformal prediction beyond exchangeability' and arXiv:2203.15885, 'Split Conformal Prediction and Non-Exchangeable Data'. Time-series conformal sets: arXiv:2206.07851. Financial walkthrough: mql5.com/en/articles/18324, 'Exploring Conformal Forecasting of Financial Time Series'.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ }
+]

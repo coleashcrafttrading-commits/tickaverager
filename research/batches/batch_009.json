@@ -1,0 +1,202 @@
+[
+ {
+  "name": "Realized Skewness Percentile Reversal",
+  "category": "higher realized moments",
+  "side": "both",
+  "timeframe": "5-minute bars aggregated weekly, held for one week",
+  "entry_rule": "Over the last 5 trading sessions collect the n = 390 five-minute log returns r_i. Realized skewness RSk = sqrt(n) * SUM r_i^3 / (SUM r_i^2)^(3/2). Rank RSk against its own trailing 252-session history of weekly values to get a percentile. LONG at the next open when the percentile <= 20. SHORT at the next open when the percentile >= 80. Require median 5-session dollar volume >= the 20-session median dollar volume, so the third moment is not driven by thin prints.",
+  "exit_rule": "Hold exactly 5 trading sessions and exit at the close of the 5th. Hard stop at 3.0*ATR(14) daily. No trailing stop - the paper's effect is a fixed one-week horizon and a trailing exit would truncate it.",
+  "inputs": [
+   "5-minute OHLC",
+   "5-minute volume",
+   "ATR(14) daily"
+  ],
+  "params": [
+   "moment window (3, 5, 10 sessions)",
+   "percentile cutoffs (10/90, 20/80, 30/70)",
+   "hold length (5, 10 sessions)",
+   "bar size for moments (1, 5, 15 min)"
+  ],
+  "why": "Amaya, Christoffersen, Jacobs & Vasquez find that stocks in the lowest realized-skewness decile outperform the highest decile by about 19bp the following week (t = 3.70), not captured by Fama-French or Carhart factors. The economic reading is that investors overpay for lottery-like right-tail payoffs, so recently right-skewed names are overpriced and recently left-skewed names are underpriced. Because the effect decays at a weekly frequency, the fixed-horizon exit is part of the idea.",
+  "novelty": "The third moment of intraday returns is orthogonal to every mean and second-moment indicator in the existing set - a stock can be flat with normal ATR and still sit in the 5th percentile of realized skew. Ranking against its own history rather than a cross-section makes it runnable on one ticker.",
+  "source": "Amaya, Christoffersen, Jacobs & Vasquez (2015), 'Does realized skewness predict the cross-section of equity returns?', Journal of Financial Economics 118(1), 135-167. https://www.sciencedirect.com/science/article/abs/pii/S0304405X15001257 ; working paper version: https://pure.au.dk/ws/files/67739582/rp13_41.pdf",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Microstructure Noise Ratio Collapse",
+  "category": "two-scale realized variance / noise diagnostic",
+  "side": "both",
+  "timeframe": "intraday, 1-minute and 5-minute",
+  "entry_rule": "Rolling over the trailing 90 minutes, updated at each 5-minute bar close: RV1 = SUM of squared 1-minute log returns over that span; RV5avg = the average of the five possible 5-minute subgrid realized variances over the same span (offsets 0..4 minutes). Noise ratio NR = RV1/RV5avg. Under no microstructure noise NR converges to 1; bid-ask bounce inflates the finer-grid estimator, pushing NR above 1. ENTER when NR crosses below 1.10 having been >= 1.30 at some point in the previous 6 bars: go long if the net log return over the last 30 minutes is positive, short if negative. No entries in the first 45 minutes (the window is not yet full) or after 15:00 ET.",
+  "exit_rule": "Exit when NR rises back above 1.25 (bounce-dominated tape has returned), or on a stop of 1.0 * the trailing-90-minute average true range, or at 15:55 ET - whichever first.",
+  "inputs": [
+   "1-minute OHLC",
+   "5-minute OHLC",
+   "intraday ATR"
+  ],
+  "params": [
+   "window (60, 90, 120 min)",
+   "NR entry threshold (1.05, 1.10, 1.15)",
+   "prior-high requirement (1.25, 1.30, 1.5)",
+   "direction lookback (15, 30, 60 min)",
+   "NR exit threshold"
+  ],
+  "why": "The ratio of fine-grid to coarse-grid realized variance is the standard diagnostic for how much of observed price variation is quote noise rather than efficient-price movement - it is the empirical content of the volatility signature plot. A high ratio means the tape is dominated by bid-ask bounce between passive participants; a collapse toward 1 means a directional participant is consuming liquidity and moving the efficient price rather than oscillating around it. That transition is a footprint of informed order flow, visible in OHLCV without any level 2.",
+  "novelty": "The signal is the disagreement between two estimators of the same variance computed at different sampling frequencies - a sampling-scale signal, not a price or volume signal. Nothing in the existing set compares statistics across bar resolutions.",
+  "source": "Zhang, Mykland & Ait-Sahalia (2005), 'A Tale of Two Time Scales: Determining Integrated Volatility with Noisy High-Frequency Data', JASA 100(472), 1394-1411 - the two-scales estimator and the subsampled-average construction. Signature-plot diagnostics for noise: Hansen & Lunde, https://public.econ.duke.edu/~get/browse/courses/201/spr11/DOWNLOADS/VolatilityMeasures/SpecificlPapers/hansen_lunde_forecasting_rv_11.pdf",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Jump Share Collapse Continuation",
+  "category": "bipower variation / diffusive-vs-jump decomposition",
+  "side": "both",
+  "timeframe": "5-minute bars aggregated daily, held in daily bars",
+  "entry_rule": "For each session compute from the n = 78 five-minute log returns: RV_t = SUM r_i^2; bipower variation BPV_t = (pi/2) * (n/(n-1)) * SUM_{i=2..n} |r_i| * |r_{i-1}|; jump share J_t = max(0, (RV_t - BPV_t)/RV_t). Let Jbar_t = mean of J over the last 10 sessions. ENTER at the next open when Jbar_t <= 0.08 AND Jbar was >= 0.20 at some point in the previous 10 sessions (the tape has returned to a diffusive regime after a jumpy one): LONG if the 20-session log return sum is positive, SHORT if negative.",
+  "exit_rule": "Exit when Jbar_t rises back above 0.20, or after 20 sessions, or on a 2.5*ATR(14) stop - whichever first.",
+  "inputs": [
+   "5-minute OHLC",
+   "daily close",
+   "ATR(14)"
+  ],
+  "params": [
+   "jump-share averaging window (5, 10, 21)",
+   "low threshold (0.05, 0.08, 0.12)",
+   "high threshold (0.15, 0.20, 0.30)",
+   "drift lookback (10, 20, 60)",
+   "max hold"
+  ],
+  "why": "Bipower variation is consistent for the continuous (diffusive) part of quadratic variation and is robust to jumps, so RV minus BPV isolates the jump contribution. The share matters for strategy selection: when a large fraction of variance arrives in discontinuities, stops are meaningless because price gaps through them and any trend-following rule pays for slippage it cannot control. When the jump share collapses back toward zero the path is close to a diffusion again, which is the assumption under which trailing stops and trend continuation actually work. The rule trades the moment that assumption becomes true again.",
+  "novelty": "Distinct from the two other jump ideas here: this one uses the jump share as a slowly-varying tradeability regime measure rather than as an event detector, and the entry fires on the absence of jumps rather than their presence. It is a gate on path smoothness, which no ADX or volatility-level filter measures.",
+  "source": "Barndorff-Nielsen & Shephard (2004), 'Power and Bipower Variation with Stochastic Volatility and Jumps', Journal of Financial Econometrics 2(1), 1-37; and (2006), 'Econometrics of Testing for Jumps in Financial Economics Using Bipower Variation', Journal of Financial Econometrics 4(1), 1-30. Overview: https://www.researchgate.net/publication/5213484_Econometrics_of_Testing_for_Jumps_in_Financial_Economics_Using_Bipower_Variation ; threshold-bipower refinement for finite-sample bias: https://www.researchgate.net/publication/314836310_Threshold_Bipower_Variation_and_the_Impact_of_Jumps_on_Volatility_Forecasting",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Selloff-Into-The-Close Overnight Reversal",
+  "category": "overnight/intraday decomposition",
+  "side": "long",
+  "timeframe": "daily, close-to-open holding",
+  "entry_rule": "At 15:58 ET compute the last-hour return L = (last trade price / close of the 15:00 bar) - 1 and sigma_L = the standard deviation of L over the previous 60 sessions. If L < -0.75 x sigma_L, buy at the official 16:00 close. Do not take the mirror short when L > +0.75 x sigma_L - the effect is asymmetric.",
+  "exit_rule": "Exit at the next session's 09:30 open. Variant: hold to 10:00 ET and exit at the 10:00 bar close. Skip the trade entirely if the session is the last before a market holiday closure of more than one calendar day.",
+  "inputs": [
+   "1-min or 5-min intraday bars for the 15:00-16:00 window",
+   "daily close and next open",
+   "60-session rolling standard deviation",
+   "session clock and exchange calendar"
+  ],
+  "params": [
+   "threshold in sigma units (0.5/0.75/1.25)",
+   "measurement window (last 30/60/90 minutes)",
+   "exit at open vs 10:00",
+   "add a market-wide filter (only when SPY also sold off into the close)"
+  ],
+  "why": "Boyarchenko, Larsen and Whelan show that essentially the entire US equity premium accrues in a narrow overnight window coinciding with the European open, and that it is strongly predicted by end-of-day order imbalance in the preceding US session, asymmetrically: market selloffs generate robust positive overnight reversals while rallies produce much weaker ones. The mechanism is Grossman-Miller inventory: dealers absorbing the close-of-day sell imbalance demand compensation and unwind at the first deep liquidity, which for US equities is the European morning. Since a 2-3am ET bar does not exist for US equities, the tradable version conditions on the imbalance proxy at the close and captures the reversal in the close-to-open return.",
+  "source": "Boyarchenko, Larsen & Whelan, \"The Overnight Drift,\" Federal Reserve Bank of New York Staff Report 917 / CEPR DP14462; published version in Review of Financial Studies",
+  "novelty": "Signed late-session return used as an order-imbalance proxy, and the position is held only across the non-trading hours. Deliberately one-sided - the paper's asymmetry means adding the short leg should degrade it, which is itself a falsifiable test.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Turn-Of-Month Cash Cycle Window",
+  "category": "monthly calendar",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Let T be the last trading day of the calendar month, indexed from the exchange session calendar. Enter long at the 16:00 close of trading day T-4 (the fifth-to-last session of the month). Optional short leg: after the long leg is closed, enter short at the close of the 3rd trading day of the new month.",
+  "exit_rule": "Close the long at the 16:00 close of the 3rd trading day of the following month. Close the short leg (if used) at the close of the 8th trading day of that month. No intra-window stops - the trade is defined purely by the calendar; use position sizing rather than stops to bound risk.",
+  "inputs": [
+   "daily OHLCV",
+   "exchange session calendar to index trading days within each month"
+  ],
+  "params": [
+   "entry offset (T-1, T-2, T-4, T-5)",
+   "exit offset (day +1, +3, +5)",
+   "whether to include the mid-month short leg",
+   "scale exposure by the trailing 20-day realized volatility",
+   "skip December/January if the turn-of-year effect is traded separately"
+  ],
+  "why": "Ogden's payment-standardisation hypothesis: US wages, dividends, coupons and pension contributions cluster at the turn of the month, so new cash reaches the market on a fixed schedule. Etula, Rinne, Suominen and Vaittinen sharpen this with institutional flow data: funds must sell in the days before month-end to raise cash for month-end payments, depressing prices into T, and the pressure reverses once the cash is delivered - they document a return reversal following the last day of the month and estimate pension funds lose billions a year to the resulting round trip. The pre-T dip is the entry and the post-T reversal plus the new-money inflow is the payoff.",
+  "source": "Ogden, \"Turn-of-Month Evaluations of Liquid Profits and Stock Returns: A Common Explanation for the Monthly and January Effects,\" Journal of Finance 45(4), 1990, 1259-1272; Etula, Rinne, Suominen & Vaittinen, \"Dash for Cash: Monthly Market Impact of Institutional Liquidity Needs,\" Review of Financial Studies 33(1), 2020, 75-111",
+  "novelty": "Entry and exit are both pure calendar indices with no price condition whatsoever - the only inputs are the session calendar and a position size. It has no indicator, no threshold and no chart pattern, which makes it orthogonal to every one of the 32 existing signals and usable as an overlay that gates them.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Halloween Exposure Gate",
+  "category": "annual calendar overlay",
+  "side": "long",
+  "timeframe": "daily, six-month holding",
+  "entry_rule": "Buy the index proxy or the strategy's normal long book at the 16:00 close of the last trading day of October. Treat this as an exposure gate rather than a standalone trade: during the November-April window run normal gross exposure, during May-October run reduced gross exposure (0% for the pure form, or 30-50% for a softened form).",
+  "exit_rule": "Exit at the 16:00 close of the last trading day of April. No stops. Softened variant: during the May-October flat period, remain in the market only during the turn-of-month windows defined in the Turn-Of-Month Cash Cycle idea, which is where much of the summer's positive return has historically been concentrated.",
+  "inputs": [
+   "daily OHLCV",
+   "calendar month boundaries and exchange session calendar"
+  ],
+  "params": [
+   "window boundaries (31 Oct - 30 Apr vs 31 Oct - 31 May)",
+   "full flat vs partial exposure in summer",
+   "overlay the turn-of-month windows during summer",
+   "apply to index only vs to all strategy exposure"
+  ],
+  "why": "Bouman and Jacobsen documented significantly higher November-April returns than May-October returns in the large majority of the 37 markets they studied, a result that has held up in subsequent out-of-sample work more often than most calendar anomalies. Proposed causes are the seasonality of vacation-driven risk aversion and liquidity provision, and seasonal variation in the risk premium. As a standalone timing rule its Sharpe is modest; its practical value is as a gross-exposure gate over other strategies.",
+  "source": "Bouman & Jacobsen, \"The Halloween Indicator, 'Sell in May and Go Away': Another Puzzle,\" American Economic Review 92(5), 2002, 1618-1635",
+  "novelty": "This is the weakest idea in the batch and I am reporting it as an exposure overlay rather than a trade, because its standalone edge is small and it is the calendar anomaly most exposed to data-mining criticism. It is worth including only because it composes with the higher-frequency ideas above: gating turn-of-month, pre-holiday and intraday-momentum exposure by the six-month window is a cheap test of whether those effects themselves have a seasonal amplitude, which none of the underlying papers examine.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Ordinal-Pattern Continuation under Low Entropy",
+  "category": "entropy / symbolic dynamics",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "ordinal permutation patterns (d=4)",
+   "permutation entropy",
+   "ATR(14)"
+  ],
+  "entry_rule": "Set embedding dimension d = 4, delay 1. Map the last d closes to their ordinal permutation pattern pi_t - the argsort of [C_{t-3}, C_{t-2}, C_{t-1}, C_t], one of d! = 24 patterns, ties broken by index order. Over the trailing N = 500 bars compute the empirical pattern distribution and permutation entropy PE = -sum_i p_i * ln(p_i) / ln(24). Separately maintain, for each of the 24 patterns, the mean forward 5-bar log return mu_pi and its standard error se_pi over the trailing 1000 bars, excluding the last 5 bars (unmatured). LONG entry at the next open when BOTH: (a) PE < its own 20th percentile over the trailing 500 values, and (b) mu_{pi_t} > 0 with mu_{pi_t}/se_{pi_t} > 2.5. SHORT is the mirror (mu < 0 with t-ratio < -2.5).",
+  "exit_rule": "Fixed 5-bar exit matching the horizon over which mu_pi was estimated, plus a 1.5*ATR(14) stop.",
+  "params": [
+   "embedding dimension d (3-5)",
+   "delay (1-3)",
+   "forward horizon (2-10)",
+   "PE percentile gate (10-35)",
+   "pattern t-ratio threshold",
+   "pattern-statistics window"
+  ],
+  "why": "The ordinal pattern depends only on the RANK ORDER of the last four closes, so it is invariant to scale and to any monotone transform - volatility is stripped out entirely and only the geometry of the sequence remains. Under a genuine random walk all 24 patterns are equiprobable, so a low permutation entropy is direct evidence that the tape is currently non-random and specific sequences carry information. Conditioning entry on both the global non-randomness AND the specific pattern's own measured forward edge means you only trade when there is measurable inefficiency and you know which way it points.",
+  "novelty": "Rank-based rather than value-based: no threshold on any price or indicator level appears anywhere in the rule. The gate is an information-theoretic measure of the whole recent tape and the direction comes from a 24-way conditional lookup table, not from a formula. Nothing in the existing 32 uses ordinal/symbolic dynamics.",
+  "source": "Bandt & Pompe (2002), 'Permutation Entropy: A Natural Complexity Measure for Time Series', Physical Review Letters 88, 174102. Financial evidence that under-represented and forbidden ordinal patterns index inefficiency: Zunino, Zanin, Tabak, Perez & Rosso, 'Forbidden patterns, permutation entropy and stock market inefficiency', Physica A 388 (2009). Intraday application: 'Applicability of Intraday Entropy for Trading During Regular Market Hours', Computational Economics, doi 10.1007/s10614-026-11347-2.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Bertram Cost-Aware OU Band Optimization",
+  "category": "cointegration - optimized thresholds",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "MULTI-SYMBOL. Build the log-price spread x_t = log(P_A) - beta*log(P_B) with beta from a 252-bar OLS. Fit a zero-mean OU process dx = -theta*x*dt + sigma*dW via the AR(1) regression x_t = c + rho*x_{t-1} + u_t, giving theta = -log(rho)*252, sigma = sd(u)*sqrt(2*theta/(1-rho^2)), and the stationary sd sigma_eq = sigma/sqrt(2*theta). Let c_cost be the round-trip cost in log-return terms (commission + half-spread on both legs). Grid-search entry level a and exit level m over a in [-3, -0.25]*sigma_eq and m in [0, +1.5]*sigma_eq with a < m: the deterministic log return per cycle is r = m - a - c_cost, and using Bertram's first-passage expressions for E[T(a,m)] and Var[T(a,m)] compute the return per unit time mu = r/E[T] and the variance per unit time, then Sharpe = mu/sqrt(variance per unit time). Choose (a*, m*) maximizing Sharpe per unit time. ENTER LONG the spread when x_t <= a*; the mirror rule ENTER SHORT when x_t >= -a*.",
+  "exit_rule": "Close the long at x_t >= m* and the short at x_t <= -m*. The exit level is a free optimized parameter, so m* is generally NOT zero - on a fast-reverting, high-cost spread the optimizer pushes m* past the mean to pay for the round trip, and on a slow spread it pulls m* short of the mean to recycle capital faster. Hard time stop at 3 * ln(2)/theta bars (three half-lives) if m* has not been reached.",
+  "inputs": [
+   "daily closes of both legs",
+   "OLS beta on log prices",
+   "AR(1) fit of the spread giving theta and sigma",
+   "estimated round-trip transaction cost",
+   "OU first-passage-time expressions for E[T] and Var[T]"
+  ],
+  "params": [
+   "cost assumption c_cost",
+   "entry grid range for a",
+   "exit grid range for m",
+   "objective (return per unit time vs Sharpe per unit time)",
+   "half-life multiple for the time stop"
+  ],
+  "why": "Almost every pairs strategy exits at the mean by reflex, which quietly assumes transaction costs are zero and that capital has no opportunity cost. Neither is true. Bertram's insight is to make the objective explicitly a RATE - profit per unit of time, not profit per trade - which forces the optimizer to weigh how long capital sits in the trade against how much it earns. Once costs enter the objective, the optimal exit level moves off the mean, and it moves in a direction that depends on the spread's reversion speed. This is the cleanest available answer to 'where should I actually take profit', and Cummins & Bucca's large-scale test on 861 energy futures spreads, with an explicit data-snooping correction, found daily returns of 0.07-0.55% with Sharpes often above 2.",
+  "source": "Bertram (2010), 'Analytic Solutions for Optimal Statistical Arbitrage Trading', Physica A 389(11); large-scale test with data-snooping controls in Cummins & Bucca (2012), 'Quantitative Spread Trading on Crude Oil and Refined Products Markets', Quantitative Finance. Trade-cycle decomposition T = T1 + T2 and the return function r(a,m,c) = m - a - c reproduced from Krauss (2015), FAU Discussion Paper 09/2015, section 4.2 (equations 22-24).",
+  "novelty": "MULTI-SYMBOL. This is a distinct EXIT STRUCTURE above all: the take-profit level is jointly optimized with the entry level against a per-unit-TIME objective that includes transaction costs, so exits routinely land away from the mean in either direction. No band strategy in the existing 32, and none of the other pairs ideas here, optimizes entry and exit as a coupled pair or expresses the objective as a rate.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ }
+]

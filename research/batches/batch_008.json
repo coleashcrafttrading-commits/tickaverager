@@ -1,0 +1,219 @@
+[
+ {
+  "name": "White Reality Check Benchmark Gate",
+  "category": "data-snooping test / meta-strategy",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Fix the benchmark as buy-and-hold of the same ticker over the same n bars (use a flat/zero benchmark if you want an absolute rather than relative test). For each of the l candidate rules k=1..l compute the per-bar performance differential f_{k,t} = (rule k's bar return) - (benchmark's bar return) and f_bar_k = (1/n)*sum_t f_{k,t}. Observed statistic V_l = max_{k=1..l} sqrt(n)*f_bar_k. Generate B=1000 stationary-bootstrap index paths (Politis-Romano): set t=1, draw u(1) uniformly from {1..n}; at each subsequent step draw U~Uniform[0,1] - if U < q draw u(t) uniformly from {1..n}, else set u(t) = u(t-1)+1 wrapping to 1 past n; use q=0.1 for a mean block length of 10 bars. Apply the SAME index path to all l rules so cross-rule dependence is preserved. For resample i compute V*_{l,i} = max_k sqrt(n)*(f_bar*_{k,i} - f_bar_k) - note the recentring by the ORIGINAL sample mean, which is what imposes the null. Sort the V* and find M = #{i : V*_{l,i} <= V_l}; the Reality Check p-value is P_RC = 1 - M/B. Trade the argmax rule's own entries ONLY if P_RC < 0.05; otherwise the whole family is rejected and you hold the benchmark.",
+  "exit_rule": "The winning rule's own exit. Re-run the Reality Check every 126 bars on the expanding sample; revert to benchmark-only (flatten all rule-driven positions at the next open) as soon as P_RC >= 0.10. Because the statistic is recursive - V_k = max(sqrt(n)*f_bar_k, V_{k-1}) - you can add new candidate rules to the family later without re-running the whole search, but you MUST carry the running V and V* forward, which is exactly the accounting that stops you from quietly forgetting earlier trials.",
+  "inputs": [
+   "per-bar returns of every candidate rule",
+   "per-bar benchmark returns",
+   "stationary bootstrap index generator",
+   "uniform RNG with a recorded seed"
+  ],
+  "why": "The right null is not 'this rule has zero edge' but 'the BEST of the l rules I looked at has no edge over the benchmark', and that null's distribution is the distribution of a maximum over correlated series. The stationary bootstrap preserves the autocorrelation and heteroskedasticity of bar returns (an IID bootstrap would understate the null's spread and pass junk), and applying one common index path across all rules preserves their correlation, which is what stops the test being absurdly conservative when 578 rules are near-duplicates of each other. The recursive form is the practical hook: it makes the honest trial count auditable across sessions and researchers.",
+  "novelty": "Tests the maximum over the whole family against a dependence-preserving bootstrap null, rather than testing any single rule. Distinct from DSR in being non-parametric and benchmark-relative rather than absolute.",
+  "source": "White, H. (2000), 'A Reality Check for Data Snooping', Econometrica 68(5), 1097-1126 - Corollary 2.4 and Section 3 'Implementing the Bootstrap Reality Check' (P_RC = 1 - M/N, the recursive V_k updates, q=0.1, N=500-1000). PDF: https://users.ssc.wisc.edu/~bhansen/718/White2000.pdf . Applied to technical trading rules in Sullivan, R., Timmermann, A. & White, H. (1999), 'Data-Snooping, Technical Trading Rule Performance, and the Bootstrap', Journal of Finance 54(5), 1647-1691. Bootstrap: Politis, D. & Romano, J. (1994), 'The Stationary Bootstrap', JASA 89(428), 1303-1313.",
+  "ohlcv_only": true,
+  "params": [
+   "q / mean block length (1/q = 5, 10, 20, 50 bars)",
+   "B resamples (500 / 1000 / 5000)",
+   "benchmark (buy-and-hold vs flat vs the incumbent live rule)",
+   "alpha (0.01 / 0.05 / 0.10)",
+   "performance metric (mean return / Sharpe differential)"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Hill-vs-EPD Bias Gap Reliability Gate",
+  "category": "extreme value theory / model reliability",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "1000 trailing daily returns",
+   "Hill estimator across a range of k",
+   "extended Pareto distribution MLE",
+   "Weissman tail-probability estimator"
+  ],
+  "entry_rule": "Every day per ticker, form losses X_t = -r_t over the trailing 1000 daily bars and sort ascending X_(1) <= ... <= X_(n). For each k in {25, 50, 75, 100, 125, 150} compute the Hill estimate H_k = (1/k) * sum_{j=1..k} ln( X_(n-j+1) / X_(n-k) ). Separately, for each k fit the extended Pareto distribution to the excess ratios Y_j = X_(n-j+1)/X_(n-k), j = 1..k, by maximum likelihood on the survival function Gbar(y) = { y * (1 + delta - delta*y^rho) }^(-1/xi) with rho fixed at -1, giving (xi_k, delta_k). Define BIASGAP = mean over k of | H_k - xi_k | / xi_k, and HILLDISP = stdev(H_k over the six k) / mean(H_k). Take the base long entry ONLY when BIASGAP < 0.20 AND HILLDISP < 0.15 (i.e. the simple Pareto tail model is both stable in k and close to its bias-corrected version).",
+  "exit_rule": "Cut the position to half size on the first close where BIASGAP >= 0.20 or HILLDISP >= 0.15, and flatten completely if either condition persists for 3 consecutive closes. Restore full size only after 10 consecutive closes with both back under their thresholds.",
+  "params": [
+   "k grid",
+   "window (750/1000/1500 bars)",
+   "rho (fixed -1 vs estimated)",
+   "BIASGAP threshold (0.15/0.20/0.30)",
+   "HILLDISP threshold",
+   "persistence days"
+  ],
+  "why": "Beirlant and co-authors point out that in practice the Hill plot is almost never horizontal in k, and that this non-stability is a symptom of second-order slow variation - the true tail is Cx^(-1/xi)(1 + xi^(-1) delta(x)) rather than a clean power law, so any single-k Hill number is contaminated by observations from the middle of the distribution. The EPD adds exactly one parameter to absorb that deviation, so the GAP between the naive Hill and the bias-corrected EPD estimate is a direct, computable measure of how badly the tail model is misspecified for this name right now. Trading only when the tail model is trustworthy is a filter no price-based indicator can supply, and it is precisely the failure mode that blows up a levered book (the tail turns out to be heavier than the estimate said).",
+  "source": "Maribe, Verster & Beirlant, 'Reducing bias and MSE in estimation of heavy tails: a Bayesian approach', arXiv:1606.05687 - Hill estimator eq. (3), Weissman tail-probability estimator eq. (4), extended Pareto survival function eq. (6) and the EPD-ML bias-reduced estimator; the observation that Hill stability 'is not visible' in most cases motivates the dispersion term. Hill (1975) for the base estimator; Beirlant et al. (2009) for the EPD subclass F(xi, tau).",
+  "novelty": "The signal is the DISAGREEMENT BETWEEN TWO ESTIMATORS OF THE SAME QUANTITY, used as a confidence gate. Nothing in the existing 32 uses estimator instability as a tradeable state.",
+  "_agent": "v2:6c9a27a7b9b617a4303b5edac46faea41cc4f0cce91accc1a836f0c1ce47f6d8"
+ },
+ {
+  "name": "Signal Horizon Migration Detector",
+  "category": "crowding / front-running detection",
+  "side": "both",
+  "timeframe": "daily signal computation; entries at daily or intraday bars",
+  "entry_rule": "For signal S (any of the corpus's entry rules, expressed as a continuous score rather than a binary trigger), each trading day compute the cross-sectional Spearman rank information coefficient IC(h) between the signal score on bar t and the forward return from bar t+1 to bar t+h, for h in {1, 2, 3, 5, 10, 20}, across the full tradable universe (require at least 30 names with 20-day median dollar volume > $5m). Maintain a 250-day rolling mean of each, meanIC(h). Define h* = argmax_h meanIC(h) - the horizon at which the signal's alpha actually lives. Compute the migration M = position of h* in the grid today minus its position 250 trading days ago (negative M means alpha has moved EARLIER). Trading rule: if M >= -1 (horizon stable), take S's entry at the NEXT bar's open at 100% of base size; if M <= -2 (alpha has migrated at least two grid steps earlier, i.e. the trade is being anticipated), execute instead at the CLOSE of the signal bar itself and cut size to 50%.",
+  "exit_rule": "Exit at the close of bar t + h*, using the CURRENT value of h* - the holding period contracts automatically as the signal's alpha migrates earlier. Overlay a hard stop at 2 * ATR(14) adverse from entry. Retire S entirely when max_h meanIC(h) <= 0 for 60 consecutive trading days.",
+  "inputs": [
+   "OHLCV bars for the full tradable universe",
+   "cross-sectional Spearman rank correlation",
+   "forward returns at multiple horizons",
+   "ATR(14)",
+   "20-day median dollar volume"
+  ],
+  "params": [
+   "horizon grid ({1,2,3,5} / {1,2,3,5,10,20} / {1..20})",
+   "IC averaging window (125 / 250 / 500 days)",
+   "migration comparison lag (125 / 250 / 500 days)",
+   "migration threshold for the execution switch (-1 / -2 / -3 grid steps)",
+   "size cut when migrated (0.3 / 0.5 / 0.7)",
+   "universe liquidity floor ($1m / $5m / $20m)"
+  ],
+  "why": "When a signal becomes crowded, other participants trade it earlier, so its alpha migrates toward shorter horizons and eventually into the bar on which the signal is computed - at which point a next-open execution captures nothing and pays the full spread. This is decay you can see BEFORE it shows up in P&L, because the total IC can still be positive while the horizon at which it is realised has collapsed. Volpati et al. establish that this crowding is real and growing in exactly the mechanical signals the corpus is full of: momentum portfolio rebalancing alone accounts for 1-2% of total US equity order flow, a share that has grown substantially. The rule does two things with the detection - it moves execution earlier to stay ahead, and it shrinks the holding period to match where the alpha now is.",
+  "source": "Volpati, V., Benzaquen, M., Eisler, Z., Mastromatteo, I., Toth, B. & Bouchaud, J.-P., 'Zooming In on Equity Factor Crowding', arXiv:2001.04185 (crowding measured from trade-imbalance fluctuations; momentum rebalancing = 1-2% of order flow and rising). The IC-term-structure migration statistic and the execution/holding-period response are my own synthesis - Volpati et al. use signed order flow, which we do not have, so the horizon shift is the OHLCV-observable consequence of the same mechanism.",
+  "novelty": "Detects decay from WHERE IN TIME the alpha sits rather than from the level of P&L, and the response is a change in execution timing plus an adaptive holding period rather than a de-size or a kill. No level- or variance-based monitor can see this.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "Equity-Volatility Hedge Breakdown",
+  "category": "correlation-breakdown",
+  "side": "short",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "SPY daily close and open",
+   "VIXY daily close (or VIX daily close)",
+   "10-session Pearson correlation of daily returns",
+   "20-session rolling max of SPY close"
+  ],
+  "entry_rule": "Each session compute rho10 = Pearson correlation between the last 10 daily returns of SPY and the last 10 daily returns of VIXY (if index bars are available, use daily changes in VIX instead - the correlation sign is the same and the reading is cleaner). This correlation normally sits deeply negative, around -0.7 to -0.9. Short signal: rho10 > -0.25 (the inverse relationship has materially broken down) AND close(SPY) equals the highest close of the trailing 20 sessions. Sell SPY short at the next session's open. Require additionally that rho10 was below -0.50 at some point in the prior 10 sessions, so the rule fires on a breakdown rather than on a persistently broken regime.",
+  "exit_rule": "Cover at the next open on the first session where rho10 falls back below -0.50 (the normal hedge relationship has been restored). Hard time stop: 10 sessions. Hard risk stop: cover if SPY closes 3% above the entry price. Do not use a profit target - the thesis is about a regime, and the regime restoration is the exit.",
+  "why": "Volatility and equity index prices are mechanically anti-correlated because index puts are the dominant hedging instrument. When implied volatility rises while the index is also rising to new highs, someone is paying up for protection into strength - the marginal buyer of volatility is not being forced by a falling market but is choosing to hedge. That is a positioning signal that price alone cannot express: it is the option market disagreeing with the equity market about what comes next. The breakdown requirement (recently very negative, now not) is what makes it an event rather than a state.",
+  "source": "Synthesis. The mechanism rests on the well-documented, strongly negative contemporaneous VIX-SPX return relationship (the leverage/volatility-feedback effect described in the VIX literature and reflected in Cboe's own materials noting implied volatility rises when stocks drop) and on the standard practitioner observation that a positive same-day VIX/index co-movement at a new high reflects hedging demand into strength. I found no single paper that specifies this exact rule, so I have pinned it down myself and flagged it as untested rather than cite something vague.",
+  "novelty": "The trigger is the loss of a relationship, not the presence of one. Neither the level of the volatility index nor the trend of the equity index appears in the entry condition - only the rolling correlation between them, plus a price extreme used purely as a timing anchor. This is a signal with no analogue among the existing 32.",
+  "params": [
+   "correlation window (5/10/21 sessions)",
+   "breakdown threshold (-0.4/-0.25/-0.1/0.0)",
+   "prior-regime requirement (-0.4/-0.5/-0.6 within the last 5/10/20 sessions)",
+   "price extreme lookback (10/20/50 sessions)",
+   "volatility instrument (VIXY / VXX / VIX index / UVXY)",
+   "restoration exit threshold (-0.4/-0.5/-0.6)"
+  ],
+  "_agent": "v2:ace0102422e727c7e04dff379b63c92968054af0ad5011a5f348056e83babce2"
+ },
+ {
+  "name": "Dollar-Regime Domestic Revenue Tilt",
+  "category": "currency-intermarket",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "UUP daily close",
+   "IWM daily open/close",
+   "EFA daily open/close (or SPY)",
+   "20-session return of UUP",
+   "sma(100) of UUP"
+  ],
+  "entry_rule": "Compute D_t = close(UUP)/close(UUP)[20] - 1. STRONG-DOLLAR ENTRY: on the first session where D_t >= +1.5% AND close(UUP) > SMA(close(UUP),100), go long IWM and short EFA at the next open, dollar-neutral. WEAK-DOLLAR ENTRY: on the first session where D_t <= -1.5% AND close(UUP) < SMA(close(UUP),100), go long EFA and short IWM at the next open. Do not re-enter the same direction while a position in that direction is already open.",
+  "exit_rule": "Close both legs at the next open on the first session where the sign of D_t flips against the position (D_t < 0 for a strong-dollar trade, D_t > 0 for a weak-dollar trade). Hard time stop: 20 sessions. Hard risk stop: close if the spread P&L is worse than -3% of notional at any close.",
+  "why": "Russell 2000 companies derive the large majority of revenue domestically, while EFA is by construction unhedged foreign-currency exposure and large-cap US multinationals carry substantial foreign revenue translation. A sustained dollar appreciation is therefore a direct relative earnings tailwind for small domestic firms and a direct translation headwind for foreign and multinational earnings - a fundamental channel that is slow-moving and mechanical, which is precisely the sort of thing a 20-day price signal can front-run. I want to state the counter-hypothesis honestly: a rising dollar is also often a risk-off, tightening-liquidity signal, which hurts small caps through the risk channel; the two effects push in opposite directions, so the sign of the net effect is genuinely an empirical question and the strategy should be tested in both directions before being trusted.",
+  "source": "Synthesis. Grounded in the revenue-geography difference between the Russell 2000 and international/multinational indices and in standard FX-translation accounting; I could not find a single primary paper specifying this rule, so I am labelling it my own construction rather than attaching a weak citation. The 1.5% and 100-day parameters are my choices, picked so the signal fires a few times a year rather than continuously.",
+  "novelty": "The only currency-driven idea in this set, and market-neutral in its expression: the signal is a move in a currency ETF and the trade is a relative-value spread between two equity sleeves chosen for their opposite revenue geography. No indicator is computed on either traded instrument.",
+  "params": [
+   "dollar lookback (10/20/60 sessions)",
+   "trigger magnitude (0.75%/1.5%/2.5%)",
+   "trend filter length on UUP (50/100/200)",
+   "long leg (IWM / IWC / XRT - all more domestically levered) and short leg (EFA / EEM / SPY)",
+   "holding period cap (10/20/40 sessions)",
+   "direction to trade (test the reverse sign explicitly)"
+  ],
+  "_agent": "v2:ace0102422e727c7e04dff379b63c92968054af0ad5011a5f348056e83babce2"
+ },
+ {
+  "name": "Equal-Weight Breadth Non-Confirmation",
+  "category": "breadth-proxy",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "RSP daily close",
+   "SPY daily open/close",
+   "50-session rolling max/min of SPY close and of the RSP/SPY ratio",
+   "sma(20) of the ratio"
+  ],
+  "entry_rule": "Define B_t = close(RSP)/close(SPY), the equal-weight versus cap-weight ratio. BEARISH: today close(SPY) equals the highest close of the trailing 50 sessions inclusive, AND B_t equals the lowest value of B over the trailing 50 sessions inclusive. Exit all longs and, in a two-sided version, sell SPY short at the next session's open. BULLISH: today close(SPY) equals the lowest close of the trailing 50 sessions, AND B_t equals the highest value of B over the trailing 50 sessions. Buy SPY at the next open. Require a minimum of 20 sessions between consecutive signals in the same direction so a multi-week grind of new highs does not generate a signal every session.",
+  "exit_rule": "Short: cover at the next open on the first session where B_t rises above SMA(B,20); hard time stop of 15 sessions; hard risk stop if SPY closes 3% above entry. Long: exit at the next open on the first session where B_t falls below SMA(B,20); hard time stop of 15 sessions; hard risk stop if SPY closes 3% below entry.",
+  "why": "RSP holds the same 500 companies as SPY at equal weight, so the ratio strips out everything except concentration - it is a pure measurement of whether the index move is being produced by the whole list or by a handful of the largest names. An index at a fifty-day high while the ratio is at a fifty-day low means the median constituent is not participating: the advance is narrow and rests on a small number of positions whose withdrawal would remove the whole move. The mirror case at a fifty-day low is a market where the median stock is already recovering while the cap-weighted headline is still being dragged down by a few large names, which is what an internal bottom looks like.",
+  "source": "Synthesis, built on the standard breadth-divergence framework (a new index extreme unconfirmed by internals) applied to the RSP/SPY pair. The equal-weight-versus-cap-weight ratio as a concentration and participation gauge is standard practitioner analysis - see for example the multi-index comparison framing at stockcharts.com/freecharts/perf.php?SPY,QQQ,DIA,RSP,MDY,IWM,IJR,IWC. I could not find a paper that specifies this exact double-extreme rule, so I am claiming it as my own construction rather than attaching a loose citation.",
+  "novelty": "Requires simultaneous opposite extremes in two series over the same window - a joint condition on the index and on a same-constituent equal-weight ratio. It is neither a breakout (it fires against the breakout) nor a fade of an oscillator, and the exit is governed entirely by the breadth ratio's own mean reversion rather than by price.",
+  "params": [
+   "extreme lookback (20/50/100 sessions)",
+   "ratio MA length for exit (10/20/50)",
+   "minimum spacing between same-direction signals (0/10/20 sessions)",
+   "ratio alternative (RSP/SPY vs QQQE/QQQ vs MDY/SPY)",
+   "requiring the ratio to be at an N-session low versus merely below its own 50-session median",
+   "time stop (10/15/30 sessions)"
+  ],
+  "_agent": "v2:ace0102422e727c7e04dff379b63c92968054af0ad5011a5f348056e83babce2"
+ },
+ {
+  "name": "Leveraged ETF Rebalance Front-Run",
+  "category": "mechanical flow / structural",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "Define underlying/LETF groups, e.g. SPY -> {UPRO long, SPXU inverse}, QQQ -> {TQQQ, SQQQ}, IWM -> {TNA, TZA}, XLF -> {FAS, FAZ}. At 14:15 ET compute r = (underlying's last price / underlying's prior-day close) - 1. If r >= +0.01, BUY the ultra-long LETF of that group. If r <= -0.01, BUY the ultra-short (inverse) LETF of that group. If -0.01 < r < 0.01, take no position in that group. Size by expected rebalance magnitude, proportional to (L^2 - L) * r where L is the stated leverage factor (3 for a 3x fund).",
+  "exit_rule": "Market-on-close the same session, i.e. hold approximately 105 minutes from 14:15 to 16:00. No intraday stop in the published version.",
+  "inputs": [
+   "1-minute close of the underlying ETF",
+   "prior daily close of the underlying",
+   "1-minute close of the leveraged ETF",
+   "session clock (ET)",
+   "stated leverage factor per fund"
+  ],
+  "params": [
+   "trigger time (default 14:15 ET)",
+   "return threshold (default 1%)",
+   "which underlying/LETF groups",
+   "leverage factor L",
+   "optional scaling of size by |r|"
+  ],
+  "why": "A leveraged ETF must rebalance its exposure every day to restore its stated multiple, and the required trade is always in the same direction as the day's move, sized roughly (L^2 - L) times the fund's assets times the day's return. That flow is mechanically forced, publicly predictable, and concentrated into the last hour. When the underlying is already up 1% by early afternoon, a large forced buy is coming - the trade is front-running a rebalance that has to happen regardless of anyone's opinion.",
+  "source": "QuantConnect Lean, Algorithm.Python/Alphas/RebalancingLeveragedETFAlpha.py (docstring cites the leveraged-ETF rebalance literature; academic origin is Cheng & Madhavan, 'The Dynamics of Leveraged and Inverse ETFs') - https://github.com/QuantConnect/Lean/blob/master/Algorithm.Python/Alphas/RebalancingLeveragedETFAlpha.py",
+  "novelty": "The edge is not statistical at all - it is a known, dated, sized order that a counterparty is legally obliged to send. Nothing in the existing 32 conditions on another instrument's forced flow, and the entry is a wall-clock time plus a threshold on a DIFFERENT instrument's return than the one traded.",
+  "_agent": "v2:16ef1dd18371885595dabbe3e4a4868e6c3a7e7fe0580d2da50702aa86e06460"
+ },
+ {
+  "name": "TD Sequential Nine-Count Buy Setup",
+  "category": "exhaustion counting",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "Maintain two counters. seq_buy increments by 1 on each bar where close < close[4] and resets to 0 otherwise; seq_sell increments on each bar where close > close[4] and resets to 0 otherwise. When seq_buy reaches 9, index the setup bars so bar9 = current bar (shift 0), bar8 = shift 1, bar7 = shift 2, bar6 = shift 3. Require the perfection condition: (low[0] < low[2] AND low[0] < low[3]) OR (low[1] < low[2] AND low[1] < low[3]). If seq_buy >= 9 AND that condition holds, enter LONG at the next bar's open. Mirror for shorts using seq_sell >= 9 with (high[0] > high[2] AND high[0] > high[3]) OR (high[1] > high[2] AND high[1] > high[3]).",
+  "exit_rule": "Exit a long when EITHER the mirrored sell condition fires (seq_sell >= 9 with high perfection) OR seq_sell simply exceeds 8, whichever comes first. Optional overlay the published code relies on: a fixed take-profit and a hard stop, since the count-based exit can be slow.",
+  "inputs": [
+   "close",
+   "high",
+   "low",
+   "close[4] comparison series",
+   "consecutive-run counter"
+  ],
+  "params": [
+   "comparison lag (default 4 bars)",
+   "setup count required (default 9)",
+   "perfection bars compared (default 6 and 7)",
+   "whether perfection is required or optional",
+   "bar resolution"
+  ],
+  "why": "The count measures how many consecutive bars have closed below the close of four bars earlier - a persistence-of-selling measure with no averaging and no smoothing. Nine consecutive such bars is a run so long that it is statistically rare under a random walk, and it typically means a single motivated seller has been working an order to completion. The perfection condition additionally demands that the final bars of the run make a genuine new low relative to bars 6 and 7, which distinguishes real exhaustion from a slow grind.",
+  "source": "freqtrade-strategies, user_data/strategies/berlinguyinca/TDSequentialStrategy.py - https://github.com/freqtrade/freqtrade-strategies/blob/main/user_data/strategies/berlinguyinca/TDSequentialStrategy.py (implements Tom DeMark's TD Sequential setup)",
+  "novelty": "Purely ordinal - it counts comparisons between closes four bars apart and never computes an average, a band or a ratio. Three-bar momentum counts three bars of same-direction change; this counts nine bars against a fixed four-bar lag and adds a geometric perfection filter on the lows.",
+  "_agent": "v2:16ef1dd18371885595dabbe3e4a4868e6c3a7e7fe0580d2da50702aa86e06460"
+ }
+]

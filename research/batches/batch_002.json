@@ -1,0 +1,220 @@
+[
+ {
+  "name": "Multinomial Four-Level VaR Shape Monitor",
+  "category": "risk-model backtesting / tail-shape diagnosis",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "250 trailing daily portfolio or index returns",
+   "VaR forecasts at four levels",
+   "multinomial cell counts",
+   "Pearson and Nass chi-square tests"
+  ],
+  "entry_rule": "Set N = 4 and the base level alpha = 0.975, giving levels alpha_j = alpha + (j-1)/N * (1 - alpha) for j = 1..4, i.e. 0.9750, 0.98125, 0.98750, 0.99375. Each day forecast VaR at all four levels from the same model (GARCH-t or GARCH-POT). Define I_t,j = 1{L_t > VaR_alpha_j,t} and X_t = sum_j I_t,j (how many levels today's loss pierced, 0 to 4). Over the trailing n = 250 days form cell counts O_j = #{t : X_t = j} for j = 0..4 and the Pearson statistic S_N = sum_{j=0..4} (O_j - n*(alpha_{j+1} - alpha_j))^2 / (n*(alpha_{j+1} - alpha_j)) with alpha_0 = 0 and alpha_5 = 1; apply the Nass correction cS_N ~ chi-square_nu with c = 2*E[S_N]/Var(S_N), nu = c*E[S_N], E[S_N] = N, Var(S_N) = 2N - (N^2+4N+1)/n + (1/n)*sum_j 1/(alpha_{j+1}-alpha_j). Run the fleet at full size while cS_N < chi-square_nu(0.95). If the test rejects AND O_4 alone exceeds 2x its expected count while O_1 is within 1.5x expectation, classify as DEEP-TAIL MISFIT: cut gross exposure to 50%, widen all ladder rung spacing by 1.5x, and take no new adds. If the test rejects AND O_1 exceeds 2x expectation while O_4 is within 1.5x, classify as VOL-MODEL MISFIT: keep gross exposure but shorten all volatility lookbacks by half and tighten stops to 1.5*ATR(14).",
+  "exit_rule": "Return to the default configuration once cS_N falls back below chi-square_nu(0.95) for 10 consecutive closes. Independently, flatten if the deep-tail classification persists for more than 15 consecutive trading days.",
+  "params": [
+   "N (2, 4, 8)",
+   "base alpha (0.975, 0.99)",
+   "window n (250/500/750)",
+   "Pearson vs Nass vs likelihood-ratio test",
+   "the 2x / 1.5x cell-imbalance cutoffs",
+   "spacing and stop multipliers"
+  ],
+  "why": "Emmer, Kratz and Tasche show ES_alpha is well approximated by the average of four quantiles, ES_alpha ~ (1/4)[q(alpha) + q(0.75alpha+0.25) + q(0.5alpha+0.5) + q(0.25alpha+0.75)], which means simultaneously backtesting VaR at four levels IS an implicit ES backtest. Kratz, Lok and McNeil show in simulation that multinomial tests with N >= 4 are far more powerful at detecting trading-book model misspecification than the standard binomial exception test, with Nass robust in size across N. The trading value is not the pass/fail but WHICH CELL is over-populated: too many deep piercings with a normal count of shallow ones means the tail shape is wrong (leverage is the problem); too many shallow piercings with a normal deep count means the volatility scale is wrong (lookback is the problem). Those two failures call for opposite responses, and a single-level backtest cannot tell them apart.",
+  "source": "Kratz, Lok & McNeil (2018), 'Multinomial VaR backtests: a simple implicit approach to backtesting expected shortfall', J. Banking & Finance 88; arXiv:1611.04851 - level construction eq. (2.1), Pearson statistic eq. (2.4), the Nass correction with c and nu, and the finding that N >= 4 dominates binomial tests. The ES approximation eq. (1.1) is from Emmer, Kratz & Tasche (2015).",
+  "novelty": "Diagnostic rather than binary: the cell histogram of 'how many VaR levels did today pierce' tells you which part of the model broke, and the strategy takes a different action for each diagnosis.",
+  "_agent": "v2:6c9a27a7b9b617a4303b5edac46faea41cc4f0cce91accc1a836f0c1ce47f6d8"
+ },
+ {
+  "name": "Characteristic Pure Play (trade the regression slope itself)",
+  "category": "cross-sectional multivariate regression",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "same CHARS block, cross-sectionally z-scored",
+   "matrix algebra: X_t = [1, zhat_1 ... zhat_K] of shape N x (K+1)",
+   "W_t = (X_t' X_t)^{-1} X_t'"
+  ],
+  "entry_rule": "At each month-end t build X_t = [column of ones, then the K cross-sectionally winsorised-and-z-scored characteristics] over the N eligible stocks (60-day median dollar volume > $2,000,000). Compute W_t = (X_t' X_t)^{-1} X_t', an (K+1) x N matrix. Row k of W_t is a vector of portfolio weights with three exact properties: it has unit cross-sectional exposure to characteristic k, exactly zero exposure to every other characteristic, and its weights sum to zero. Pick one target characteristic k (e.g. MOM12-1). Take w = row k of W_t, scale it so sum|w_i| = 2 (i.e. 100% gross long, 100% gross short), and enter position w_i * capital in every stock i. Optionally estimate W_t by weighted least squares, W_t = (X_t' D_t X_t)^{-1} X_t' D_t with D_t = diag(sqrt(60-day median dollar volume rank / N)), to stop microcaps dominating the slope.",
+  "exit_rule": "Hold to the next month-end, then recompute W_t and trade to the new w (trade only the difference). Close the entire book and stay flat for one month if the realised 21-day volatility of the pure-play return exceeds 3x its trailing 3-year value, which signals X_t' X_t has become near-singular.",
+  "why": "An OLS slope is mechanically the return on a portfolio: lambda_k,t+1 = (row k of W_t) . r_{t+1}. So the multivariate momentum slope IS a tradable portfolio that is long momentum and hedged, by construction and to first order exactly, against size, beta, volatility, illiquidity and every other characteristic in X. A decile sort cannot do this - it can only neutralise what you happen to double-sort on.",
+  "novelty": "The position vector is the generalised inverse of the characteristic matrix, not a rank cut. Weights are continuous, sum to zero, and can be negative for a high-characteristic stock if that stock's other characteristics make it a bad hedge - something no sort can produce.",
+  "source": "Back, Kapadia & Ostdiek, 'Slopes as Factors: Characteristic Pure Plays', SSRN 2295993 (2013), later in Journal of Financial and Quantitative Analysis. The slope-as-portfolio-return algebra originates in Fama (1976), Foundations of Finance, ch. 9, and underlies Fama & MacBeth (1973).",
+  "params": [
+   "which characteristic to make the pure play",
+   "control set K",
+   "OLS vs WLS weighting scheme",
+   "gross leverage target",
+   "rebalance frequency (weekly / monthly)",
+   "ridge term added to X'X for conditioning (0 / 0.01 / 0.1 of trace/N)"
+  ],
+  "_agent": "v2:ea925ed25b6af9d1d174935a23471f0383024a2b532396e09ec39a411346d203"
+ },
+ {
+  "name": "Spread Regime Passive-Aggressive Switch",
+  "category": "optimal execution",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "On a signal, compute spread_hat_t = the EDGE effective spread over the trailing 60 bars (fraction of price) and its percentile rank pct_s within its own trailing 252 values. Compute participation p = Q / V_bar, where V_bar is the 20-bar average volume per bar. Then branch on BOTH: (a) if pct_s > 70 AND p < 0.02 \u2014 the spread is unusually wide and your order is small \u2014 post a passive limit buy at C_t * (1 - spread_hat/2) and hold it for up to W bars; model a fill only on a bar whose LOW <= the limit price, filled at the limit. If still unfilled after W bars, CANCEL AND SKIP THE TRADE \u2014 do not convert to a market order and do not chase. (b) otherwise \u2014 spread is normal or tight, or your order is large relative to bar volume \u2014 cross immediately with a market order at the next bar's open. W is swept in [1, 5].",
+  "exit_rule": "Mirror the branch. If pct_s > 70 and p < 0.02, post a passive limit sell at C_t * (1 + spread_hat/2), modelling a fill only on a bar whose HIGH >= the limit; if unfilled after W bars, convert to a market order (unlike the entry, exits must complete). Otherwise cross immediately. A stop-loss breach always crosses immediately regardless of the spread regime.",
+  "inputs": [
+   "ohlc bars (1 or 5 minute)",
+   "EDGE spread estimate over 60 bars",
+   "rolling percentile of the spread over 252 bars",
+   "volume per bar and 20-bar average",
+   "atr(14) for stops"
+  ],
+  "params": [
+   "spread percentile threshold (50-90)",
+   "participation threshold (0.5%-5%)",
+   "W passive wait bars (1-5)",
+   "EDGE window (40-120)",
+   "limit offset as a fraction of spread_hat (0.25-0.75)"
+  ],
+  "why": "The cost of crossing is the spread, and the spread is not constant \u2014 it widens in stressed and thin conditions and narrows otherwise. When it is wide you are paying a lot to demand immediacy, and if your order is small you can afford to supply liquidity instead and earn the spread rather than pay it. When your order is large relative to the bar, posting is pointless because you cannot get filled at size without moving the book anyway, so crossing is correct. The asymmetric skip-on-no-fill for entries and complete-on-no-fill for exits reflects that a missed entry costs only opportunity while a missed exit carries real risk.",
+  "novelty": "The existing execution-timing family tests fill assumptions, but the branch here depends jointly on an ESTIMATED spread regime derived from OHLC and on the order's OWN PARTICIPATION RATE, and an unfilled passive entry kills the trade rather than falling back to a market order. Both are structural changes to the entry logic, not fill-model parameters.",
+  "source": "Synthesis, grounded in verified primary sources: Ardia, D., Guidotti, E. & Kroencke, T.A. (2024), 'Efficient Estimation of Bid-Ask Spreads from Open, High, Low, and Close Prices', Journal of Financial Economics 161:103916 (OHLC-only spread estimator; official implementation at github.com/eguidotti/bidask, which notes the estimator works best on intraday bars with at least two trades per period); and the Roll (1984)/Hasbrouck (2009) effective-spread framing used as the cost measure in Novy-Marx & Velikov (RFS 2016), which explicitly caveats that the effective spread 'does not account for the price impact of large trades, and should thus be interpreted as the costs faced by a small liquidity demander' \u2014 precisely the condition under which posting passively is viable.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ },
+ {
+  "name": "Full-Range Gap Continuation with a Gap-Fill Stop",
+  "category": "gap continuation, long-horizon hold",
+  "side": "both",
+  "timeframe": "daily (with an intraday no-retest variant)",
+  "entry_rule": "DAILY VERSION. LONG: bar i is a full-range gap up - low(i) > high(i-1), i.e. the ENTIRE day trades above the prior day's entire range - AND a channel confirmation holds: high(i) > max(high over the 20 bars before i). Enter at the close of bar i. SHORT: high(i) < low(i-1) AND low(i) < min(low over the 20 bars before i); enter at the close of bar i. Sweep the channel length over 2-100. INTRADAY VARIANT (5-minute bars, US regular hours, tests the same idea at higher resolution): today's open >= high[-1] + 0.20 x daily ATR(14); then from the 09:35 bar through the 10:30 bar inclusive, EVERY 5-minute bar's low must stay strictly above high[-1] - the prior day's high is never touched - and the 10:30 bar's close must exceed the high of the 09:30-09:35 opening bar. Buy at the close of the 10:30 bar. Abort permanently for that day the moment any 5-minute bar's low <= high[-1]. One attempt per symbol per day; mirror for gap downs at the prior day's low.",
+  "exit_rule": "DAILY: three exits, first to fire. (i) Pattern exit - a stop one tick below the gap, i.e. at high(i-1) - 0.01 for longs, high(i-1) being the level the gap cleared; the trade dies the moment the gap fills. (ii) Time exit after n days, n swept 1-50 and biased LONG - the source found longer holding periods preferred. (iii) Disaster stop at entry - 6 x ATR(20). No profit target. INTRADAY: exit at the 15:55 close (no overnight hold); stop at high[-1] - 0.05 x daily ATR; trail to breakeven once price is 1 x the 09:30-10:30 range beyond entry.",
+  "inputs": [
+   "ohlcv daily",
+   "20-bar rolling max/min of high/low",
+   "atr(20) daily",
+   "5-minute bars and daily atr(14) for the intraday variant"
+  ],
+  "params": [
+   "channel filter length (20, sweep 2-100)",
+   "hold days n (sweep 1-50, bias long)",
+   "minimum gap in daily ATR for the intraday variant (0.20)",
+   "no-retest cutoff time (10:30 ET, sweep 10:00-11:30)",
+   "ATR stop multiple (6)"
+  ],
+  "why": "The absence of a fill is the signal. A gap that clears the prior bar's ENTIRE range and is never traded back into means there is no supply willing to transact at yesterday's extreme - the opposite information from a gap that gets filled or even retested. Placing the stop one tick inside the gap makes the whole trade a bet on exactly that proposition, and the finding that LONGER holds are preferred runs directly against the usual 'gaps fade fast' intuition, which is what makes it worth testing. This is rated B/C - the best-rated gap variant in that catalogue and better than the close-referenced Type B (rated C) - and it gives the fleet a mechanically opposite sibling to the retest-based gap rule already in the book, so the two can be run as a paired experiment on the same universe of gap days.",
+  "source": "https://oxfordstrat.com/trading-strategies/gap-pattern/ - Gap Pattern Type A: long gap defined as Low[i] > High[i-1], channel filter High[i] > UpperChannel[i-1] with lookback 2-100, pattern exit 'one tick below the price gap', time exit 1-50 days with longer holds preferred, ATR(20) x 6 stop, rating B/C over 42 US futures markets. Compare https://oxfordstrat.com/trading-strategies/gap-pattern-2/ - Type B uses the weaker Low[i] > Close[i-1] definition and rates C, 'less efficient than Type A'. The intraday no-retest cutoff is my own construction: conditioning on the NON-occurrence of a retest by a fixed clock time is what makes an otherwise unfalsifiable notion of 'strong gap' testable.",
+  "novelty": "Requires the gap to clear the prior bar's whole RANGE (not merely its close), makes the non-fill of the gap the stop condition, and holds for weeks rather than hours. The excluded out-of-range gap-and-go rule requires a retest and is intraday-only; this one is invalidated by the very retest that rule waits for.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Meta-Labelled Primary Signal",
+  "category": "lightweight ML / two-stage architecture",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "inputs": [
+   "any primary signal",
+   "EWM return sd (span 50)",
+   "ADX(14)",
+   "ATR(14)",
+   "RSI(14)",
+   "volume",
+   "permutation entropy of last 40 returns"
+  ],
+  "entry_rule": "PRIMARY model sets side in {+1,-1} on bar t (reference implementation: the 20/50 EMA cross, but any of the existing 32 works). Label every historical primary signal by its triple-barrier outcome: upper barrier at C_t * (1 + side * 2 * sigma_t), lower at C_t * (1 - side * 1 * sigma_t), vertical barrier at 10 bars, where sigma_t is the EWM sd of log returns with span 50; meta-label = 1 if the profit-take barrier is touched first, else 0. Train a SECONDARY binary model (logistic regression, or the 50-stump ensemble of idea 10) on features [ADX(14), ATR14/mean(ATR14,100), (C-EMA50)/ATR14, ln(V/mean(V,20)), RSI(14), permutation entropy (d=3) of the last 40 returns, and for intraday the minutes-since-open], using ONLY labels whose vertical barrier closed before bar t, with a 10-bar embargo after the last training label. ENTRY: take the primary signal at the next open only if the secondary model's predicted probability > 0.55; size the position proportional to (p - 0.55)/0.45.",
+  "exit_rule": "Exit on whichever of the SAME three barriers used to construct the label is touched first: +2*sigma profit-take, -1*sigma stop, 10-bar vertical. Never exit on a primary-model reversal alone - the label the secondary model learned was defined by these barriers, so the live exit must match it exactly or the model is being asked a different question than it was trained on.",
+  "params": [
+   "profit/stop barrier multiples",
+   "vertical barrier length",
+   "secondary probability threshold (0.50-0.70)",
+   "embargo length",
+   "secondary feature set",
+   "secondary model class"
+  ],
+  "why": "Direction and conviction are different problems and a single model forced to do both does neither well. A trend rule has decent recall and terrible precision; the secondary model's only job is to learn the CONDITIONS under which the primary rule's precision is acceptable - which is a much easier, better-conditioned learning problem because the labels come from the primary signal's actual path-dependent P&L rather than a fixed-horizon return. Position sizing falls out of the probability for free.",
+  "novelty": "Not a signal at all - an architecture. Side and size are decided by separate models, training labels are path-dependent triple-barrier outcomes, and the purge-plus-embargo scheme prevents the overlapping-label leakage that makes naive versions of this look spectacular in backtest and fail live. It can be wrapped around any of the 32 existing strategies.",
+  "source": "Lopez de Prado, Advances in Financial Machine Learning (Wiley, 2018), Ch. 3 (triple-barrier labelling, getEvents/getBins) and section 3.6 (meta-labelling). Empirical evaluation: Hudson & Thames, 'Does Meta Labeling Add to Signal Efficacy?', hudsonthames.org. Method overview: en.wikipedia.org/wiki/Meta-Labeling",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Adversarial No-Arbitrage SDF Portfolio",
+  "category": "deep learning / asset pricing, adversarial objective",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "Train two networks against each other on the return panel. SDF network: takes the macro state h_t and the firm state I_{i,t} and outputs weights omega(h_t, I_{i,t}); the stochastic discount factor is M_{t+1} = 1 - sum_i omega(h_t, I_{i,t}) * R^e_{i,t+1}. Conditioning network: outputs test-asset functions g(h_t, I_{i,t}). Train the min-max objective min_omega max_g (1/N) * sum_j || E[ M_{t+1} * R^e_{j,t+1} * g(h_t, I_{j,t}) ] ||^2, weighting each symbol's sample moment by T_i/T for the unbalanced panel. The macro state h_t comes from an LSTM over five OHLCV-derived aggregate series: the equal-weighted universe return, the cross-sectional standard deviation of daily returns across the universe, aggregate 21-day realised volatility, market breadth (fraction of symbols above their own 200-day SMA), and the average pairwise correlation of the universe over 60 days. The firm state I_{i,t} is the OHLCV characteristic set. Trade the SDF tangency portfolio: hold weight omega(h_t, I_{i,t}) in symbol i at each close, L1-normalised so the weights sum to 1 in absolute value.",
+  "exit_rule": "Weights are re-solved at every rebalance; a symbol exits when its omega crosses zero. Portfolio-level volatility control: if the realised 21-day volatility of the SDF portfolio exceeds 1.5x its target, scale every weight by target/realised until it is back in band.",
+  "inputs": [
+   "daily returns panel",
+   "OHLCV firm characteristics",
+   "aggregate market-state series: equal-weighted return, cross-sectional return dispersion, realised volatility, breadth, average pairwise correlation",
+   "LSTM macro-state encoder",
+   "SDF network + adversarial conditioning network"
+  ],
+  "params": [
+   "number of hidden macro states K_h",
+   "SDF and conditioning network widths",
+   "adversarial training schedule (alternating steps)",
+   "L1 leverage normalisation",
+   "volatility band multiple",
+   "rebalance frequency"
+  ],
+  "why": "Direct return forecasting fails because the signal-to-noise ratio is around one percent. The no-arbitrage condition E[M * R^e * g] = 0 must hold for EVERY conditioning function g, which is a far richer set of constraints than 'predict next month's return', and the adversarial player actively searches for the g where the current model prices worst - so the model is trained on its own hardest cases rather than on an arbitrary menu of test portfolios. Chen, Pelger & Zhu report roughly 2.6x the out-of-sample Sharpe of standard forecasting and linear benchmarks.",
+  "source": "Chen, Pelger & Zhu (2024), 'Deep Learning in Asset Pricing', Management Science 70(2); arXiv:1904.00745. Read the full text (ar5iv) and verified: M_{t+1} = 1 - omega_t' R^e_{t+1}, the min-max objective over conditioning functions g, LSTM extraction of K_h hidden macro states from a large set of macro time series, the T_i/T unbalanced-panel weighting in the empirical loss, and the separate feedforward network for loadings on the traded SDF factor. Their macro inputs are 178 FRED series; the five OHLCV-derived aggregate market-state series substituted here are my proxies, since we have no macro feed.",
+  "novelty": "The loss is a set of economic moment conditions with an adversarial player choosing which ones to enforce, and no return forecast is ever produced. Nothing else in the corpus trains against a self-generated worst-case test asset.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "Decay-Matched Scale-In",
+  "category": "entry splitting",
+  "timeframe": "any",
+  "side": "both",
+  "entry_rule": "Signal S fires at close_t. Split the intended position into M tranches and enter them at the closes of bars t, t+1, ..., t+M-1 unconditionally, at whatever price prevails, cancelling any remaining tranches if the signal fires in the opposite direction. Sweep M in {1,2,3,5}, where M=1 is the single-shot benchmark. Variant B (front-loaded): tranche i receives weight w_i proportional to exp(-i/tau) normalised to sum to one, with tau taken from the measured half-life produced by the Alpha Half-Life Surface for that same signal, so the schedule is not free-fitted but imported from an independent measurement.",
+  "exit_rule": "Two exit structures, crossed with the entry arms. Single-shot exit: close the entire accumulated position at the close of bar t+L+H using that signal's best H from the decay surface. Symmetric scale-out: exit in M equal tranches at the closes of the H-th through (H+M-1)-th bars after the final entry tranche. Both carry a portfolio-level stop at (average fill price) - 2*ATR(14)_t.",
+  "inputs": [
+   "atr(14)",
+   "bar close",
+   "measured signal half-life tau from the Alpha Half-Life Surface",
+   "any of the 32 signals"
+  ],
+  "why": "Almgren and Chriss frame execution as a trade-off between the market impact of trading fast and the volatility risk of trading slow, with the optimal number of slices emerging endogenously from that balance. For a small retail order in liquid names the impact term is close to zero, which naively implies M=1 - trade it all at once. But a second cost appears that their framework does not model, because they assume a fixed target: the signal itself decays across the slicing window, so late tranches buy into a weaker expected return. That flips the problem from an impact-versus-risk trade-off to a decay-versus-variance-reduction trade-off, and it yields a falsifiable prediction rather than a fitted parameter - M* should be small for signals whose measured decay surface falls off fast and larger for signals whose surface is flat in L. Testing M* against the independently measured tau is the actual experiment.",
+  "novelty": "The optimal slice count is predicted in advance from a separately measured quantity rather than swept and selected, which makes it a genuine out-of-sample test of a mechanism rather than another parameter search. Nothing in the existing 32 splits an entry at all.",
+  "source": "Almgren & Chriss (2000), 'Optimal Execution of Portfolio Transactions', Journal of Risk 3(2):5-39 - impact-versus-timing-risk trade-off and endogenous slice count, confirmed by fetching the paper. Garleanu & Pedersen, NBER WP 15205, abstract read directly, for 'trade partially towards the current aim' as the optimal response to costly trading against a decaying signal.",
+  "params": [
+   "M, number of tranches",
+   "tau, decay constant for the front-loaded weights",
+   "whether the exit is single-shot or scaled",
+   "stop multiple"
+  ],
+  "ohlcv_only": true,
+  "_agent": "v2:5554823afda7d5463649edadabfc0a821b53085796a66d6cb238003250335e3b"
+ },
+ {
+  "name": "Garleanu-Pedersen Aim Portfolio",
+  "category": "cost-aware rebalancing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Run K signals f_{k,t}, each z-scored over 252 bars. (1) For each signal estimate its mean-reversion speed: fit an AR(1) to f_k over the trailing 500 bars to get rho_k, set Phi_k = 1 - rho_k. (2) Estimate B = the matrix of walk-forward OLS loadings of next-bar asset returns on f, refit every 20 bars on a 500-bar window. (3) Sigma = the 60-bar sample covariance of asset returns. (4) Markowitz target M_t = (gamma*Sigma)^-1 * B * f_t. (5) AIM PORTFOLIO: aim_t = (gamma*Sigma)^-1 * B * (I + (a/gamma)*Phi)^-1 * f_t \u2014 i.e. each signal k is shrunk by the scalar 1/(1 + (a/gamma)*Phi_k), so fast-decaying signals get systematically less weight. (6) Trading rate: with rho_bar the average signal persistence, a = [ -(gamma*(1-rho_bar) + lambda*rho_bar) + sqrt( (gamma*(1-rho_bar) + lambda*rho_bar)^2 + 4*gamma*lambda*(1-rho_bar)^2 ) ] / (2*(1-rho_bar)). (7) Set the new position x_t = (1 - a/lambda)*x_{t-1} + (a/lambda)*aim_t. Calibrate lambda so that (lambda/2)*dx'*Sigma*dx equals the square-root-law impact cost Y*sigma_d*sqrt(Q/V20)*Q*P at a typical trade size.",
+  "exit_rule": "There is no separate exit rule. When aim_t goes to zero the position decays geometrically at rate a/lambda per bar, which is the cost-optimal unwind speed. Overrides: flatten a name entirely if its 20-bar realised volatility exceeds 4x its 252-bar median, and flatten the book if portfolio drawdown from peak exceeds a swept threshold.",
+  "inputs": [
+   "close (returns)",
+   "volume (for lambda calibration)",
+   "K signal series",
+   "AR(1) coefficient per signal",
+   "rolling covariance matrix (60)",
+   "rolling OLS loadings (500)"
+  ],
+  "params": [
+   "gamma risk aversion",
+   "lambda cost coefficient",
+   "signal persistence window (250-1000)",
+   "covariance window (40-120)",
+   "refit frequency",
+   "K number of signals"
+  ],
+  "why": "Garleanu & Pedersen solve the dynamic problem in closed form and get two principles: trade PARTIALLY toward the target at a fixed rate, and AIM IN FRONT of it. The aim portfolio is an exponentially weighted average of current and expected future Markowitz portfolios, which is algebraically equivalent to shrinking each signal by its own decay speed. This is exactly the right answer for a large signal book under costs: a signal that decays in two days is worth almost nothing after costs even if its raw information ratio is high, while a persistent one is worth trading, and the closed form says by precisely how much.",
+  "novelty": "The corpus reportedly has one heuristic nod to partial rebalancing but not the closed form. The two structural pieces missing are (a) the trading rate a/lambda derived from cost and risk aversion rather than picked, and (b) the shrinkage factor 1/(1 + (a/gamma)*Phi_k) that downweights signals by measured alpha decay. Neither appears in any of the 32.",
+  "source": "Garleanu, N. & Pedersen, L.H. (2013), 'Dynamic Trading with Predictable Returns and Transaction Costs', Journal of Finance 68(6): Proposition 2 eq. (7) and (10) x_t = (1 - a/lambda)*x_{t-1} + (a/lambda)*aim_t; eq. (9) for a; Proposition 3 eqs. (12)-(13); Proposition 4 eq. (14) aim_t = (gamma*Sigma)^-1 * B * (I + (a/gamma)*Phi)^-1 * f_t, 'the aim portfolio is the Markowitz portfolio built as if the signals f were scaled down based on their mean-reversion Phi'. Assumption 1: Lambda = lambda*Sigma.",
+  "_agent": "v2:af7805cbda62d56314a835951c1d2396ef4ff53084c1db9b21bd8e92e37e1128"
+ }
+]

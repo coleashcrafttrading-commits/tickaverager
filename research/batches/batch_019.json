@@ -1,0 +1,206 @@
+[
+ {
+  "name": "Extreme-Bar Two-Day Reversal",
+  "category": "wide-range bar / overreaction",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Compute r = close/close[-1] - 1 and s = standard deviation of the last 20 daily returns. LONG when ALL hold: r <= -3.0 x s; r <= -0.05 in absolute terms; the close sits in the bottom 30% of the bar, (close - low)/(high - low) <= 0.30; and the 20-day average dollar volume (close x volume) >= $20,000,000. Buy at the next bar's open. SHORT is the mirror (r >= +3.0 x s, r >= +0.05, close in the top 30% of the bar), which the literature says is the weaker side - test it separately.",
+  "exit_rule": "Pure time exit: close the position at the close of the 2nd trading day after entry. Single hard stop meanwhile at entry_bar_low - 0.5 x ATR(14) (longs). No profit target - the exit structure is deliberately time-based so the test measures the documented 2-day drift and nothing else.",
+  "inputs": [
+   "OHLCV bars",
+   "20-day return standard deviation",
+   "ATR(14)",
+   "dollar-volume liquidity filter"
+  ],
+  "params": [
+   "sigma threshold (2.5 / 3.0 / 4.0)",
+   "absolute move floor (5%)",
+   "close-location threshold (0.30)",
+   "holding period (1, 2, 3 days)",
+   "liquidity floor"
+  ],
+  "why": "Documented short-horizon overreaction: a one-day move of several sigma is dominated by liquidity demand (forced selling, index/ETF flow, panic) rather than by information, and the price concession paid to that demand is recovered over the next one to two sessions. The close-location filter selects for bars that ended at the extreme - i.e. where the liquidity demand was still unfilled at the bell - which is exactly the case that should snap back.",
+  "novelty": "Both the trigger and the exit are unlike anything in the current set: the trigger is a return standardised by the stock's own recent volatility combined with where the close sits inside the bar, and the exit is a fixed 2-day clock with no target. The liquidity floor is deliberate - the academic reversal is largely an artefact of spread and low price in illiquid names, so the test must exclude them or it will find a fake edge.",
+  "source": "Bremer, M. and Sweeney, R. J. (1991), 'The Reversal of Large Stock-Price Decreases', Journal of Finance 46(2) - stocks falling 10%+ in a day rebound roughly 2.2% over the following two days. Cox, D. R. and Peterson, D. R. (1994), 'Stock Returns following Large One-Day Declines: Evidence on Short-Term Reversals and Longer-Term Performance', Journal of Finance 49(1) (onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.1994.tb04428.x) - reversal concentrated in low-price/illiquid names, hence the liquidity filter. Atkins, A. B. and Dyl, E. A. (1990), 'Price Reversals, Bid-Ask Spreads, and Market Efficiency', JFQA 25, 535-547 - reversal largely inside the spread. Zawadowski, Kertesz and Andor, 'Short-term market reaction after extreme price changes of liquid stocks' (arXiv cond-mat/0406696; Quantitative Finance) - significant reversal after BOTH intraday increases and decreases in liquid names, but NYSE spread widening eats most of it.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "Quantified Pin Bar at a 20-Bar Extreme",
+  "category": "candlestick",
+  "side": "both",
+  "timeframe": "daily or 15m",
+  "entry_rule": "For the current bar define range = high - low, body = |close - open|, lower_wick = min(open, close) - low, upper_wick = high - max(open, close). BULLISH PIN when ALL hold: lower_wick >= 0.60 x range; upper_wick <= 0.15 x range; body <= 0.30 x range; range >= 1.2 x ATR(14); and the bar's low is the lowest low of the last 20 bars including itself. Entry: buy stop at the pin bar's high + 0.01, valid for the next 2 bars only, then cancelled. BEARISH PIN is the mirror (upper_wick >= 0.60 x range, lower_wick <= 0.15 x range, high is the 20-bar highest high) with a sell stop at the pin low - 0.01.",
+  "exit_rule": "Initial stop = pin bar low - 0.05 (longs). Target = entry + 2.0 x (entry - stop). If neither is touched within 8 bars, exit at that bar's close. Move the stop to breakeven when open profit reaches 1.0 x initial risk.",
+  "inputs": [
+   "OHLC bars",
+   "ATR(14)",
+   "20-bar rolling extreme"
+  ],
+  "params": [
+   "wick fraction (0.55-0.70)",
+   "opposite-wick cap (0.10-0.20)",
+   "body cap (0.25-0.35)",
+   "range floor in ATR (1.0-1.5)",
+   "extreme lookback (10, 20, 50)",
+   "order validity (2 bars)"
+  ],
+  "why": "A long lower shadow with a close near the top is a within-bar round trip: sellers pushed to a new multi-week low and every tick of that push was bought back before the bell. That is a directly observable failure of the dominant side. The range floor matters - the same shape on a quiet bar is noise, since a small wick on a small bar means no meaningful volume changed hands there.",
+  "novelty": "Not indicator-based at all: it is a within-bar auction-failure measurement combined with a positional requirement (the bar must be at the extreme of its own recent range). The three simultaneous wick/body ratio constraints exclude the ordinary doji and spinning-top shapes that a loose 'hammer' definition would let through, which is precisely where the academic null results come from.",
+  "source": "Bulkowski, T., 'Encyclopedia of Candlestick Charts' and the hammer identification guidelines at thepatternsite.com. The extra filters are a deliberate response to the negative literature: Marshall, B. R., Young, M. R. and Rose, L. C. (2006), 'Candlestick technical trading strategies: Can they create value for investors?', Journal of Banking & Finance 30(8), 2303-2323, find no profitability from unfiltered candlestick patterns on DJIA components 1992-2002 - so an unconditioned hammer is known to be worthless and only the conditioned version is worth testing.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "Residual s-score stat arb",
+  "category": "statistical-arbitrage",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Each day, over the trailing 60 daily bars, OLS-regress the ticker's daily returns on SPY's daily returns: R_t = b0 + beta*R_SPY_t + e_t. Build the cumulative residual X_k = sum(e_1..e_k) for k=1..60 (note X_60 = 0 by construction). Fit the 1-lag OLS X_{n+1} = a + b*X_n + z, n=1..59. Compute kappa = -ln(b)*252 and REJECT the ticker for that day if b >= 0.9672 (i.e. kappa <= 252/30 = 8.4, mean reversion slower than ~1.5 months). Otherwise sigma_eq = sqrt(Var(z)/(1-b^2)), m = a/(1-b), and the s-score is s = -m/sigma_eq = (-a/(1-b)) / sqrt(Var(z)/(1-b^2)). BUY TO OPEN when s < -1.25. SELL/SHORT TO OPEN when s > +1.25. Hedge by simultaneously taking -beta dollars of SPY per 1 dollar of stock (or run unhedged if shorting is unavailable).",
+  "exit_rule": "Close the long when s rises above -0.50. Close the short when s falls below +0.75 (the asymmetry is the authors' own tuned choice). Hard time stop after 3 mean-reversion times, i.e. 3/kappa*252 bars.",
+  "inputs": [
+   "daily close of the ticker",
+   "daily close of SPY or a sector ETF",
+   "60-bar rolling OLS",
+   "1-lag AR(1) OLS"
+  ],
+  "params": [
+   "regression window (60)",
+   "AR window",
+   "open threshold sbo/sso (1.25)",
+   "close thresholds sbc (0.75) / ssc (0.50)",
+   "min kappa (8.4)",
+   "factor proxy (SPY vs sector ETF)"
+  ],
+  "why": "The excess of a stock over its market/sector factor is a genuinely stationary quantity under an OU model, so its distance from equilibrium in units of the OU stationary standard deviation is comparable across tickers and across time in a way a raw price z-score is not. The kappa filter is the load-bearing part: it refuses to trade names whose reversion is too slow for the 60-day estimation window to be meaningful, which is exactly the failure mode that kills naive pairs trading. Trading only on large excursions means you are betting on a documented anomaly (idiosyncratic residual over-extension) rather than on direction.",
+  "novelty": "Not a Bollinger or VWAP z-score. The z is taken on the OU stationary distribution of a factor-neutral CUMULATIVE RESIDUAL, not on price; and the model self-rejects when the fitted mean-reversion speed is too slow, which no band indicator does. Entry and exit thresholds are deliberately asymmetric.",
+  "ohlcv_only": true,
+  "source": "Avellaneda & Lee (2010), 'Statistical Arbitrage in the US Equities Market', Courant Institute NYU open working paper, https://math.nyu.edu/~avellane/AvellanedaLeeStatArb20090616.pdf - equations (15), (16), (21), (22), Section 4.1 and Appendix (verified by extracting the PDF text).",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "Semi-Monthly Payday Window",
+  "category": "calendar flow / retirement contribution cycle",
+  "side": "long",
+  "timeframe": "daily, calendar-scheduled",
+  "entry_rule": "Enter LONG at the close of the last trading session that falls on or before the 15th calendar day of the month. If the 15th is a weekend or holiday, use the most recent prior trading session. No indicator condition.",
+  "exit_rule": "Exit at the close of the first trading session that falls on or after the 17th calendar day of the month. Hard stop at 2.5 * ATR(20) adverse from entry. Skip the window entirely if it overlaps the turn-of-month window, to avoid double-counting the same flow.",
+  "inputs": [
+   "close",
+   "session-time / calendar date",
+   "atr(20)"
+  ],
+  "params": [
+   "target calendar day (15th/16th)",
+   "entry and exit offsets",
+   "whether to also trade the 1st-2nd window",
+   "instrument selection"
+  ],
+  "why": "A large fraction of US employers run semi-monthly payroll, paying on the 15th and at month end. Payroll-deducted retirement contributions are swept into target-date and index funds a day or two later, and those funds buy the broad market with no price sensitivity whatsoever. This is the cleanest possible example of a non-informational, calendar-locked demand shock, and it is behavioural in the sense that the automation of the contribution - a deliberate self-control device that households adopt precisely because they will not save otherwise - is what makes the flow so mechanically predictable.",
+  "source": "Aixin Ma and William Robert Pratt, 'Payday Anomaly', SSRN working paper 3257064 - trading rule, mechanism and performance VERIFIED via https://quantpedia.com/strategies/payday-anomaly/, which gives the rule as 'Buy and hold the S&P 500 index on the 16th day of each month only', reports 2.57% annualised with 4.31% volatility and a 0.6 Sharpe over a 1980-2010 backtest, and quotes the authors that 'the 16th day of the month statistically and economically outperforms all other calendar days except the 1st and 2nd'.",
+  "ohlcv_only": true,
+  "novelty": "Distinct from the turn-of-month window in both timing and underlying flow - this one targets the mid-month payroll date, which the turn-of-month window does not span. Like turn-of-month it is indicator-free, but it fires at a different point in the month, so the two together tile the payroll cycle rather than duplicating it. Best deployed as a fleet-wide long tilt on a liquid index proxy rather than per single name, since the flow buys the market, not individual stocks.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Strike Grid Pin",
+  "category": "pinning",
+  "side": "both",
+  "timeframe": "intraday 5-minute, monthly expiry Friday only",
+  "entry_rule": "Only on the third Friday of the month. Build the strike grid G from a hardcoded convention table (no options feed): G=$1 if price<$25, G=$2.50 if $25<=price<$200, G=$5 if price>=$200. At 14:00 ET let P = last 5-min close, K = nearest integer multiple of G to P, d = P-K. Enter if 0.10*G <= |d| <= 0.20*G, in the direction of K: LONG if d<0, SHORT if d>0. Require the symbol be option-active: 60-day median dollar volume >= $200M.",
+  "exit_rule": "Exit at whichever comes first: (a) |P-K| <= 0.02*G (pin achieved), (b) 15:58 ET time exit, (c) stop-out when |d| widens to 0.35*G against entry.",
+  "inputs": [
+   "5-min OHLCV",
+   "daily OHLCV for the dollar-volume filter",
+   "bar timestamps to derive the third Friday",
+   "hardcoded strike-interval table"
+  ],
+  "params": [
+   "entry clock time (13:00/14:00/15:00)",
+   "band edges as fractions of G (default 0.10 and 0.20)",
+   "pin-reached exit 0.02*G",
+   "stop 0.35*G",
+   "price-tier to grid-spacing mapping",
+   "dollar-volume floor"
+  ],
+  "why": "Ni, Pearson and Poteshman show option market makers who hold net long expiring positions delta-hedge by buying below the strike and selling above it, and this hedge rebalancing physically drags the close toward the strike. They document that on expiration Fridays the fraction of optionable stocks closing within $0.125 of a strike spikes (z=8.15), that returns of optionable stocks are altered by at least 16.5bp on each expiration date, and critically that the deficit is concentrated at $0.50-$1.00 from the nearest strike on a $5 grid - exactly the 0.10*G to 0.20*G band. Stocks that would have closed in that band instead get pulled onto the strike. The effect vanishes when the same stocks lose their listed options, which rules out generic round-number clustering.",
+  "source": "Ni, Pearson & Poteshman (2005), 'Stock Price Clustering on Option Expiration Dates', Journal of Financial Economics 78(1), 49-87. Full text read at https://optionsoffice.ru/wp-content/uploads/2020/01/Stock-Price-Clustering-on-Option-Expiration-Dates.pdf",
+  "novelty": "Not an indicator at all. The signal is a deterministic distance to a fixed price lattice, gated by a calendar date. There is no moving average, no oscillator, and no volatility band - the attractor level is exogenous to price history. The band is two-sided and bounded on both ends, so unlike any mean-reversion rule it deliberately does NOT fire when price is already close to the level or far from it.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Factor Valuation Percentile Timing",
+  "category": "factor timing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily closes of paired factor ETFs",
+   "5-year cumulative factor spread return",
+   "expanding-window percentile ranks"
+  ],
+  "params": [
+   "valuation lookback (1260d default, sweep 750-1500)",
+   "percentile thresholds (bottom/top tercile default)",
+   "expanding vs 20-year rolling percentile window",
+   "overlay strength (full tilt vs half tilt)"
+  ],
+  "entry_rule": "Using the same K factor ETF spread series, proxy each factor's relative valuation with the quantity Arnott et al call the factor's relative price, measured from bars alone: P_f,t = sum of factor f's daily log returns over the trailing 1260 trading days (5 years). A factor whose long leg has strongly outperformed its short leg over five years has seen its value spread compress and is therefore expensive; the reverse means cheap. Convert to a percentile: q_f,t = the rank of P_f,t within factor f's OWN history of P over an expanding window starting at least 1260 days after inception, expressed in [0,1]. Rule: at each month end, go long the factor spreads in the bottom tercile of q (cheap factors, q < 1/3) and short those in the top tercile (expensive factors, q > 2/3), equal-weighted, each sized to equal dollar risk by its own 252-day volatility. Factors in the middle tercile are not traded. Enter at the next open. Run the honest null alongside it: the same book with the sign flipped is factor momentum, so a single backtest adjudicates the Arnott-versus-Asness dispute on our data.",
+  "exit_rule": "Rebalance monthly to fresh terciles; a factor exits when q moves into the middle tercile. Because valuation signals are extremely slow, impose a minimum holding period of 6 months per factor to stop the tercile boundary generating churn. Portfolio stop: flatten if the book's trailing 252-day return is below its own 10th percentile since inception, since a sustained loss here is the signature of the momentum-dominates-valuation world in which the trade is simply wrong.",
+  "why": "Arnott, Beck, Kalesnik and West argue that most of the historical return to smart-beta factors came from rising valuations rather than from the factor premium, and that buying factors when they are cheap relative to their own history and avoiding them when expensive should therefore add value. Asness, Ilmanen and Maloney counter that this timing is far weaker than advertised and is largely redundant with simply owning value, and Asness's 'Siren Song of Factor Timing' argues the whole exercise is close to a value trade in disguise. Haddad, Kozak and Santosh sit in between: they find factor returns genuinely are predictable by their own valuations. The corpus contains dozens of factor-like signals and no layer that decides how much of each to run, so this is worth resolving empirically even though the literature disagrees.",
+  "novelty": "The signal is the percentile of a factor's own 5-year cumulative spread return within its own full history - a valuation-style measure applied to a strategy rather than to an asset. That is a different object from anything in the 32, all of which signal on asset prices. Note this is deliberately the OPPOSITE sign to the 12-month factor momentum idea, at a much longer horizon, which is exactly the value-versus-momentum horizon split.",
+  "source": "Arnott, Beck, Kalesnik & West, 'How Can Smart Beta Go Horribly Wrong?' (Research Affiliates, 2016) versus Asness, Ilmanen & Maloney, 'Market Timing: Sin a Little' (Journal of Investment Management 2017) and Asness, 'The Siren Song of Factor Timing' (Journal of Portfolio Management 2016). I could not open the Research Affiliates article - the URL now redirects to a dead page - so the relative-price percentile proxy for the factor value spread is my own OHLCV-only substitute for the book-to-market spread those papers use; the direction of the proposed trade follows their stated argument. Haddad, Kozak & Santosh, 'Factor Timing' (RFS 2020; NBER WP 26708) independently confirms that anomaly portfolios are predictable by their own valuation ratios.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "BAHC Bootstrapped Hierarchical Covariance Filter",
+  "category": "covariance estimation / hierarchical filtering",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Last trading day of each month. (1) Let R be the trailing 252 x N daily return matrix. (2) For b = 1..B with B = 100: draw 252 rows with replacement; compute that resample's correlation matrix rho_b; run average-linkage agglomerative clustering on d_ij = sqrt(0.5*(1 - rho_b,ij)); then build the hierarchically filtered matrix rho_b_filt by setting each off-diagonal entry rho_b_filt,ij to the mean of the rho_b entries over all pairs inside the smallest cluster in the dendrogram that contains both i and j, with the diagonal set to 1. (3) Average across replications: C_BAHC = (1/B) * sum_b rho_b_filt; project to the nearest positive-definite matrix by clipping any eigenvalue below 1e-8 to 1e-8 and rescaling the diagonal to 1. (4) Sigma = diag(s) C_BAHC diag(s) with s the 252-day sample stdevs. (5) GMV weights w = Sigma^{-1}1 / (1'Sigma^{-1}1), clipped to [0, 0.15], renormalised. Enter each w_i > 0.005 at the next open.",
+  "exit_rule": "Monthly rebalance, but with a deliberately wide 0.03 no-trade band and a hard cap of 25% of book value traded per rebalance, executing the largest weight changes first - the source paper reports this method wins on after-cost Sharpe despite generating higher turnover than competing filters, so turnover control is part of the strategy, not an afterthought. Exit a name when its weight is below 0.005 and the trade fits inside the turnover cap.",
+  "inputs": [
+   "daily close (252 bars, all fleet symbols)",
+   "bootstrap resampler",
+   "average-linkage hierarchical clustering per resample",
+   "eigenvalue floor for PD projection"
+  ],
+  "params": [
+   "B (50/100/200)",
+   "linkage method",
+   "number of nested filtering levels k (the k-fold boosted variant)",
+   "lookback T",
+   "turnover cap and no-trade band"
+  ],
+  "novelty": "Filtering happens in the space of hierarchies rather than the space of eigenvalues. Bootstrapping produces many plausible dendrograms and averages the matrices they imply, so the final estimate is not conditioned on one particular clustering that the sample happened to produce - a distinct failure mode from the one shrinkage and clipping address.",
+  "why": "Hierarchical filtering imposes a strong, economically sensible structure - names in the same cluster share one correlation - which kills a great deal of noise. But a single dendrogram estimated from a short sample is itself very unstable: a small perturbation flips two branches and the filtered matrix changes materially. Bootstrapping the hierarchy and averaging recovers the noise reduction of the structural ansatz without inheriting its instability. Bongiorno and Challet report lower realised risk in global minimum variance portfolios than current filtering methods specifically when the number of data points is relatively small, which is exactly the regime a fleet of a dozen names on a year of daily bars operates in.",
+  "source": "Bongiorno & Challet (2020) 'Covariance matrix filtering with bootstrapped hierarchies', arXiv:2003.05807 (fetched this session - confirms the hierarchical ansatz with dependence averaging between clusters, the bootstrap over multiple hierarchies, and the lower realised GMV risk when data points are few). Bongiorno & Challet (2020) 'Reactive Global Minimum Variance Portfolios with k-BAHC covariance cleaning', arXiv:2005.08703 (fetched this session - the k-fold boosted variant, and the finding of better after-cost Sharpe ratios despite higher turnover).",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Betting Against Correlation",
+  "category": "defensive / low-risk",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-day log returns of each ETF and SPY",
+   "overlapping 3-day log returns",
+   "252-day volatility window",
+   "1250-day correlation window"
+  ],
+  "params": [
+   "correlation window (1250d, sweep 500-1500)",
+   "number of volatility buckets for the neutralising sort (3 or 5)",
+   "rebalance period (21d)"
+  ],
+  "entry_rule": "Use the Frazzini-Pedersen identity beta_i = rho_i * (sigma_i / sigma_m) and trade ONLY the correlation term. Estimate rho_i as the correlation between asset i's and SPY's overlapping 3-day log returns over the trailing 1250 days, and sigma_i as the 252-day standard deviation of 1-day log returns. At each month end, first sort the ETF universe into 3 equal-count buckets by sigma_i. WITHIN each volatility bucket, rank assets by rho_i and form rank weights w = k*(rank(rho) - mean rank) with the negative part as the long leg and the positive part as the short leg, each summing to 1. Aggregate the three buckets by equal weight, so the resulting book is long low-correlation assets and short high-correlation assets while being neutral to volatility by construction. Scale the long and short legs by 1/beta_L and 1/beta_H (betas computed as in the BAB idea) so the book is beta-neutral at formation. Enter at the next open.",
+  "exit_rule": "Full rebalance every 21 trading days to fresh within-bucket ranks and fresh leg scalings. Flatten the book if realised correlation dispersion collapses - specifically, if the cross-sectional standard deviation of rho_i across the universe falls below its own 20th percentile over the trailing 750 days, since the signal then has no cross-sectional content; re-enter when it rises back above the 40th percentile.",
+  "why": "Asness, Frazzini, Gormsen and Pedersen argue the beta anomaly is not one effect but two, because beta is mechanically the product of correlation and relative volatility. The correlation component and the volatility component have different economic drivers: low-correlation assets are the ones a leverage-constrained investor should hold most of and cannot, so leverage constraints bite hardest there, whereas the volatility component is contaminated by lottery-seeking demand for high-volatility assets. Isolating correlation therefore isolates the leverage-constraint channel, which is the one with a coherent theory behind it.",
+  "novelty": "Sorting on the correlation half of beta while holding volatility fixed is a genuinely different entry rule from sorting on beta or on volatility. It will hold high-volatility assets long whenever they are also low-correlation, which a low-volatility or low-beta screen would never do. The corpus has no correlation-based cross-sectional signal of any kind.",
+  "source": "Concept from Asness, Frazzini, Gormsen & Pedersen, 'Betting Against Correlation: Testing Theories of the Low-Risk Effect' (Journal of Financial Economics 2020). I could NOT open the full text of this paper - the Pedersen, AQR and Wiley copies all returned 403/404 - so the construction above is my reconstruction of the BAC factor from the beta decomposition and estimation windows that I did verify in the Frazzini-Pedersen BAB paper (https://w4.stern.nyu.edu/facdir/lpederse/papers/BettingAgainstBeta.pdf, equation 14). Treat the within-volatility-bucket sort as my specification rather than a verbatim replication.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ }
+]

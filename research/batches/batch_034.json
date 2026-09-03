@@ -1,0 +1,216 @@
+[
+ {
+  "name": "Cross-Sectional Clustering Gate",
+  "category": "event-study methodology",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of the whole tradable universe",
+   "daily OHLCV of SPY",
+   "market model per symbol",
+   "daily cross-sectional census of SAR"
+  ],
+  "entry_rule": "Each session compute SAR_i,t (Patell-standardized market-model residual, 250-session estimation window ending 21 sessions back) for EVERY symbol in the tradable universe. Let f_neg,t = fraction of the universe with SAR_i,t <= -2.0 and f_pos,t = fraction with SAR_i,t >= +2.0. Take a long reversion entry in symbol i at the next open only when SAR_i,t <= -2.5 AND f_neg,t <= 0.10; take a short reversion entry only when SAR_i,t >= +2.5 AND f_pos,t <= 0.10. On any session where the relevant fraction exceeds 0.10, open no new positions on that side at all, regardless of how extreme the individual SAR is.",
+  "exit_rule": "Exit at the next open after CAR since entry (beta frozen at entry) crosses zero in the favourable direction, or at the close of the 10th session held, whichever first. Additionally, force-flatten every open position on the first session where the same-sign fraction f exceeds 0.25 - the regime has become macro and the idiosyncratic thesis is void.",
+  "why": "Kothari & Warner devote a section to exactly this problem: event-time clustering breaks the cross-sectional independence assumption, biases the standard-error estimate downward and the test statistic upward, so a clustered sample produces spurious significance. Kolari & Pynnonen's correction multiplies the statistic by sqrt((1-rbar)/(1+(N-1)rbar)), which collapses toward zero as cross-correlation rises. Economically the same point: a -3 sigma day when 40% of the universe is also down 2 sigma is a factor move that will not revert idiosyncratically; a -3 sigma day when nothing else moved is a firm-specific liquidity event that will. The gate converts an econometric correction into a trade filter.",
+  "source": "Kothari & Warner (2006) sec. 3.3 on event-time clustering, cross-sectional dependence and the downward-biased standard error (citing Collins & Dent 1984, Bernard 1987, Petersen 2005) - read directly from the PDF. Kolari & Pynnonen (2010) adjusted Patell Z, z_adj = z*sqrt((1-rbar)/(1+(N-1)rbar)), documented at https://eventstudytools.com/significance-tests.",
+  "novelty": "The gate is a cross-sectional census of the entire universe on that session, not a single-symbol indicator - the same bar in the same symbol is tradable or not depending on what the other several hundred symbols did that day. Nothing in the existing set conditions on how many other names fired the same signal simultaneously, and it also supplies a portfolio-level force-flatten rule.",
+  "params": [
+   "universe SAR census threshold (1.5/2.0/2.5)",
+   "clustering ceiling f (0.05/0.10/0.20)",
+   "individual entry SAR (2.0/2.5/3.0)",
+   "force-flatten f (0.20/0.25/0.40)",
+   "max hold (5/10/20)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Equal-Risk-Contribution Book Allocation",
+  "category": "portfolio construction / position sizing",
+  "side": "both",
+  "timeframe": "daily rebalance",
+  "entry_rule": "When one or more base signals are live, do not size them independently. Each daily close: build the set S of symbols with an open position or a fresh signal. Compute Sigma, the covariance matrix of daily log returns over the last 60 trading days for S. Solve for weights w >= 0, sum(w) = 1, satisfying w_i * (Sigma w)_i = w_j * (Sigma w)_j for all i, j (cyclical coordinate descent, 50 iterations, initialise at inverse-volatility weights). Target notional for symbol i = w_i * equity * gross_leverage (gross_leverage = 1.0). Enter or top up at the next open whenever actual notional deviates from target by more than 25%. Cheap fallback variant worth sweeping separately: skip the solve and use w_i proportional to 1/sigma_i, which is the exact ERC solution when all pairwise correlations are equal.",
+  "exit_rule": "A position exits entirely on its own base exit signal (stop at 2*ATR(14) or opposite signal). On any exit, the remaining book is re-solved that night and every surviving position is resized to the new ERC weights at the next open - so exits change the size of every other open trade, which the current engine cannot express.",
+  "inputs": [
+   "daily log return series for all book symbols",
+   "60-day covariance matrix",
+   "atr(14)",
+   "account equity"
+  ],
+  "params": [
+   "covariance lookback (30/60/120)",
+   "gross leverage (0.5/1.0/2.0)",
+   "rebalance band (10%/25%/50%)",
+   "full ERC vs inverse-vol fallback",
+   "shrinkage on the covariance estimate (Ledoit-Wolf intensity 0/0.2/0.5)"
+  ],
+  "why": "Sizing each trade independently means the book's risk is dominated by whichever cluster happens to have the most open positions. ERC forces every position to contribute the same share of portfolio variance, which is the risk-budgeting analogue of diversification and, unlike minimum variance, does not require any expected-return input. Maillard, Roncalli and Teiletche prove the solution exists and is unique for any positive-definite covariance matrix, so the solve is well-posed.",
+  "source": "Sebastien Maillard, Thierry Roncalli & Jerome Teiletche, 'The Properties of Equally Weighted Risk Contribution Portfolios', Journal of Portfolio Management 36(4), 2010 - the w_i(Sigma w)_i = w_j(Sigma w)_j condition, the uniqueness result, and the equal-correlation reduction to inverse-volatility weights.",
+  "novelty": "Position size becomes a function of the whole open book rather than the individual trade, and exits trigger resizing of unrelated positions. No entry indicator in the existing 32 has any cross-sectional component.",
+  "ohlcv_only": true,
+  "_agent": "v2:4a185d6e6f4ebde3b5c17f4530685569479f2989c481d0290ba5129b10d040d1"
+ },
+ {
+  "name": "IB Retracement-Depth Continuation",
+  "category": "auction-market-theory",
+  "side": "both",
+  "timeframe": "intraday 5-minute",
+  "entry_rule": "IB = 09:30-10:30 ET; IBH, IBL, IBW as above. Wait for the FIRST breakout: a 5-minute bar closing above IBH (up-case) or below IBL (down-case). Record the breakout extreme XE = the highest high since the breakout (up-case). Then track retracement depth r = (XE - lowest low since XE)/IBW, updated per bar. ENTRY (up-case): price must first re-enter the IB (some bar's low < IBH), and while r has never exceeded 0.25, a 5-minute bar closes back above IBH - buy at that close. Down-case is the mirror with r = (lowest low since breakout to highest high since)/IBW and a close back below IBL. Only one entry per session; do not enter after 14:30 ET.",
+  "exit_rule": "Signal-nullification stop: exit immediately at market on any 5-minute close that pushes r >= 0.50 (deep retracement - per the study, only 24.8% of such days close in the breakout direction and 52.7% become double-breakout days). Hard price stop = IB midpoint. Target = breakout price + 1.00*IBW (up-case) / - 1.00*IBW (down-case). Otherwise exit at 15:55 ET.",
+  "inputs": [
+   "ohlcv (5-minute intraday, RTH)",
+   "initial balance high/low",
+   "running max/min since breakout",
+   "atr(14) daily (optional sizing)"
+  ],
+  "params": [
+   "shallow-retrace threshold (0.25 IBW)",
+   "nullification threshold (0.50 IBW)",
+   "target (1.00 IBW)",
+   "latest entry time (14:30 ET)"
+  ],
+  "why": "After an IB break, essentially every day retraces back into the IB (99.9% of ES days), so the retracement itself carries no information - the DEPTH does. Shallow retracements (under 25% of IB width) closed in the breakout direction 93.8% of the time and produced zero double-breakout days; retracements of 50% or more closed in the breakout direction only 24.8% of the time. The trade is a bet on the pullback failing to go deep, entered after that failure is observable.",
+  "source": "tradingstats.net, 'Initial Balance Breakout Statistics: ES & NQ Futures 2015-2025' - Retracement Depth Determines Day Type section (shallow <25%: 93.8% close in breakout direction, 0.0% double breakout; deep >=50%: 24.8% / 52.7%). Retrace-into-IB rate 99.9% ES.",
+  "ohlcv_only": true,
+  "novelty": "Entry is on the RE-BREAK after a measured shallow pullback, not on the original breakout, and the primary stop is a normalized structure percentage (retracement as a fraction of IB width) rather than a price or ATR distance. An ORB system is already long before this system evaluates anything, and an ORB fade takes the opposite side.",
+  "_agent": "v2:1db7bf8f003d6a64be250b11b84dc6de7bdcc59f0e1caf59d48acdf061b67153"
+ },
+ {
+  "name": "Effort-versus-Result Absorption Bar",
+  "category": "wyckoff",
+  "side": "both",
+  "timeframe": "5-minute, 15-minute or daily",
+  "entry_rule": "Per bar compute Effort E = volume / SMA(volume,20) and Result R = (high-low) / ATR(14), and close-location CL = (close-low)/(high-low). LONG absorption bar A requires: E >= 2.0 AND R <= 0.60 AND CL >= 0.65 AND low(A) <= (40-bar lowest low) + 0.30*ATR. Enter long at the close of the next bar if that bar's close > high(A) and its low >= low(A). SHORT mirror: E >= 2.0, R <= 0.60, CL <= 0.35, high(A) >= (40-bar highest high) - 0.30*ATR; enter short at the close of the next bar closing below low(A). Optional regime confirmation: the bar's Amihud ratio |close/close[1]-1| / (close*volume) must sit in the bottom 20th percentile of its own 250-bar history (very low price impact per unit volume = absorption).",
+  "exit_rule": "Stop = low(A) - 0.10*ATR (mirror: high(A) + 0.10*ATR). Target = entry + 2.0 * (entry - stop). Time stop: exit at the close of the 10th bar after entry if neither level is touched.",
+  "inputs": [
+   "ohlcv",
+   "atr(14)",
+   "sma(volume,20)",
+   "rolling 40-bar high/low",
+   "amihud ratio |ret|/(price*volume) with 250-bar percentile"
+  ],
+  "params": [
+   "effort multiple (2.0)",
+   "result cap (0.60 ATR)",
+   "close-location threshold (0.65)",
+   "proximity to extreme (0.30 ATR)",
+   "Amihud percentile (20th)",
+   "reward multiple (2.0R)",
+   "time stop (10 bars)"
+  ],
+  "why": "Wyckoff's third law: large effort producing small result means the move is being absorbed by an opposing party. Formalised, that is exactly Amihud's price-impact ratio - a bar where a lot of volume produced almost no price displacement has abnormally low realised impact, which is the microstructure signature of a large passive counterparty filling into the flow. Requiring the close in the upper third says the absorbing side won the bar.",
+  "source": "StockCharts ChartSchool, 'The Wyckoff Method: A Tutorial' - Law of Effort versus Result: 'High volume with minimal price advance suggests absorption of supply or weakness'. Formalisation via Amihud, Y. (2002), 'Illiquidity and stock returns: cross-section and time-series effects', Journal of Financial Markets: ILLIQ_t = |R_t| / DollarVolume_t.",
+  "ohlcv_only": true,
+  "novelty": "No band, no oscillator, no moving average. The signal is a two-dimensional condition on the SAME bar - volume expansion with range contraction - combined with location at a 40-bar extreme. Bollinger-with-volume fires on volume plus a band touch, which is a range-EXPANSION signal; this one requires range compression, so the two almost never fire on the same bar.",
+  "_agent": "v2:1db7bf8f003d6a64be250b11b84dc6de7bdcc59f0e1caf59d48acdf061b67153"
+ },
+ {
+  "name": "PLS Supervised Predictor Alignment",
+  "category": "return predictability econometrics / supervised dimension reduction",
+  "timeframe": "daily bars aggregated to monthly; monthly rebalance",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "Take the same N-predictor OHLCV panel as the combination idea, standardised to zero mean and unit variance using data through t. At each month-end t: (1) FIRST PASS - N time-series regressions. For each predictor i, regress the predictor on the CONTEMPORANEOUSLY-FOLLOWING realised return: x_i,s = pi_i0 + pi_i*r_{s+1} + u_i,s, over all s from the start to t-1. Keep the slope pi_i_hat. This is the step that makes the method supervised: the loading of each predictor is estimated by how it co-moves with the return it is meant to forecast, not by how it co-moves with the other predictors. (2) SECOND PASS - one cross-sectional regression per date. For each date s <= t, regress the N standardised predictor values at that date on the N first-pass loadings: x_i,s = c_s + F_s*pi_i_hat + e_i,s, running the regression ACROSS the N predictors with the loadings as the single regressor. The slope F_s is the aligned factor at date s. (3) THIRD PASS - run the expanding-window predictive regression r_{s+1} = a + b*F_s + e through s = t-1 and form rhat_{t+1} = a_hat + b_hat*F_t. (4) Apply the Campbell-Thompson wrong-sign fallback and zero truncation, then rebalance at the next open to w_t = clip((1/5)*rhat/sigmahat^2, 0, 1.5). CRITICAL BACKTEST CONSTRAINT: the first-pass regressions use r_{s+1}, so they must be re-estimated recursively using ONLY returns realised on or before t; using the full sample here is look-ahead and will manufacture spectacular fake results.",
+  "exit_rule": "No stop, no target. Hold one month; re-run all three passes on the extended sample and rebalance. w = 0 exits fully.",
+  "inputs": [
+   "the N-predictor OHLCV panel",
+   "N first-pass time-series regressions on future returns",
+   "T second-pass cross-sectional regressions on the loadings",
+   "third-pass predictive regression",
+   "60-month return variance"
+  ],
+  "params": [
+   "N and panel membership",
+   "number of PLS factors (1, 2, 3)",
+   "standardisation window (expanding vs rolling)",
+   "whether the first pass regresses on r_{s+1} or on a multi-month forward return",
+   "gamma, weight cap"
+  ],
+  "why": "Principal components are unsupervised: they extract whatever explains the most variance among the predictors, which is not necessarily what forecasts returns. If the dominant common factor in a predictor panel is a nuisance factor - a common measurement artefact, a shared exposure to something unpriced - PCA will hand you that nuisance factor as the first component and throw away the weak signal. Partial least squares, in Kelly and Pruitt's three-pass form, fixes this by using future returns to discipline the dimension reduction: the first pass instruments each predictor's loading with the very thing being forecast, so the second pass's cross-sectional slope isolates the return-relevant common component and discards common and idiosyncratic pieces that are irrelevant for forecasting. Huang, Jiang, Tu and Zhou demonstrate the size of the difference by rebuilding the Baker-Wurgler sentiment index this way from the same six raw proxies and getting a far stronger predictor from identical inputs.",
+  "novelty": "Explicitly distinct from the PC-TECH idea in this same list, and that distinction is the point: same panel, same regression frontend, but PCA maximises explained predictor variance while PLS maximises covariance with the forecast target. They select different linear combinations and will disagree. Beyond that, nothing in the 32 involves any dimension reduction, supervised or otherwise.",
+  "source": "Huang, D., Jiang, F., Tu, J. and Zhou, G., 'Investor Sentiment Aligned: A Powerful Predictor of Stock Returns', Review of Financial Studies 28(3), 2015 - read directly at the open working-paper copy https://down.aefweb.net/WorkingPapers/w676.pdf. The two-step OLS implementation of PLS is set out on pp.265-300 of that text: first-pass time-series regression eq. (4), second-pass cross-sectional regression eq. (5), and the closed form eq. (6). The method is attributed there to Wold (1966, 1975) and extended by Kelly and Pruitt (2013, 2014); I did not open the Kelly-Pruitt originals.",
+  "_agent": "v2:2986ad60a64b30f5d6a1ab8fd871eb95cd89b5d6c01da660d34a55f6bf9aab82"
+ },
+ {
+  "name": "Ledoit-Wolf Constant-Correlation Shrinkage GMV",
+  "category": "portfolio construction / covariance estimation",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Every Friday close on daily bars. Universe = fleet symbols with >=252 daily bars and 20-day median dollar volume >= $5M. Build the T x N matrix X of daily log returns, T=252, demeaned column-wise. (1) Sample covariance S = (1/T) X'X. (2) Constant-correlation target F: F_ii = S_ii; F_ij = rbar * sqrt(S_ii*S_jj) for i!=j, where rbar = mean of all off-diagonal sample correlations. (3) pi_hat = sum_{i,j} pi_ij where pi_ij = (1/T) sum_t ((x_ti)(x_tj) - S_ij)^2. (4) rho_hat = sum_i pi_ii + sum_{i!=j} (rbar/2) * [ sqrt(S_jj/S_ii)*theta_ii,ij + sqrt(S_ii/S_jj)*theta_jj,ij ], where theta_ii,ij = (1/T) sum_t (x_ti^2 - S_ii)(x_ti*x_tj - S_ij). (5) gamma_hat = sum_{i,j} (F_ij - S_ij)^2. (6) delta = max(0, min(1, ((pi_hat - rho_hat)/gamma_hat)/T)). (7) Sigma = delta*F + (1-delta)*S. (8) w_raw = Sigma^{-1} * 1; w = w_raw / sum(w_raw); clip each w_i to [0, 0.20] and renormalise; set w_i = 0 if w_i < 0.005 and renormalise. Enter/resize each symbol at Monday's open to w_i * account equity.",
+  "exit_rule": "Hold to the next weekly rebalance. Resize a name only if |w_new - w_old| > 0.02 (no-trade band). Fully exit a symbol when its new weight is < 0.005 or it leaves the eligible universe. Liquidate the whole book and stand flat for 5 sessions if the strategy equity curve drops 12% below its running high.",
+  "inputs": [
+   "daily close (log returns, 252 bars, all fleet symbols)",
+   "daily volume (20-day median dollar volume for the liquidity screen)"
+  ],
+  "params": [
+   "lookback T (126/252/504)",
+   "per-name weight cap (0.10-0.30)",
+   "no-trade band (0.01-0.05)",
+   "rebalance frequency (weekly/monthly)",
+   "min-weight cutoff"
+  ],
+  "why": "With N symbols and T bars the sample covariance has O(N^2) free parameters estimated from N*T numbers; its smallest eigenvalues are biased downward, and the GMV inverse loads maximally on exactly those noisy directions. Shrinking toward a constant-correlation target trades a little bias for a large variance reduction, and the optimal intensity is estimable in closed form from the same sample. This is the single highest-leverage fix in a multi-name book: the error in Sigma^{-1} dominates realised risk far more than the entry signal does.",
+  "source": "Ledoit & Wolf (2003) 'Improved estimation of the covariance matrix of stock returns with an application to portfolio selection', Journal of Empirical Finance 10(5) - the constant-correlation target; and Ledoit & Wolf (2004) 'Honey, I Shrunk the Sample Covariance Matrix', Journal of Portfolio Management 30(4). Estimator form delta*F + (1-delta)*S and the three LW target variants (constant variance / single factor / constant correlation) confirmed against PyPortfolioOpt risk-model docs (https://pyportfolioopt.readthedocs.io/en/latest/RiskModels.html) and scikit-learn covariance docs (https://scikit-learn.org/stable/modules/covariance.html), both fetched this session. Note: ledoit.net PDFs failed to fetch (self-signed cert); the pi/rho/gamma decomposition is quoted from the published papers.",
+  "novelty": "Contains no timing signal whatsoever - the edge is entirely in the estimator of the second moment across names. A moving-average cross is a per-symbol time-series rule; this is a cross-sectional estimation rule that decides how much of each name to hold.",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Risk-On/Risk-Off Composite Z",
+  "category": "risk-appetite-composite",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "HYG, IEF, XLY, XLP, SPHB, SPLV, IWM, SPY, COPX, GLD daily closes (dividend-adjusted for HYG and IEF)",
+   "20-session returns",
+   "252-session rolling mean and standard deviation",
+   "SPY daily open/close"
+  ],
+  "entry_rule": "Build five relative-return spreads, each as the difference of two 20-session simple returns: S1 = ret20(HYG) - ret20(IEF); S2 = ret20(XLY) - ret20(XLP); S3 = ret20(SPHB) - ret20(SPLV); S4 = ret20(IWM) - ret20(SPY); S5 = ret20(COPX) - ret20(GLD). Standardise each: Zi_t = (Si_t - mean(Si over the trailing 252 sessions)) / stdev(Si over the trailing 252 sessions). Composite Z_t = the arithmetic mean of Z1..Z5, requiring all five to be available (otherwise no signal). Buy SPY at the next session's open when Z_t crosses from <= 0 to > 0 AND Z_t > Z_{t-5}. Position size may be scaled linearly by min(Z_t, 2)/2 rather than held constant, which is the variant I would test first.",
+  "exit_rule": "Exit at the next open when Z_t < 0. Secondary exit: also close if Z_t has declined on each of the last three sessions (Z_t < Z_{t-1} < Z_{t-2} < Z_{t-3}) while Z_t < 0.5, which catches deterioration before the zero crossing. No price stop - the composite is the risk control, and a hard price stop would defeat the point of measuring risk appetite independently of price.",
+  "why": "Every one of the five spreads is a different market's independent vote on the same question: does capital want risk right now? Credit versus duration, cyclical consumer versus defensive consumer, high beta versus low volatility, small versus large, and industrial metal versus safe-haven metal. Each individually is noisy and each individually can be dominated by a sector-specific story; averaging their standardised values suppresses that idiosyncratic noise while preserving the common risk-appetite factor. Because the votes are cast in credit, commodity and equity markets, the composite carries information that the equity index price does not yet contain.",
+  "source": "Synthesis. The individual components are each established practitioner risk-appetite gauges - the HYG/IEF credit ratio (formalised in SSRN 5815822 as a ratio-versus-moving-average timing rule), the SPHB/SPLV beta ratio (Arthur Hill, StockCharts, 'Measuring the Risk Appetite with Beta, Volatility and Ratios'), and the offense-versus-defense commodity pair logic of Bilello and Gayed's 2015 NAAIM Wagner Award paper. The z-score ensemble construction, the 20/252 windows and the crossing rule are mine.",
+  "novelty": "Cross-asset ensemble rather than a single indicator: five spreads across three asset classes, each standardised on its own history so no component can dominate through scale, combined into one continuous state variable that also serves as a position-sizing input. Nothing in the existing set aggregates evidence across markets, and the sizing-by-conviction structure is a different exit and risk shape from a binary in/out rule.",
+  "params": [
+   "spread lookback (10/20/60 sessions)",
+   "z-score window (126/252/504)",
+   "component set (drop or add spreads: XLE-XLU, EEM-SPY, ARKK-SPLV, IWM-QQQ)",
+   "weighting (equal vs inverse-volatility vs correlation-adjusted)",
+   "entry threshold (0 / +0.5 / +1.0)",
+   "slope confirmation lag (3/5/10 sessions)",
+   "continuous sizing versus binary exposure"
+  ],
+  "_agent": "v2:ace0102422e727c7e04dff379b63c92968054af0ad5011a5f348056e83babce2"
+ },
+ {
+  "name": "Quasi-Multivariate Synthetic Peer, Single Leg",
+  "category": "cross-sectional relative value",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "SINGLE-SYMBOL TRADED, conditioned on five other symbols' data. Standardize every candidate's close over a 504-bar (two-year) moving window: z_i(t) = (P_i(t) - mean_504(P_i)) / sd_504(P_i). For target stock i, select the m = 5 names with the highest correlation of standardized price to z_i. Form the synthetic peer z_syn(t) = sum_{k=1..5} w_k * z_k(t), with w_k either equal (1/5) or fitted by OLS of z_i on the five z_k; re-estimate the weights every 10 bars on the trailing 504 bars. Define spread_t = z_i(t) - z_syn(t) and sigma_s = sd(spread) over the trailing 504 bars. ENTER LONG stock i ALONE (no short leg, no hedge) when spread_t <= -1.5 * sigma_s. ENTER SHORT stock i alone when spread_t >= +1.5 * sigma_s.",
+  "exit_rule": "Close when |spread_t| <= 0.5 * sigma_s, or after 10 bars, whichever comes first. Hard stop at |spread_t| >= 3.0 * sigma_s. The synthetic peer is never traded - it exists only to generate the signal - so there are no short-leg borrow costs and only one commission per round trip.",
+  "inputs": [
+   "daily closes of the target and its candidate peers",
+   "504-bar rolling standardized prices",
+   "correlation ranking of standardized price series",
+   "synthetic peer weights (equal or OLS), refreshed every 10 bars"
+  ],
+  "params": [
+   "standardization window (504)",
+   "peer count m (5)",
+   "weighting scheme (equal / OLS / correlation-weighted)",
+   "weight refresh cadence (10)",
+   "entry multiple (1.5)",
+   "exit multiple (0.5)",
+   "time stop (10)",
+   "hard stop (3.0)"
+  ],
+  "why": "The whole point of a stat-arb hedge leg is to cancel common risk, but on a broker where shorting is expensive, restricted or unavailable, the hedge leg can cost more than the risk it removes. Perlin's construction accepts that trade: use a five-name synthetic peer to decide WHETHER the target is cheap - which is where the information is - then take the exposure in one instrument. The 10-bar time stop is what makes this survivable unhedged, because it caps how long naked market beta can run against you while the signal is wrong. Perlin found the quasi-multivariate version beat the univariate one across a broad range of thresholds, and Chen et al. independently reached the same conclusion with a 50-name basket.",
+  "source": "Perlin (2007, 2009), 'Evaluation of Pairs Trading Strategy at the Brazilian Financial Market' and 'M of a Kind: A Multivariate Approach at Pairs Trading', applied to the 57 most liquid Brazilian stocks 2000-2006. Construction (standardize prices over a two-year moving window, m=5 highest-correlation partners, equal/OLS/correlation weighting, weights re-estimated every ten days, and critically 'only the reference component of each pair is traded and not the synthetic asset, in order to avoid high transaction costs') reproduced from Krauss (2015), FAU Discussion Paper 09/2015, section 2.3.",
+  "novelty": "THIS IS THE SINGLE-SYMBOL EXPRESSION OF A STAT-ARB SIGNAL - directly usable in a long-only or short-restricted account, which no other idea in this set is. Distinct from the s-score family because the benchmark is a small correlation-selected peer set standardized in PRICE space rather than a factor regression in return space, and distinct from all pairs ideas because only one leg ever trades. The unhedged construction makes the time stop load-bearing rather than cosmetic.",
+  "_agent": "v2:23273544d4e93ff371df16de5e5345e854223d7e2fbaef79167c8824a00c88ae"
+ }
+]

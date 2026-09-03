@@ -1,0 +1,214 @@
+[
+ {
+  "name": "Pattern-to-Pattern Variable Holding Period (LSL exit)",
+  "category": "state-driven exit, unbounded hold",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Define an equality tolerance eps = 0.05 x (high - low) for the marubozu tests. BULLISH ENTRY SET B (any one fires, and requires close > EMA(10) of close): Closing White Marubozu - close > open AND |high - close| <= eps AND (open - low) > eps; OR Opening White Marubozu - close > open AND |open - low| <= eps AND (high - close) > eps. Enter long at the close of the first bar satisfying any member of B while flat. BEARISH SET S (used as the exit trigger, and as the short entry set when close < EMA(10)): Closing Black Marubozu - close < open AND |close - low| <= eps AND (high - open) > eps; OR Opening Black Marubozu - close < open AND |open - high| <= eps AND (close - low) > eps.",
+  "exit_rule": "THIS IS THE IDEA. Hold with NO time stop, NO price target and NO fixed stop loss. Exit at the close of the first subsequent bar that satisfies any member of the opposing set S. Sweep two modes: (i) long-only, going flat on the S signal; (ii) always-in, reversing to short on the S signal and holding until the next B signal. Add an optional catastrophic stop at entry - 4 x ATR(14) purely as a survival guard and measure how often it binds.",
+  "inputs": [
+   "ohlcv daily",
+   "ema(10) of close",
+   "atr(14) for the optional guard stop"
+  ],
+  "params": [
+   "equality tolerance eps as a fraction of range (0.05, sweep 0.02-0.10)",
+   "membership of the bullish/bearish sets",
+   "mode: long-only vs always-in",
+   "optional guard stop ATR multiple (4)"
+  ],
+  "why": "The holding period is set by the market rather than by the calendar: the position is carried for exactly as long as price action keeps refusing to print the opposite signature, so winners in persistent trends are held for weeks while positions in choppy tape are cut within days - all without a single volatility or time parameter. Lu, Shiu & Liu (2012) tested this variable holding period on Taiwan Top 50 constituents 2002-2008 and found certain bullish reversal patterns generated positive abnormal returns net of transaction costs, where fixed-horizon tests of the same patterns did not.",
+  "source": "Lu, Shiu & Liu (2012), variable-holding-period ('LSL') exit strategy - buy on a bullish signal, liquidate when a bearish pattern occurs - described and contrasted against the MYR and CL exits in Tharavanij, Siraprapasiri & Rajchamaha (2017), SAGE Open, doi:10.1177/2158244017736799. One-day pattern inequalities from Goo, Chen & Chang (2007), reproduced in the same paper.",
+  "novelty": "An exit with no clock and no price level in it at all - the position ends only when the opposite pattern appears. Every exit in the existing book is a bar count, an ATR distance, a channel, or a price target.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Kendall NET rank oscillator",
+  "category": "mean-reversion",
+  "side": "both",
+  "timeframe": "intraday 5-15 minute or daily",
+  "entry_rule": "First compute MyRSI over L bars: CU = sum over i = 0..L-1 of max(0, close[i] - close[i+1]); CD = sum over i = 0..L-1 of max(0, close[i+1] - close[i]); MyRSI = (CU - CD)/(CU + CD), bounded in [-1, +1] (set to 0 if CU + CD = 0). Then apply Noise Elimination Technology over M bars: let X[i] = MyRSI[i] for i = 1..M counting backwards. Because the reference series Y is a straight line counted backwards, sgn(Y[i] - Y[j]) = -1 for every i < j, so the Kendall numerator simplifies to num = - sum over j = 2..M, i = 1..j-1 of sgn(X[i] - X[j]). Denominator = 0.5*M*(M-1). NET = num / denominator, bounded in [-1, +1]. GO LONG at the close when NET crosses above -0.5 from below. GO SHORT when NET crosses below +0.5 from above.",
+  "exit_rule": "Exit the long when NET crosses below +0.5 from above (i.e. the mirror trigger), or after 3*M bars. Exit the short on the mirror condition.",
+  "inputs": [
+   "close",
+   "MyRSI (signed, [-1,1] normalised RSI)",
+   "Kendall tau concordance count"
+  ],
+  "params": [
+   "MyRSI length L (10, 14, 20)",
+   "NET length M (8, 10, 14)",
+   "trigger thresholds (+/-0.5)"
+  ],
+  "why": "Every conventional way of making a short-window oscillator readable is a linear smoother, which adds lag proportional to its length and therefore delays the decision it was meant to clarify. A Kendall rank correlation against a monotone line is nonlinear: it counts concordant versus discordant pairs, so it responds to the ORDER of the recent oscillator values rather than their magnitudes. Noise that does not change the ordering contributes nothing, so the output is decisive without the lag a filter would impose. Because it is a pure rank statistic it is also immune to a single outlier bar dominating the reading.",
+  "novelty": "A rank-concordance statistic used as the noise filter, not a moving average. The signal is 'has this oscillator been ordering itself upward', a monotonicity count, which is a categorically different quantity from an oscillator level - and it deliberately achieves smoothing with no group delay.",
+  "ohlcv_only": true,
+  "source": "John F. Ehlers, 'NET - Noise Elimination Technology: Clarify Your Indicators Using Kendall Correlation', free technical paper at https://www.mesasoftware.com/papers/Noise%20Elimination%20Technology.pdf - including the stated simplification that sgn(y_i - y_j) is always negative because Y is a straight line, and the MyRSI construction (CU, CD, ratio of difference to sum) from Stocks & Commodities May 2018 (downloaded and text-extracted directly).",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "Kalman Efficient-Price Deviation",
+  "category": "microstructure / state-space price decomposition",
+  "side": "both",
+  "timeframe": "5-minute (or 1-minute)",
+  "entry_rule": "Model the observed log price as y_t = ln(C_t) = m_t + c * q_t, where m_t is the unobserved efficient price following a random walk m_t = m_{t-1} + w_t with w ~ N(0, sw2), and q_t is the trade direction in {-1, +1} with unit unconditional variance, so the observation-noise variance is c2 = c^2. Calibrate from the first two moments of dy_t = y_t - y_{t-1} over the trailing 500 bars: c2 = max(1e-12, -Cov(dy_t, dy_{t-1})) (Roll's identity - the negative first autocovariance IS the bounce), and sw2 = max(1e-12, Var(dy) - 2 * c2). Run a scalar Kalman filter: predict mpred = m_prev, Ppred = P_prev + sw2; gain K = Ppred / (Ppred + c2); update m_t = mpred + K * (y_t - mpred), P_t = (1 - K) * Ppred. Deviation d_t = (y_t - m_t) / sqrt(c2). ENTRY at the next bar's open: LONG when d_t <= -2.0 (the print sits more than two noise standard deviations BELOW the filtered efficient price); SHORT when d_t >= +2.0. Require c2 > 0 strictly (if the first autocovariance is positive there is no bounce to trade and no signal is generated).",
+  "exit_rule": "Exit when |d_t| falls back below 0.5 (the print has re-converged to the filtered efficient price), or at the close of the 10th bar after entry, or on a stop at 1.5 * ATR(14) against entry. Re-estimate sw2 and c2 every 100 bars, not every bar, to keep the filter's parameters stable.",
+  "inputs": [
+   "close",
+   "500-bar variance and first autocovariance of log returns",
+   "scalar Kalman recursion",
+   "ATR(14)"
+  ],
+  "params": [
+   "calibration window (500)",
+   "re-estimation interval (100)",
+   "entry deviation (2.0)",
+   "exit deviation (0.5)",
+   "max hold (10)",
+   "initial P"
+  ],
+  "why": "Roll's model says the observed price is the efficient price plus a bounce term of fixed magnitude and random sign. Written as a state-space system rather than as a moment condition, it becomes something you can FILTER: the Kalman recursion produces a running estimate of the unobservable efficient price at every bar, with the gain automatically weighting new prints by how much of their variation is signal versus bounce. The deviation of the observed print from the filtered state is then a directly tradable quantity - it says this print is transitory noise, of this magnitude, right now - whereas the moment-based estimators can only report an average spread over a window. The gain adapts on its own: in a high-noise regime K falls and the filter trusts prints less, which is exactly the behaviour you want.",
+  "source": "Synthesis. The measurement equation and the two-moment calibration are the standard state-space form of Richard Roll's 1984 model (Journal of Finance, 'A simple implicit measure of the effective bid-ask spread in an efficient market'), which underlies the Roll estimator; the Kalman filtering of the efficient price and the deviation-based entry/exit are my construction. Related in spirit to Hasbrouck's Gibbs-sampler estimation of effective costs from daily data, which fits the same latent-price model by Bayesian rather than filtering methods.",
+  "novelty": "Roll appears twice in the existing set but only as an ESTIMATOR whose value or sign is the signal (the autocovariance flip, and the ratio of Roll to Corwin-Schultz). Here the same model is inverted to recover the latent efficient price series itself, and the trade is the gap between the observed print and that latent series - a per-bar, self-normalising deviation with a convergence-based exit rather than a fixed hold.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ },
+ {
+  "name": "Momentum Life Cycle Turnover Interaction",
+  "category": "cross-sectional momentum, volume-conditioned",
+  "side": "both",
+  "timeframe": "daily bars, monthly rebalance, 3-month hold",
+  "entry_rule": "Monthly, on the first trading day, for each symbol with 50-day median dollar volume >= $2,000,000 compute: MOM = close_{t-5} / close_{t-131} - 1 (roughly 6-month return skipping the last week); and RVOL_LONGRUN = mean(volume over the last 126 trading days) / mean(volume over the last 756 trading days) - a shares-outstanding-free proxy for turnover level. Sort the universe into terciles on MOM and, independently, into terciles on RVOL_LONGRUN. EARLY-STAGE LONG leg: symbols in the TOP MOM tercile AND the BOTTOM RVOL_LONGRUN tercile (low-volume winners). EARLY-STAGE SHORT leg: symbols in the BOTTOM MOM tercile AND the TOP RVOL_LONGRUN tercile (high-volume losers). Equal dollar weight each leg, entered at the next open.",
+  "exit_rule": "Hold exactly 3 months (63 trading days), then close. Run three overlapping cohorts so one third of the book turns over each month. No stops in the base version; test a -20% per-name stop as a variant.",
+  "inputs": [
+   "daily OHLCV for the universe",
+   "6-month price momentum",
+   "126-day and 756-day mean volume",
+   "cross-sectional terciles"
+  ],
+  "params": [
+   "momentum formation window (3-12 months)",
+   "skip period (0-21 days)",
+   "turnover proxy windows (63/504 to 252/1008)",
+   "terciles vs quintiles",
+   "holding period (1-6 months)",
+   "dollar-volume floor"
+  ],
+  "why": "Lee and Swaminathan's momentum life cycle says trading volume tells you WHERE in the underreaction-to-overreaction arc a stock sits. High-turnover winners are late-stage - the crowd has already arrived, and they revert fastest. Low-turnover winners are early-stage - the move is real but under-attended, and it has further to run. The same logic inverted gives high-volume losers as the better short. Volume therefore predicts the magnitude and persistence of momentum, not just its presence, which is why the interaction beats momentum alone.",
+  "novelty": "A two-way cross-sectional sort where volume determines the EXPECTED PERSISTENCE of a price signal rather than confirming or vetoing it. Volume changes how long you should hold, and which end of the momentum distribution to take, which is a genuinely different use than any confirmation filter.",
+  "ohlcv_only": true,
+  "source": "Lee, C.M.C. and Swaminathan, B. (2000), 'Price Momentum and Trading Volume', Journal of Finance 55(5) - https://onlinelibrary.wiley.com/doi/abs/10.1111/0022-1082.00280 ; international confirmation in 'Trading Volume and Momentum: The International Evidence', https://sites.uwasa.fi/mfjuva/wp-content/blogs.dir/4/files/sites/231/2025/02/MJ0p1a4fk7lfg1h65i61du41mm5lt14.pdf ; life-cycle revisit at https://www.sciencedirect.com/science/article/abs/pii/S0378426621000777 . PROXY NOTE: their turnover is volume/shares-outstanding, which we do not have. I substituted a within-name long-run relative volume ratio, which captures 'is this name being traded more than it usually is' but NOT the cross-sectional turnover level - test both this and a simple cross-sectional rank of log(dollar volume) as alternatives.",
+  "_agent": "v2:74b72b10aad022b74885d9539dfb07c28d3f484da2b8b7010914406165497ee2"
+ },
+ {
+  "name": "ACD A-level breakout with time confirmation and pivot-range gate",
+  "category": "intraday breakout with dwell-time confirmation",
+  "side": "both",
+  "timeframe": "30-minute opening range, 5-minute execution, daily ATR input",
+  "entry_rule": "Compute the daily pivot range from the PRIOR session: P = (High + Low + Close)/3; PD = |P - (High + Low)/2|; PivotHigh = P + PD, PivotLow = P - PD. Compute A_value = 0.22 * ATR(30) on daily bars (Fisher's published ES figure; sweep it). Opening range OR = high and low of the first 30 minutes of the session; ORH and ORL. A_up = ORH + A_value, A_down = ORL - A_value. LONG: after the opening range completes, enter long at the close of the first 5-minute bar that both trades above A_up AND CLOSES above A_up, provided the session opened above PivotHigh. The requirement that price close a full bar beyond the level, not merely touch it, is the time confirmation that rejects fake breakouts. SHORT is the mirror using A_down with the session opening below PivotLow. C-POINT REVERSAL: if a long A_up entry is stopped out and price subsequently trades A_value below ORL (the C-down level), reverse and enter short there; symmetric for a stopped short.",
+  "exit_rule": "Initial stop at the opposite side of the opening range \u2014 ORL for a long, ORH for a short. Move the stop to breakeven once price reaches entry + A_value. Exit all positions market-on-close; carry nothing overnight. Optional target at ORH + 3*A_value.",
+  "inputs": [
+   "prior daily OHLC for the pivot range",
+   "daily ATR(30)",
+   "5-minute intraday OHLC",
+   "first-30-minute opening range"
+  ],
+  "params": [
+   "opening range 10/15/30/60 min",
+   "A multiplier 0.22 of ATR(30) (sweep 0.10-0.40)",
+   "ATR lookback 3-30 days",
+   "confirmation = 1 closed 5-min bar (sweep 1-3 bars or a dwell time in minutes)",
+   "pivot-range gate on/off",
+   "C-reversal on/off"
+  ],
+  "why": "Two mechanisms that plain ORB lacks. First, the offset scales with the instrument's recent daily ATR, so the same rule adapts across names and volatility regimes instead of using a fixed opening range that is too wide for a quiet stock and too tight for a fast one. Second, the dwell requirement \u2014 price must hold beyond the level for a complete bar \u2014 is a direct filter on the single most common ORB failure, the one-print stop run that immediately reverts. The pivot range acts as a regime gate: opening outside it means the market has already gapped away from the prior session's value area and is more likely to trend than to rotate.",
+  "source": "Mark B. Fisher, 'The Logical Trader: Applying a Method to the Madness' (2002) \u2014 the ACD method, A and C levels as an ATR-scaled extension of the opening range with the 22% of 30-day ATR figure for the ES, and the three-day rolling pivot range P = (H+L+C)/3 with pivot differential |P - (H+L)/2|; documented at http://www.dacharts.com/templates/descr/ACDmethod.htm and https://news.cqg.com/workspaces/2016/11/mark-fisher-indicator",
+  "novelty": "Opening range breakout triggers on a touch of the OR extreme. This triggers at an ATR-scaled distance BEYOND it, requires a full closed bar of persistence past the level, gates the whole day on where the open sat relative to a prior-session pivot range, and adds a documented reversal entry (C) when the first attempt fails \u2014 four separate mechanical differences.",
+  "ohlcv_only": true,
+  "_agent": "v2:f5f032cda86046734ffcad9e8f804d90c918533489aa540fb34b2254c98c8019"
+ },
+ {
+  "name": "Index-Rebalance Effective-Close Pressure Reversal",
+  "category": "index / flow event",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of symbol",
+   "trading-day calendar / session date",
+   "50-session median volume",
+   "close location value"
+  ],
+  "entry_rule": "Define rebalance-effective sessions from the calendar alone: the third Friday of March, June, September and December (S&P quarterly share-count and float rebalance, effective at that close) and the last Friday of June (Russell annual reconstitution, effective at that close). On such a session t compute RV = volume_t / median(volume over t-50..t-1), the session return r_t = close_t/close_{t-1} - 1, and CLV = (close_t - low_t)/(high_t - low_t). ADDITION leg: SHORT at the open of t+1 when RV >= 4 AND r_t >= +0.03 AND CLV >= 0.90. DELETION leg: LONG at the open of t+1 when RV >= 4 AND r_t <= -0.03 AND CLV <= 0.10.",
+  "exit_rule": "Exit at the close of session t+10. Exit early when the price has retraced 80% of |r_t| in the favourable direction. Hard stop at 6% adverse from the entry fill. The two legs are sized independently - the deletion leg carries the larger size per the asymmetry finding.",
+  "why": "Harris & Gurel found the S&P-change price and volume effects to be pure price pressure, essentially fully reversed within about two weeks - index funds must buy at the effective close regardless of price, and the liquidity providers who accommodate them are paid by the subsequent reversion. Shleifer read the same event as evidence of a permanently downward-sloping demand curve. Chen, Noronha & Singal reconciled the two with an asymmetry: additions' gains are largely permanent while deletions' losses reverse, which is a sharp, testable prediction - the deletion (long) leg should be the stronger of the two, and if it is not, the asymmetry has decayed and the sleeve should be retired. The CLV >= 0.90 condition captures the specific footprint of a non-discretionary buyer executing at the closing cross.",
+  "source": "Harris & Gurel (1986) 'Price and Volume Effects Associated with Changes in the S&P 500 List: New Evidence for the Existence of Price Pressures', Journal of Finance 41(4) 815-829 - record confirmed via the OpenAlex API. Shleifer (1986) 'Do Demand Curves for Stocks Slope Down?'. Chen, Noronha & Singal (2004) 'The Price Response to S&P 500 Index Additions and Deletions: Evidence of Asymmetry and a New Explanation', cited at https://en.wikipedia.org/wiki/Index_fund, which also describes index funds' predictable rebalancing and the resulting demand and supply shocks.",
+  "novelty": "The event is a fixed CALENDAR date combined with the shape of a single bar (relative volume plus close-location value) - an index membership change inferred from the closing print rather than from any index-membership feed. It also encodes a falsifiable asymmetry between its two legs, so the backtest tests a specific published prediction rather than just a pattern.",
+  "params": [
+   "rebalance dates (S&P quarterly only / plus Russell recon / plus MSCI May-Nov)",
+   "RV threshold (3/4/8)",
+   "return threshold (2%/3%/5%)",
+   "CLV threshold (0.85/0.90/0.95)",
+   "reversal horizon (5/10/20 sessions)",
+   "retracement target (60%/80%/100% of r_t)",
+   "stop (4%/6%/10%)",
+   "leg sizing ratio (1:1 / 1:2 addition:deletion)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Rolling Half-Kelly Ledger Sizing",
+  "category": "position sizing",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Entry SIGNAL is a fixed harness held constant across the sweep (reference harness: enter long at next bar open when close crosses above the highest high of the prior 20 bars). The idea is the QUANTITY rule. Maintain a rolling ledger of the last N=100 closed trades of this strategy on this symbol. Let W = (count of trades with P&L>0)/N, A = mean P&L of the winners, B = mean absolute P&L of the losers, R = A/B. Compute f_star = W - (1-W)/R. Set risk_fraction = min(max(c*f_star, 0), 0.02) with c = 0.5 (half-Kelly). initial_stop = entry_price - 2*ATR(14). shares = floor(risk_fraction * account_equity / (entry_price - initial_stop)). If f_star <= 0 the signal is SKIPPED entirely and no position is taken until a later recomputation gives f_star > 0. Before 30 closed trades exist, use a flat 0.5% risk_fraction. Recompute after every closed trade.",
+  "exit_rule": "Held constant so the sizing effect is isolated: stop at entry_price - 2*ATR(14), otherwise exit at next bar open when close crosses below the lowest low of the prior 10 bars. No target, no time stop.",
+  "inputs": [
+   "atr(14)",
+   "rolling trade ledger (win rate, avg win, avg loss)",
+   "account equity",
+   "donchian(20) high",
+   "donchian(10) low"
+  ],
+  "params": [
+   "ledger window N (50/100/250)",
+   "Kelly fraction c (0.25/0.5/1.0)",
+   "risk cap (1%/2%/4%)",
+   "stop ATR multiple",
+   "minimum ledger size before Kelly engages"
+  ],
+  "why": "Kelly sizing maximises the expected log of wealth, i.e. the long-run geometric growth rate. Thorp shows half-Kelly retains 0.75 of the full-Kelly growth rate while the probability of doubling before halving rises to 8/9, so it buys most of the growth for a fraction of the ruin risk. Estimating f from the strategy's own recent trade ledger makes the size adapt to genuine edge decay: when the edge disappears, f_star goes negative and the rule stops trading before the equity curve does the telling.",
+  "source": "Edward O. Thorp, 'The Kelly Criterion in Blackjack, Sports Betting, and the Stock Market' (2006/2007), open PDF at https://gwern.net/doc/statistics/decision/2006-thorp.pdf and https://web.williams.edu/Mathematics/sjmiller/public_html/341/handouts/Thorpe_KellyCriterion2007.pdf - half-Kelly growth/drawdown result is in the fractional-Kelly section.",
+  "novelty": "Not an indicator at all - the trade is identical, only the share count changes, and the rule can veto trades. A moving-average cross has no concept of its own recent hit rate; this does, and the position size is a closed-form function of it.",
+  "ohlcv_only": true,
+  "_agent": "v2:4a185d6e6f4ebde3b5c17f4530685569479f2989c481d0290ba5129b10d040d1"
+ },
+ {
+  "name": "Poor High / Poor Low Repair",
+  "category": "auction-market-theory",
+  "side": "both",
+  "timeframe": "daily structure, 15-minute execution",
+  "entry_rule": "Build a TPO profile from the 13 RTH 30-minute bars of a completed session: rows of width w = 0.05*ATRd; a period 'marks' every row between its own low and high; TPO count per row = number of periods marking it. POOR HIGH: the topmost occupied row has TPO count >= 2 AND the top two rows both have TPO count >= 2 AND at least 2 distinct 30-minute periods have a high within 1 row of the session high (a flat, tail-less top). POOR LOW is the mirror at the bottom. ENTRY (poor high recorded within the last 10 sessions and never yet exceeded): when price first trades within 0.20*ATRd BELOW that poor high and the current 15-minute bar closes above its own open, buy at that close. Mirror for a poor low: when price trades within 0.20*ATRd above it and a 15-minute bar closes below its open, sell short.",
+  "exit_rule": "Target = poor high + 0.15*ATRd (the repair - the auction must trade through the flat top to complete). Stop = 0.35*ATRd below entry. Abandon the setup and any open position at the close of the 3rd session after entry. Delete a recorded poor high from the register once it has been exceeded by 0.15*ATRd.",
+  "inputs": [
+   "ohlcv (30-minute for the TPO profile, 15-minute for execution)",
+   "TPO counts per price row",
+   "register of unrepaired poor highs/lows (10 sessions)",
+   "atr(14) daily"
+  ],
+  "params": [
+   "row width (0.05 ATRd)",
+   "minimum TPO count for 'poor' (2)",
+   "flat-top period count (2)",
+   "register depth (10 sessions)",
+   "approach distance (0.20 ATRd)",
+   "repair target (0.15 ATRd)",
+   "hold limit (3 sessions)"
+  ],
+  "why": "A session extreme made by several 30-minute periods stacked at the same price, with no single-print tail, means the auction stopped for lack of interest rather than being rejected by aggressive opposing size. Dalton calls that unfinished business: the market has not yet found the price at which the other side refuses. Such extremes tend to be revisited and exceeded, because the auction still has to complete the job of finding rejection.",
+  "source": "Dalton, Jones & Dalton, 'Mind Over Markets' (1993). Operational definition as documented by marketcalls.in ('Poor High and Poor Low Market Profile Structure Explained': lack of excess or a single TPO at the tail) and ShadowTrader glossary ('a poor high will have less than two TPOs of excess with at least 2-3 columns of TPOs lining up to form a flat top'); carry-forward tracking of about one month.",
+  "ohlcv_only": true,
+  "novelty": "Requires constructing a TPO (time-at-price) profile, which is a time-count structure no price/volume indicator in the existing set produces, and it trades TOWARD a resistance level rather than away from it - the opposite of every fade and every breakout rule listed, and the opposite of its own companion idea (excess-tail fade) at a superficially identical price geometry.",
+  "_agent": "v2:1db7bf8f003d6a64be250b11b84dc6de7bdcc59f0e1caf59d48acdf061b67153"
+ }
+]

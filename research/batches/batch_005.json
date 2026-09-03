@@ -1,0 +1,204 @@
+[
+ {
+  "name": "Rogers-Satchell Drift Detector",
+  "category": "range-estimator ratio / drift extraction",
+  "side": "both",
+  "timeframe": "daily; also 15-minute",
+  "entry_rule": "Over the last N=20 daily bars compute sigma_cc^2 = (1/N) * SUM (ln(C_t/C_{t-1}))^2 (NOT demeaned - the mean is the signal), and the Rogers-Satchell variance sigma_RS^2 = (1/N) * SUM [ ln(H_t/C_t)*ln(H_t/O_t) + ln(L_t/C_t)*ln(L_t/O_t) ]. Rogers-Satchell is unbiased for the diffusion variance regardless of drift, while the undemeaned close-to-close estimator has expectation sigma^2 + mu^2. Define DR = sigma_cc^2 / sigma_RS^2, so DR - 1 is an estimate of (drift/vol)^2 per bar. LONG when DR >= 1.25 AND the sum of the last 20 log returns > 0 AND today's close is the highest close of the last 5 bars. SHORT when DR >= 1.25 AND the 20-bar return sum < 0 AND today's close is the lowest close of the last 5 bars.",
+  "exit_rule": "Exit when DR falls below 1.05 (the drift component has vanished into the noise), or trail 2.0*ATR(14) from the best close since entry, or after 25 bars - whichever first.",
+  "inputs": [
+   "daily OHLC",
+   "ATR(14)"
+  ],
+  "params": [
+   "N (10, 20, 40)",
+   "DR entry threshold (1.15, 1.25, 1.5)",
+   "DR exit threshold (1.0, 1.05, 1.1)",
+   "confirmation lookback (3, 5, 10)"
+  ],
+  "why": "This is a signal-to-noise estimator built from the algebra of two volatility estimators rather than from smoothing. Rogers-Satchell isolates pure diffusion because its cross-product construction is drift-independent; undemeaned close-to-close variance contains diffusion plus drift squared. Their ratio therefore estimates how much of recent price variation is directional rather than random, without needing any lookback direction choice or smoothing lag. ADX answers a similar question but through smoothed directional movement, which lags by design.",
+  "novelty": "The trend strength measure comes from the difference between two unbiased estimators of the same quantity under different assumptions - an identification trick, not an indicator. It has no smoothing constant and therefore no lag beyond the estimation window, and it is scale-free.",
+  "source": "Rogers & Satchell (1991), 'Estimating variance from high, low and closing prices', Annals of Applied Probability 1(4), 504-512 (the drift-independent estimator); Parkinson (1980), Journal of Business 53(1), 61-65; Garman & Klass (1980), Journal of Business 53(1), 67-78. Estimator comparison and formulas: https://portfoliooptimizer.io/blog/range-based-volatility-estimators-overview-and-examples-of-usage/ and https://macrosynergy.com/research/six-ways-to-estimate-realized-volatility/ . The drift-ratio construction itself is my synthesis from those estimators' bias properties.",
+  "ohlcv_only": true,
+  "_agent": "v2:624f6bf414bea470579da4cdad5d18b20c8d9070b637c6a626b2ef0fd9b1aa3b"
+ },
+ {
+  "name": "Close-Location Absorption Run",
+  "category": "candlestick geometry / synthesis",
+  "side": "both",
+  "timeframe": "daily or 15m",
+  "entry_rule": "Define CLV_t = ((close - low) - (high - close)) / (high - low), set to 0 when high == low. This is +1 for a close on the high, -1 for a close on the low. LONG setup when ALL hold over the last 3 completed bars: mean(CLV) >= 0.60; every individual bar has CLV >= 0.30; |close[0] - close[-3]| <= 0.25 x ATR(14) (essentially no net price progress); the sum of the 3 bars' ranges >= 2.5 x ATR(14) (the bars were not quiet); and total volume over the 3 bars >= 1.2 x 3 x the 20-bar average volume. Entry: buy stop at max(high) of those 3 bars + 0.01, valid 2 bars. SHORT is the mirror with CLV <= -0.60 / <= -0.30.",
+  "exit_rule": "Initial stop = the minimum low of the 3 setup bars - 0.01. Exit immediately on any bar that closes with CLV <= -0.50 (a decisive close on the low reverses the whole premise). Otherwise trail on the 3-bar low and hard-exit at the close of the 10th bar after entry.",
+  "inputs": [
+   "OHLCV bars",
+   "ATR(14)",
+   "20-bar average volume"
+  ],
+  "params": [
+   "run length (2, 3, 4 bars)",
+   "mean CLV threshold (0.50-0.75)",
+   "net-progress cap in ATR (0.25)",
+   "range-sum floor (2.5 ATR)",
+   "volume multiple (1.2)"
+  ],
+  "why": "Buyers repeatedly winning the close while price goes nowhere on heavy, wide-ranging trade is the signature of a large seller being absorbed: the supply is being taken at a flat average price and the moment it is exhausted the constraint on price disappears. The two constraints together - strong closes AND no net progress - are what identify absorption rather than plain momentum.",
+  "novelty": "The signal is a DIVERGENCE between where bars close and where price actually goes, which no trend, oscillator or band rule in the current set can express. Requiring near-zero net movement explicitly excludes the three-bar momentum case we already trade; a bar sequence that fires this rule would be invisible to it.",
+  "source": "Synthesis. The CLV statistic is the standard close-location term from the Williams Accumulation/Distribution and Chaikin Accumulation-Distribution Line constructions; the absorption reading (strong closes with no net price change on heavy volume) is the Volume Spread Analysis interpretation from Tom Williams, 'Master the Markets' (1993). The specific inequalities, the flat-price constraint and the CLV-based exit are my own quantification and have not, to my knowledge, been published or tested in this form.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "Rank-Space Residual Reversion",
+  "category": "statistical arbitrage / cross-sectional in rank space",
+  "side": "both",
+  "timeframe": "daily signal, intraday rebalance",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV for the universe",
+   "63-bar median dollar volume as a capitalization-rank proxy",
+   "PCA",
+   "AR(1) fit",
+   "intraday bars for the rank-crossing rebalance"
+  ],
+  "entry_rule": "MULTI-SYMBOL cross-sectional, but indexed by RANK rather than by name. Capitalization is not available from OHLCV, so proxy the capitalization ORDERING with each name's trailing 63-bar median daily dollar volume V_i,t - a slow-moving quantity whose ordering is strongly rank-correlated with capitalization; let I(k,t) be the name occupying rank k on day t in descending order. Define the RANK RETURN as rtilde_(k),t = (V_{I(k,t),t} - V_{I(k,t-1),t-1}) / V_{I(k,t-1),t-1} - that is, TODAY's occupant of rank k compared with YESTERDAY's occupant of rank k, so the series belongs to the market SLOT, not to any company. Residualize: over a trailing 252 bars, build the correlation matrix of the rank-return series, eigendecompose it and keep the top 15 components as rank-space factors; then over the last 60 bars only, regress each rtilde_(k) on those factor returns by OLS and keep the residuals eps_(k),t. Cumulate X_(k)(n) = sum of eps_(k) over n = 1..60, fit an AR(1) X(n+1) = a + b X(n) + zeta, and form s_(k) = (X_(k)(60) - m) / sigma_eq with m = a/(1-b) and sigma_eq = sqrt(Var(zeta)/(1-b^2)), keeping only slots with b in (0,1). ENTER LONG rank slot k when s_(k) < -1.25 and ENTER SHORT when s_(k) > +1.25, dollar-neutral across all open slots. Execute by placing the slot's dollar weight on whichever TICKER currently occupies that rank.",
+  "exit_rule": "Close a slot when |s_(k)| < 0.5. The distinct mechanic is the RANK-CROSSING REBALANCE: every T = 30 minutes during the session, recompute the ranks and TRANSFER each slot's dollar position to the ticker that now occupies that slot. A name whose rank has crossed a boundary is sold and its replacement bought even though nothing about that name's own signal changed - the position belongs to the slot, and the slot's occupant changed.",
+  "why": "In name space, a stock's residual return is a noisy and non-stationary object because the underlying company itself changes over the estimation window. In rank space, the object is a market slot - 'the 50th largest name' - whose statistical behaviour is far more stable across decades, which is the central result of stochastic portfolio theory and the Atlas and hybrid-Atlas models. Li and Papanicolaou document that the rank-space correlation matrix has a larger spectral gap (a cleaner factor structure) and that rank-space residual returns mean-revert more strongly than their name-space counterparts, which is exactly what a residual reversion strategy needs.",
+  "novelty": "The signal lives on the rank slot rather than on the ticker, and the portfolio rotates names automatically as ranks cross regardless of any name-level signal. That rank-crossing turnover has no analogue in any name-space construction - it is a distinct exit mechanism (you exit a name because it moved slots, not because its spread converged).",
+  "params": [
+   "capitalization-rank proxy (63-bar median dollar volume vs 21-bar vs price x volume)",
+   "universe size N",
+   "number of PCA factors (10-20)",
+   "factor window (252)",
+   "residual window (60)",
+   "entry s (1.0-1.5)",
+   "exit s (0.3-0.75)",
+   "intraday rebalance interval T (15-60 min)"
+  ],
+  "source": "Y.-F. Li and G. Papanicolaou, 'Statistical Arbitrage in Rank Space', arXiv:2410.06568 - rank return definition eq. 3.5, the rank-space factor model eq. 3.6-3.7, and the intraday weight-conversion / rank-crossing rebalance eq. 3.11-3.13, read from the PDF. The dollar-volume proxy for capitalization rank and the classic Avellaneda-Lee s-score parameterization of the residual are my substitutions to keep it OHLCV-only and free of a neural network.",
+  "_agent": "v2:a1639122361ba21f547792bd5221bffb0c601a33c6b712ef6c9421a3847e346b"
+ },
+ {
+  "name": "Turn-of-Month Flow Window",
+  "category": "calendar flow / salience of the month boundary",
+  "side": "long",
+  "timeframe": "daily, calendar-scheduled",
+  "entry_rule": "From the bar timestamps, enumerate the trading sessions of each calendar month. Let T be the LAST trading session of the month. Enter LONG at the close of session T-1 (the second-to-last trading session of the month). No indicator condition. Optional volatility gate: skip the window when ATR(14)/close on session T-1 exceeds the 90th percentile of its own trailing 250-session history.",
+  "exit_rule": "Exit at the close of the 3rd trading session of the new calendar month. Fixed four-session window (T-1, T, plus sessions 1, 2, 3 of the new month, exiting at the close of session 3). Hard stop at 2.5 * ATR(20) adverse from entry.",
+  "inputs": [
+   "close",
+   "session-time / calendar date",
+   "atr(20)",
+   "atr(14)"
+  ],
+  "params": [
+   "entry offset (T-1, or T-4 for the wider variant)",
+   "exit day (3rd session)",
+   "volatility skip percentile",
+   "which instrument to apply it to (index proxy versus single names)"
+  ],
+  "why": "Salaries, pensions and retirement-plan contributions are paid on a monthly cycle and are mechanically routed into broad equity funds at the month boundary. Ogden's liquidity hypothesis makes this concrete: standardised payment dates concentrate cash inflows at the turn of the month, and that cash has to buy something. The behavioural component is that the month boundary is a salient accounting and evaluation date - portfolios are marked, statements are cut, and both institutional window dressing and household contribution decisions cluster on it. The effect is a pure flow phenomenon with no informational content, which is why it survives being widely known.",
+  "source": "John J. McConnell and Wei Xu, 'Equity Returns at the Turn of the Month', Financial Analysts Journal 64(2), 2008 - trading rules and magnitude VERIFIED via https://quantpedia.com/strategies/turn-of-the-month-in-equity-indexes/, which specifies 'Buy SPY ETF 1 day (some papers say 4 days) before the end of the month and sell the 3rd trading day of the new month at the close' and reports that over 1926-2005 'virtually all of the excess market return is accrued during the four-day turn-of-the-month period' while investors received minimal compensation for market risk over the other 16 trading days. Mechanism: Ogden (1990) on standardised payment dates; Lakonishok and Smidt (1988) on calendar anomalies.",
+  "ohlcv_only": true,
+  "novelty": "Zero indicator input - the signal is the calendar alone, derived from bar timestamps. It is completely orthogonal to all 32 existing strategies, which means it diversifies the book at the correlation level rather than just adding another price-based signal. It also gives the fleet a mechanical seasonal overlay that can be combined multiplicatively with any other entry as a position-size tilt.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Volume-Profile Max-Pain Wall",
+  "category": "pinning",
+  "side": "both",
+  "timeframe": "daily decision on 5-minute data, the 5 sessions ending on monthly expiry",
+  "entry_rule": "Build G from the strike-interval table. Over the trailing 20 sessions of 5-min bars, for each bar compute typical price TP=(H+L+C)/3, snap TP to the nearest multiple of G, and accumulate that bar's volume into that grid bucket. Let K* be the grid level with the greatest accumulated volume among levels within +/-3*G of current price. Trade only on the 5 trading days ending on (and including) monthly expiry Friday. At 14:00 ET each of those days, if |P - K*| >= 0.30*G, enter toward K*: LONG if P<K*, SHORT if P>K*.",
+  "exit_rule": "Exit on whichever comes first: |P - K*| <= 0.05*G, the expiry Friday 15:58 ET close, or a stop at 0.60*G adverse from entry.",
+  "inputs": [
+   "5-min OHLCV including volume",
+   "hardcoded strike-interval table",
+   "expiry calendar from timestamps"
+  ],
+  "params": [
+   "profile lookback (10/20/40 sessions)",
+   "window length before expiry (3/5/10 days)",
+   "trigger distance 0.30*G",
+   "target 0.05*G",
+   "stop 0.60*G",
+   "search radius +/-3*G"
+  ],
+  "why": "Open interest is not observable to us, but open interest accumulates at strikes where the underlying has actually spent time and traded volume - dealers write the contracts people want at prices the stock visits. So the volume-weighted point of control, snapped to the strike lattice, is a proxy for the largest open-interest strike (the practitioner 'max pain' level). Ni, Pearson and Poteshman show clustering is already elevated on trade dates -5 through -1, not just on expiry day, and that it is roughly twice as strong when market makers hold net purchased positions in the strike nearest the close - i.e. the pull is concentrated at the big-OI strike and it operates for the whole week.",
+  "source": "Ni, Pearson & Poteshman (2005), JFE 78(1), 49-87 - Figure 6 Panel A (clustering conditional on market makers holding net purchased positions, spike ~2% vs ~1% unconditional, and elevated levels on pre-expiration dates). Max-pain framing is practitioner; the volume-profile-snapped-to-strike-grid proxy is my synthesis.",
+  "novelty": "A volume profile bucketed onto the option strike lattice rather than into arbitrary price bins, which turns a generic point-of-control into a specific open-interest estimate. The target level is chosen by accumulated volume, not by proximity - so it will often point the trade away from the nearest strike, which is the opposite of what Strike Grid Pin does.",
+  "ohlcv_only": true,
+  "_agent": "v2:8a72d7f6597b3debe89864b7e219378e55a8eb1c7dba3e0aeb183c1b10c84d44"
+ },
+ {
+  "name": "Principal-Component Factor Timing",
+  "category": "factor timing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "monthly returns of K factor ETF spreads",
+   "expanding-window covariance matrix and eigendecomposition",
+   "5-year cumulative PC returns"
+  ],
+  "params": [
+   "number of PCs retained (5 default, sweep 3-8)",
+   "expanding window minimum length (60 months)",
+   "valuation lookback for each PC (60 months)",
+   "shrinkage on the predicted-return vector"
+  ],
+  "entry_rule": "Take the K factor ETF spread series as monthly return vectors. At each month end, using an expanding window of at least 60 months, standardise each factor's returns to unit variance, compute the covariance matrix, and extract the first 5 principal components; fix each eigenvector's sign so its largest-magnitude loading is positive, and carry the previous month's eigenvectors forward by aligning each new one to its predecessor by maximum absolute correlation so the PCs do not arbitrarily flip month to month. Each PC p has a return series r_p,t = e_p' * r_t. Predict each PC's next-month return with its OWN valuation proxy: x_p,t = the z-score, over the expanding history, of minus the trailing 60-month cumulative return of PC p (so a PC that has run up a long way scores negative, i.e. expensive). Estimate b_p by expanding-window OLS of r_p,t+1 on x_p,t, and form the predicted return mu_p,t = b_p * x_p,t. Hold PC p with weight proportional to mu_p,t / var(r_p), i.e. a mean-variance weight across the 5 PCs, then map back to factor positions via w = sum_p weight_p * e_p, and scale the whole book to a 10% annualised volatility target. Enter at the next open.",
+  "exit_rule": "Rebalance monthly, recomputing eigenvectors, regressions and weights. Because the PC definitions themselves drift, force a full liquidation and re-entry rather than incremental trading whenever the correlation between this month's and last month's leading eigenvector falls below 0.8, which signals the factor structure has genuinely changed. Cut the book to zero if the realised out-of-sample R-squared of the predictions, tracked on a 36-month rolling basis, turns negative.",
+  "why": "Haddad, Kozak and Santosh's key argument is that expected returns must load mostly on the LARGEST sources of return variation, because otherwise small, near-arbitrage components would be wildly predictable and generate implausible Sharpe ratios. Restricting attention to the first five PCs, which explain about 60% of the variation in their 50 anomaly portfolios, is therefore not just a statistical convenience but an economic restriction that stabilises estimation. Empirically it works: they find the first and fourth PCs are predictable by their own valuation ratios with out-of-sample R-squared around 4% per month, roughly four times that of predicting the aggregate market, and that predicting each anomaly separately with its own valuation captures only half as much. Their pure factor timing portfolio achieves a Sharpe ratio of 0.71.",
+  "novelty": "The traded objects are principal components of a set of long-short factor spreads, and the dimension reduction is the source of the edge rather than an efficiency measure. Nothing in the corpus performs an eigendecomposition or trades a latent combination of strategies, and the entry logic - regress each component on its own valuation, then mean-variance weight the components - has no analogue among the 32.",
+  "source": "Haddad, Kozak & Santosh, 'Factor Timing' (Review of Financial Studies 2020; NBER Working Paper 26708, fetched from https://www.nber.org/system/files/working_papers/w26708/w26708.pdf). The paper restricts attention to the first five PCs of 50 anomaly portfolios explaining about 60% of realised return variation, uses only each portfolio's own book-to-market ratio as the predictor, reports out-of-sample monthly R-squared around 4% for the first and fourth PCs and about 1% in total, notes that predicting each anomaly separately yields only half the predictability, and reports a 0.71 Sharpe ratio for the pure factor timing portfolio. The 5-year cumulative PC return substitutes for the book-to-market spread, which we cannot observe.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "Marchenko-Pastur Eigenvalue Clipping",
+  "category": "covariance estimation / random matrix theory",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Last trading day of each month. Take T=500 daily log returns for the N eligible symbols; require N < T. Standardise each column to zero mean and unit variance to get Z, and form the correlation matrix C = (1/T) Z'Z. Eigendecompose C = sum_k lambda_k v_k v_k' with lambda_1 >= ... >= lambda_N. Set q = N/T and sigma^2 = 1 - lambda_1/N. Marchenko-Pastur noise edge: lambda_plus = sigma^2 * (1 + sqrt(q))^2. Declare every eigenvalue with lambda_k < lambda_plus to be noise. Replace each noise eigenvalue by their common mean lambda_bar = (sum of noise eigenvalues) / (count of noise eigenvalues), leaving eigenvectors and the surviving large eigenvalues untouched. Rebuild C_clean = sum_k lambda_k_clean v_k v_k'; rescale so diag(C_clean) = 1 exactly (C_clean = D^{-1/2} C_clean D^{-1/2} with D = diag(C_clean)). Convert to covariance: Sigma = diag(s) C_clean diag(s) with s_i the 500-day sample stdev of symbol i. Weights w = Sigma^{-1}1 / (1'Sigma^{-1}1), clipped to [0, 0.15] and renormalised. Enter at the next session's open.",
+  "exit_rule": "Hold to next monthly rebalance; resize only when |w_new - w_old| > 0.02. Exit a name when its weight goes below 0.005. Hard risk stop: if realised 20-day annualised volatility of the live book exceeds 3x the volatility implied by w'Sigma w at the last rebalance, cut all positions by half immediately and wait for the next scheduled rebalance to restore.",
+  "inputs": [
+   "daily close (500 bars per symbol)",
+   "N (number of symbols in the fleet)"
+  ],
+  "params": [
+   "T lookback (250/500/750)",
+   "sigma^2 convention (1.0 vs the 1 - lambda_1/N market-mode correction)",
+   "weight cap",
+   "clip target (common mean vs linear-shrinkage of the noise bulk)"
+  ],
+  "novelty": "A spectral surgery rather than a convex blend: eigenvalues inside the noise band are flattened while the informative large eigenvalues are left completely alone. Linear shrinkage pulls every eigenvalue toward the mean including the real ones; clipping does not touch them. Different estimator, different resulting weight vector.",
+  "why": "Laloux et al. showed that roughly 94% of the eigenvalues of an S&P 500 correlation matrix fall inside the band predicted for a purely random matrix - meaning the corresponding eigenvectors carry no reproducible information. GMV inversion assigns weight proportional to 1/lambda, so those noise directions receive the largest allocations and are precisely the ones that fail out of sample. Flattening the bulk removes the mechanism by which noise becomes leverage.",
+  "source": "Laloux, Cizeau, Bouchaud & Potters (1999) 'Noise dressing of financial correlation matrices', arXiv:cond-mat/9810255 (fetched this session - confirms the RMT/eigenvalue-density agreement and the warning against blind use of empirical correlation matrices). Bun, Bouchaud & Potters (2017) 'Cleaning Large Correlation Matrices: Tools from Random Matrix Theory', arXiv:1610.08104 (fetched this session - Marchenko-Pastur equation, rotationally invariant estimators, eigenvalue clipping). MP support bounds lambda_pm = sigma^2 (1 +/- sqrt(q))^2 verified at https://en.wikipedia.org/wiki/Marchenko-Pastur_distribution.",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Betting Against Beta, Rank-Weighted",
+  "category": "defensive / low-risk",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-day log returns of each ETF and of the market proxy SPY",
+   "overlapping 3-day log returns",
+   "252-day volatility window",
+   "1250-day correlation window"
+  ],
+  "params": [
+   "shrinkage weight w (0.6 default)",
+   "volatility window (252d)",
+   "correlation window (1250d)",
+   "rebalance period (21d)",
+   "overlap length for correlation returns (3d)"
+  ],
+  "entry_rule": "For each asset i in a broad ETF universe (sector SPDRs, size and style ETFs, country ETFs, bond and credit ETFs - at least 25 names), estimate beta the way Frazzini and Pedersen do, estimating volatility and correlation on DIFFERENT windows because correlations move more slowly than volatilities: sigma_i = standard deviation of 1-day log returns over the trailing 252 days; sigma_m = the same for SPY; rho_i = correlation between the asset's and SPY's OVERLAPPING 3-day log returns r3_t = sum_{k=0..2} ln(1+r_{t-k}) over the trailing 1250 days (the 3-day overlap corrects for non-synchronous trading). Then beta_TS_i = rho_i * sigma_i / sigma_m. Shrink toward the cross-sectional mean of 1: beta_i = 0.6 * beta_TS_i + 0.4 * 1.0. Require at least 120 non-missing days for volatility and 750 for correlation, else drop the asset. At each month end rank all N assets ascending by beta_i, let z_i = rank(beta_i) and zbar = mean rank. Weights: w_L = k * (z - zbar)^-, w_H = k * (z - zbar)^+, with k = 2 / sum|z_i - zbar| so each leg's weights sum to 1. Go long the low-beta leg scaled by 1/beta_L and short the high-beta leg scaled by 1/beta_H, where beta_L and beta_H are the weighted-average betas of the two legs, so the book has zero net beta at formation. Enter at the next open.",
+  "exit_rule": "Rebalance every calendar month end to fresh ranks and fresh leg scalings; assets crossing the median beta switch legs. Because the long leg is levered above 1x, apply a hard risk stop: if the book's trailing 21-day realised volatility exceeds 2x its trailing 252-day median, halve both legs until it falls back below 1.5x.",
+  "why": "Investors who want more return but face leverage constraints or a leverage aversion bid up high-beta assets instead of levering low-beta ones. That bids high-beta prices above fair value and leaves low-beta assets cheap, so the security market line is flatter than CAPM predicts. Levering the cheap low-beta leg and shorting the expensive high-beta leg harvests the difference. The strategy is a bet on the slope of the security market line, not on the market's direction, which is why the legs are explicitly beta-neutralised.",
+  "novelty": "The corpus has no risk-based or defensive signal at all, and no cross-sectional ranking construction. The distinctive mechanics here are the split estimation windows (1-year vol, 5-year correlation on 3-day overlapped returns), Vasicek shrinkage toward 1, rank-proportional weights, and per-leg beta scaling - none of which resemble a moving-average or oscillator rule.",
+  "source": "Frazzini & Pedersen, 'Betting Against Beta' (JFE 2014; PDF fetched from https://w4.stern.nyu.edu/facdir/lpederse/papers/BettingAgainstBeta.pdf). Equation (14) gives beta = rho * sigma_i / sigma_m; the text specifies 1-year rolling volatility on 1-day log returns, 5-year correlation on overlapping 3-day log returns, minima of 120 and 750 observations. Equation (15) sets shrinkage w = 0.6 toward a cross-sectional mean of 1. Equation (16) gives the rank weights and the text states both legs are rescaled to a beta of one at formation, rebalanced every calendar month.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ }
+]

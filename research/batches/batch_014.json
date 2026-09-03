@@ -1,0 +1,209 @@
+[
+ {
+  "name": "Extremal Index Cluster Switch",
+  "category": "volatility",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLC",
+   "ATR(14)"
+  ],
+  "params": [
+   "window n=500",
+   "threshold quantile 0.95",
+   "cluster theta threshold 0.45",
+   "isolated theta threshold 0.75",
+   "breakout offset 0.1 ATR",
+   "stops 2.0 / 1.5 ATR"
+  ],
+  "entry_rule": "Over a trailing window of n = 500 daily log returns set the threshold u = the 95th percentile of |r|. Let the exceedance bar indices be S_1 < S_2 < ... < S_N (bars where |r| > u) and the inter-exceedance times T_i = S_{i+1} - S_i for i = 1..N-1. FERRO-SEGERS INTERVALS ESTIMATOR: if max(T_i) <= 2, theta = 2 * (SUM T_i)^2 / ((N-1) * SUM T_i^2); otherwise theta = 2 * (SUM (T_i - 1))^2 / ((N-1) * SUM (T_i - 1)*(T_i - 2)). Clamp theta to (0, 1]. The mean cluster size of extremes is 1/theta. Act only on days where |r_t| > u. CLUSTER MODE (theta <= 0.45, extremes arrive in clusters of 2 or more): on session t+1 place a stop-buy at H_t + 0.1*ATR(14) and a stop-sell at L_t - 0.1*ATR(14); take whichever fills first, cancel the other; if neither fills by the close of t+1 cancel both. ISOLATED MODE (theta >= 0.75, extremes arrive singly): enter AGAINST today's bar at the open of t+1 - SHORT if r_t > 0, LONG if r_t < 0. No trade when 0.45 < theta < 0.75, and no trade on any day that is not an exceedance.",
+  "exit_rule": "Cluster mode: trailing stop 2.0*ATR(14) from the extreme close reached since entry, hard time stop 5 sessions. Isolated mode: profit target at C_{t-1} (the close immediately before the shock bar), stop 1.5*ATR(14) from entry, time stop 3 sessions.",
+  "why": "Volatility clustering is universally acknowledged and almost never measured as such - GARCH and HAR measure the persistence of the volatility LEVEL, which is a different thing from the tendency of EXTREME moves to arrive in bunches. The extremal index theta is the exact extreme-value-theory parameter for that tendency, and 1/theta is directly interpretable as the expected number of large moves per cluster. It resolves the perennial ambiguity after a big bar: when theta is low the market is in a state where one shock begets another and a bracket is correct; when theta is near 1 the same-sized bar is a genuine isolated outlier and fading it is correct. Nothing in the standard toolkit distinguishes those two cases.",
+  "novelty": "Extreme value theory as a live regime signal. Measures clustering of the tail specifically, using inter-exceedance times, rather than persistence of the conditional variance. Distinct from ARCH/GARCH persistence, from ATR expansion, and from every jump test - it is a property of the arrival PROCESS of extremes, not of any single extreme.",
+  "source": "Ferro & Segers (2003), 'Inference for clusters of extreme values', Journal of the Royal Statistical Society Series B 65(2) - the intervals estimator of the extremal index reproduced above. Leadbetter, Lindgren & Rootzen (1983), 'Extremes and Related Properties of Random Sequences and Processes' - the definition of the extremal index. Cited from knowledge; the web search budget was exhausted before I could open these, so verify the two-branch estimator formula against Ferro-Segers before implementation. The trading application is my synthesis.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "Volume Time Versus Clock Time Volatility Ratio",
+  "category": "volume-synchronised sampling",
+  "side": "both",
+  "timeframe": "1-minute construction, 5-minute entries",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute bars",
+   "equal-volume bucket resampling",
+   "realized variance in clock time",
+   "realized variance in volume time",
+   "500-observation percentile of the ratio",
+   "atr(14) 5-minute"
+  ],
+  "params": [
+   "bucket size V (median daily volume / 78)",
+   "window (2 sessions)",
+   "fade percentile (90)",
+   "stand-aside percentile (10)",
+   "lookback move (30 minutes)",
+   "max hold (12 bars)"
+  ],
+  "entry_rule": "Maintain two parallel return series over a rolling window of the last 2 sessions of 1-minute data. CLOCK series: the raw 1-minute closes; RV_clock = sum of (log(close_i/close_{i-1}))^2. VOLUME series: accumulate 1-minute volume into buckets of fixed size V = (median daily volume over the last 50 sessions) / 78, splitting any bar that overfills a bucket pro rata and interpolating that bar's close linearly to the split point; take the most recent N buckets where N = the number of 1-minute bars in the window, ending at the same instant; RV_vol = sum of squared log returns between consecutive bucket closes. Let Q = RV_clock / RV_vol, percentile-ranked against its own trailing 500 observations. ENTRY (fade) when Q's percentile >= 90: price is moving per unit of clock time far more than per unit of volume, i.e. moving without participation. Let r30 = the return over the last 30 minutes. SHORT at the next 5-minute bar's open if r30 > 0; LONG if r30 < 0. Only between 10:00 and 15:00 ET; at most one trade per direction per session. Take NO new positions while Q's percentile <= 10 (every move is fully volume-backed).",
+  "exit_rule": "Exit when Q's percentile falls back below 50 (participation has caught up with the price move), or after 12 five-minute bars, or on a stop of 1.0 * ATR(14, 5-minute), whichever comes first.",
+  "why": "Sampling by volume rather than by the clock is the core argument of the volume-clock literature: information arrives with trade, not with time, so a volume-time series has better statistical behaviour than a clock-time one. The ratio of the two realized variances is therefore a direct effort-versus-result measure at the level of volatility rather than of individual bars: when clock-time variance greatly exceeds volume-time variance, price is being pushed around inside a thin book by very little actual trading, and those excursions revert once real size arrives.",
+  "novelty": "Compares two resamplings of the SAME data - one indexed by time, one by volume - and trades their divergence. No indicator is involved and no bar is scored; the signal is the disagreement between two clocks. Distinct from the volume-bar and imbalance-bar ideas, which sample in volume time and then trade the resulting bars directly rather than measuring volume time against clock time.",
+  "source": "Motivated by Easley, Lopez de Prado & O'Hara, 'The Volume Clock: Insights into the High Frequency Paradigm', Journal of Portfolio Management 39(1), 2012 (SSRN 2034858). I attempted to fetch the SSRN page and received HTTP 403, so this is a bibliographic citation, not a verified quotation; the RV_clock / RV_vol ratio and the trading rule are my synthesis.",
+  "_agent": "v2:d2c68c917bfc2191138a0a4fd2776864b6bac0b59fb98dd59663666fef7408af"
+ },
+ {
+  "name": "Volatility-Scaled Time-Series Momentum",
+  "category": "trend / risk sizing",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily log returns",
+   "exponentially weighted variance with 60-day centre of mass",
+   "12-month cumulative return"
+  ],
+  "params": [
+   "lookback k (12 months default, sweep 1-12)",
+   "holding period h (1 month default, sweep 1-12)",
+   "EWMA centre of mass (60 days)",
+   "annual volatility target (40% per instrument default)"
+  ],
+  "entry_rule": "For each instrument, estimate ex ante annualised variance with the exact Moskowitz-Ooi-Pedersen model: sigma_t^2 = 261 * sum_{i>=0} (1-d) * d^i * (r_{t-1-i} - rbar_t)^2, where r are 1-day log returns, rbar_t is the exponentially weighted mean computed with the same weights, and d is set so the centre of mass d/(1-d) = 60 days, i.e. d = 60/61 = 0.98361. Use sigma_{t-1} against day-t returns so there is no look-ahead. At each month end (every 21st trading day), take the sign of the trailing 12-month cumulative excess return, S_i = sign(ln(close_t/close_{t-252}) - 252*rf_daily), where rf_daily comes from the BIL ex-dividend gap yield. Position size in dollars is N_i = (target_vol / sigma_i,t-1) * S_i * capital, with target_vol = 40% annualised. Enter at the next open. To avoid a single monthly rebalance date dominating results, run h overlapping sub-portfolios: the position held on any day is the average of the positions implied by formation dates t-21, t-42, ... t-21h.",
+  "exit_rule": "Each sub-portfolio is held exactly h months and then replaced by a freshly formed one, so the aggregate position turns over gradually rather than all at once - a sign flip therefore scales the book out over h months instead of reversing it in a day. Between rebalances the dollar position is re-sized daily as sigma_i changes, so a volatility spike automatically shrinks the position without any stop being hit. Hard exit: close a sub-portfolio early only if the instrument stops trading or fails a liquidity screen.",
+  "why": "Moskowitz, Ooi and Pedersen document significant return continuation at every lag from 1 to 12 months across 58 futures markets and reversal thereafter, which they attribute to initial under-reaction followed by delayed over-reaction, plus the position flows of hedgers and speculators. The reason to specify this as a separate idea from any moving-average rule is the risk model: sizing at a constant ex ante volatility target is what makes the returns aggregate sensibly across instruments with wildly different volatilities, and it produces automatic de-risking in crises that a fixed-size trend rule does not have.",
+  "novelty": "The entry is the sign of a 12-month return, not a crossover, and there is no smoothing of price at all. The genuinely new element for this corpus is the exit and sizing structure: an EWMA-variance-targeted dollar position that is re-sized daily, plus overlapping sub-portfolios so entries and exits are staggered rather than binary. That is a different exit structure, which the brief counts as a distinct idea.",
+  "source": "Moskowitz, Ooi & Pedersen, 'Time Series Momentum' (Journal of Financial Economics 104, 2012, 228-250; PDF fetched from https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf). Section 2.4 equation (1) gives the ex ante volatility model with the 261 annualisation scalar and the centre-of-mass 60-day weighting; Section 3.2 specifies the sign rule, the position size inversely proportional to sigma_{t-1}, and the Jegadeesh-Titman overlapping-portfolio averaging used to avoid overlapping observations.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "Factor Autocorrelation Regime Gate",
+  "category": "factor timing / regime filter",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "monthly returns of K factor ETF spreads",
+   "expanding-window mean and standard deviation per factor"
+  ],
+  "params": [
+   "number of factors K",
+   "expanding vs rolling window for mu and sigma",
+   "gate form (binary vs linear scaling)",
+   "threshold (0 default, sweep -0.5 to +0.5)"
+  ],
+  "entry_rule": "Using the same K factor ETF spread series as the Time-Series Factor Momentum idea, compute for each factor f at each month end: r_t = factor f's return this month; r_minus_t = the mean of factor f's monthly returns from month t-12 to t-1; mu_f and sigma_f = factor f's mean and standard deviation of monthly returns over an expanding window of at least 60 months. Then rho_auto,f,t = (r_minus_t * r_t - mu_f^2) / (sigma_f^2 / sqrt(12)). The aggregate factor autocorrelation index A_t is the cross-sectional average of rho_auto,f,t over all K factors. A_t > 0 means the average factor moved this month in the same direction it moved over the prior year. Rule: run all momentum-family strategies at full size only while A_t > 0. When A_t <= 0 at a month end, cut every momentum-family position to zero at the next open. The gate applies to time-series factor momentum, cross-sectional momentum, and the momentum half of any value-momentum blend; it does NOT gate value or carry.",
+  "exit_rule": "Re-enter momentum exposure at full size at the next open after A_t turns positive at a month end. Optional linear form instead of binary: scale momentum exposure by clip(A_t / A_90, 0, 1) where A_90 is the 90th percentile of A over the expanding history, which avoids all-or-nothing switching. As a gate it has no profit target of its own.",
+  "why": "Ehsani and Linnainmaa show that momentum crashes are not random: splitting their 1964-2015 sample on the sign of this index, UMD averaged +2.4% per month with 3.3% volatility in the positive-autocorrelation regime and -1.6% per month with 4.4% volatility in the negative regime, and the 5th percentile of UMD returns was -1.9% in the positive regime against -8.8% in the negative one. Almost the entire left tail of momentum concentrates in negative-index months, and they report that a one-unit increase in the index lowers the probability of a momentum crash by 15% (z = -6.78). The mechanism is that momentum is an accumulation of factor autocorrelations, so when factors collectively turn against their own past, every momentum expression breaks at once.",
+  "novelty": "The state variable is the cross-sectional average autocorrelation of a set of long-short factor returns - a quantity that is not a price, a volatility, or a trend of any traded asset. Nothing in the 32 conditions on anything like it, and unlike a volatility filter it specifically anticipates the direction-reversal risk that kills momentum rather than the variance risk.",
+  "source": "Ehsani & Linnainmaa, 'Factor Momentum and the Momentum Factor' (Journal of Finance 2022; NBER WP 25551). Equation (11) defines a factor's monthly autocorrelation as (r_minus_t * r_t - mu^2)/(sigma^2/sqrt(12)) with the formation period running from t-12 to t-1, and the aggregate index as the cross-sectional average. Figure 4 and the surrounding text report the +2.4%/-1.6% conditional means, the 3.3%/4.4% volatilities, the -1.9%/-8.8% fifth percentiles, and Appendix A.5 the 15% crash-probability result.",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "Volume-Conditioned Autocorrelation Switch",
+  "category": "volume-conditioned reversal",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close",
+   "daily volume",
+   "atr(14)"
+  ],
+  "params": [
+   "regression window 200 sessions (try 120, 200, 500)",
+   "t-stat cutoff 1.96 (try 1.5, 2.5)",
+   "volume trigger v_t > 0.5 (try 0.3, 0.8, 1.2)",
+   "move trigger 1.0 x ATR (try 0.7, 1.5)",
+   "hold 1 vs 3 sessions"
+  ],
+  "entry_rule": "For each symbol, at each session close, using the trailing 200 sessions: r_d = ln(close_d/close_{d-1}); v_d = ln(volume_d) minus the mean of ln(volume) over the 200 sessions ending at d-1 (detrended log volume - since shares outstanding is essentially constant over 200 sessions this equals detrended log turnover up to an additive constant). Estimate by OLS r_{d+1} = c0 + c1*r_d + c2*(v_d * r_d) + e over the window, requiring at least 150 valid observations. Classify the symbol LIQUIDITY-DRIVEN if c2 < 0 with t-stat < -1.96; INFORMATION-DRIVEN if c2 > 0 with t-stat > +1.96; otherwise UNCLASSIFIED and never traded. Then at the close of session t require BOTH v_t > +0.5 (volume at least e^0.5 = 1.65x its 200-day typical level) AND |r_t| >= 1.0 * ATR(14)/close_t. If the symbol is LIQUIDITY-DRIVEN: go LONG at the close when r_t < 0, SHORT at the close when r_t > 0. If the symbol is INFORMATION-DRIVEN: take the OPPOSITE side (LONG when r_t > 0, SHORT when r_t < 0).",
+  "exit_rule": "Close at the close of session t+1 (one-session hold). Stop out intraday at 2.5 * ATR(14) adverse from entry. Re-estimate c2 every 21 sessions; if a held name's classification flips or drops to UNCLASSIFIED at a re-estimation, close it at the next session's close.",
+  "why": "Llorente, Michaely, Saar and Wang derive and confirm that 'returns generated by risk-sharing trades tend to reverse themselves while returns generated by speculative trades tend to continue themselves.' Whether a high-volume price move reverses is therefore a property of the STOCK, not of the setup - it depends on how much informed/speculative trading that name carries. They find stocks of small firms or with wide bid-ask spreads show continuation after high-volume days, while large firms and tight-spread stocks show reversal. The c2 coefficient on the volume-return interaction is a direct per-name estimate of which regime a symbol is in.",
+  "novelty": "The SIGN of the trade is estimated from the symbol's own history rather than assumed. The identical setup - big volume, big move - produces a long in one stock and a short in another on the same day. Every volume-conditioned rule on the existing list assumes reversal universally and uses volume or illiquidity only as a static filter on which names qualify.",
+  "source": "Guillermo Llorente, Roni Michaely, Gideon Saar, Jiang Wang, 'Dynamic Volume-Return Relation of Individual Stocks', NBER Working Paper 8312 (May 2001), published Review of Financial Studies 15 (2002) 1005-1047. PDF opened this session (custom font encoding decoded); the risk-sharing-reverses / speculative-continues sentence and the small-firm and bid-ask-spread cross-sectional results are quoted from its abstract and introduction.",
+  "_agent": "v2:a5ae7559b8afe46008ea144e180e06b435128d76433946942f24be45b53033b9"
+ },
+ {
+  "name": "Pre-Registered Revival Trial",
+  "category": "strategy resurrection protocol / exit structure",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "When any decay monitor retires sub-strategy s, do not delete it. Instead open a REVIVAL TRIAL with hard, pre-registered terms fixed at the moment of retirement: trial length exactly 250 bars, trial size exactly 10% of s's normal base size, and success hurdle a running t-statistic of the trial's mean per-bar return, t_k = mean(r_1..r_k) / (std(r_1..r_k)/sqrt(k)), reaching 1.8. During the trial, s takes its own entry signals at the next bar's open at 10% size. Compute t_k at the close of each trial bar. If t_k >= 1.8 at any point with k >= 40, promote s immediately: size steps to 50% of base for the next 60 bars, then to 100%. If bar 250 of the trial is reached without t_k ever having touched 1.8 with k >= 40, retire s permanently - it is deleted from the corpus and never re-trialled.",
+  "exit_rule": "s's own exit rule governs trades throughout. Trial-level exits: on promotion, the trial ends and normal sizing resumes; on reaching bar 250 without success, flatten all of s's positions at the next open and delete s. Hard abort: if the trial's cumulative return reaches -3% of the trial's allocated capital before bar 250, terminate the trial early and delete s. A given strategy is allowed exactly one revival trial in its lifetime.",
+  "inputs": [
+   "OHLCV bars",
+   "per-strategy per-bar return series during the trial",
+   "running t-statistic of the mean"
+  ],
+  "params": [
+   "trial length (125 / 250 / 500 bars)",
+   "trial size fraction (0.05 / 0.10 / 0.25)",
+   "t-stat hurdle (1.65 / 1.8 / 2.0)",
+   "minimum k before the hurdle can be claimed (20 / 40 / 100)",
+   "abort drawdown (-1.5% / -3% / -5%)",
+   "number of trials allowed per strategy (1 / 2)"
+  ],
+  "why": "Every monitor in this list produces false positives - a strategy is killed by a break test during a run of ordinary bad luck. The usual responses are both wrong: kill permanently (you lose real strategies to noise) or re-arm after an arbitrary cooldown (you keep resurrecting dead ones forever, and the cooldown becomes a tuned parameter that guarantees eventual re-entry). A bounded trial with a pre-registered hurdle, a hard deadline and a one-shot limit converts the resurrection decision into a proper sequential test with a known cost ceiling: at most 10% size for at most 250 bars, once. The 1.8 hurdle is not arbitrary - Chen and Zimmermann find that among predictors that survive journal review, a t-stat hurdle of 1.8 is sufficient to control for multiple testing, because the dispersion of true returns is large enough that each t-stat is genuinely informative. That is the right hurdle for an idea that already has a prior of having worked.",
+  "source": "t-stat hurdle of 1.8 from Chen, A.Y. & Zimmermann, T. (2018), 'Publication Bias and the Cross-Section of Stock Returns', FEDS 2018-033 - among predictors that survive journal review, a low t-stat hurdle of 1.8 controls for multiple testing using the statistics of Harvey, Liu & Zhu (2015). The bounded one-shot trial protocol itself is my own synthesis.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "Parkinson Efficiency Mean-Reversion Gate",
+  "category": "regime detection for mean reversion",
+  "side": "both",
+  "timeframe": "15-minute bars, daily regime",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily high",
+   "daily low",
+   "daily close",
+   "15-minute open/high/low/close",
+   "session clock"
+  ],
+  "params": [
+   "Q window 20 sessions (try 10, 20, 40)",
+   "regime percentile 0.70 (try 0.60, 0.70, 0.85)",
+   "percentile history 120 sessions",
+   "band multiple 1.0 (try 0.5, 1.0, 1.5)",
+   "max entries per session 2"
+  ],
+  "entry_rule": "REGIME: for each symbol over the trailing 20 sessions compute the Parkinson range volatility PARK = sqrt( (1/(4*ln 2)) * mean( (ln(high_d/low_d))^2 ) ) and the close-to-close volatility CC = stdev( ln(close_d/close_{d-1}) ). Form Q = PARK / CC. Under a driftless random walk E[Q] is approximately 1; Q > 1 means the path travelled far further than its net displacement (oscillation), Q < 1 means moves persisted within the day and gapped across days (trending). Classify the symbol OSCILLATING on session t if Q_t >= its own 120-session 70th percentile. TRADE, only in the OSCILLATING regime, on 15-minute bars between 10:00 and 15:00 ET: let O = the session's 09:30 opening price and B = (mean over the trailing 20 sessions of (high_d - low_d)) / 2. Enter LONG when a 15-minute bar closes below O - 1.0 * B AND that bar's close is above its own open. Enter SHORT when a 15-minute bar closes above O + 1.0 * B AND that bar's close is below its own open. Maximum 2 entries per symbol per session.",
+  "exit_rule": "Target: the session open O. Stop: 1.5 times the entry distance |entry - O| beyond the entry, away from O. Hard exit at 15:50 ET the same session - never carried overnight. Cancel all pending setups for the session if the symbol's regime flips out of OSCILLATING at the prior close.",
+  "why": "The high-low range measures the distance the price actually travelled during the session; the close-to-close return measures only where it ended up. Their ratio is a direct estimate of path efficiency, and it separates two situations that look identical to any close-only statistic: a stock that oscillated all day around its open, and a stock that trended cleanly from open to close. Only the first is safe to fade. Range-based estimators are also far more efficient than close-to-close ones for the same sample size, so the regime classification stabilizes on 20 sessions where a close-only test needs several times as much history.",
+  "novelty": "The regime test compares a range estimator against a close-to-close estimator - it uses the high and low, which a Lo-MacKinlay variance ratio structurally cannot see because it is built from closing prices at multiple horizons. Two symbols with identical close-to-close volatility and identical variance ratios receive opposite classifications here depending on how much intraday travel produced that volatility. The trade is also different: intraday reversion to the session open rather than a multi-day ATR-scaled fade.",
+  "source": "Synthesis. The two estimators are Michael Parkinson, 'The extreme value method for estimating the variance of the rate of return', Journal of Business 53 (1980) 61-65, and the standard close-to-close estimator; their relative efficiency and the use of the range as a volatility proxy are established in Sassan Alizadeh, Michael Brandt, Francis Diebold, 'Range-based estimation of stochastic volatility models', Journal of Finance 57 (2002) 1047-1091. The RATIO of the two as a mean-reversion regime classifier, and the session-open reversion trade built on it, are my own construction and I am not aware of a paper that tests exactly this - it should be treated as an untested hypothesis rather than a documented effect.",
+  "_agent": "v2:a5ae7559b8afe46008ea144e180e06b435128d76433946942f24be45b53033b9"
+ },
+ {
+  "name": "Two-Frequency Noise Share Switch",
+  "category": "microstructure noise estimation",
+  "side": "both",
+  "timeframe": "daily signal, 5-minute execution",
+  "entry_rule": "Per session compute RV_1 = sum of squared 1-minute log returns (M1 = 390 returns) and RV_15 = sum of squared 15-minute log returns (M15 = 26 returns). Under i.i.d. microstructure noise, E[RV_M] = IV + 2*M*E[eta^2], so estimate the per-observation noise variance as eta2 = max(0, (RV_1 - RV_15) / (2 * (M1 - M15))) and the NOISE SHARE as q = min(1, 2 * M1 * eta2 / RV_1). Let Q = mean(q, 10 sessions) and rank Q against its trailing 250 sessions. FADE BRANCH - when Q >= its 80th percentile AND the first-order autocorrelation of the last 200 one-minute returns is <= -0.05 (confirming bid-ask bounce): on the next session, on any 5-minute bar between 10:00 and 15:30 ET where ln(C_bar / O_session) exceeds +0.75 * ATR(14, daily)/O_session, SHORT at that bar's close; mirror LONG on a -0.75 breach. FOLLOW BRANCH - when Q <= its 20th percentile AND the Lo-MacKinlay variance ratio VR(6) computed on the trailing 500 five-minute returns is >= 1.05: take the same +/-0.75 ATR breach but enter WITH the direction. No trade when Q sits between its 20th and 80th percentiles or when the confirming statistic fails.",
+  "exit_rule": "Exit at the session close, or on a stop at 1.0 * ATR(14, daily) against entry. One trade per session per branch.",
+  "inputs": [
+   "1-minute close",
+   "5-minute close",
+   "15-minute close",
+   "ATR(14, daily)",
+   "250-session percentile of the noise share",
+   "1-minute return autocorrelation"
+  ],
+  "params": [
+   "sampling pair (1-min vs 15-min)",
+   "smoothing window (10 sessions)",
+   "percentile window (250)",
+   "entry percentiles (20/80)",
+   "displacement (0.75 ATR)",
+   "autocorrelation and VR confirmation thresholds"
+  ],
+  "why": "The volatility signature plot is the oldest diagnostic in high-frequency econometrics: realized variance computed at ever-finer sampling intervals rises without bound because each observation carries a noise term that gets counted M times. Bandi and Russell make that decomposition explicit and separable. Differencing RV at two frequencies therefore backs out the noise variance itself - a direct estimate of how much of today's tape is bid-ask bounce and how much is real price discovery, using nothing but bars. When noise dominates, an intraday displacement is disproportionately likely to be the accumulation of transitory bounce and reverts; when the tape is clean, the same displacement is price discovery and persists. The autocorrelation and variance-ratio confirmations are there because the noise estimate is itself noisy and can go negative or spike on a single bad print.",
+  "source": "Federico M. Bandi and Jeffrey R. Russell, 'Separating microstructure noise from volatility', Journal of Financial Economics 79(3), 655-692, 2006 (https://ideas.repec.org/a/eee/jfinec/v79y2006i3p655-692.html). The identity E[RV_M] = IV + 2*M*E[eta^2] under i.i.d. noise and the two-frequency differencing follow directly from that framework; the trading construction is mine.",
+  "novelty": "Estimates NOISE variance rather than price variance, by exploiting the difference between two sampling frequencies - a quantity none of the existing ideas computes. The Yang-Zhang idea also switches between fade and follow but does so on the overnight share of TOTAL variance, which is a property of the session's shape; this switches on how much of the intraday variance is not real at all.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ }
+]

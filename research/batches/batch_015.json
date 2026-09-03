@@ -1,0 +1,218 @@
+[
+ {
+  "name": "Netted Value-Momentum Combination",
+  "category": "cross-asset value + momentum",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily closes back to 1400 trading days",
+   "2-12 month return",
+   "cross-sectional ranks"
+  ],
+  "params": [
+   "value/momentum blend (0.5/0.5 default, sweep 0.3-0.7)",
+   "momentum lookback (252d skipping the last 21d)",
+   "rebalance period (21d)"
+  ],
+  "entry_rule": "On the SAME cross-asset ETF universe, compute two rank-weight vectors each month end. VALUE: V_i = ln( mean(close_i over days t-1386 to t-1134) / close_i,t ), weights w_V,i = c_t*(rank(V_i) - mean rank) scaled to $1 long / $1 short. MOMENTUM: M_i = ln(close_i,t-21 / close_i,t-252), the 2-to-12-month return skipping the most recent month, weights w_M,i = c_t*(rank(M_i) - mean rank) scaled the same way. Final position in asset i is w_i = 0.5*w_V,i + 0.5*w_M,i, computed BEFORE any trade is placed so the two books net against each other at the position level rather than being run as two separate portfolios. An asset that is both cheap and rising gets roughly double weight; an asset that is cheap but still falling nets to approximately zero and is not traded at all. Enter the netted target at the next open.",
+  "exit_rule": "Recompute the netted target every 21 trading days and trade only the difference from the current book, which materially cuts turnover versus running the two sleeves separately. A position exits naturally when the two signals disagree enough to net it to below 0.2% of capital. Portfolio-level gate: cut the momentum half of the blend to zero whenever the Factor Autocorrelation Regime Gate (separate idea) is negative, leaving value running alone.",
+  "why": "AMP's central result is not that value works or that momentum works but that they are strongly negatively correlated everywhere, so a 50/50 blend has a much higher Sharpe ratio than either alone and the blend is what should be traded. Netting at the position level rather than the portfolio level is what captures this: the negative correlation shows up as offsetting orders that never get placed, so the investor gets the diversification without paying the turnover for it. The economics are that value is long-horizon overreaction correcting and momentum is short-horizon underreaction continuing - opposite behavioural errors at opposite horizons, so their errors offset.",
+  "novelty": "The distinct element is the netting structure and the deliberately opposite horizons (4.5-5.5 years against 2-12 months) applied to one universe. The corpus has no multi-signal netted portfolio and no construction where two signals cancel into a no-trade.",
+  "source": "Asness, Moskowitz & Pedersen, 'Value and Momentum Everywhere' (Journal of Finance 2013), equation (3): r_COMBO = 0.5*r_VALUE + 0.5*r_MOM; equation (1) for rank weights; p. 938 for the 5-year value proxy and the choice of MOM2-12 as the momentum measure (the paper explicitly defends 2-12 over 7-12, citing Novy-Marx 2012 and Goyal & Wahal 2012).",
+  "_agent": "v2:b2f11819a3eedbb02aa5e8fd9c9a4d7ebb2d4b2746533c6b3a4d6d73556bef1f"
+ },
+ {
+  "name": "Turtle System 1 loser-filtered breakout",
+  "category": "breakout / state-dependent filter",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Daily bars. N = Wilder 20-period ATR (N_t = (19*N_{t-1} + TR_t)/20). A long breakout event occurs on bar t when High_t > max(High[t-20 .. t-1]); short when Low_t < min(Low[t-20 .. t-1]). Maintain a state variable last_breakout_result. Compute it by phantom-simulating the MOST RECENT prior breakout event b regardless of whether it was traded: phantom entry price = the broken level itself, phantom N = N_b, phantom stop = entry - 2*N_b (long) / entry + 2*N_b (short); walk bars forward from b+1 and mark it LOSER if the stop is touched before the 10-day trailing exit (Low < min(Low[u-10..u-1]) for a long) is touched, else WINNER. RULE: take the current 20-day breakout ONLY if last_breakout_result == LOSER (or no prior breakout exists). If last_breakout_result == WINNER, skip it but keep updating state. OVERRIDE: always take the trade, filter or not, if High_t > max(High[t-55 .. t-1]) (long) or Low_t < min(Low[t-55 .. t-1]) (short) \u2014 the documented 55-day failsafe.",
+  "exit_rule": "Long: exit on the bar where Low < min(Low[t-10 .. t-1]). Short: exit where High > max(High[t-10 .. t-1]). Hard stop at entry -/+ 2*N measured with N at the entry bar. Whichever comes first.",
+  "inputs": [
+   "daily OHLC",
+   "ATR(20) Wilder-smoothed",
+   "rolling 20/55-bar high and low",
+   "rolling 10-bar high and low"
+  ],
+  "params": [
+   "breakout lookback 20",
+   "failsafe lookback 55",
+   "exit lookback 10",
+   "stop multiple 2N",
+   "ATR period 20"
+  ],
+  "why": "Donchian breakouts cluster: after a breakout that trends, the next breakout in the same market is disproportionately a late-stage exhaustion move, while a breakout following a failed one occurs after weak hands have been shaken out. The filter is an explicit bet that breakout outcomes are negatively autocorrelated at the event level. Dennis and Eckhardt used it to cut the trade count roughly in half while keeping most of the big trends, with the 55-day failsafe insuring against the one skipped breakout that becomes the year's biggest move.",
+  "source": "Original Turtle Trading rules as published by Richard Dennis's students (Curtis Faith, 'The Original Turtle Trading Rules'), rules summary at https://www.theturtletrader.com/turtle-trading-rules/ \u2014 System 1 20-day entry with the skip-if-previous-breakout-was-a-winner filter, the 55-day failsafe, N as 20-day EMA of true range, 2N stop, 10-day exit.",
+  "novelty": "Plain Donchian breakout is an unconditional rule on price alone. This adds a memory of the previous signal's OUTCOME as a gating variable \u2014 the same price bar is tradeable or not depending on trade history. Nothing in the existing 32 conditions entry on the P&L of a prior hypothetical trade.",
+  "ohlcv_only": true,
+  "_agent": "v2:f5f032cda86046734ffcad9e8f804d90c918533489aa540fb34b2254c98c8019"
+ },
+ {
+  "name": "Gap-Cadence Earnings Calendar and Pre-Announcement Premium",
+  "category": "event-study methodology",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of symbol",
+   "overnight gap series |open_t/close_(t-1) - 1|",
+   "trading-day calendar",
+   "session spacing arithmetic"
+  ],
+  "entry_rule": "CALENDAR RECONSTRUCTION: take the 12 sessions with the largest |overnight gap| = |open_t/close_{t-1} - 1| in the trailing 750 sessions. Sort their dates and keep the maximal subset whose consecutive spacings, measured in trading sessions, all lie in [55, 70]. If at least 6 dates survive, declare a quarterly announcement cadence with median spacing m and most recent announcement date A; the predicted next announcement is session A + m. Discard the symbol if the last two observed spacings differ by more than 8 sessions (the cadence has drifted and the forecast is unreliable). TRADE: enter LONG at the close of session A + m - 6.",
+  "exit_rule": "Exit at the close of session A + m - 1. The position is ALWAYS flat before the predicted announcement - never hold through it, and never re-enter after it. Hard stop at -6% from the entry fill. If the predicted date passes without a gap of at least 1.5x the symbol's 250-session median |gap|, mark the cadence stale and skip the symbol until it re-qualifies.",
+  "why": "There is a documented positive average return in the days running into a scheduled earnings announcement - the earnings-announcement premium - attributed to attention-driven retail buying and to a premium for bearing announcement risk. The whole point of exiting the session before the print is that this is precisely where Beaver showed the return VARIANCE explodes: the premium is earned in the run-in, and the variance is incurred in the print, so the two can be separated by a date-based exit. Reconstructing the announcement calendar from the periodicity of the symbol's own overnight gaps solves the problem that we have no earnings feed - quarterly reporting produces a strongly periodic gap signature with roughly 63 trading sessions between reports, and the four largest gaps of a year are overwhelmingly the four reports.",
+  "source": "Beaver (1968) on announcement-period return variance and trading volume, cited in Kothari & Warner (2006) footnote 1. Frazzini & Lamont (2007) 'The Earnings Announcement Premium and Trading Volume' (NBER WP 13090) for the run-in premium. The gap-cadence reconstruction device itself is a synthesis - no earnings calendar is available on this feed, so the event dates are inferred from the periodicity of the symbol's own overnight gaps, and the estimator is falsifiable (the predicted date either does or does not produce an outsized gap).",
+  "novelty": "Forecasts a FUTURE event date from the periodicity of the symbol's own bars and defines both the entry and the exit by offsets from that predicted date, with no price condition on either side. Nothing in the existing set predicts when an event will occur; and the rule is self-validating - a missed prediction retires the symbol until the cadence re-establishes. The reconstructed calendar is also reusable as an exclusion filter by every other event rule.",
+  "params": [
+   "gap-candidate count (8/12/20)",
+   "spacing band ([58,68] / [55,70] / [50,76] sessions)",
+   "minimum surviving dates (4/6/8)",
+   "drift tolerance (4/8/12 sessions)",
+   "entry offset before predicted date (3/6/10 sessions)",
+   "exit offset (-1/-2 sessions)",
+   "stop (-4%/-6%/-10%)",
+   "staleness gap multiple (1.2x/1.5x/2.0x)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Effective-Number-of-Bets Admission Test",
+  "category": "risk sizing / breadth control",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "Run daily at the close on top of whatever target weights w the per-symbol strategies propose. (1) Sigma = MP-denoised covariance over 252 daily returns. (2) Eigendecompose Sigma = E Lambda E' with eigenvalues sorted descending. (3) Project the book into principal bets: wtilde = E' w. (4) Diversification distribution: p_k = (wtilde_k^2 * Lambda_kk) / (w' Sigma w), which is non-negative and sums to 1 by construction. (5) Effective Number of Bets ENB = exp( -sum_k p_k * ln p_k ) (Shannon entropy exponentiated; ENB = 1 when all risk sits in one principal direction, = N when risk is spread evenly). (6) Admission test for a new candidate position j: recompute ENB with j included at its proposed weight; open the position only if ENB_with_j > ENB_without_j. (7) Global throttle: multiply every target weight by min(1, ENB / 5) so the book runs at full size only when it holds at least five effectively independent bets.",
+  "exit_rule": "If ENB < 3 on three consecutive closes, close positions in descending order of their p_k contribution - largest first - until ENB is back above 3. Otherwise exits are left to the underlying per-symbol strategies; this layer only sizes and vetoes.",
+  "inputs": [
+   "daily close (252 bars, every symbol in the fleet)",
+   "current and proposed target weights",
+   "eigendecomposition of the denoised covariance"
+  ],
+  "params": [
+   "ENB target (3-8)",
+   "denoising method",
+   "lookback",
+   "basis (PCA eigenvectors vs Meucci minimum-torsion factors)",
+   "consecutive-breach count for the forced reduction"
+  ],
+  "novelty": "A veto, not a weighting scheme. It can reject a signal that is strong on its own merits purely because the risk it adds points in a direction the book is already loaded on. Every other entry in this family answers 'how much of each'; this answers 'is this position adding anything at all'.",
+  "why": "The fundamental law says information ratio scales with the square root of breadth - the number of genuinely independent bets. A fleet of twelve tickers that are all long high-beta US equities has a breadth close to one, and its Sharpe will behave accordingly no matter how good the per-symbol signals are. Counting names overstates breadth badly; the entropy of the risk decomposition across principal directions measures it honestly, because two perfectly correlated positions collapse into a single p_k and the entropy does not rise.",
+  "source": "Meucci (2009) 'Managing Diversification', Risk 22(5), pp. 74-79, introduces the diversification distribution and the entropy-based effective number of bets; Meucci, Santangelo & Deguest (2015) 'Risk Budgeting and Diversification Based on Optimized Uncorrelated Factors' gives the minimum-torsion basis alternative to PCA. Note: SSRN 1358533 returned 403 and arpm.co gave no detail, so these are cited from the published articles rather than verified by fetch this session. Breadth framing from Grinold & Kahn, 'Active Portfolio Management' (2nd ed., 2000).",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ },
+ {
+  "name": "Developing POC Ratchet",
+  "category": "auction-theory",
+  "side": "both",
+  "timeframe": "intraday minutes",
+  "ohlcv_only": true,
+  "entry_rule": "ATRd = ATR(14) daily; row width w = 0.05*ATRd. Build the DEVELOPING volume-at-price profile intraday from 1-minute RTH bars (volume/(rows spanned) into each row between low and high). At the close of every 30-minute period p, record the developing POC price, POC_p = the highest-volume row of the profile built from 09:30 to that moment. LONG entry, evaluated from the 11:00-11:30 period onward: require POC_p > POC_{p-1} AND POC_{p-1} > POC_{p-2} AND (POC_p - POC_{p-2}) >= 0.25*ATRd AND min(POC_1..POC_p) >= POC_{p-2} (the developing POC has never printed below the base of the ratchet at any earlier period today) AND the last price > POC_p. Buy at the close of period p. SHORT entry is the exact mirror: POC_p < POC_{p-1} < POC_{p-2}, (POC_{p-2} - POC_p) >= 0.25*ATRd, max(POC_1..POC_p) <= POC_{p-2}, and the last price < POC_p; sell at the close of period p. One entry per session; no entry after 14:00 ET.",
+  "exit_rule": "Initial stop at POC_{p-2}, the base of the ratchet. Then TRAIL THE STOP ON THE DEVELOPING POC ITSELF: at the close of each subsequent 30-minute period, if the new developing POC is higher than the current stop (lower, for shorts), move the stop to the new developing POC. Exit at market if a 30-minute period closes beyond the stop. No fixed price target - the position is held while the volume mode keeps migrating and is exited when the mode stops moving or reverses. Flat at 15:55 ET.",
+  "inputs": [
+   "1-minute ohlcv",
+   "30-minute period boundaries",
+   "daily atr(14)",
+   "developing volume-at-price profile",
+   "session-time labels"
+  ],
+  "params": [
+   "row width (0.05*ATRd)",
+   "consecutive migrations required (3)",
+   "minimum migration distance (0.25*ATRd)",
+   "earliest decision period (11:00)",
+   "entry cutoff (14:00)",
+   "trail granularity (30 minutes)"
+  ],
+  "why": "Value migration within a single session is the auction accepting new prices in real time. When the developing point of control ratchets monotonically higher period after period, the price at which the most business is being done is moving up and never coming back - which is the definition of acceptance, as opposed to a price excursion that gets rejected and leaves the mode where it was. The monotonicity requirement matters economically: a POC that oscillates is a market rotating around fair value, whereas a POC that only moves one way is a market whose fair value is being repriced, and repricing tends to run to completion within the session because inventory has to be rebuilt at every new level.",
+  "novelty": "Both the entry and the exit are defined on the intraday migration of the volume mode. The trailing stop is the developing POC itself, which is a genuinely different exit structure from anything in the existing set - it is a volume-derived, non-monotone-in-price trailing reference that can sit still for hours while price runs. The existing Value Migration Acceptance Pullback compares COMPLETED daily value areas; this operates inside one session and never looks at the prior day.",
+  "source": "Developing POC / developing value area is standard Market Profile instrumentation (Steidlmayer, CBOT Market Profile; Dalton et al., 'Mind Over Markets'), and Sierra Chart documents 'Volume Point Of Control For Bars' and developing value-area studies as built-in tools. The monotone-ratchet predicate, the migration-distance gate and the POC-trailing exit are my quantification (synthesis).",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Creek Jump and Back-Up",
+  "category": "wyckoff",
+  "side": "both",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "ATR=ATR(14), AV=SMA(volume,20). (1) Identify swing highs by a 7-bar fractal: bar i is a swing high if high(i)>high(j) for all j in i-3..i-1 and i+1..i+3. Take the three most recent swing highs inside a 60-bar window at indices i1<i2<i3. (2) Fit an ordinary least-squares line through the three points (i_k, high(i_k)); call it the creek C(t)=m*t+b. Require slope m<=0 and require range containment: (60-bar highest high - 60-bar lowest low)<=3.5*ATR. (3) JUMP bar J (the jump across the creek): close(J)>C(J)+0.10*ATR AND (high(J)-low(J))>=1.3*ATR AND volume(J)>=1.6*AV AND (close(J)-low(J))/(high(J)-low(J))>=0.70. (4) BACK-UP bar B at some index in J+2..J+10: low(B)<=C(B)+0.30*ATR AND close(B)>C(B) AND volume(B)<=0.80*AV AND (high(B)-low(B))<=0.80*ATR. (5) LONG entry: buy at the close of the first bar after B whose close>high(B). Abort the setup if any close<C(t)-0.50*ATR before entry. SHORT mirror: build the 'ice' line by OLS through the three most recent swing LOWS (7-bar fractal lows) with slope m>=0; jump bar closes below C(J)-0.10*ATR with the same spread/volume conditions and close-location<=0.30; back-up bar has high>=C(B)-0.30*ATR, close<C(B), low volume and narrow spread; sell at the first close below low(B).",
+  "exit_rule": "Stop at low(B)-0.25*ATR (short: high(B)+0.25*ATR). Target = entry + (C(entry_index) - 60-bar lowest low), i.e. the depth of the trading range projected upward from the creek at the moment of entry. Exit the whole position on any close back below C(t)-0.50*ATR. If the target is not reached within 30 bars, exit at market.",
+  "inputs": [
+   "ohlcv",
+   "atr(14)",
+   "sma(volume,20)",
+   "7-bar fractal swing highs/lows",
+   "OLS line fit"
+  ],
+  "params": [
+   "fractal half-width (3)",
+   "number of swing points fitted (3)",
+   "range containment multiple (3.5*ATR)",
+   "jump spread multiple (1.3)",
+   "jump volume multiple (1.6)",
+   "jump close-location (0.70)",
+   "back-up proximity (0.30*ATR)",
+   "back-up volume fraction (0.80)",
+   "back-up window (2..10 bars)"
+  ],
+  "why": "Wyckoff drew the creek as a wavy, usually down-sloping line joining the rally highs INSIDE a trading range, not a horizontal ceiling, precisely because supply is being distributed at successively lower prices as the range matures. Overhead supply is therefore a downward-sloping function of time, and the price at which the market must show demand to prove absorption falls as the base builds. Jumping that sloping line with wide spread and heavy volume is effort spent to clear the remaining offers; the back-up to the near side of the creek on shrunken spread and volume is the test that no new supply appeared at the newly cleared prices. The pair (effort to clear, absence of supply on the retest) is the causal claim.",
+  "novelty": "The boundary is a fitted sloping line through interior swing highs, so this fires at prices strictly below a Donchian/horizontal-high breakout and often several bars earlier, or not at all when the range top is flat. Requires a two-bar confirmation pair (expansion bar, then contraction bar) rather than a single breakout close, which is what separates it from the already-held Donchian breakout and the Retest Volume Referee.",
+  "source": "Wyckoff's creek / jump-across-the-creek / back-up-to-the-edge-of-the-creek analogy, as taught in the StockCharts ChartSchool Wyckoff Method article and in Hank Pruden's codification of Wyckoff (The Three Skills of Top Trading, Wiley 2007). The OLS three-swing-point construction, slope constraint and all thresholds are my quantification (synthesis) - the creek is drawn by hand in every source I could reach.",
+  "_agent": "v2:c0ab4fd875654be8b6bba82a69ea8973e7ffe5abbf72c1ee921bbba4ca274610"
+ },
+ {
+  "name": "Stambaugh-Corrected Augmented Predictive Regression",
+  "category": "return predictability econometrics / small-sample bias correction",
+  "timeframe": "daily bars aggregated to monthly; monthly rebalance",
+  "side": "long",
+  "ohlcv_only": true,
+  "entry_rule": "For any persistent OHLCV-derived predictor x (log aggregate illiquidity, log RVOL, avgcor, the Hill tail measure, log(P/200dma) - all have first-order autocorrelation above 0.7): at each month-end t, using only data through t: (1) Fit the predictor's own AR(1): x_s = mu + rho*x_{s-1} + v_s by OLS. (2) Apply Kendall's small-sample bias correction to the persistence estimate: rho_c = rho_hat + (1 + 3*rho_hat)/T + 3*(1 + 3*rho_hat)/T^2, where T is the number of observations in that AR(1) fit. Adjust the intercept to mu_c = mean(x)*(1 - rho_c). (3) Recompute the corrected innovations vhat_c,s = x_s - mu_c - rho_c*x_{s-1}. (4) Estimate the AUGMENTED predictive regression r_{s+1} = alpha + beta*x_s + phi*vhat_c,s+1 + e_{s+1}, including the CONTEMPORANEOUS corrected predictor innovation as an extra regressor. Because the bias in beta arises entirely from the correlation between the return shock and the predictor shock, projecting that shock out leaves beta_hat unbiased; the raw regression without the vhat term is upward-biased whenever cov(e, v) is non-zero, which it is for every valuation-like or liquidity-like predictor. (5) Form the forecast for trading as rhat_{t+1} = alpha_hat + beta_hat*x_t (the phi term is dropped - vhat_{t+1} is not knowable at t; its only job is to de-bias beta). (6) TRADE GATE: enter only if beta_hat has the theoretically expected sign AND its Newey-West t-statistic with 12 lags exceeds 2.0 in that direction. Otherwise set rhat to the prevailing mean. (7) Truncate rhat at 0 and rebalance at the next open to w_t = clip((1/5)*rhat/sigmahat^2, 0, 1.5).",
+  "exit_rule": "No stop, no target. Hold one month; at the next month-end refit the AR(1), re-apply Kendall's correction on the now-longer sample, re-estimate the augmented regression, re-check the gate, and rebalance. A position is cut to the prevailing-mean allocation the moment the bias-corrected slope loses significance - so the exit is driven by the predictor's econometric standing, not by price.",
+  "inputs": [
+   "a persistent OHLCV-derived predictor series",
+   "AR(1) fit of that predictor",
+   "Kendall bias-corrected persistence",
+   "corrected AR innovations",
+   "augmented OLS with Newey-West standard errors",
+   "SPY monthly excess returns"
+  ],
+  "params": [
+   "which predictor is being de-biased",
+   "t-statistic gate (1.65, 2.0, 2.5, 3.0)",
+   "Newey-West lag length (6, 12, 24)",
+   "whether to use Kendall's correction or a wild bootstrap of the null instead",
+   "minimum estimation window"
+  ],
+  "why": "Stambaugh's bias is not a technicality - it is the single largest reason persistent predictors look better in sample than they are. When a predictor is highly autocorrelated and its innovation is correlated with the return innovation (which it always is for price-based ratios: a price move changes both the return and the ratio), the downward bias in the estimated AR root feeds through into an UPWARD bias in the predictive slope and inflates the t-statistic. Trading a signal on that inflated slope is a systematic error, not an unlucky one. Amihud implements exactly this fix in the aggregate-illiquidity setting: he notes that his g1 coefficient is upward biased by Stambaugh's argument, corrects the AR(1) slope with Kendall's method (his 0.764 becomes 0.869, which I verified reproduces exactly from the formula above with T = 34), adds the corrected residual to the right-hand side, and reports only the augmented model. Neely et al. address the same concern with a wild bootstrap and confirm the bias-correction literature (Amihud-Hurvich, Lewellen, Campbell-Yogo) gives qualitatively similar inferences, so either route is defensible.",
+  "novelty": "The entry condition is a property of the ESTIMATOR, not of the price. The same predictor at the same level can be tradeable one month and not the next purely because the bias-corrected slope crossed a significance threshold. No indicator rule in the corpus has a gate of this kind, and the augmented-regression construction (adding a contemporaneous innovation you will never observe at trade time, purely to de-bias a coefficient you will use) has no analogue anywhere in it.",
+  "source": "Stambaugh, R.F., 'Predictive regressions', Journal of Financial Economics 54, 1999 - the canonical statement of the bias; I did not open the original. The implementation I specify is verified from Amihud, Y., 'Illiquidity and Stock Returns: Cross-Section and Time-Series Effects', NYU working paper FIN-00-041, published JFM 5, 2002 - read directly at http://archive.nyu.edu/bitstream/2451/26706/2/FIN-00-041.pdf, pp.19-20, where the Kendall (1954) correction, the explicit appeal to Stambaugh (1999), and the augmented model (11) with the AR residual on the right-hand side are all set out; I checked Kendall's formula reproduces his reported 0.869 from rho_hat = 0.764 and T = 34. The alternative bias-correction routes (Amihud-Hurvich 2004, Lewellen 2004, Campbell-Yogo 2006) and the wild-bootstrap substitute are named in Neely et al., FRB St. Louis WP 2010-008, p.5 and footnote 3.",
+  "_agent": "v2:2986ad60a64b30f5d6a1ab8fd871eb95cd89b5d6c01da660d34a55f6bf9aab82"
+ },
+ {
+  "name": "Aim-Portfolio Partial Rebalancing",
+  "category": "portfolio construction / transaction-cost-aware rebalancing",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "entry_rule": "Daily at the close, replacing scheduled calendar rebalancing entirely. (1) Compute the target Markowitz portfolio on current information: aim_t = (1/delta) * Sigma_t^{-1} * mu_t, with Sigma_t the Ledoit-Wolf shrunk 252-day covariance, mu_t the cross-sectional z-scores of the composite signal scaled to expected daily excess return by multiplying by 0.02 * sigma_i_daily, and delta = 2.5; clip to [0, 0.15] and renormalise. (2) Do NOT trade to aim_t. Instead trade a fixed fraction of the way there: w_t = w_{t-1} + M * (aim_t - w_{t-1}), with trade rate M in (0,1). (3) Set M from the cost/risk trade-off: M = (sqrt(k^2 + 4k) - k)/2 where k = delta * sigma_p^2 / (2*c), c = the per-unit round-trip cost as a fraction (half-spread from the 20-bar average of (high-low)/close divided by 4, plus 5bp slippage), and sigma_p = the current portfolio daily volatility; clamp M to [0.05, 0.60]. (4) Execute only the per-name deltas whose notional exceeds max($200, 0.25 * average daily dollar volume / 1000) - smaller ones are skipped and carried into the next day's delta.",
+  "exit_rule": "There is no rebalance date and no fixed no-trade band; positions decay toward zero automatically whenever their aim weight is zero, at rate M per day, which produces a smooth exponential unwind rather than a cliff. Force an immediate full exit of any name that becomes untradeable (halt, delisting, or 20-day median dollar volume below $2M), bypassing the trade-rate smoothing. If realised portfolio volatility exceeds 1.5x target, temporarily double M so the book converges to the (smaller) aim portfolio faster.",
+  "inputs": [
+   "daily OHLC (for the (high-low)/close spread proxy)",
+   "daily volume (for the participation cap)",
+   "daily close (252 bars for the covariance and signal)",
+   "current holdings"
+  ],
+  "params": [
+   "M bounds and the cost parameter c",
+   "delta risk aversion",
+   "signal-to-return scaling",
+   "minimum trade notional",
+   "volatility-stress multiplier on M"
+  ],
+  "novelty": "The exit structure is the idea: no rebalance calendar, no threshold band, just a constant fractional convergence toward a moving target. Positions are never closed by a rule about the position - they shrink because the aim moved. That is a different exit mechanism from every stop, target, and time-based exit in the collection.",
+  "why": "A portfolio with transaction costs should never jump to the current optimum, because that optimum will move tomorrow and the trade will be partly reversed. Garleanu and Pedersen show the optimal policy is to trade a constant fraction of the way toward an aim portfolio - a weighted average of the current Markowitz optimum and future expected optima - with the fraction set by the ratio of risk aversion to trading cost. Slower-decaying signals are worth chasing further. In practice this converts a lumpy, cost-heavy monthly rebalance into a smooth daily drift, which cuts turnover sharply on a fleet where per-name notionals are small and the spread proxy is a real fraction of the expected edge.",
+  "source": "Garleanu & Pedersen (2013) 'Dynamic Trading with Predictable Returns and Transaction Costs', Journal of Finance 68(6) (NBER Working Paper 17777). Note: the NBER PDF fetched this session returned unreadable encoded content, so the aim-portfolio and trade-rate formulas above are quoted from the published paper rather than verified by fetch; the trade rate given is the standard quadratic-cost closed form. Covariance input per Ledoit & Wolf as cited above.",
+  "_agent": "v2:c7a29356709099bb1bd53faa239806235639bdcb829b14d06737437bb851d5f4"
+ }
+]

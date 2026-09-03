@@ -1,0 +1,218 @@
+[
+ {
+  "name": "Causal A-Trous Wavelet Scale Disagreement",
+  "category": "wavelet decomposition",
+  "side": "both",
+  "timeframe": "5-minute (also daily)",
+  "ohlcv_only": true,
+  "inputs": [
+   "log close",
+   "ATR(14)"
+  ],
+  "entry_rule": "Decompose log close with the CAUSAL A-TROUS (undecimated, shift-invariant) HAAR TRANSFORM, which uses only past data by construction and therefore has no look-ahead: S_0[t] = ln(close_t); for levels j = 1..5, S_j[t] = 0.5*(S_(j-1)[t] + S_(j-1)[t - 2^(j-1)]); detail D_j[t] = S_(j-1)[t] - S_j[t]. Note that S_5 depends on data up to 31 bars back and nothing forward. Define the MID-SCALE detail M[t] = D_3[t] + D_4[t]. ENTER LONG at the close of bar t when BOTH: (a) S_5[t] > S_5[t-1] (the coarse scale is rising), and (b) M[t] < the 20th percentile of M over the last 200 bars (the mid scales are stretched to the downside). Mirror for short: S_5 falling and M above its 80th percentile.",
+  "exit_rule": "Exit at the close of the first bar where EITHER (a) M rises above its 80th percentile over the last 200 bars (the mid-scale dip has been more than reclaimed), or (b) S_5[t] < S_5[t-1] (the coarse scale rolled over). Hard stop at 2.0 * ATR(14). No fixed target.",
+  "why": "A wavelet decomposition splits the price into additive components that live at separate, non-overlapping timescales \u2014 unlike two moving averages of different lengths, whose outputs both contain the same low-frequency content and are therefore highly correlated. That separation is what makes a genuine multi-horizon disagreement measurable: S_5 carries only movement slower than roughly 32 bars, D_3 + D_4 carries only movement between roughly 8 and 32 bars, and neither contains the other's information. The trade is placed when short-horizon and long-horizon participants disagree, on the reasoning that the longer-horizon flow is the more persistent of the two because it is driven by slower-moving capital.",
+  "novelty": "Two things separate this from any MA pullback. First, the components are ORTHOGONAL by construction \u2014 an EMA(50) and an EMA(10) share most of their variance, whereas S_5 and D_3+D_4 share none, so 'disagreement between scales' is a well-defined quantity here and is not well-defined for two EMAs. Second, the threshold is a percentile of the detail's OWN recent distribution rather than a price or ATR distance, so the entry is invariant to the ticker's volatility level. The insistence on the a-trous/undecimated form rather than the standard DWT is the important implementation detail: the decimated DWT is not shift-invariant and standard wavelet-denoising implementations leak future information across the boundary, which is the single most common way wavelet backtests produce fake results.",
+  "params": [
+   "number of levels (4/5/6)",
+   "which details to sum (D2+D3, D3+D4, D3+D4+D5)",
+   "percentile lookback (100/200/500)",
+   "entry/exit percentiles (10/90, 20/80, 30/70)",
+   "wavelet (causal Haar vs causal B3-spline a-trous)",
+   "ATR stop multiple"
+  ],
+  "source": "Donald Percival & Andrew Walden, 'Wavelet Methods for Time Series Analysis' (Cambridge University Press, 2000) - the a-trous / maximal-overlap (undecimated) transform, its shift invariance, and the boundary-coefficient problem. Evidence on wavelet denoising of financial series: 'Can Denoising Enhance Prediction Accuracy of Learning Models? A Case of Wavelet Decomposition Approach', Forecasting 6(1), 2024, DOI 10.3390/forecast6010005 (open access). The scale-disagreement trading rule is my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Fractionally differenced z-score",
+  "category": "feature-engineering",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Build the fractional-differencing weight vector by the recursion w_0 = 1, w_k = -w_{k-1} * (d - k + 1)/k, truncating at the first k where |w_k| < 1e-5; let that truncation length be W. The transformed series is FD_t = sum over k = 0..W-1 of w_k * ln(close_{t-k}). Select d by scanning d over {0, 0.05, 0.10, ..., 1.00} on an expanding in-sample window and taking the SMALLEST d at which the augmented Dickey-Fuller test on FD rejects the unit root at the 95% level; hold that d fixed thereafter. Standardise z_t = (FD_t - mean(FD over trailing 252 bars)) / std(FD over trailing 252 bars). GO LONG at the close when z_t < -2.0 and z_{t-1} >= -2.0. GO SHORT when z_t > +2.0 and z_{t-1} <= +2.0.",
+  "exit_rule": "Exit the long when z_t rises above -0.5; exit the short when z_t falls below +0.5. Hard time stop after 20 bars. Stop out at 2*ATR(14) adverse.",
+  "inputs": [
+   "close (log)",
+   "fractional differencing weights",
+   "ADF test",
+   "252-bar rolling mean and std",
+   "ATR(14)"
+  ],
+  "params": [
+   "d grid and step",
+   "weight truncation threshold (1e-5)",
+   "z entry threshold (2.0)",
+   "z exit threshold (0.5)",
+   "standardisation window (252)",
+   "expanding vs fixed window variant"
+  ],
+  "why": "Integer differencing (returns) makes a series stationary but erases essentially all memory of price level, while raw log price retains full memory but is non-stationary, so any threshold calibrated on it is meaningless out of sample. Fractional differencing at the minimum d that achieves stationarity resolves the tension: the series is statistically comparable across time - so a z-score of -2 in 2019 means the same thing as one in 2026 - while still encoding how far price has travelled from its longer history. That is exactly the property a fixed mean-reversion threshold needs and that a price-minus-moving-average spread does not have.",
+  "novelty": "The traded series is neither price, nor returns, nor price minus a moving average - it is a long-memory weighted sum of log prices with geometrically decaying, alternating-sign weights, and the differencing order is chosen by a stationarity test rather than assumed. A fixed threshold on it is therefore defensible in a way a fixed threshold on a price-band spread is not.",
+  "ohlcv_only": true,
+  "source": "Lopez de Prado, 'Advances in Financial Machine Learning', ch.5 sections 5.4.2 and 5.5 (pp.78-83), implemented as FractionalDifferentiation.get_weights and frac_diff in mlfinlab/features/fracdiff.py, with the exact recursion weights_ = -weights[-1]*(diff_amt - k + 1)/k and the threshold-based truncation - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB. Referenced there to Hosking (1981), https://wwwf.imperial.ac.uk/~ejm/M3S8/Problems/hosking81.pdf",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "Stop-Cascade Band Above Round",
+  "category": "limit-order clustering / positive-feedback stop cascades",
+  "side": "both",
+  "timeframe": "intraday minutes (1-minute or 5-minute)",
+  "entry_rule": "Grid G as in the Take-Profit Cluster Rejection idea. Define the stop band above R as the half-open interval (R, R + 0.10*G] and below R as [R - 0.10*G, R). LONG at the close of bar t when: (1) close_t is inside (R, R + 0.10*G]; (2) close_{t-1} <= R; (3) volume_t >= 2.0 * median(volume over bars t-30..t-1). SHORT at the close of bar t when: (1) close_t is inside [R - 0.10*G, R); (2) close_{t-1} >= R; (3) same volume condition.",
+  "exit_rule": "Hard target at R + 0.40*G for longs, R - 0.40*G for shorts (40% of the way to the next grid level). Trailing stop at 0.75 * ATR(14) from the running favourable extreme, armed immediately. Time stop: exit at market on bar t+20. Flatten 10 minutes before the close.",
+  "inputs": [
+   "close",
+   "volume",
+   "atr(14)",
+   "session-time"
+  ],
+  "params": [
+   "grid size G per tier",
+   "stop-band width as a fraction of G (0.10)",
+   "volume multiple (2.0)",
+   "volume lookback (30 bars)",
+   "target fraction of G (0.40)",
+   "trail ATR multiple (0.75)",
+   "time stop (20 bars)"
+  ],
+  "why": "Osler's order-book data show a sharp, measured asymmetry: executed stop-loss BUY orders bunch just ABOVE round numbers and executed stop-loss SELL orders just BELOW them, whereas take-profits sit ON the number. Stops are market orders on trigger, so they consume liquidity and produce positive-feedback trading; Osler finds the price response to stop clusters is both larger and longer-lasting than the response to take-profit clusters, producing 'price cascades'. Traders anchor a protective stop to the round number and then place it a few ticks clear of it, which is exactly why the mass sits in the band beside the number rather than on it.",
+  "source": "C. L. Osler, 'Stop-Loss Orders and Price Cascades in Currency Markets', FRBNY Staff Report, https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr150.pdf - VERIFIED. p.7 and Table III: '14.3 percent of executed stop-loss buy orders have requested execution rates ending in the range [01,10], while only 6.9 percent of those orders have requested execution rates ending in the range [90,99]'. Abstract: 'The response to stop-loss orders is larger than the response to take-profit orders' and 'lasts longer'.",
+  "novelty": "Pairs with, and takes the opposite side to, the take-profit rejection idea - the two partition the space by exactly where price sits relative to the round number, which no indicator in the existing 32 can express. It is not a Donchian or opening-range breakout: the trigger level is fixed by the price grid rather than by an N-bar extreme or a session window, and no new high is required (the trade often fires well inside the day's range).",
+  "ohlcv_only": true,
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Attention U-Shape Fade",
+  "category": "attention-driven buying / limited attention",
+  "side": "short",
+  "timeframe": "daily",
+  "entry_rule": "AV_t = volume_t / mean(volume over sessions t-252..t-1). R_t = close_t / close_{t-1} - 1. sigma_t = stdev of daily returns over sessions t-60..t-1. Enter SHORT at the OPEN of session t+1 when BOTH: (1) AV_t >= 5.0; (2) |R_t| >= 3 * sigma_t. Note the absolute value - the trade is a short whether the extreme day was up OR down.",
+  "exit_rule": "Cover at the close of session t+5. Stop at 1.5 * ATR(14) above entry. Cover early at the close of any session on which AV falls back below 1.2 (attention has dissipated and the edge is gone).",
+  "inputs": [
+   "close",
+   "volume",
+   "atr(14)",
+   "252-session mean volume",
+   "60-session return stdev"
+  ],
+  "params": [
+   "abnormal volume multiple (5.0)",
+   "return extremity in sigmas (3.0)",
+   "holding period (5 sessions)",
+   "ATR stop multiple",
+   "attention-dissipation threshold (AV < 1.2)"
+  ],
+  "why": "Barber and Odean's central finding is that individual investors are net BUYERS of attention-grabbing stocks - stocks with high abnormal trading volume and stocks with extreme one-day returns - because buying requires searching thousands of candidates while selling only requires looking at what you already own. The search asymmetry means attention determines the choice set on the buy side only. Crucially, their imbalance curve is U-SHAPED in the previous day's return: retail investors pile into yesterday's biggest LOSERS as eagerly as yesterday's biggest winners. That transitory, non-informational buying pressure inflates the price for a few days and then unwinds, so the trade is to supply the liquidity retail is demanding, on both tails.",
+  "source": "Brad M. Barber and Terrance Odean, 'All That Glitters: The Effect of Attention and News on the Buying Behavior of Individual and Institutional Investors', Review of Financial Studies 21(2), 2008, 785-818 - VERIFIED by reading the PDF from Odean's Berkeley faculty page. Table 1 note: 'Abnormal volume is calculated as the ratio of the current day's volume ... divided by the average volume over the previous 252 trading days.' p.14: buy-sell imbalance is '+29.5%' for the highest-volume vingtile versus '-18.15%' for the lowest decile. p.16-17: for stocks sorted on the previous day's return, imbalance 'is 29.4% for the vingtile of stocks with the worst return performance on the previous day', drops 'to 1.8% in the eighth return decile' and rises back for the best - the U-shape.",
+  "ohlcv_only": true,
+  "novelty": "The sign-free |R_t| condition is the entire idea and it is what makes this NOT a mean-reversion trade. A conventional reversion rule buys after a large down day; this one shorts after a large down day, because the behavioural claim is about buying PRESSURE arriving on both tails, not about price being cheap. It is also the opposite direction to the ATR expansion breakout already in the book, and the abnormal-volume denominator is a 252-session mean rather than the 20-bar averages used by the existing volume filters.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Lottery MAX Fade",
+  "category": "skewness preference / probability weighting",
+  "side": "both",
+  "timeframe": "daily, rebalanced monthly",
+  "entry_rule": "On the last session of each month compute MAX5 = the arithmetic mean of the 5 largest daily returns over the trailing 21 sessions. Cross-sectional version: rank all fleet tickers by MAX5 and SHORT the top 20%, LONG the bottom 20%, equal weight, entering at the next session's open. Single-ticker version for a per-symbol bot: SHORT when MAX5 exceeds the 90th percentile of that ticker's own trailing 500-session history of MAX5; LONG when MAX5 falls below its own 10th percentile.",
+  "exit_rule": "Hold 21 trading sessions and exit at the close on the last session of the following month, then re-form. Hard stop at 2 * ATR(20) adverse from entry.",
+  "inputs": [
+   "daily close (to form daily returns)",
+   "atr(20)",
+   "cross-sectional ranking across the fleet"
+  ],
+  "params": [
+   "N in MAX(N) (1, 2, 3, 4 or 5)",
+   "formation window (21 sessions)",
+   "cross-sectional cutoff (20%)",
+   "own-history percentile cutoffs (10/90)",
+   "holding period (21 sessions)",
+   "ATR stop multiple"
+  ],
+  "why": "Under cumulative prospect theory investors overweight small probabilities, so they overpay for assets with a chance of a large positive payoff - a lottery preference. Bali, Cakici and Whitelaw show the single largest daily return in the past month is a sufficient statistic for how lottery-like a stock has recently looked, and that stocks scoring highest on it go on to underperform by more than 1% a month. The demand is coming from poorly diversified investors who evaluate the stock in isolation rather than as a portfolio addition, which is exactly why an idiosyncratic feature like a one-day jackpot gets priced at all.",
+  "source": "Turan G. Bali, Nusret Cakici and Robert F. Whitelaw, 'Maxing out: Stocks as lotteries and the cross-section of expected returns', Journal of Financial Economics 99(2), 2011, 427-446 - VERIFIED by reading the PDF at http://pages.stern.nyu.edu/~rwhitela/papers/max jfe11.pdf. Abstract: 'a negative and significant relation between the maximum daily return over the past one month (MAX) and expected stock returns. Average raw and risk-adjusted return differences between stocks in the lowest and highest MAX deciles exceed 1% per month.' p.2: value-weighted decile spread is -1.03%, four-factor alpha -1.18%, July 1962 to December 2005, and 'the results are robust to sorting stocks not only on the single maximum daily return during the month, but also the average of the two, three, four, or five highest daily returns within the month'. Underpinning theory: Barberis and Huang (2008) on probability weighting; Kumar (2009) on lottery-type stocks.",
+  "ohlcv_only": true,
+  "novelty": "The statistic is an order statistic of the return distribution - the mean of the top N daily returns - not a moment, a range, or a smoothed average. Two stocks with identical ATR and identical monthly return can have wildly different MAX5 depending on whether the move came in one jump or twenty steps. Nothing in the existing 32 reads the shape of the return distribution's right tail.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Information Discreteness Momentum Gate",
+  "category": "limited attention / frog-in-the-pan gradual information",
+  "side": "both",
+  "timeframe": "daily, rebalanced monthly",
+  "entry_rule": "On the last session of each month: PRET = close_{t-21} / close_{t-252} - 1 (twelve-month cumulative return, skipping the most recent month). Over that same t-252..t-21 window, let pos = fraction of daily returns that are positive and neg = fraction that are negative. ID = sgn(PRET) * (neg - pos), where sgn(PRET) is +1 if PRET > 0 and -1 if PRET < 0. LONG when PRET > 0 AND ID ranks in the bottom 20% of the fleet's cross-sectional ID distribution. SHORT when PRET < 0 AND ID ranks in the bottom 20%. Enter at the next session's open.",
+  "exit_rule": "Hold 126 trading sessions, then exit at the close - deliberately no reversal exit, since the paper finds continuation from continuous information 'does not reverse in the long run'. Hard stop at 3 * ATR(20) adverse from entry. Rebalance one-sixth of the book each month so six overlapping cohorts are live.",
+  "inputs": [
+   "daily close",
+   "cross-sectional ranking across the fleet",
+   "atr(20)"
+  ],
+  "params": [
+   "formation window (252 sessions) and skip (21 sessions)",
+   "cross-sectional ID cutoff (20%)",
+   "holding period (126 sessions)",
+   "ATR stop multiple",
+   "magnitude-weighted ID variant"
+  ],
+  "why": "Da, Gurun and Warachka's frog-in-the-pan hypothesis: a series of frequent small changes attracts less investor attention than a few dramatic ones, so information that arrives gradually is absorbed with a longer delay and produces stronger, more persistent continuation. Their ID statistic separates two stocks that finished the year at the same place by how they got there. Low ID means the return was built from a steady grind of same-signed days - continuous information, little attention, big drift ahead. High ID means it came from a handful of dramatic jumps that everybody noticed - discrete information, attention paid, no drift or outright reversal.",
+  "source": "Zhi Da, Umit G. Gurun and Mitch Warachka, 'Frog in the Pan: Continuous Information and Momentum', Review of Financial Studies 27(7), 2014, 2171-2218 - VERIFIED by reading the PDF at https://academicweb.nd.edu/~zda/Frog.pdf. p.7, equation (1): 'ID = sgn(PRET) x [%neg - %pos]', where '%pos and %neg' are 'the percentage of days during the formation period with positive and negative returns' and 'PRET is defined as a firm's cumulative return over the past twelve months after skipping the most recent month'. Abstract: 'Momentum decreases monotonically from 5.94% for stocks with continuous information during their formation period to -2.07% for stocks with discrete information but similar cumulative formation-period returns.'",
+  "ohlcv_only": true,
+  "novelty": "The gate is a property of the PATH, not of the outcome. Two tickers with identical 12-month returns and identical volatility get opposite treatment based purely on the count of up-days versus down-days that produced the return - a statistic that discards magnitude entirely. No moving average, oscillator or channel in the existing 32 can distinguish them, because they all summarise where price went rather than how evenly it got there.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Salience-Weighted Overpricing",
+  "category": "salience theory / attention to extreme relative outcomes",
+  "side": "both",
+  "timeframe": "daily, rebalanced monthly",
+  "entry_rule": "Over the trailing 21 sessions, for each session k compute the stock's return r_ik and the benchmark return r_mk (SPY). Salience of session k: sigma_k = |r_ik - r_mk| / (|r_ik| + |r_mk| + theta), with theta = 0.10. Rank the 21 sessions by sigma in DESCENDING order and let j(k) be the rank of session k (j=1 for the most salient). Assign weights w_k = delta^{j(k)} / SUM over all 21 sessions of delta^{j}, with delta = 0.70. Compute ST_i = SUM over k of (w_k - 1/21) * r_ik - the difference between the salience-weighted mean return and the plain mean return. Rank the fleet by ST_i on the last session of each month: SHORT the top 20%, LONG the bottom 20%, entering at the next open.",
+  "exit_rule": "Hold 21 trading sessions and exit at the close on the last session of the following month, then re-form. Hard stop at 2.5 * ATR(20) adverse from entry.",
+  "inputs": [
+   "daily close",
+   "SPY daily close (benchmark)",
+   "cross-sectional ranking across the fleet",
+   "atr(20)"
+  ],
+  "params": [
+   "theta (0.10)",
+   "delta (0.70)",
+   "formation window (21 sessions)",
+   "cross-sectional cutoff (20%)",
+   "holding period (21 sessions)",
+   "ATR stop multiple"
+  ],
+  "why": "Bordalo, Gennaioli and Shleifer's salience theory holds that a decision maker's attention is drawn to the states in which an option's payoff differs most from the alternatives, and that those salient states get overweighted relative to their true probability. Applied to stocks: an investor recalling the last month overweights the days on which this stock behaved most unlike the market. If those salient days were up days, the stock looks better than its average return warrants and gets bid too high, so subsequent returns are low. ST_i measures exactly that - the gap between how the stock looks under salience-distorted weights and how it actually performed.",
+  "source": "Pedro Bordalo, Nicola Gennaioli and Andrei Shleifer, 'Salience Theory of Choice Under Risk', Quarterly Journal of Economics 127(3), 2012, 1243-1285, for the salience function and the rank-based delta weighting; Mathijs Cosemans and Rik Frehen, 'Salience theory and stock prices: Empirical evidence', Journal of Financial Economics 140(2), 2021, 460-483, for the equity application. IMPORTANT: I was NOT able to open either paper in this session - SSRN returned 403 and my web search budget was exhausted. Both citations and the functional form of sigma and the delta-weighting are from background knowledge, not verified here. Confirm theta, delta and the exact ST construction against Cosemans and Frehen before implementing.",
+  "ohlcv_only": true,
+  "novelty": "The weighting scheme is determined by a RANK ordering of how unusual each day was relative to the benchmark, not by recency. The most salient day gets the largest weight regardless of whether it happened yesterday or three weeks ago - the exact inverse of every exponential-decay indicator in the existing 32, all of which weight by how recent a bar is. Distinct from the MAX lottery fade too: MAX looks only at the stock's own largest raw returns, whereas salience is defined relative to the market, so a stock that jumped 6% on a day the market jumped 6% scores as completely unsalient here while scoring maximally on MAX.",
+  "_agent": "v2:32583b53f4111dbf3bc35633cd9dcca704bfe6ea5fc7dc3f7c3de28b4aee5c8c"
+ },
+ {
+  "name": "Chaikin Money Flow Sign Run Exhaustion",
+  "category": "money flow state duration",
+  "side": "both",
+  "timeframe": "daily or 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "high",
+   "low",
+   "close",
+   "volume",
+   "chaikin money flow (21)",
+   "run length of CMF sign",
+   "sma(close,50)",
+   "atr(14)"
+  ],
+  "params": [
+   "CMF window (21)",
+   "minimum prior run length (20)",
+   "trend filter length (50)",
+   "max hold (25 bars)",
+   "stop multiple (2 ATR)"
+  ],
+  "entry_rule": "CMF(21) = [sum over the last 21 bars of ((close-low)-(high-close))/(high-low) * volume] / [sum over the last 21 bars of volume], with the multiplier set to 0 when high == low. Track the run length n_t = the number of consecutive bars, ending at t, over which CMF has held the same sign. LONG at the close of bar t when: CMF_t > 0 AND CMF_{t-1} <= 0 AND the immediately preceding negative run had length >= 20 bars AND close_t > SMA(close, 50). SHORT at the close of bar t when: CMF_t < 0 AND CMF_{t-1} >= 0 AND the immediately preceding positive run had length >= 20 bars AND close_t < SMA(close, 50).",
+  "exit_rule": "Exit at the first bar whose CMF sign flips back against the position, or after 25 bars, whichever is first; stop at 2 * ATR(14) from entry.",
+  "why": "A zero-line cross on its own is noise - money flow wobbles across zero constantly. What carries information is the completion of a full regime: flow that has been persistently one-sided for at least as long as the indicator's own averaging window has genuinely repriced inventory, and its termination marks a handoff between populations. The run-length requirement is what turns a common crossing into a rare event, and pairing it with a trend filter means the trade is taken only when the newly arriving flow agrees with the longer-term price direction.",
+  "novelty": "The trigger is the DURATION of the preceding flow state, not its magnitude or its threshold. Two CMF crossings with identical values are treated completely differently depending on how long the prior regime lasted, which is a different selection principle from any level, z-score, percentile or divergence rule.",
+  "source": "Chaikin Money Flow formula verified from the open-source `ta` library source, https://raw.githubusercontent.com/bukosabino/ta/master/ta/volume.py (ChaikinMoneyFlowIndicator: mfv = ((close-low)-(high-close))/(high-low), filled with 0, times volume, rolling-summed and divided by rolling-summed volume). Indicator originally Marc Chaikin; the run-length entry condition and the sign-flip exit are my synthesis.",
+  "_agent": "v2:d2c68c917bfc2191138a0a4fd2776864b6bac0b59fb98dd59663666fef7408af"
+ }
+]

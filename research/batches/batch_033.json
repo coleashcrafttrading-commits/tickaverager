@@ -1,0 +1,215 @@
+[
+ {
+  "name": "Sharpe-Loss Deep Momentum Network",
+  "category": "deep sequence model / trend",
+  "timeframe": "daily",
+  "side": "both",
+  "ohlcv_only": true,
+  "entry_rule": "Per symbol, build a daily 8-element feature vector u_t: (a) five volatility-normalised returns r_{t-k,t}/(sigma_t*sqrt(k)) for k in {1,21,63,126,252}, where sigma_t is the exponentially weighted std of daily returns with a 60-day span; (b) three normalised MACD signals for (S,L) in {(8,24),(16,48),(32,96)}, computed as MACD_t = EWMA(close, halflife=ln(0.5)/ln(1-1/S)) - EWMA(close, halflife=ln(0.5)/ln(1-1/L)), then y_t = MACD_t / rolling_std(close,63), then q_t = y_t / rolling_std(y,252). Feed the trailing 63 days of u into an LSTM (hidden size 10-40, dropout 0.3) whose final dense layer uses tanh, giving position X_t in [-1,1]. Train by minimising L = -sqrt(252)*mean(R)/std(R) where R_{t+1} = X_t*(0.15/sigma_t)*r_{t,t+1}. At each daily close, go long if X_t > +0.10 and short if X_t < -0.10.",
+  "exit_rule": "Position is re-set every day to X_t*(0.15/sigma_t); go flat when |X_t| <= 0.10 or when sign(X_t) flips. No price stop and no profit target - the tanh magnitude IS the exit, so a decaying |X_t| scales the position down continuously. Refit the network every 6 months on an expanding window.",
+  "inputs": [
+   "daily close",
+   "volatility-normalised returns at 1/21/63/126/252 days",
+   "EWMA volatility, 60-day span",
+   "MACD (8,24), (16,48), (32,96)",
+   "LSTM with tanh output"
+  ],
+  "params": [
+   "LSTM hidden units",
+   "dropout",
+   "input sequence length tau (63)",
+   "position deadband (0.10)",
+   "volatility target sigma_tgt (0.15)",
+   "refit cadence",
+   "feature horizon set"
+  ],
+  "why": "Classical time-series momentum destroys information twice: it discretises the trend estimate to a sign, and it imposes a position-sizing function rather than learning one. Training a network to maximise the Sharpe ratio of the volatility-scaled return stream makes it learn the entire response function - where it saturates, where it flips sign, how sharply - from the data. Lim et al. report more than double the Sharpe of standard TSMOM across 88 futures contracts, with the advantage surviving 2-3bp costs.",
+  "source": "Lim, Zohren & Roberts (2019), 'Enhancing Time Series Momentum Strategies Using Deep Neural Networks', arXiv:1904.04912. Read the full text (ar5iv): feature set (returns over 1d/1m/3m/6m/1y normalised by daily vol; MACD with S in {8,16,32}, L in {24,48,96}; half-life = log(0.5)/log(1-1/S)), the Sharpe loss formula, tanh-bounded direct position output, 15% annualised vol target with 60-day EWM std, and 63-timestep LSTM trajectories.",
+  "novelty": "There is no threshold crossing anywhere in the rule. The trading function is learned end-to-end and the objective is risk-adjusted return, not directional accuracy - which is what separates it from the hand-crafted trend transforms (tanh saturation, dampened MACD) it supersedes.",
+  "_agent": "v2:3079b39cdc6f1c53f075d55ddacb9a0f07b0bfeff0f06b3a77161e5a1e86ede9"
+ },
+ {
+  "name": "EMD cycle-versus-trend mode switch",
+  "category": "regime-detection",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "With Price = (high + low)/2, Period = 20 and delta = 0.5: beta = cos(2*pi/Period); gamma = 1/cos(4*pi*delta/Period); alpha = gamma - sqrt(gamma^2 - 1); bandpass BP_t = 0.5*(1 - alpha)*(Price_t - Price_{t-2}) + beta*(1 + alpha)*BP_{t-1} - alpha*BP_{t-2}. Mean = simple moving average of BP over 2*Period bars. Track Peak = the most recent BP_{t-1} that satisfied BP_{t-1} > BP_t and BP_{t-1} > BP_{t-2} (held until replaced), and Valley likewise for local minima. AvgPeak = SMA(Peak, 50), AvgValley = SMA(Valley, 50), Fraction = 0.1. CLASSIFY: UPTREND mode if Mean > Fraction*AvgPeak; DOWNTREND mode if Mean < Fraction*AvgValley; CYCLE mode otherwise. THEN: in UPTREND mode, go long at the close when BP crosses above 0. In CYCLE mode, go long when BP crosses above AvgValley (from below) and go short when BP crosses below AvgPeak (from above). Take no long entries in DOWNTREND mode.",
+  "exit_rule": "Trend-mode long: exit when BP crosses below 0 or when the mode leaves UPTREND. Cycle-mode long: exit when BP crosses below AvgPeak from above, or when the mode leaves CYCLE, or after Period bars.",
+  "inputs": [
+   "high",
+   "low",
+   "2-pole bandpass filter",
+   "local peak/valley tracker",
+   "50-bar averages of peaks and valleys"
+  ],
+  "params": [
+   "Period (20)",
+   "delta bandwidth (0.1 to 0.5)",
+   "Fraction (0.1 to 0.5)",
+   "trend average length (2*Period)",
+   "peak/valley average (50)"
+  ],
+  "why": "The bandpass filter isolates a specific band of cycle periods, discarding both the low-frequency trend and the high-frequency noise, so the residual is a clean swing component. Ehlers' insight is that the MEAN of that band-limited component over an integer number of cycle periods should be zero in a pure cycle, but becomes positive in an uptrend because uptrends produce higher swing highs and higher swing lows. Comparing that mean against a fraction of the recent average swing amplitude therefore gives an objective, amplitude-calibrated boundary between cycle mode and trend mode - and the two modes demand opposite tactics, which is precisely why applying one rule set unconditionally fails.",
+  "novelty": "The regime classifier is derived from the filtered cycle component itself - its mean relative to its own swing envelope - rather than from a separate trend-strength indicator. It also changes the rule set, not just the permission to trade, and both branches read the same bandpass series so there is no indicator disagreement.",
+  "ohlcv_only": true,
+  "source": "John F. Ehlers and Ric Way, 'Empirical Mode Decomposition: A novel approach for cycle and trend mode detection', free technical paper at https://www.mesasoftware.com/papers/EmpiricalModeDecomposition.pdf - Figure 9 EasyLanguage listing (beta/gamma/alpha bandpass recursion, Mean = Average(BP, 2*Period), Peak/Valley detection, AvgPeak/AvgValley = Average(...,50), Fraction thresholds) and the concluding paragraph stating the trend/cycle delineation rule (downloaded and text-extracted directly).",
+  "_agent": "v2:6aaa92cea232aff15a104ff418b9a41c4520f372e2bc35612e9206f1b905a44e"
+ },
+ {
+  "name": "Five-Condition Pivot Reversal Bar",
+  "category": "composite reversal bar at a broken swing pivot",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Step 1 - DEMAND PIVOT P: a bar whose low is strictly lower than the lows of the 2 bars either side (a 5-bar fractal low); record P_low = its low. Step 2 - BREAKDOWN: a later bar D makes low(D) < P_low. Step 3 - REVERSAL BAR R, which must occur within 5 bars of D and satisfy ALL FIVE: (a) close(R) > close(R-1) AND close(R) > close(R-2); (b) close(R) > P_low - the broken pivot is reclaimed on a closing basis; (c) close(R) > open(R); (d) close(R) > 0.5 x (high(R) + low(R)) - the close is above the bar's own midrange; (e) high(R) - low(R) > high(R-1) - low(R-1) - range expansion. Enter LONG at the OPEN of the bar after R. SHORT is the exact mirror around a supply pivot (5-bar fractal high) that is broken and then reclaimed.",
+  "exit_rule": "Initial risk = entry - min(low(R), low(D)) for longs; place the stop there. Target = entry + Reward_Ratio x initial risk with Reward_Ratio swept 1-10 and biased toward the high end - the source's explicit conclusion is that these reversals 'with larger target exits are preferred'. Time exit at the OPEN of the (n+1)th bar, n swept 1-40. Also test with the target removed entirely, given the same catalogue's finding that fixed targets hurt.",
+  "inputs": [
+   "ohlcv daily",
+   "5-bar fractal pivots on highs and lows",
+   "atr(20) for an optional disaster stop"
+  ],
+  "params": [
+   "fractal half-width (2, sweep 1-4)",
+   "bars allowed between breakdown and reversal (5, sweep 2-10)",
+   "Reward_Ratio (1-10)",
+   "time exit n (1-40)",
+   "midrange threshold (0.5, sweep 0.5-0.75)"
+  ],
+  "why": "Five independent confirmations on a single bar, each cheap on its own but jointly rare: direction versus TWO prior closes, reclaim of a broken structural level, close above the open, close above the bar's own midpoint, and range expansion versus the previous bar. The conjunction means the bar simultaneously reverses the immediate sequence, invalidates the breakdown, and does so with expanding participation. Rated C over 42 futures markets and 32 years, with the explicit findings that reversal patterns are very sensitive to trading costs and work better with larger targets - so it must be traded sparingly, in liquid names, and held for a real move rather than scalped.",
+  "source": "https://oxfordstrat.com/trading-strategies/reversal-patterns-part-2/ - top/bottom reversal around supply/demand pivots: 'closes below the two previous days' closings', close beyond the pivot, 'close is below the opening and the mid-range of the day', daily range exceeds the previous day's range, all within 5 bars of the breakout; entry at the open after the reversal; rating C, 42 US futures markets 1980-2011. Pivot construction follows Kaufman's swing-point definition.",
+  "novelty": "The conjunction of a close above the bar's own MIDRANGE with a close above two prior closes, range expansion, and the reclaim of a broken fractal pivot is used by nothing in either list, and the entry is deferred to the next OPEN rather than taken at the signal close - which materially changes the fill distribution on gapping names.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Momentum Burst out of a Tight Base",
+  "category": "range expansion with a time-based exit",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Long. On day D require: (a) close[D]/close[D-1] - 1 >= 0.04 OR close[D] - close[D-1] >= 0.90; (b) volume[D] >= 100000 and volume[D] >= 2.0 * SMA(volume,20); (c) close[D] >= 5.00; (d) close[D-1]/close[D-2] - 1 < 0.02 (yesterday was not already running); (e) prior tight base over the 3-20 sessions before D: (max(high) - min(low)) / min(low) <= 0.15 AND the mean of (high-low)/close over that window <= 0.05; (f) close[D] >= low[D] + 0.75*(high[D]-low[D]) (close in the top quartile of the day's range). Enter on a buy-stop at high[D] + 0.02 on day D+1; if not filled that day, cancel.",
+  "exit_rule": "Hard time exit at the close of the 3rd trading day after fill. Take profit early at +8% from entry if hit first. Stop at low[D]. No trailing, no extension of the holding period.",
+  "inputs": [
+   "daily OHLCV",
+   "volume",
+   "sma(volume,20)"
+  ],
+  "why": "Bonde's core empirical claim is that the bulk of tradeable swing movement arrives as 3-5 day, 8-40% 'bursts' that begin with one range-expansion day emerging from a volatility contraction \u2014 and that the money is lost by holding past the burst waiting for a trend that usually never forms. The fixed 3-day exit is the strategy: it harvests the documented burst window and refuses to pay for the mean-reverting tail.",
+  "source": "Pradeep Bonde, Stockbee \u2014 'Momentum Burst' / '4% breakout' method, taught free at stockbee.blogspot.com and on his YouTube channel. Exact thresholds corroborated by an open-source implementation of his screen that I fetched: github.com/ZihaoGuan/ticker-screener, src/stockbee_momentum_burst_screen.py \u2014 FOUR_PCT_THRESHOLD=4.0, DOLLAR_THRESHOLD=0.90, MIN_VOLUME=100_000, MIN_PRICE=5.0, MIN_BASE_DAYS=3, MAX_BASE_DAYS=20, MAX_BASE_WIDTH_PCT=15.0, MAX_PRIOR_AVG_RANGE_PCT=5.0, MAX_PREV_DAY_GAIN_FOR_RANGE=2.0. His own pre-market scan formula '((c/c1>=1.02) or (c-o>=.90)) ... and v>=100000 and c>=1' appears verbatim on the blog. CAVEAT: Bonde publishes no auditable equity curve.",
+  "novelty": "The exit is a BAR COUNT. Every one of the 32 existing strategies exits on a price level, an indicator condition, or a stop \u2014 a fixed-holding-period exit is a structurally different exit family, and it is the part of this idea most worth testing independently of the entry.",
+  "ohlcv_only": true,
+  "params": [
+   "range-expansion threshold 3% / 4% / 5%",
+   "volume multiple 1.5 / 2.0 / 3.0",
+   "base window 3-20 / 5-30 sessions",
+   "base width cap 10% / 15% / 20%",
+   "holding days 2 / 3 / 5",
+   "profit target 6% / 8% / 12%"
+  ],
+  "_agent": "v2:5dc784de464dcafe06d80db0ae9fd6871328474257ca0af67140af46718388e3"
+ },
+ {
+  "name": "Bollinger Break With Candle-Anatomy Filters (BinHV45)",
+  "category": "mean reversion with bar-shape confirmation",
+  "side": "long",
+  "timeframe": "any",
+  "ohlcv_only": true,
+  "entry_rule": "Compute mid = SMA(close, 40) and lower = mid - 2 * stdev(close, 40). Derive four magnitudes on the current bar: bbdelta = abs(mid - lower); closedelta = abs(close - close[1]); tail = abs(close - low); and require lower[1] > 0. Enter LONG when ALL of: (a) bbdelta > close * 0.007 (band is wide enough in relative terms), (b) closedelta > close * 0.017 (the bar itself moved sharply), (c) tail < bbdelta * 0.025 (the close sits essentially on the low - almost no lower wick), (d) close < lower[1] (closed below the PREVIOUS bar's lower band), and (e) close <= close[1]. Published defaults were tuned on crypto and must be re-swept for equities: treat 0.007 / 0.017 / 0.025 as starting points, not as constants.",
+  "exit_rule": "The published code emits no exit signal - it relies on the framework's ROI table and stop-loss. Pinning it down for implementation: exit at the first close back above mid = SMA(close, 40), or after a fixed 20-bar time stop, or on a stop at entry_low - 1.0 * ATR(14), whichever comes first.",
+  "inputs": [
+   "close",
+   "open",
+   "low",
+   "SMA(close,40)",
+   "stdev(close,40)",
+   "previous-bar lower band"
+  ],
+  "params": [
+   "Bollinger period (default 40) and k (default 2)",
+   "bbdelta ratio (default 0.007)",
+   "closedelta ratio (default 0.017)",
+   "tail ratio (default 0.025)",
+   "exit MA period",
+   "time-stop bars"
+  ],
+  "why": "A close below the lower band is common and mostly meaningless. The three magnitude filters together demand a specific bar shape: the band must be genuinely wide (so the market is already volatile, not asleep), the bar must have travelled far from the previous close (a real capitulation candle rather than drift), and the close must be pinned to the low with almost no lower wick (no dip-buyers absorbed it yet). That last condition is counter-intuitive - most fade rules want to see a rejection wick - and it identifies the bar BEFORE the reversal rather than after it.",
+  "source": "freqtrade-strategies, user_data/strategies/berlinguyinca/BinHV45.py - https://github.com/freqtrade/freqtrade-strategies/blob/main/user_data/strategies/berlinguyinca/BinHV45.py",
+  "novelty": "Distinct from plain Bollinger fade because the trigger is a conjunction of three ratios describing the bar's geometry - band width, bar displacement and wick length - each normalised to a different denominator (close, close, bbdelta). It also compares to the PREVIOUS bar's band rather than the current one, avoiding the self-referential problem where a large bar widens the very band it must break.",
+  "_agent": "v2:16ef1dd18371885595dabbe3e4a4868e6c3a7e7fe0580d2da50702aa86e06460"
+ },
+ {
+  "name": "Effective-Tick Clustering Tightening",
+  "category": "microstructure / spread proxy from price clustering",
+  "side": "both",
+  "timeframe": "daily bars, or 5-minute for intraday variant",
+  "entry_rule": "Use the tick grid s = (0.01, 0.05, 0.10, 0.25, 1.00), indexed j = 1..5 finest to coarsest. For each of the trailing N = 200 closes assign it to the COARSEST s_j for which C/s_j is an integer within 1e-9 (so 50.00 -> 1.00, 50.25 -> 0.25, 50.10 -> 0.10, 50.05 -> 0.05, 50.03 -> 0.01). Let F_j = count_j / N. Unconstrained cluster probabilities: U_1 = 2*F_1; U_j = 2*F_j - F_{j-1} for j = 2..4; U_5 = F_5 - F_4. Constrain sequentially: gamma_j = min(max(U_j, 0), 1 - sum_{k<j} gamma_k), then divide all gamma by their sum. Fine-grid weight W_t = gamma_1 + gamma_2 (the 1c and 5c mass). ENTRY: at the next bar's open when W_t - W_{t-20} >= +0.15 (the price grid has visibly tightened over 20 bars, i.e. the effective tick has collapsed and the tape has become continuously quotable) AND |sum of ln(C/C_prev) over the last 10 bars| >= 1.0 * ATR(14)/C_t. Take the side of that 10-bar sum. No trade when the fine-grid weight has not moved by 0.15.",
+  "exit_rule": "Exit at the close of the 20th bar after entry, or earlier if W falls back below its value at entry minus 0.10 (the grid re-coarsens, liquidity has withdrawn), or on a stop at 1.5 * ATR(14) against entry.",
+  "inputs": [
+   "close",
+   "ATR(14)",
+   "price tick grid",
+   "200-bar rolling window of closes"
+  ],
+  "params": [
+   "grid set s",
+   "clustering window N (200)",
+   "lookback for the change (20)",
+   "fine-weight jump threshold (0.15)",
+   "displacement threshold in ATR (1.0)",
+   "hold length (20)"
+  ],
+  "why": "Holden's estimator infers the effective spread from where prices cluster: when the spread is wide, prices pile up on coarse increments; when it narrows, mass migrates to the penny grid. A rapid migration to the fine grid is a liquidity event - market makers have tightened, more participants are quoting inside, and the stock has moved from a quote-driven to a flow-driven regime. Directional information that could not be expressed while the spread was wide gets expressed once it is cheap to trade, so a displacement occurring simultaneously with a grid tightening is more likely to be real than the same displacement in a wide-spread regime.",
+  "source": "Craig W. Holden, 'New low-frequency spread measures', Journal of Financial Markets 12(4), 778-813, 2009 (https://ideas.repec.org/a/eee/finmar/v12y2009i4p778-813.html) - the paper builds spread proxies from daily data using price clustering, serial covariance and no-trade days. The clustering-probability construction is Holden's; the tightening-as-a-trigger entry rule is my synthesis.",
+  "novelty": "Nothing in the existing set reads the price grid itself. Roll, Corwin-Schultz and Abdi-Ranaldo all infer spread from return or range covariance structure; this infers it from the discreteness of the closing prints, which is an orthogonal source of information and survives on days when the return-based estimators go degenerate.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ },
+ {
+  "name": "Volume-Conditioned Momentum Life Cycle",
+  "category": "cross-sectional momentum with a volume conditioner",
+  "timeframe": "daily bars, monthly rebalance, 6-month hold",
+  "side": "both",
+  "entry_rule": "At each month end compute for every symbol: RET = close_{t-21}/close_{t-252} - 1, and RVOL = [mean daily volume over the last 252 bars] / [mean daily volume over the 252 bars before that]. RVOL is the OHLCV proxy for turnover - it removes the need for shares outstanding by comparing a name's volume to its own history rather than to its float. Sort the universe independently into RET terciles and RVOL terciles. Go long at the next open the intersection of the TOP RET tercile and the BOTTOM RVOL tercile (low-volume winners). Go short the intersection of the BOTTOM RET tercile and the TOP RVOL tercile (high-volume losers). Take no position in the other seven cells.",
+  "exit_rule": "Six-month holding with overlapping portfolios: each month one sixth of the book is closed at the next open and replaced by the newly selected names, so six vintages run in parallel. No stop.",
+  "inputs": [
+   "close",
+   "volume",
+   "252-bar mean volume vs the prior 252-bar mean volume",
+   "12-1 return"
+  ],
+  "params": [
+   "volume lookback and comparison window",
+   "tercile vs quintile cuts",
+   "holding period (3/6/12 months)",
+   "dollar volume vs share volume"
+  ],
+  "why": "Trading volume proxies for how much attention and disagreement a name already carries. Winners that ran up on heavy, expanding volume have already had their news absorbed and behave like late-stage momentum - they reverse sooner. Winners that ran up quietly are still under-recognised and continue for longer. The same logic inverted applies to losers: heavily traded losers still have selling to do. The interaction is strong enough that volume predicts both the magnitude and the persistence of momentum, not just its level.",
+  "novelty": "A double sort where the second dimension is a volume ratio that reorders the momentum ranking rather than filtering it, and the trade is placed only in the two diagonal cells. Distinct from a volume confirmation filter (which requires high volume for entry) - here the LONG leg explicitly requires LOW relative volume, which is the opposite of the usual confirmation logic.",
+  "source": "Lee & Swaminathan (2000), 'Price Momentum and Trading Volume', Journal of Finance 55(5), 2017-2069 - the 'momentum life cycle' hypothesis and the RET x turnover double sort. (Wiley article page returned HTTP 403 during this session, so this citation is from knowledge of the literature; the RVOL proxy above is my substitution for turnover and is stated precisely.)",
+  "ohlcv_only": true,
+  "_agent": "v2:cfd30cfcc39909b0d50d86a5c465eddca78daa50c3cb3ba17ddf1d4a91a2525a"
+ },
+ {
+  "name": "Darvas box with three-day confirmed walls",
+  "category": "breakout / confirmed-pivot box",
+  "side": "long",
+  "timeframe": "daily",
+  "entry_rule": "Step 1 (candidate): the stock's High_t equals max(High[t-251 .. t]) \u2014 a new 52-week high \u2014 and Volume_t > 1.5 * SMA(Volume, 50). Record H_box = High_t. Step 2 (ceiling confirmation): if the next 3 consecutive daily bars all satisfy High < H_box, the ceiling is confirmed. If any of those 3 bars exceeds H_box, reset H_box to that bar's high and restart the 3-day count. Step 3 (floor confirmation): after the ceiling is confirmed, take L_candidate = the lowest Low made since the ceiling bar; if the next 3 consecutive bars all satisfy Low > L_candidate, set L_box = L_candidate and the box is complete. If any bar breaks below L_candidate, reset L_candidate to that bar's low and restart the 3-day count. Step 4 (entry): buy on a stop order at H_box + 0.10 once the box is complete.",
+  "exit_rule": "Stop at L_box - 0.10, placed immediately on entry. When a NEW box completes at a higher level (repeat steps 1-3 from the new high), raise the stop to the new box's L_box - 0.10. Position is exited only by the box-bottom stop; there is no profit target.",
+  "inputs": [
+   "daily OHLC",
+   "volume",
+   "SMA(volume,50)",
+   "rolling 252-bar high"
+  ],
+  "params": [
+   "confirmation days 3 (sweep 2-5)",
+   "volume multiple 1.5",
+   "breakout offset 0.10 or 0.25*ATR(14)",
+   "52-week lookback 252"
+  ],
+  "why": "The three-day no-violation requirement on both walls converts an arbitrary swing point into a level that supply and demand have actually defended, which filters the single-bar spike highs that make raw Donchian channels noisy. The stop then ratchets in discrete confirmed steps rather than continuously, so it stays out of the way during normal consolidation but is always sitting under real support. Darvas's economic claim was that institutions accumulate in boxes and the box top marks where their bid overwhelms remaining supply.",
+  "source": "Nicolas Darvas, 'How I Made $2,000,000 in the Stock Market' (1960); algorithmic box construction with the three-consecutive-day confirmation rule for both ceiling and floor described at https://clickalgo.com/darvas-box-theory and https://investinganswers.com/dictionary/d/darvas-box-theory",
+  "novelty": "Donchian breakout uses a raw rolling extreme with no confirmation and a symmetric channel stop. The Darvas box requires a pivot to survive three bars before it counts, builds an asymmetric box whose floor is discovered separately from its ceiling, and ratchets the stop box-by-box rather than bar-by-bar.",
+  "ohlcv_only": true,
+  "_agent": "v2:f5f032cda86046734ffcad9e8f804d90c918533489aa540fb34b2254c98c8019"
+ }
+]

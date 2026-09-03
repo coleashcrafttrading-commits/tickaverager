@@ -1,0 +1,210 @@
+[
+ {
+  "name": "MinBTL Trial Budget with 1/e Stopping",
+  "category": "research protocol / search control",
+  "side": "both",
+  "timeframe": "daily (budget), any (deployed rule)",
+  "entry_rule": "BEFORE any sweep, fix S* = the annualised in-sample Sharpe you refuse to be fooled by (use S* = 1.0) and count y = years of usable history for the ticker. The trial budget is the largest integer N satisfying MinBTL(N) <= y, where MinBTL(N) = [ ( (1-gamma)*Zinv(1 - 1/N) + gamma*Zinv(1 - 1/(N*e)) ) / S* ]^2 with gamma = 0.5772156649 (upper-bounded by 2*ln(N)/S*^2). Verified values: y=2 years gives N=7; y=5 years gives N=45; y=6.4 years gives N=100; y=10.6 years gives N=1000. Enumerate the theoretically justified configurations of the rule in RANDOM order and cap the list at N. Evaluate the first floor(N/e) (about 37%) and deploy NONE of them, recording only the best Sharpe seen, S_best. Then continue one configuration at a time and DEPLOY the first one whose in-sample Sharpe exceeds S_best. If none does by configuration N, deploy nothing and stay flat. The deployed configuration then generates entries by its own rule.",
+  "exit_rule": "The deployed configuration's own exit. It is retired without replacement after y/2 years of live trading, or immediately if its live Sharpe over the trailing 126 bars is below zero. A NEW sweep on the same ticker may only begin once MinBTL(N_new) years of genuinely unseen data have accumulated since the last sweep - the calendar, not the researcher's impatience, gates the next search. Every configuration ever evaluated is written to an append-only trial log; that log's length is the M fed into every other gate in this collection.",
+  "inputs": [
+   "length of available OHLCV history in years",
+   "count of parameter configurations in the grid",
+   "in-sample Sharpe of each configuration",
+   "append-only trial register",
+   "inverse normal CDF"
+  ],
+  "why": "Every other idea here is a post-hoc correction applied after the damage is done. This one is ex ante and it is the only lever that actually reduces the amount of overfitting rather than measuring it. The arithmetic is brutal and worth internalising: with 5 years of data, trying more than about 45 independent configurations essentially GUARANTEES you find one with an in-sample Sharpe of 1.0 and a true out-of-sample Sharpe of zero. With 2 years, seven trials suffice. Since financial series exhibit mean-reverting memory, backtest overfitting does not merely dilute the false pattern out of sample - it selects rules positioned to be actively undone, so the expected out-of-sample result is negative, not zero. The 1/e secretary rule is the optimal-stopping answer to 'when do I stop looking?' when every additional trial carries an irreversible false-positive cost.",
+  "novelty": "Constrains the SEARCH rather than correcting its output, and gives a hard, computable cap on the number of configurations as a function of available history. Nothing else in the corpus touches the size of the search. It also produces the auditable M that the DSR, haircut, FDR and stepdown gates all require as an input.",
+  "source": "Bailey, D., Borwein, J., Lopez de Prado, M. & Zhu, Q. (2014), 'Pseudo-Mathematics and Financial Charlatanism: The Effects of Backtest Overfitting on Out-of-Sample Performance', Notices of the AMS 61(5), 458-471 - Theorem 3.1 (MinBTL) and the explicit '5 years of data, no more than 45 independent configurations' and '7 trials for a 2-year backtest with IS Sharpe 1' results, which I reproduced numerically (my computation gives 5.00 and 1.92 years respectively). PDF: https://www.davidhbailey.com/dhbpapers/backtest-pseudo.pdf . The 1/e stopping rule is recommended in the 'When should we stop testing?' section of Bailey & Lopez de Prado (2014), 'The Deflated Sharpe Ratio', JPM 40(5), citing Bruss, F. T. (1984), 'A Unified Approach to a Class of Best Choice Problems', Annals of Probability 12(3), 882-889.",
+  "ohlcv_only": true,
+  "params": [
+   "S* (0.5 / 1.0 / 1.5)",
+   "exact MinBTL vs the 2 ln N upper bound",
+   "sampling fraction for the stopping rule (1/e vs 1/2)",
+   "live retirement horizon"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Optimiser Permutation Test on Shuffled Bars",
+  "category": "randomisation test / meta-strategy",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Convert the ticker's bar series into T tuples: the close-to-close log return r_t, plus the intrabar offsets (open_t - close_{t-1}), (high_t - close_t), (low_t - close_t) expressed in log terms so bar shape travels with the return. Build P=1000 surrogate series by Fisher-Yates shuffling the ORDER of the tuples and re-cumulating from the original starting price - this destroys all serial structure and all regime persistence while preserving the exact marginal return distribution and the realistic bar geometry. On EACH surrogate, re-run the ENTIRE parameter optimisation for the strategy family and record the best in-sample Sharpe found, S*_p. On the real series record S_real, the best in-sample Sharpe from the identical optimisation. The permutation p-value is p = (1 + #{p : S*_p >= S_real}) / (P + 1). ARM the optimised configuration only if p < 0.05. For rules that depend on intraday structure or overnight gaps, permute in WHOLE-DAY BLOCKS (shuffle the order of trading days, keep each day's intraday bars intact and in order) so the null is not made artificially easy by destroying the intraday shape the rule exploits.",
+  "exit_rule": "The armed configuration's own exit. Re-run the permutation test annually on the expanding series and disarm (flatten at the next open) if p >= 0.20. Run a SECOND, complementary permutation with the trading SIGNAL held fixed and only the returns permuted: this tests whether the specific rule has edge, whereas the first test prices the optimiser's greed. Arm only if both tests pass; if the signal-fixed test passes but the optimiser test fails, the rule idea may be real but the parameter search was too aggressive - shrink the grid and re-run rather than deploying.",
+  "inputs": [
+   "OHLCV bars",
+   "full parameter grid and the optimisation routine itself",
+   "permutation RNG with recorded seed",
+   "best-in-grid Sharpe under each surrogate"
+  ],
+  "why": "Every parametric gate assumes something - normality, a known number of independent trials, a particular dependence structure. A permutation test assumes none of that: it just asks how good the best result from THIS EXACT SEARCH looks on data with no structure at all. Because it re-runs the whole optimisation on each surrogate, it automatically prices the greediness of the optimiser, the non-independence of neighbouring grid points, and any subtle selection the researcher built into the grid - none of which the trial count N captures. It is the closest thing to an honest answer to 'how much of my 2.4 Sharpe is the search itself?'. The cost is compute: P times the full sweep. That is a bearable price for the one test with no free parameters to fudge.",
+  "novelty": "Resamples the DATA and repeats the SEARCH, rather than resampling a fixed set of P&L series. That distinction matters: White's Reality Check conditions on the l P&L series you happened to produce, whereas this prices the whole discovery process including how the grid was chosen. The paired signal-fixed variant separates rule edge from optimiser greed, which no other test here does.",
+  "source": "Masters, T. (2018), 'Permutation and Randomization Tests for Trading System Development: Algorithms in C++', and Masters, T. (2018), 'Testing and Tuning Market Trading Systems' - the training-set (optimiser) permutation test versus the selection-bias permutation test. Related published treatment: Aronson, D. (2006), 'Evidence-Based Technical Analysis', ch.6, which applies White's Reality Check and Monte Carlo permutation to 6,402 TA rules and finds none significant after correction.",
+  "ohlcv_only": true,
+  "params": [
+   "P permutations (200 / 1000 / 5000)",
+   "permutation unit (single bar / whole day / stationary block)",
+   "statistic (best Sharpe / best profit factor / mean of top decile)",
+   "alpha and disarm threshold"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Clark-West Nested Admission Test",
+  "category": "forecast comparison / ensemble construction",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "You run an incumbent ensemble E producing a one-bar-ahead return forecast f_{E,t}. A candidate rule C is NESTED in E if E's forecast equals the E+C forecast with C's weight set to zero - which is the case whenever you are asking 'should I add this rule to my existing book?'. Over an out-of-sample window of n bars, form f_{E,t}, f_{EC,t} and the realised bar return y_t, then compute the Clark-West adjusted differential cw_t = (y_t - f_{E,t})^2 - [ (y_t - f_{EC,t})^2 - (f_{E,t} - f_{EC,t})^2 ]. The statistic is CW = sqrt(n) * mean(cw) / HAC_se(cw) with Newey-West bandwidth floor(4*(n/100)^(2/9)). ADMIT C to the ensemble only if CW > 1.645 (one-sided 5%, standard-normal critical value, valid for the nested case) AND CW exceeds the Holm-adjusted critical value for the M candidates being considered simultaneously (for M=20 that is Phi^{-1}(1 - 0.05/20) = 3.09). For NON-nested comparisons between two independent rules use plain Diebold-Mariano instead: d_t = L(e_{1,t}) - L(e_{2,t}) with L the squared-error loss, DM = mean(d)/HAC_se(d), compared to the standard normal. Once admitted, the ensemble trades the sign of f_{EC,t} with size proportional to |f_{EC,t}| / ATR(14), capped at 1x.",
+  "exit_rule": "C is DROPPED from the ensemble - its contribution zeroed and any C-specific position flattened at the next open - when its rolling 252-bar CW statistic falls below 0. The ensemble as a whole exits a position when f_{EC,t} changes sign or when |f_{EC,t}| falls below 0.25 * ATR(14). Re-run the admission test for every pending candidate quarterly, and never admit more than one candidate per quarter regardless of how many pass, so that the trial count grows slowly enough for MinBTL to stay satisfied.",
+  "inputs": [
+   "one-bar-ahead return forecasts from the incumbent ensemble and from ensemble-plus-candidate",
+   "realised bar returns",
+   "atr(14)",
+   "Newey-West HAC standard errors"
+  ],
+  "why": "Adding a rule to an existing book is a NESTED model comparison, and the standard Diebold-Mariano test is badly mis-sized in that setting: under the null the extra parameter is zero, so the larger model's forecast error is inflated purely by estimation noise, and DM systematically UNDER-rejects, meaning genuinely useful additions get rejected. Clark-West's adjustment term (f_E - f_EC)^2 removes exactly that noise penalty and restores an approximately standard-normal null. This is the correct statistical machinery for the actual decision a fleet operator makes 578 times: not 'is this rule good in isolation?' but 'does this rule add anything my existing book does not already have?' - which is also the only question that controls the corpus's rampant near-duplication.",
+  "novelty": "Tests INCREMENTAL contribution against an incumbent rather than absolute performance against zero, which is a fundamentally different admission decision and the one that actually prevents 578 correlated rules from all being funded. The nested-versus-non-nested distinction and its correct critical values appear nowhere in the corpus.",
+  "source": "Clark, T. E. & West, K. D. (2007), 'Approximately Normal Tests for Equal Predictive Accuracy in Nested Models', Journal of Econometrics 138(1), 291-311 - the adjusted MSPE statistic. Also Clark, T. E. & West, K. D. (2006), Journal of Econometrics 135(1-2), 155-186; Clark, T. E. & McCracken, M. W. (2001), Journal of Econometrics 105(1), 85-110. Non-nested case: Diebold, F. X. & Mariano, R. S. (1995), 'Comparing Predictive Accuracy', JBES 13(3), 253-263, with the small-sample correction of Harvey, Leybourne & Newbold (1997), International Journal of Forecasting 13(2), 281-291.",
+  "ohlcv_only": true,
+  "params": [
+   "n out-of-sample window (252 / 504 / 756)",
+   "HAC bandwidth",
+   "loss function (squared error / absolute error / direct P&L)",
+   "Holm M (how many candidates are in flight)",
+   "max admissions per quarter"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Time-Series Spanning-Alpha Residual Portfolio",
+  "category": "characteristic orthogonalisation (return space)",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily return series F_k of each of the H characteristic-managed portfolios",
+   "rolling 756-session multivariate time-series regression of each F_k on the other H-1 (or on the K retained principal components)",
+   "Newey-West standard errors with 21 lags"
+  ],
+  "entry_rule": "For each characteristic portfolio F_k, run a rolling 756-session daily time-series regression F_k = alpha_k + sum_{j != k} b_{kj} F_j + e_k (or on the K retained PCs, to keep the right-hand side well conditioned). Compute the Newey-West t-statistic on alpha_k with 21 lags. Admit characteristic k only if its t(alpha_k) > 2.5. Trade the residual, not the raw portfolio: hold the stock-level weights z_{i,k,t} for the admitted characteristic and simultaneously hold minus sum_{j != k} b_{kj} * z_{i,j,t}, so the net book is F_k hedged by its own fitted combination of the other signals. Aggregate across all admitted k with weights proportional to alpha_k / stdev(e_k), scale to sum|w| = 2.",
+  "exit_rule": "Re-estimate the spanning regressions and re-admit monthly. Drop any characteristic the month its t(alpha_k) falls below 1.5; a dropped characteristic must clear 2.5 again to return. Close the whole book for a month if fewer than two characteristics are admitted. Rehedge weekly if any |b_{kj}| has moved by more than 0.5 since the last rebalance.",
+  "why": "Cross-sectional orthogonalisation removes the confound from the characteristic; time-series orthogonalisation removes it from the return stream. A signal can look distinct in characteristic space and still be a linear combination of other signals' returns - that is exactly what a spanning regression alpha detects. Holding the residual rather than the raw portfolio means you are paid only for the part of the signal nobody else in the book already owns.",
+  "novelty": "The hedge is a basket of other signal portfolios with regression-estimated betas, refitted on a rolling window, rather than a static market or sector hedge. It is the dual of cross-sectional residualisation and picks up redundancies that the cross-sectional version cannot see.",
+  "source": "The spanning-regression standard comes from Fama & French (1993, 2015). Formalised for model comparison in Barillas & Shanken, 'Which Alpha?', Review of Financial Studies (2017). The redundancy problem it addresses is documented in Green, Hand & Zhang (2017), RFS 30(12):4389-4436, and in Feng, Giglio & Xiu (2020), Journal of Finance 75(3):1327-1370.",
+  "params": [
+   "regression window (378 / 756 / 1260 sessions)",
+   "right-hand side: all other H-1 portfolios vs K principal components",
+   "t(alpha) admission and drop thresholds",
+   "Newey-West lag length",
+   "aggregation weights across admitted characteristics",
+   "rehedge trigger size"
+  ],
+  "_agent": "v2:ea925ed25b6af9d1d174935a23471f0383024a2b532396e09ec39a411346d203"
+ },
+ {
+  "name": "Pre-Averaged Drift Burst Entry",
+  "category": "noise-robust intraday explosive-drift detection",
+  "side": "both",
+  "timeframe": "1-minute bars, intraday",
+  "entry_rule": "Intraday on 1-minute bars, every 60 seconds from 09:45 ET, compute the Christensen-Oomen-Reno drift burst statistic on pre-averaged log returns. Pre-average with g(x) = min(x, 1-x) and horizon k_n = 5: rbar_i = sum_{j=1..k_n-1} g(j/k_n) * r_{i+j}. Spot drift muhat_t = (1/h_n) * sum_i K((t_{i-1} - t)/h_n) * rbar_{i-1} with K a left-sided exponential kernel and h_n = 300 seconds. Spot variance sigmahat_t^2 = (1/h'_n) * [ sum_i (K((t_{i-1} - t)/h'_n) * rbar_{i-1})^2 + 2 * sum_{L=1..L_n} w(L/L_n) * sum_i K((t_{i-1}-t)/h'_n) * K((t_{i+L-1}-t)/h'_n) * rbar_{i-1} * rbar_{i-1+L} ] with w the Parzen kernel, h'_n = 900 seconds, and L_n the Newey-West automatic lag plus 2*(k_n - 1). Statistic Tbar_t = sqrt(h_n / K2) * muhat_t / sigmahat_t, with K2 the squared-kernel constant of the chosen exponential kernel. ENTER LONG at market when Tbar_t exceeds the 99% critical value of the Christensen-Oomen-Reno Appendix B distribution for the number of tests per day (approximately 4.6 for 390 tests) AND the symbol's cumulative volume since the open is at least 1.2x its 20-day average at the same clock time. Mirror for shorts on Tbar_t below the negative critical value.",
+  "exit_rule": "Exit when Tbar_t falls back below the 90% critical value (approximately 3.9), or at 15:55 ET, whichever comes first. Hard stop at 1.5 * sigmahat_t * sqrt(1800/h_n) against the entry. Never carry overnight, and never re-enter the same symbol in the same direction on the same day.",
+  "inputs": [
+   "1-minute OHLCV",
+   "cumulative intraday volume",
+   "20-day time-of-day volume profile",
+   "session-clock timestamps"
+  ],
+  "why": "The drift burst hypothesis is that flash-crash and flash-rally episodes are locally explosive DRIFTS rather than jumps: the drift-to-volatility ratio diverges over a window of minutes, and the price path is continuous but transiently deterministic. Because the statistic is built from pre-averaged returns with a HAC (Parzen-kernel) long-run variance, it is robust both to microstructure noise and to the serial correlation the pre-averaging itself induces, so it does not fire on bid-ask bounce the way a naive z-score of cumulative return would. The volume confirmation separates genuine flow-driven bursts from thin-book drifts.",
+  "source": "Christensen, Oomen & Reno (2022), 'The drift burst hypothesis', Journal of Econometrics 227, 461-497. Test statistic, pre-averaging, HAC variance, default bandwidths and Appendix B critical values exactly as implemented in driftBursts and getCriticalValues in the R highfrequency package, CRAN reference manual pp. 20-22 and 26: https://cran.r-project.org/web/packages/highfrequency/highfrequency.pdf",
+  "ohlcv_only": true,
+  "params": [
+   "pre-averaging horizon k_n (2 / 5 / 10)",
+   "mean bandwidth h_n (120 / 300 / 600 s)",
+   "variance bandwidth h'_n (600 / 900 / 1800 s)",
+   "critical-value level (0.95 / 0.99 / 0.999)",
+   "volume confirmation multiple (1.0 / 1.2 / 1.5)",
+   "earliest test time (09:45 / 10:00 ET)",
+   "exit critical-value level"
+  ],
+  "novelty": "Not an ATR expansion and not an opening-range break: this is a formal hypothesis test with a nonstandard critical-value distribution on whether the local drift is exploding relative to the local, noise-robust volatility, and the exit is governed by the statistic decaying rather than by price.",
+  "_agent": "v2:7553de6b0ec86a2f6842bf8a52309d6335e8a8ccb631ed57c8015c0d2345e01c"
+ },
+ {
+  "name": "Minimum Regime Performance Gate",
+  "category": "decay-risk metric / allocation",
+  "side": "both",
+  "timeframe": "daily evaluation; base signal any timeframe",
+  "entry_rule": "For sub-strategy s with daily return series r_1..r_T (use the longest available history, backtest plus live concatenated), compute MRP with one split: define d = 500 bars as the minimum segment length, and MRP1(s) = min over tau in [d, T-d] of min( SR(r_1..r_tau), SR(r_{tau+1}..r_T) ), where SR is the annualised Sharpe ratio of the segment. This is Alexander & Fabozzi's Eq. 3-4 with s = 1 split. Recompute on the first trading day of each month. A sub-strategy is ELIGIBLE if MRP1(s) >= -0.10. Take s's own entry signal at the next bar's open, sized at base * clip((MRP1(s) + 0.5) / 1.0, 0.2, 1.0). Ineligible strategies take no new entries.",
+  "exit_rule": "s's own exit rule. Additionally, flatten all of s's positions and retire s for 63 trading days whenever the current month's MRP1(s) has fallen by more than 0.25 Sharpe points relative to MRP1(s) measured three months earlier - a worsening worst regime, which is the paper's stated early-warning signal.",
+  "inputs": [
+   "OHLCV bars",
+   "per-strategy daily return series (backtest and live concatenated)",
+   "annualised Sharpe ratio over arbitrary sub-samples"
+  ],
+  "params": [
+   "number of splits s (1 / 2 / 3)",
+   "minimum segment length d (250 / 500 / 1000 bars)",
+   "history lookback (10 / 20 / 40 years, or max available)",
+   "MRP eligibility floor (-0.30 / -0.10 / 0.0)",
+   "month-over-month MRP deterioration trigger (0.15 / 0.25 / 0.40 Sharpe points)"
+  ],
+  "why": "MRP is the worst Sharpe ratio a strategy has ever realised over ANY admissible partition of its history - the authors call it the expected shortfall of model efficacy. It answers the question the corpus cannot currently answer: not 'did this make money on average' but 'how bad does it get when the supporting relationship weakens'. Their headline empirical result is directly relevant to allocating across 578 ideas: high full-sample Sharpe does not imply high MRP, and several factors with the best full-sample numbers (Debt Issuance SR 1.14, MRP -0.05; Investment SR 0.45, MRP -1.01) are strictly dominated on the decay-risk frontier. Ranking a large corpus by backtest Sharpe therefore systematically buys fragility.",
+  "source": "Alexander, N. & Fabozzi, F.J., 'Measuring Strategy-Decay Risk: Minimum Regime Performance and the Durability of Systematic Investing', arXiv:2604.08356, Eqs. 3-4 and Exhibits 3-4 (decay-risk frontier). Code repository cited by the authors: github.com/nolanalexander/minimum_regime_performance",
+  "novelty": "The gate statistic is a minimax over split points, not a mean or a rolling window. Unlike a structural-break test it does not ask whether a break is statistically significant - it just reports how bad the worst half was, which makes it robust when the number of observations is too small for a break test to have power. The deterioration-of-the-minimum trigger is a second-order signal no level-based monitor produces.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "MinTRL Probation Sizing",
+  "category": "evidence-sufficiency gate / live monitoring",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "For each sub-strategy s, using ONLY its live (post-deployment) per-bar return series, compute the per-bar Sharpe SR = mean(r)/std(r), the sample skewness g3 and the RAW kurtosis g4 (excess kurtosis + 3). Compute the Minimum Track Record Length: MinTRL = 1 + [ 1 - g3*SR + ((g4 - 1)/4)*SR^2 ] * ( Phi^{-1}(1 - alpha) / SR )^2 with alpha = 0.05 so Phi^{-1}(0.95) = 1.645. Let T_live be the number of live bars observed so far. Sizing rule, recomputed at each day's close: if SR <= 0, s takes no new entries; if SR > 0 and T_live < MinTRL, s is on PROBATION and takes its own entry signal at 25% of base size; if T_live >= MinTRL, s takes its own entry signal at 100% of base size. Entries execute at the next bar's open on s's own trigger.",
+  "exit_rule": "s's own exit rule. Additionally: retire s permanently (no re-entry) if it is still on probation after 3 * MinTRL_initial bars, where MinTRL_initial is the value computed at the end of the first 60 live bars - i.e. the strategy has had three times the length of evidence it needed and still cannot clear the bar. Flatten immediately at the next open if live SR turns negative while on probation.",
+  "inputs": [
+   "OHLCV bars",
+   "per-strategy live per-bar return series",
+   "sample skewness and raw kurtosis",
+   "inverse normal CDF"
+  ],
+  "params": [
+   "confidence alpha (0.10 / 0.05 / 0.01)",
+   "probation size fraction (0.10 / 0.25 / 0.50)",
+   "retirement multiple of MinTRL (2x / 3x / 5x)",
+   "benchmark Sharpe SR* (0 or the strategy's costed break-even)"
+  ],
+  "why": "The corpus has 578 ideas and will inevitably deploy many of them on short live histories. MinTRL answers exactly the right question - how many bars of live track record are needed before an observed Sharpe is statistically distinguishable from zero at a stated confidence - and it does so accounting for skewness and fat tails, which matters enormously for the corpus's many stop-loss-heavy and breakout strategies whose returns are strongly negatively skewed. Negative skew and high kurtosis inflate MinTRL sharply, so a strategy that makes many small wins and occasional large losses is correctly forced to earn a much longer probation than a symmetric one before it gets full capital.",
+  "source": "Bailey, D.H. & Lopez de Prado, M. (2012), 'The Sharpe Ratio Efficient Frontier' (Minimum Track Record Length). Formula reproduced verbatim as Eq. (1) in Santoni, M.L., Jouanne, V. & Scullin, M.L., 'Equity Strategy Backtesting: Luck or Edge? The MinervaScore as a Statistical Robustness Grade', arXiv:2608.23808, which also notes MinTRL depends only on the single strategy and must not be confused with Minimum Backtest Length MinBTL ~= 2*ln(N)/E[max]^2.",
+  "novelty": "Sizes by how much EVIDENCE exists, not by how good the performance looks. It is monotone in track length and in the moments of the return distribution, so it automatically penalises the negatively-skewed strategies in the corpus. Nothing in a Sharpe-threshold or drawdown-threshold monitor has this property.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "BOCPD Run Length Sizing",
+  "category": "online changepoint detection / live monitoring",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Run Adams and MacKay's Bayesian Online Changepoint Detection on sub-strategy s's per-bar return series r_t, with a Gaussian observation model with unknown mean and variance (Normal-Inverse-Gamma conjugate prior, mu_0 = 0, kappa_0 = 1, alpha_0 = 2, beta_0 = var(r) over the first 250 bars) and a constant hazard function H(r) = 1/250. At each bar propagate the run-length posterior P(r_t | x_{1:t}) by the message-passing recursion, and record: R_t = E[run length], p_break_t = P(run length < 5), and mu_hat_t = the posterior predictive mean of the current-run return parameter, computed as the run-length-weighted average of the per-run posterior means. Trading rule: s may take new entries only when p_break_t < 0.20 AND mu_hat_t > 0. Size = base * clip(R_t / 250, 0.2, 1.0), so conviction grows with an uninterrupted run and resets after a break. Entries fire on s's own trigger at the next bar's open.",
+  "exit_rule": "s's own exit rule. Additionally: flatten every position belonging to s at the next open on any bar where p_break_t > 0.50 - a changepoint has probably just occurred and the parameters governing s are no longer the ones it was sized on. Stay flat until BOTH R_t >= 20 (the new run has accumulated 20 bars) AND mu_hat_t > 0. Note that BOCPD needs no manual reset: the posterior re-initialises the parameter estimate on the new run automatically.",
+  "inputs": [
+   "OHLCV bars",
+   "per-strategy per-bar return series",
+   "Normal-Inverse-Gamma conjugate updates",
+   "run-length posterior recursion"
+  ],
+  "params": [
+   "hazard rate 1/H (1/100 / 1/250 / 1/1000)",
+   "prior strength kappa_0, alpha_0, beta_0",
+   "p_break entry gate (0.10 / 0.20 / 0.35)",
+   "p_break flatten trigger (0.35 / 0.50 / 0.70)",
+   "run-length size normaliser (100 / 250 / 500)",
+   "re-entry run length (10 / 20 / 60)"
+  ],
+  "why": "Page-Hinkley - the corpus's one existing overlay - is a one-sided sequential CUSUM: it needs a hand-set drift parameter and a hand-set threshold, it gives a binary alarm with no confidence attached, and after it fires a human has to decide when to reset it. BOCPD gives a full posterior over how long the current regime has lasted, which turns into three things Page-Hinkley cannot give: a graded position size that grows with regime age, a calibrated probability that a break just happened, and an automatic parameter re-estimation on the new regime with no reset step. That last property is what makes it usable unattended across hundreds of strategies. The hazard rate is a genuine prior about decay speed - 1/250 encodes 'expect a regime to last about a year', which is roughly the timescale the publication-effect literature implies.",
+  "source": "Adams, R.P. & MacKay, D.J.C. (2007), 'Bayesian Online Changepoint Detection', arXiv:0710.3742 - exact online inference of the run-length posterior via a message-passing recursion with a hazard function; demonstrated on financial, biometric and robotic data.",
+  "novelty": "Probabilistic and self-resetting rather than a threshold alarm, and it produces a continuous sizing signal (expected run length) in addition to a kill signal (break probability). Distinct from Page-Hinkley in its output type, not just its formula: PH emits a binary alarm, BOCPD emits a distribution.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ }
+]

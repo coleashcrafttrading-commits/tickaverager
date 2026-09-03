@@ -1,0 +1,210 @@
+[
+ {
+  "name": "Homing Pigeon / Descending Hawk (same-colour body containment)",
+  "category": "candlestick reversal (body-space inside bar)",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Daily bars. Both bars must be the SAME colour and the second body must sit strictly inside the first body. LONG (homing pigeon), requires ALL: (a) downtrend, close(bar1) < EMA(10) of close; (b) bar1 black: open1 > close1; (c) bar2 black: open2 > close2; (d) strict body containment on both edges: open1 > open2 AND close2 > close1; (e) body1 = open1 - close1 >= 1.0 x ATR(14); (f) body2 = open2 - close2 <= 0.50 x body1. Enter long at the close of bar2. SHORT (descending hawk) is the exact mirror: uptrend close(bar1) > EMA(10); both bars white; close1 > close2 > open2 > open1; body1 >= 1.0 x ATR(14); body2 <= 0.50 x body1; short at the close of bar2. No condition is placed on highs or lows - bar2's range may exceed bar1's.",
+  "exit_rule": "Exit at the close of the 5th bar after entry. Stop at low(bar2) - 0.50 x ATR(14) for longs, high(bar2) + 0.50 x ATR(14) for shorts. Variant to sweep: instead of entering at the close of bar2, place a buy stop at high(bar2) + 0.01 valid 2 bars.",
+  "inputs": [
+   "ohlcv daily",
+   "ema(10) of close",
+   "atr(14)"
+  ],
+  "params": [
+   "body2/body1 ratio cap (0.50, sweep 0.25-0.75)",
+   "minimum body1 in ATR (1.0)",
+   "hold bars (5)",
+   "entry mode: close vs stop above bar2 high"
+  ],
+  "why": "A second down bar that opens above the prior close and still cannot print a lower close is a failure to extend: sellers had a full session and produced nothing. Because the bar is still black, every scanner and every discretionary eye classifies it as continued weakness, so the signal is under-arbitraged relative to the harami, which everyone watches. Shiu & Lu (2011) found that harami-family two-day signals on the Taiwan exchange generated significant positive abnormal returns.",
+  "source": "Goo, Chen & Chang (2007) formal definitions - Homing Pigeon: O1 > O2 > C2 > C1 & downtrend; Descending Hawk: C1 > C2 > O2 > O1 & uptrend - reproduced with the full pattern table in Tharavanij, Siraprapasiri & Rajchamaha (2017), SAGE Open, doi:10.1177/2158244017736799. Abnormal-return evidence for two-day harami-family patterns: Shiu & Lu (2011), cited therein.",
+  "novelty": "Body containment where BOTH bars share the same colour. A harami requires opposite colours; a classical inside bar is defined on highs and lows. This is defined purely on opens and closes and will fire on bars whose high/low range is NOT contained by the prior bar - a set of setups the inside-bar and harami rules both miss.",
+  "ohlcv_only": true,
+  "_agent": "v2:2d97c81bff0a261c2d6c0b57f0c2a02391ad2473a99800717ecea28358605e1f"
+ },
+ {
+  "name": "Calendar-Time Event Cohort Portfolio",
+  "category": "portfolio construction / exit structure",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of the universe",
+   "daily OHLCV of SPY",
+   "market model residuals",
+   "position-level event-date clock"
+  ],
+  "entry_rule": "Maintain a fixed-size rolling cohort of N = 20 slots. On any session, every symbol whose SAR <= -3.0 (or, for the short book, SAR >= +3.0) becomes a candidate. Fill empty slots with candidates ranked by |SAR| descending, one slot each, entering at the next open with a target weight of 1/N of the sleeve's capital. If no slot is free, evict the member whose own event date is oldest and take the new candidate in its place. Every Friday at the close, rebalance all current members back to exactly 1/N of current sleeve equity (trim winners, add to losers).",
+  "exit_rule": "A member leaves the cohort exactly T = 60 sessions after ITS OWN event date, at that session's close, regardless of price, P&L or any indicator. There is no price stop and no profit target at the position level. The only position-level exit is the elapsed-time clock; risk is controlled at the sleeve level by the equal-weight cap and the fixed slot count.",
+  "why": "This is the Jensen-alpha / calendar-time portfolio design turned into a live trading rule. The literature adopted it precisely because averaging CARs across firms whose event windows overlap in calendar time produces cross-sectionally correlated observations and inflated test statistics; forming one portfolio per calendar day and studying its time series instead makes the dependence disappear into the portfolio return. The practical consequence is that this sleeve's own realised equity curve IS the alpha estimate - there is no separate statistical step and no way to fool yourself with overlapping windows. The Friday equal-weight rebalance additionally harvests dispersion between cohort members mechanically.",
+  "source": "Kothari & Warner (2006), sec. 4.3.2 'Jensen-alpha approach (calendar-time portfolio)': in each calendar month a portfolio is formed of all firms experiencing the event within the previous T months, rebalanced as firms enter and exit, and the time series is regressed as Rpt - Rft = ap + bp(Rmt-Rft) + sp*SMB + hp*HML + mp*UMD + ept (eq. 8). Introduced by Jaffe (1974) and Mandelker (1974); advocated by Fama (1998) and Mitchell & Stafford (2000).",
+  "novelty": "A position-level exit driven purely by an elapsed-time clock anchored to that position's own event date, with overlapping cohorts and a periodic equal-weight rebalance at the sleeve level. Every strategy in the existing set exits on a price condition or an indicator flip; none has a portfolio-level, calendar-only exit with slot eviction.",
+  "params": [
+   "slot count N (10/20/40)",
+   "cohort horizon T (20/60/120 sessions)",
+   "rebalance frequency (daily/weekly/monthly)",
+   "event SAR threshold (2.5/3.0/3.5)",
+   "eviction rule (oldest event / weakest |SAR|)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "Ornstein-Uhlenbeck Residual S-Score",
+  "category": "statistical arbitrage / mean reversion",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "For each symbol i and its sector ETF S, over the trailing 60 sessions regress daily returns r_i on r_S (OLS, no intercept constraint) and form the cumulative residual X_k = SUM of residuals from the start of the window to session k. Fit AR(1): X_{k+1} = a + b * X_k + zeta. Require 0 < b < 1. Derive kappa = -ln(b) * 252, m = a/(1-b), sigma_eq = sqrt( var(zeta) / (1 - b^2) ), and s = (X_last - m)/sigma_eq. Trade only names with kappa > 252/30 (mean-reversion half-life under ~30 calendar days). ENTER LONG when s < -1.25; ENTER SHORT when s > +1.25. Hedge each position with an offsetting dollar amount of S equal to beta_i times the stock notional (or run the book beta-neutral in aggregate).",
+  "exit_rule": "Close longs when s > -0.50; close shorts when s < +0.75 (Avellaneda-Lee's asymmetric bands). Force exit if kappa falls below 252/30 at any daily re-estimation, or after 60 sessions in the trade, whichever comes first.",
+  "inputs": [
+   "daily OHLCV of each universe symbol",
+   "daily OHLCV of sector ETFs",
+   "60-session rolling regression and AR(1) fit"
+  ],
+  "params": [
+   "regression window 40/60/120",
+   "ETF vs PCA-factor residualization",
+   "entry bands 1.0/1.25/1.5",
+   "exit bands",
+   "minimum kappa",
+   "hedge ratio refresh frequency"
+  ],
+  "why": "Avellaneda and Lee formalise mean-reversion trading as an Ornstein-Uhlenbeck process on the residual of a stock against its factor/ETF exposure: the tradable object is the idiosyncratic deviation, and the s-score is that deviation in units of its own stationary standard deviation. The kappa filter is what stops you from fading a residual that is drifting rather than reverting - it directly measures the speed of reversion instead of assuming it.",
+  "novelty": "The z-score is computed on a fitted stochastic process (stationary standard deviation of an OU model), not on a rolling sample standard deviation of price, and entry is gated on an ESTIMATED SPEED OF REVERSION. That kappa gate is the key difference from any band-fade: a wide residual with slow reversion is explicitly not a trade.",
+  "source": "Avellaneda & Lee, 'Statistical arbitrage in the US equities market', Quantitative Finance 10(7), 2010, 761-782 (Crossref-confirmed; SSRN 2008 working paper). Entry/exit band values 1.25/1.25/0.75/0.50 are the paper's own.",
+  "ohlcv_only": true,
+  "_agent": "v2:5116ce28b5ae6ebd763d5cc9d7322dd61e5097f1d83bbcd948934872923941bc"
+ },
+ {
+  "name": "Hasbrouck VAR Flow Forecast",
+  "category": "microstructure / trade-return vector autoregression",
+  "side": "both",
+  "timeframe": "5-minute",
+  "entry_rule": "Let r_t = ln(C_t / C_{t-1}) and let the signed flow proxy be x_t = sign(C_t - C_{t-1}) * ln(1 + V_t / mean(V, 20)) (carry the previous sign forward when C_t = C_{t-1}). Over the trailing 500 bars estimate a bivariate VAR(5) by OLS with x ordered first, so the r equation may include the contemporaneous x_t: r_t = a + b0*x_t + sum_{i=1..5} b_i * r_{t-i} + sum_{i=1..5} c_i * x_{t-i} + u_t, and x_t = d + sum_{i=1..5} e_i * r_{t-i} + sum_{i=1..5} f_i * x_{t-i} + v_t. Produce the one-step forecast by first forecasting xhat_{t+1} from the x equation, then rhat_{t+1} = a + b0*xhat_{t+1} + sum b_i*r_{t+1-i} + sum c_i*x_{t+1-i}. ENTRY at the open of bar t+1 in the sign of rhat_{t+1} when |rhat_{t+1}| >= 0.75 * stdev(r, 500) AND the r-equation's in-sample R-squared over the 500-bar window is >= 0.01 (below that the VAR is fitting noise and no trade is taken).",
+  "exit_rule": "Exit at the close of bar t+1 - a strict one-bar hold matching the forecast horizon - with an intrabar stop at 2.0 * stdev(r, 500) against entry. Re-estimate and re-enter each bar; consecutive same-side signals hold the position rather than round-tripping it.",
+  "inputs": [
+   "5-minute close",
+   "volume",
+   "20-bar mean volume",
+   "500-bar rolling OLS"
+  ],
+  "params": [
+   "VAR lag order (5)",
+   "estimation window (500)",
+   "signal threshold in return sigma (0.75)",
+   "minimum R-squared (0.01)",
+   "flow proxy transform"
+  ],
+  "why": "Hasbrouck's contribution was to stop treating trades and returns as a one-way regression and model them as a joint system: order flow is autocorrelated, returns feed back into future order flow, and the price impact of a trade is spread over subsequent periods rather than being contemporaneous. A single-equation lambda regression throws all of that away. The VAR captures both the flow persistence and the staggered impact, so its one-step forecast aggregates several small, individually unusable effects into one number. Requiring a minimum R-squared is the honest gate: for most stocks in most windows there is nothing there, and the rule should say so.",
+  "source": "Joel Hasbrouck, 'Measuring the Information Content of Stock Trades', Journal of Finance 46(1), 179-207, 1991 (https://ideas.repec.org/a/bla/jfinan/v46y1991i1p179-207.html) - a VAR of trades and quote revisions, with price effects that materialise gradually and impact that rises concavely with size. Using the fitted VAR as a live one-step forecaster is my construction.",
+  "novelty": "Distinct from the existing temporary-vs-permanent impact idea, which classifies event bars by a median reversal ratio and switches between two fixed behaviours. This fits a full dynamic system every bar and trades its point forecast, so it can produce a signal on ordinary bars with no event at all, and its exit is horizon-matched rather than fixed-count.",
+  "ohlcv_only": true,
+  "_agent": "v2:f93db44c61639630b1f14c8ff557bfc7979510b8647cf2c3763b0fe9c364996d"
+ },
+ {
+  "name": "Sign-Count Z-Score TSMOM",
+  "category": "time-series momentum signal construction",
+  "timeframe": "daily bars, 10-day rebalance",
+  "side": "both",
+  "entry_rule": "Fix L = 10 days and M = 10 blocks. Act only on bars where the bar index is a multiple of 10. Partition the last 100 daily bars into 10 disjoint consecutive blocks of 10 bars. For block m compute b_m = sum over the 10 bars in that block of sign(close_t/close_{t-1} - 1). Compute S = (1/sqrt(M*L)) * sum over m of b_m = (1/10) * sum of all 100 daily return signs. Under serially independent returns S is a unit-variance z-score. At the next open set notional = S * min(sigma_target/sigma_ann, leverage_cap) * allocated equity with sigma_target = 0.15 and sigma_ann = stdev of daily returns over 33 bars * sqrt(260). Long if S > 0, short if S < 0.",
+  "exit_rule": "Hold for exactly 10 trading days; at the next multiple-of-10 bar the weight is replaced by the freshly computed one (which may be a reversal or a flat). Forward-fill the weight on non-rebalancing days. No stop.",
+  "inputs": [
+   "close",
+   "daily return signs",
+   "rolling stdev(33) of daily returns"
+  ],
+  "params": [
+   "block length L",
+   "number of blocks M",
+   "sigma_target",
+   "leverage cap"
+  ],
+  "why": "Counting the signs of daily returns throws away magnitude entirely, so a single crash day or gap cannot flip or dominate the signal - the volatility estimator drops out of the signal completely because sign(r/sigma) = sign(r). The 1/sqrt(ML) normalisation makes the signal a genuine z-score, so the strategy's realised volatility ends up close to sigma_target regardless of the choice of M and L, which is what makes the parameter sweep interpretable rather than a volatility sweep in disguise.",
+  "novelty": "The signal is a normalised count of up-days over disjoint blocks rather than a cumulative return or a moving-average relationship. Distinct from three-bar momentum (too short, no normalisation) and from a multi-horizon sign consensus, which takes the sign of three cumulative returns rather than counting 100 individual daily signs.",
+  "source": "Sepp & Lucic (2026), 'The Science and Practice of Trend-Following Systems', arXiv:2607.19497v1, Definition 3.1(3) and Appendix A.2 Definition A.4, eq. (A.16); optimal M = L = 10 from Section 7.1. Generalises Moskowitz, Ooi & Pedersen (2012) eq. (A.15) and the sign-of-normalised-returns averaging of Dudler, Gmur & Malamud (2015). PDF fetched and read directly.",
+  "ohlcv_only": true,
+  "_agent": "v2:cfd30cfcc39909b0d50d86a5c465eddca78daa50c3cb3ba17ddf1d4a91a2525a"
+ },
+ {
+  "name": "Wyckoff Spring in a Bounded Base",
+  "category": "wyckoff / failed-breakout",
+  "side": "both",
+  "timeframe": "daily or 15m",
+  "entry_rule": "Define the base over the 20 bars ending at bar[-1]: RH = max high, RL = min low. Require the base to be genuinely bounded: (RH - RL) <= 2.5 x ATR(20), AND at least two separate bars, at least 3 bars apart, with low <= RL + 0.25 x ATR(20) (the support has been tested twice). SPRING BAR (current bar) must satisfy ALL: low < RL - 0.05 x ATR(20) (it does undercut); low >= RL - 0.50 x ATR(20) (the undercut is shallow, not a breakdown); close > RL (it closes back inside the base); close >= low + 0.60 x range (close in the upper 40% of the bar); volume <= 1.2 x the 20-bar average volume (no supply came in on the undercut). Entry: buy stop at the spring bar's high + 0.01 on the next bar; cancel if unfilled after 2 bars. UPTHRUST is the exact mirror at RH for shorts.",
+  "exit_rule": "Initial stop = spring bar low - 0.10 x ATR(20). First target = RH (the top of the base); take 60% there. Trail the remainder beneath the lowest low of the last 3 bars. Full exit on any close below RL - 0.50 x ATR(20) (the spring has failed into a real breakdown).",
+  "inputs": [
+   "OHLCV bars",
+   "ATR(20)",
+   "20-bar rolling high/low",
+   "20-bar average volume",
+   "support-touch counter"
+  ],
+  "params": [
+   "base lookback (20, 30, 40)",
+   "base width cap in ATR (2.0-3.0)",
+   "undercut depth band (0.05-0.50 ATR)",
+   "volume ceiling (0.8x low-volume variant vs 1.2x vs >1.5x shakeout variant)",
+   "required support touches (2 or 3)"
+  ],
+  "why": "Inside a bounded base, a shallow undercut of support that closes back inside on ordinary or light volume means the supply that support was holding back does not exist - the break found no sellers. That converts the base's resistance into the next objective because the only remaining constraint on price is overhead supply, which is measurable as the range top.",
+  "novelty": "Materially different from our liquidity-sweep rule: this requires a BOUNDED base (a maximum width in ATR), at least two prior tests of support, a MAXIMUM undercut depth as well as a minimum, and a volume ceiling. The depth band is the key structural difference - a deep flush disqualifies the setup here, whereas a sweep rule treats deeper as stronger. The target is the range top rather than an R multiple.",
+  "source": "Wyckoff method literature - Pruden, H., 'The Three Skills of Top Trading' (2007), chapters on the spring/shakeout and upthrust-after-distribution; Wyckoff Analytics course material on spring types 1/2/3 classified by penetration depth and volume. Volume-tier classification consistent with published detection implementations (e.g. tradingview.com/script/H3zpGMiK-Wyckoff-Spring-Upthrust-FibAlgo/, which classifies springs as <=0.8x, 0.8-1.5x and >1.5x average volume). The specific ATR-normalised inequalities, the base-width cap and the depth band are my quantification - Wyckoff's own writing is qualitative and unbacktestable as written.",
+  "ohlcv_only": true,
+  "_agent": "v2:90fc99a0abb8b102b1820eb03a4c5a3e0a9527de719f622a682d70a88574c66a"
+ },
+ {
+  "name": "Corrado Rank Event Trigger",
+  "category": "event-study methodology",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily OHLCV of symbol",
+   "daily OHLCV of SPY",
+   "OLS market model",
+   "rank of residual within trailing window",
+   "50-session median volume"
+  ],
+  "entry_rule": "Each day compute the market-model abnormal return AR_s over a rolling 250-session estimation window ending yesterday, then form the 251-value series {AR of the 250 estimation sessions, AR of today}. Rank today's AR within that series ascending (rank 1 = most negative) and set the Corrado rank score K_t = rank_t / 252. LONG at tomorrow's open when K_t <= 1/252 (today is the single most negative abnormal return of the last 251 sessions) AND today's volume >= 2x the 50-session median volume. SHORT at tomorrow's open when K_t >= 251/252 under the same volume condition.",
+  "exit_rule": "Recompute K_t each session for the held name. Exit at the next open after K_t has been inside [0.25, 0.75] for two consecutive sessions (the symbol has returned to its own normal-return regime). Hard time exit at 15 sessions. No price stop - the rank state is the stop, since a further extreme in the adverse direction keeps K outside the band and is handled by the time exit.",
+  "why": "The Corrado rank statistic is distribution-free: it assumes only exchangeability under the null, requires no normality and no symmetry, and is not distorted by event-induced variance - precisely the three failure modes that make a fixed sigma threshold misfire. 'Most extreme day in a year' is a scale-free event definition that self-calibrates to each symbol's own volatility regime, so the same rule works on a 15%-vol utility and a 90%-vol biotech without re-tuning. Kothari & Warner explicitly recommend the non-parametric route when event-period uncertainty inflates variance.",
+  "source": "Corrado (1989) rank test, K_i,t = rank(AR_i,t)/(1 + M_i + L_2), z = (K_bar_0 - 0.5)/S_Kbar, documented with the full formula at https://eventstudytools.com/significance-tests. Recommended in Kothari & Warner (2006) footnote 6: non-parametric tests as in Corrado (1989) may be effective for well-specified tests under increased event-period uncertainty.",
+  "novelty": "Both the entry and the exit are expressed as rank percentiles of the residual distribution rather than as sigma multiples or price levels, so the strategy has no volatility-scaling parameter at all. It is a different statistic from the Patell trigger, not a different threshold on the same statistic: rank is invariant to the shape of the residual distribution.",
+  "params": [
+   "estimation window (250/500)",
+   "entry rank cutoff (1/252, 2/252, 5/252)",
+   "volume confirmation multiple (1.0/2.0/3.0)",
+   "exit rank band ([0.35,0.65] / [0.25,0.75] / [0.15,0.85])",
+   "consecutive sessions in band (1/2/3)",
+   "max hold (10/15/30)"
+  ],
+  "_agent": "v2:bd16921b65dc2b81aa77b1d5b2e3011c09bec1f19dc8937cb226f3ce12b1a53d"
+ },
+ {
+  "name": "GARCH-POT Conditional-EVT Shortfall Budget",
+  "category": "extreme value theory / position sizing",
+  "side": "long",
+  "timeframe": "daily (with intraday execution)",
+  "ohlcv_only": true,
+  "inputs": [
+   "1000 trailing daily returns",
+   "AR(1)-GARCH(1,1)",
+   "generalized Pareto MLE",
+   "conditional VaR and ES"
+  ],
+  "entry_rule": "Every day after the close, per ticker: fit AR(1)-GARCH(1,1) to the trailing 1000 daily log returns, take standardised residuals z_t = (r_t - mu_t)/sigma_t, set u = the 10th percentile of z (so T_u = 100 exceedances out of T = 1000) and fit GPD(xi, beta) by maximum likelihood to the excesses (u - z) over that threshold. Forecast one step ahead: VaR_a = mu_{t+1} + sigma_{t+1} * ( u + (beta/xi) * [ 1 - ( a / (T_u/T) )^(-xi) ] ) and ES_a = mu_{t+1} + sigma_{t+1} * ( VaR_a/(1-xi) - (beta + xi*u)/(1-xi) ), with a = 0.025. Take whatever base long entry the ladder already generates, but size it so that shares * |ES_0.025| * price = 0.75% of account equity. Skip the entry entirely if the GPD fit returns xi >= 0.5 (infinite-variance tail, sizing is meaningless).",
+  "exit_rule": "Exit the full position when either (a) the ticker's realised daily return breaches its own forecast VaR_0.01 on two days within any rolling 10-day window, or (b) the forecast ES_0.025 rises above 2.0x its own trailing 250-day median. Re-enter only after ES_0.025 has been below its 250-day median for 5 consecutive closes.",
+  "params": [
+   "threshold percentile (5/10/15%)",
+   "GARCH window (500/1000/1500 bars)",
+   "a (0.01, 0.025, 0.05)",
+   "equity budget per position (0.25%-1.5%)",
+   "xi rejection cutoff (0.4/0.5)",
+   "re-entry cooldown (3/5/10 days)"
+  ],
+  "why": "McNeil and Frey's two-stage estimator separates the two things that make a tail forecast wrong: the VOLATILITY DYNAMIC (handled by the GARCH filter, so a quiet period does not get a crisis-sized risk number) and the TAIL SHAPE of the innovations (handled by fitting a generalized Pareto to the residual exceedances, per the Pickands-Balkema-de Haan theorem). Unconditional EVT gets stuck at the average tail over the whole sample; plain GARCH-normal underestimates how bad the bad days are. Sizing off a conditional ES rather than a stop distance means every position carries the same expected loss GIVEN a bad day, which is the number that actually kills a levered book.",
+  "source": "McNeil & Frey (2000), 'Estimation of tail-related risk measures for heteroscedastic financial time series: an extreme value approach', J. Empirical Finance 7. Exact VaR/ES closed forms and the two-step procedure as restated in Nieto & Ruiz, 'Backtesting extreme value theory models of expected shortfall', UCM working paper (https://docta.ucm.es/bitstreams/661963d3-b3ca-44e1-b46c-ad300c907b79/download), Section 3. Threshold in the 8-10% quantile range follows Chavez-Demoulin & McGill (2012) and Herrera (2013) as cited there.",
+  "novelty": "The exit is triggered by a MODEL FORECAST breaking down, not by price. Two positions with identical charts get different sizes because their residual tails have different GPD shape parameters.",
+  "_agent": "v2:6c9a27a7b9b617a4303b5edac46faea41cc4f0cce91accc1a836f0c1ce47f6d8"
+ }
+]

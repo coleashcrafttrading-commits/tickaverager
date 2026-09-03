@@ -1,0 +1,210 @@
+[
+ {
+  "name": "Hansen Superior Predictive Ability Gate",
+  "category": "data-snooping test / meta-strategy",
+  "side": "both",
+  "timeframe": "any",
+  "entry_rule": "Same f_{k,t} differentials and the same shared stationary-bootstrap index paths as the Reality Check. Additionally compute omega_hat_k, a Newey-West HAC estimate of the standard deviation of sqrt(n)*f_bar_k with bandwidth floor(4*(n/100)^(2/9)). Observed statistic T_SPA = max(0, max_k sqrt(n)*f_bar_k / omega_hat_k). For the bootstrap, recentre each rule by g_hat_k = f_bar_k * 1{ f_bar_k >= -sqrt( (omega_hat_k^2 / n) * 2*ln(ln(n)) ) } - i.e. a rule whose mean differential is worse than that threshold is recentred at ZERO instead of at its own mean, so hopeless rules cannot pad out the null distribution. For each of B=1000 resamples compute T*_{SPA,i} = max(0, max_k sqrt(n)*(f_bar*_{k,i} - g_hat_k)/omega_hat_k); p_SPA = #{i : T*_{SPA,i} > T_SPA} / B. ARM the family's best rule only if p_SPA < 0.05, and take its own entries.",
+  "exit_rule": "The armed rule's own exit. Re-run the SPA test quarterly on the expanding sample; disarm and flatten at the next open when p_SPA >= 0.10. Always report BOTH the SPA p-value and the White Reality Check p-value from the same bootstrap paths: a family that passes RC but fails SPA is one where the winner is only winning because it is being compared against a lot of noise, and a family that fails RC but passes SPA has been diluted by junk candidates and deserves a rerun with the junk removed.",
+  "inputs": [
+   "per-bar returns of every candidate rule",
+   "benchmark returns",
+   "Newey-West HAC standard errors",
+   "shared stationary bootstrap index paths"
+  ],
+  "why": "White's Reality Check is not consistent against the alternative when the candidate set contains many poor models: adding deliberately terrible rules widens the null distribution of the max and makes the p-value LARGER, so a researcher can manipulate the test in either direction just by curating the candidate list. Hansen fixes this two ways - studentising by each rule's own volatility so a high-variance rule cannot dominate the max on scale alone, and recentring clearly-inferior rules at zero via the law-of-the-iterated-logarithm threshold sqrt(2 log log n). For a 578-rule corpus where most rules are genuinely bad, this is the difference between a test with power and one without.",
+  "novelty": "Different entry decision from the Reality Check on the same data: studentised max plus selective recentring means the two tests can and routinely do disagree, and the disagreement is itself diagnostic about whether the candidate pool was padded.",
+  "source": "Hansen, P. R. (2005), 'A Test for Superior Predictive Ability', Journal of Business & Economic Statistics 23(4), 365-380 - the studentised T^SPA statistic, the g_hat recentring rule with the -sqrt((omega^2/n) 2 log log n) threshold, and the demonstration that White's RC is sensitive to the inclusion of poor alternatives.",
+  "ohlcv_only": true,
+  "params": [
+   "HAC bandwidth rule",
+   "recentring constant (the 2 log log n multiplier, or Hansen's lower/upper/consistent variants)",
+   "B resamples",
+   "q / block length",
+   "alpha"
+  ],
+  "_agent": "v2:56cce8d3edfe660900454917ea52c5d3a854a0d7ea349989abbd29d0a1713538"
+ },
+ {
+  "name": "Extreme Expectile-to-Quantile Tail Heaviness",
+  "category": "extreme value theory / coherent risk measures",
+  "side": "long",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "1000 trailing daily returns",
+   "asymmetric least squares (expectile) via IRLS",
+   "Hill estimator",
+   "Weissman extrapolation"
+  ],
+  "entry_rule": "Each day for SPY (and per ticker for the cross-sectional variant), over the trailing 1000 daily returns with losses Y_t = -r_t: (a) compute the intermediate expectile at tau = 0.95 by asymmetric least squares, xi_tau = argmin_theta sum_t |1{Y_t - theta <= 0} - tau| * (Y_t - theta)^2, solved by iteratively reweighted least squares; (b) compute the Hill estimate gamma_hat with k = 50 upper order statistics; (c) extrapolate to the extreme level tau' = 0.999 by the Weissman-type formula xi_tau' = ((1-tau')/(1-tau))^(-gamma_hat) * xi_tau; (d) compute the empirical 99.9th-percentile loss q_0.999 over the same window; (e) form the heaviness ratio G = xi_tau' / q_0.999. Take the fleet's base long entries only when G is below its own trailing 750-day 80th percentile.",
+  "exit_rule": "Halve every position on the first close where G rises above its trailing 750-day 80th percentile; flatten entirely above the 95th percentile. Restore full size after G has been below the 80th percentile for 5 consecutive closes.",
+  "params": [
+   "tau (0.90, 0.95, 0.98)",
+   "tau' (0.995, 0.999, 1 - 1/n)",
+   "k for Hill (30/50/100)",
+   "window (750/1000/1500 bars)",
+   "percentile gates (70/80/90/95)",
+   "IRLS convergence tolerance"
+  ],
+  "why": "Expectiles are the ONLY law-invariant risk measure that is both coherent and elicitable - VaR is elicitable but not coherent, ES is coherent but not elicitable. An expectile therefore has a natural scoring function (asymmetric squared loss) so it can be backtested directly, and unlike a quantile it depends on the MAGNITUDES of the losses beyond the threshold, not only their frequency. The ratio of an extrapolated extreme expectile to the matching empirical quantile is consequently a clean, self-normalising measure of how much mass sits deep in the tail: under a light tail the two nearly coincide, and the ratio grows with the tail index gamma. Because the Weissman extrapolation is explicitly powered by gamma_hat, the signal is a tail-shape reading rather than a volatility reading, so it can rise while realised volatility is flat - which is precisely the pre-crash configuration that a volatility-targeted book walks into.",
+  "source": "Padoan & Stupfler, 'Tail risk inference via expectiles in heavy-tailed time series', arXiv:2004.04078 - expectile definition eq. (1) with eta_tau(u) = |1(u<=0) - tau| u^2 (Newey & Powell 1987), the heavy-tail model with index gamma, and the Weissman-type extrapolation eq. (3) xi_tau'/xi_tau ~ ((1-tau')/(1-tau))^(-gamma). Coherence-and-elicitability uniqueness from Bellini & Bignozzi, 'Risk measures with the CxLS property' (arXiv:1411.0426) and Ziegel, 'Coherence and elicitability' (arXiv:1303.1690).",
+  "novelty": "A magnitude-weighted tail statistic compared against a frequency-based one; the RATIO is the signal. This is not a volatility measure, not a quantile, and not an ES - it is the divergence between two different notions of 'how bad the tail is'.",
+  "_agent": "v2:6c9a27a7b9b617a4303b5edac46faea41cc4f0cce91accc1a836f0c1ce47f6d8"
+ },
+ {
+  "name": "Volume Share Arbitrage Capital Brake",
+  "category": "crowding / arbitrage-capital proxy",
+  "side": "both",
+  "timeframe": "daily",
+  "entry_rule": "Each trading day, for signal S, identify the extreme deciles the signal would trade (top 10% and bottom 10% of the score distribution across the liquid universe). Compute A_t = [ sum of 20-day average dollar volume across the names in those two deciles ] / [ sum of 20-day average dollar volume across the whole universe ], then z_t = (A_t - mean(A over last 750 days)) / std(A over last 750 days). Trading rule: take S's own entry signal at the next bar's open sized at 100% of base when z_t < 1.0; at 50% of base when 1.0 <= z_t < 2.0; take no new entries when z_t >= 2.0. Additionally require the individual name's own 20-day dollar volume z-score (against its own 250-day history) to be below 3.0, to avoid entering a name in the middle of a volume shock.",
+  "exit_rule": "S's own exit rule. Additionally, flatten all of S's positions at the next open when z_t >= 2.0 AND S's own trailing 20-day P&L is negative - the combination of unusually heavy trading in exactly the names the signal picks and the signal not working is the observable signature of the trade being crowded and unwinding. Re-enable entries when z_t falls back below 1.0.",
+  "inputs": [
+   "OHLCV bars for the full tradable universe",
+   "20-day average dollar volume per name",
+   "universe aggregate dollar volume",
+   "750-day rolling mean and standard deviation of the volume share",
+   "per-strategy trailing 20-day P&L"
+  ],
+  "params": [
+   "decile width (5% / 10% / 20%)",
+   "dollar-volume averaging window (10 / 20 / 60 days)",
+   "z-score history (250 / 750 / 1250 days)",
+   "de-size z threshold (0.5 / 1.0 / 1.5)",
+   "stop-entry z threshold (1.5 / 2.0 / 3.0)"
+  ],
+  "why": "Hanson and Sunderam's central move is to use short interest as an observable measure of how much arbitrage capital is currently deployed against a given strategy, and to show that strategy returns are lower when that capital is high. We have no short-interest feed, but the same economics has an OHLCV shadow: capital deployed against a signal has to trade, and it trades disproportionately in the names at the extremes of that signal. An abnormally high share of total market dollar volume concentrated in the signal's own extreme deciles means the trade is getting crowded. Using it as a capacity throttle rather than a directional signal keeps the claim modest - we are not predicting returns from it, we are refusing to add size to a trade that a lot of other capital has just arrived in.",
+  "source": "Motivating result: Hanson, S.G. & Sunderam, A. (2014), 'The Growth and Limits of Arbitrage: Evidence from Short Interest', Review of Financial Studies 27(4) - short interest measures the arbitrage capital devoted to a quantitative strategy and predicts lower subsequent strategy returns. The volume-share proxy and the specific z-score thresholds are my own synthesis; I was unable to obtain the paper's full text, so the proxy should be validated against the paper's stated direction before being trusted.",
+  "ohlcv_only": true,
+  "_agent": "v2:7ed955461795b80299ed7ce5edbdb67ff7b844cbb139f61f2846b462e7cc4948"
+ },
+ {
+  "name": "Volume-Clock Compression Breakout",
+  "category": "volatility",
+  "side": "both",
+  "timeframe": "1-minute input, volume-time bars",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute OHLCV"
+  ],
+  "params": [
+   "buckets per session 50",
+   "volume-bar lookback 50",
+   "compression percentile 25",
+   "compression window 1000 volume bars",
+   "trailing stop 2.5 sigma_V",
+   "time stop 200 volume bars"
+  ],
+  "entry_rule": "Rebuild the series in volume time. Over the last 20 sessions compute average daily dollar volume ADV$. Set bucket size B = ADV$/50. Walk the 1-minute bars in chronological order accumulating dollar volume, using typical price TP = (H+L+C)/3 so each 1-minute bar contributes TP*V. Each time the accumulator crosses B, close a VOLUME BAR: its open is the open of the first contributing 1-minute bar, its high and low are the extremes over all contributing bars, its close is the close of the bar in which the threshold was crossed; carry the overflow into the next bucket. Recompute B every 20 sessions. On this volume-bar series let u_j = ln(close_j/close_{j-1}) and sigma_V = stdev of the last 50 u_j. ENTER LONG at the close of volume bar j when close_j is the HIGHEST close of the last 50 volume bars AND sigma_V is at or below its 25th percentile over the last 1000 volume bars. ENTER SHORT when close_j is the LOWEST close of the last 50 volume bars under the same sigma_V condition.",
+  "exit_rule": "Trailing stop, updated at each volume-bar close, placed 2.5 * sigma_V * (current close) below the highest close since entry for longs and above the lowest close since entry for shorts. Hard time stop: exit at the close of the 200th volume bar after entry. Flatten at the regular-session close (no overnight carry) since bucket accumulation is discontinuous across the gap.",
+  "why": "Returns sampled in transaction or volume time are far closer to i.i.d. Gaussian than returns sampled in clock time - the fat tails and volatility clustering of clock-time returns are largely an artifact of the random, autocorrelated arrival of trading activity. Sampling by dollar volume subordinates the clock to the information flow and largely removes it. The consequence for a breakout system is decisive: a '50-bar extreme' in volume time carries the same statistical meaning at 09:45 as at 15:30, whereas in clock time it means two utterly different things, which is why clock-time breakout systems need time-of-day filters bolted on. The compression filter then becomes a genuine measure of information-flow-adjusted quiet.",
+  "novelty": "The novelty is the SAMPLING SCHEME, not the trigger. Every excluded strategy operates on fixed clock-time bars; this one changes the clock itself, which changes the null distribution of every statistic computed on it. A clock-time Donchian breakout and a volume-time Donchian breakout fire on different bars, at different frequencies, and with different hit rates - they are not the same system with a different lookback.",
+  "source": "Mandelbrot & Taylor (1967), 'On the distribution of stock price differences', Operations Research 15 - subordination of price to transaction time. Ane & Geman (2000), 'Order Flow, Transaction Clock, and Normality of Asset Returns', Journal of Finance 55(5) - the empirical demonstration that transaction-time returns are close to normal. Easley, Lopez de Prado & O'Hara (2012), 'The Volume Clock: Insights into the High Frequency Paradigm', Journal of Portfolio Management 39(1). Cited from knowledge - the web search budget for this session was already exhausted and I could not open these directly; the dollar-volume bucket construction above follows the standard volume-bar recipe.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "VPIN Toxicity Burst",
+  "category": "microstructure / volume-synchronised order imbalance",
+  "side": "both",
+  "timeframe": "intraday, 1-minute bars bucketed by volume",
+  "entry_rule": "Bucket 1-minute bars into equal-volume buckets of size V = (median daily volume over last 50 sessions) / 50; a bar that overfills a bucket is split pro rata. Within each bucket, for each 1-minute bar i: dP_i = close_i - close_{i-1}; sigma = stdev of 1-minute close-to-close changes over the trailing 250 bars; buyVol_i = vol_i * Phi(dP_i / sigma) with Phi the standard normal CDF (bulk volume classification); sellVol_i = vol_i - buyVol_i. For a completed bucket: signed imbalance S = (sum buyVol - sum sellVol)/V, in [-1, 1]. VPIN = mean of |S| over the last n = 50 completed buckets. Maintain the empirical percentile of VPIN over the trailing 1000 buckets. ENTRY: on the bucket at which VPIN crosses from below to above its 95th percentile, take a position in the direction of the sign of that bucket's S - LONG if S > 0, SHORT if S < 0 - at the open of the next 1-minute bar. No entries after 15:30 ET.",
+  "exit_rule": "Exit when VPIN falls back below its 60th percentile, OR on a 1.5 x ATR14(5-min) adverse move, OR 60 minutes after entry, whichever first. Force flat 15:55 ET.",
+  "inputs": [
+   "1-minute OHLCV",
+   "volume buckets of fixed size",
+   "standard normal CDF",
+   "rolling stdev of 1-min close changes",
+   "ATR(14) on 5-minute bars"
+  ],
+  "params": [
+   "buckets per day (25-100)",
+   "VPIN window n (20-100)",
+   "sigma lookback (100-500 bars)",
+   "entry percentile (90-99)",
+   "exit percentile (40-70)",
+   "CDF choice: normal vs Student-t with 0.1-0.25 d.o.f."
+  ],
+  "why": "VPIN measures order-flow toxicity: the fraction of volume that is one-sided, measured in volume time rather than clock time so that busy periods are stretched and quiet periods compressed. High toxicity means market makers are being adversely selected by informed traders; they widen and withdraw, and price moves in the direction of the toxic flow. Easley, Lopez de Prado & O'Hara showed VPIN peaked hours ahead of the 2010 Flash Crash. Crucially, bulk volume classification was designed precisely so that the measure can be computed from bar aggregates without needing signed trades.",
+  "novelty": "Sampling is by volume, not time, so the indicator has no fixed lookback in minutes at all - it adapts its own clock to activity. This is a fundamentally different information axis from any price-derived oscillator, and the imbalance is estimated by a probabilistic split of each bar's volume rather than the all-or-nothing sign that OBV uses.",
+  "ohlcv_only": true,
+  "source": "Easley, Lopez de Prado & O'Hara (2012), 'Flow Toxicity and Liquidity in a High-Frequency World', Review of Financial Studies 25(5); and 'An Improved Version of the Volume-Synchronized Probability of Informed Trading', https://cfr.ivo-welch.org/published/papers/easley-prado-hara.pdf . BVC buy fraction = Phi(dP/sigma) and the 50-bucket rolling window confirmed against two open implementations: https://github.com/twowaymind/orderflow-metrics (functions bucketByVolume, bvcBuyFraction, vpin) and https://github.com/hanxixuana/flowrisk . The Student-t 0.25 d.o.f. variant is from their 2016 follow-up.",
+  "_agent": "v2:74b72b10aad022b74885d9539dfb07c28d3f484da2b8b7010914406165497ee2"
+ },
+ {
+  "name": "Variance-Ratio Trend Gate",
+  "category": "trend regime filter",
+  "timeframe": "daily",
+  "side": "both",
+  "entry_rule": "Daily, per symbol. Let x_t = ln(close_t/close_{t-1}) over a 252-bar window (nq+1 observations). Compute the Lo-MacKinlay overlapping variance ratio with q = 20: mu = (x_{n} - x_{1} summed)/nq; sigma_a^2 = (1/(nq-1)) * sum over t of (x_t - mu)^2; sigma_c^2 = (1/m) * sum over t=q..nq of (ln(close_t/close_{t-q}) - q*mu)^2 with m = q*(nq - q + 1)*(1 - q/(nq)); VR(q) = sigma_c^2/sigma_a^2. Compute the heteroskedasticity-robust statistic z*(q) = (VR(q) - 1)/sqrt(theta*(q)) using Lo-MacKinlay's theta*(q) = sum over j=1..q-1 of [2(q-j)/q]^2 * delta_j, delta_j = [sum_t (x_t-mu)^2 (x_{t-j}-mu)^2] / [sum_t (x_t-mu)^2]^2. Take a position only when z*(q) > +1.65 (prices are trending, positive autocorrelation at the 20-day scale). Direction: go long at the next open when z*(q) > 1.65 AND close_t/close_{t-63} - 1 > 0; go short when z*(q) > 1.65 AND close_t/close_{t-63} - 1 < 0.",
+  "exit_rule": "Exit to flat when z*(q) falls below 0 (the trending regime has ended) OR when the sign of the 63-day return flips. Nothing is entered while -inf < z*(q) <= 1.65, which is most of the time on most symbols - the gate is deliberately restrictive.",
+  "inputs": [
+   "close",
+   "log returns",
+   "overlapping q-period return variance",
+   "Lo-MacKinlay heteroskedasticity-robust VR z-statistic"
+  ],
+  "params": [
+   "aggregation q (10/20/40)",
+   "estimation window (252/504)",
+   "z threshold",
+   "direction lookback (63)"
+  ],
+  "why": "The P&L of a trend system on a given asset decomposes almost exactly into the difference between its long-horizon and short-horizon realised variance - a trend follower is structurally long the variance term structure. The variance ratio measures precisely that spread, and its z-statistic says whether the spread is bigger than sampling noise. So this gates trend entries on a direct, testable statistic for the thing that pays trend followers, rather than on ADX or a volatility band which are proxies for trend strength, not for return autocorrelation.",
+  "novelty": "Conditions on the autocorrelation structure of returns via a formal statistical test, not on price geometry. ADX measures directional-movement magnitude; a trend t-stat tests a linear drift in log price. VR(q) tests whether variance scales super-linearly with horizon, which is a different null and can be positive when a t-stat on the drift is not (choppy but persistent) and negative when it is (a smooth drift with strong short-horizon mean reversion).",
+  "source": "Lo & MacKinlay (1988), 'Stock Market Prices Do Not Follow Random Walks: Evidence from a Simple Specification Test', Review of Financial Studies 1(1), 41-66 - the VR(q) estimator and the heteroskedasticity-robust z*(q). The link from VR to trend P&L is established in Dao, Nguyen, Deremble, Lemperiere, Bouchaud & Potters (2017), 'Tail protection for long investors: Trend convexity at work', arXiv:1607.02410, which shows trend-following returns 'can be ascribed to the difference between long-term and short-term realized variance' (abstract fetched and verified).",
+  "ohlcv_only": true,
+  "_agent": "v2:cfd30cfcc39909b0d50d86a5c465eddca78daa50c3cb3ba17ddf1d4a91a2525a"
+ },
+ {
+  "name": "Duration-Hazard Phase Reversal",
+  "category": "regime detection / semi-Markov duration dependence",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily close",
+   "causal peak/trough dating",
+   "empirical phase-duration distribution",
+   "ATR(14)"
+  ],
+  "entry_rule": "Date bull/bear phases causally with a Bry-Boschan / Pagan-Sossounov rule on daily closes using window w = 21: index t is a PEAK if C_t = max(C_{t-w..t+w}) and a TROUGH if C_t = min over the same window; enforce a minimum phase length of 21 bars and a minimum amplitude of 8% between consecutive turning points, alternating peaks and troughs. Apply the rule only to data up to t-w, so the dating is causal; the last w bars are the 'provisional' tail of the current phase. Maintain, over all available history, the empirical distribution of COMPLETED phase durations separately for bull and for bear phases. LONG entry at the next open when ALL of: (a) the current phase is a bear, (b) its age in trading days exceeds the 60th percentile of historical bear durations, (c) the close has risen at least 1.5*ATR(14) off the running minimum of the phase within the last 5 bars. SHORT entry is the mirror at old bull-phase age with a 1.5*ATR fall off the running maximum.",
+  "exit_rule": "Exit when the phase age exceeds the 90th percentile of historical bull durations (for a long), or on a 2.5*ATR(14) trailing stop below the highest close since entry, or when a new provisional peak is dated - whichever first.",
+  "params": [
+   "turning-point window w (10-126)",
+   "minimum phase length",
+   "minimum amplitude (5-25%)",
+   "age percentile for entry (50-80)",
+   "age percentile for exit (80-95)",
+   "ATR confirmation multiple"
+  ],
+  "why": "A standard Markov or HMM regime model has geometric sojourn times, which are memoryless: the probability the regime ends today is the same whether it started last week or last year. That is empirically false - stock market phases show positive duration dependence, so the longer a bear has run the higher its termination hazard. Trading the hazard means buying when a downtrend is statistically overdue to end AND price has confirmed with a real move off the low, which is a fundamentally different timing logic from buying a dip or a crossover.",
+  "novelty": "Conditions on HOW LONG the current state has lasted - a variable no HMM, no moving average and none of the existing 32 can express. The entry is the empirical termination hazard crossing a percentile, with price confirmation as a secondary trigger, not the other way round.",
+  "source": "Pagan & Sossounov (2003), 'A Simple Framework for Analysing Bull and Bear Markets', Journal of Applied Econometrics 18(1):23-46 - the censoring rules (minimum phase length, minimum cycle length, amplitude) for turning-point dating; original monthly calibration is a 6-month window, 4-month minimum phase and 20% amplitude, rescaled here for daily bars. Lunde & Timmermann (2004), 'Duration Dependence in Stock Prices: An Analysis of Bull and Bear Markets', Journal of Business & Economic Statistics 22(3) - positive duration dependence in phase termination. Semi-Markov formalisation: Bulla & Bulla, 'Stylized facts of financial time series and hidden semi-Markov models', Computational Statistics & Data Analysis 51 (2006).",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ },
+ {
+  "name": "Bounce-Free Midpoint Reversal with Spread Hurdle",
+  "category": "microstructure-clean reversal",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "daily high",
+   "daily low",
+   "daily close",
+   "dollar volume"
+  ],
+  "params": [
+   "reversal lookback 5 sessions (try 2, 5, 10)",
+   "spread window 21 sessions",
+   "cost multiple 4x (try 2, 4, 8)",
+   "names per side 10 (try 5, 20)"
+  ],
+  "entry_rule": "For each session define the log range midpoint eta_d = (ln(high_d) + ln(low_d))/2 and the log close c_d = ln(close_d). Estimate the effective spread with the Abdi-Ranaldo two-day corrected estimator over the trailing N = 21 sessions: S_i = (1/N) * SUM over d of sqrt( max{ (c_d - eta_d) * (c_d - eta_{d+1}), 0 } ), then take the full spread as 2 * S_i. Compute the reversal signal on MIDPOINTS, not closes: MR_i = eta_t - eta_{t-5}. Cross-sectionally demean over U (close > $5, 20-session median dollar volume > $10M): MRdm_i = MR_i - mean(MR over U). Enter market-on-close: LONG the 10 most negative MRdm_i and SHORT the 10 most positive MRdm_i, equal dollar weight - but include a name ONLY if |MRdm_i| > 4 * S_i. Any name failing the cost hurdle is skipped and the next-ranked name is taken in its place.",
+  "exit_rule": "Close market-on-close after 5 sessions, or earlier on the first session where eta_t crosses back through its own 21-session mean (target reached). Force-close any name whose estimated spread 2*S_i doubles versus its value at entry (liquidity has deteriorated and the edge no longer clears cost).",
+  "why": "Nagel's construction makes the point explicitly: he computes reversal returns from both closing transaction prices and quote midpoints precisely because a large part of measured short-horizon reversal is bid-ask bounce in transaction prices rather than genuine negative serial correlation in the efficient price. Corwin-Schultz and Abdi-Ranaldo establish the OHLCV substitute: the daily high tends to be a buy at the ask and the low a sell at the bid, so the high-low midpoint cancels the two half-spreads and is a much better estimate of the efficient price than the close. Building the signal on midpoints removes the fake component of the edge, and the same paper's estimator prices the round trip so you only trade what clears it.",
+  "novelty": "The input price series itself is different - the strategy never looks at a closing transaction price for the signal - and entry is gated by an estimated transaction cost computed from the same bars. Cross-sectional reversal rules on the existing list all rank on close-to-close returns and have no cost gate, so they systematically select the widest-spread names, where the apparent reversal is largest and least real.",
+  "source": "Stefan Nagel, 'Evaporating Liquidity', NBER Working Paper 17653 (Dec 2011), RFS 25 (2012) 2005-2039, for the transaction-price-versus-midpoint decomposition (PDF opened this session). Estimator from Farshid Abdi and Angelo Ranaldo, 'A simple estimation of bid-ask spreads from daily close, high, and low prices', Review of Financial Studies 30 (2017) 4437-4480, building on Shane Corwin and Paul Schultz, Journal of Finance 67 (2012) 719-759 and Richard Roll, Journal of Finance 39 (1984) 1127-1139 - exact two-day corrected formula transcribed from lecture notes on the estimator opened this session.",
+  "_agent": "v2:a5ae7559b8afe46008ea144e180e06b435128d76433946942f24be45b53033b9"
+ }
+]

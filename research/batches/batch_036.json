@@ -1,0 +1,208 @@
+[
+ {
+  "name": "Diurnal-Scaled Range Breakout",
+  "category": "intraday seasonality normalization",
+  "side": "both",
+  "timeframe": "5-minute",
+  "entry_rule": "For each 5-minute slot s, compute D_s = the median (high - low) in slot s over the previous 20 sessions - a time-of-day-specific volatility unit. Enter long at the next bar's open when the current bar's close exceeds the highest high of the previous 12 bars by more than 0.25 x D_s. Mirror for short. Require the session to be between 09:45 and 15:30.",
+  "exit_rule": "Initial stop at entry minus 1.0 x D_s(entry slot); profit target at entry plus 2.0 x D_s(entry slot); trailing stop that re-scales each bar to 1.0 x D_s(current slot), so the stop tightens automatically through the midday lull and widens again into the close. Time stop after 24 bars. Flat at 15:55.",
+  "inputs": [
+   "5-min OHLCV",
+   "20-session per-slot median range table",
+   "12-bar rolling high/low",
+   "session clock"
+  ],
+  "params": [
+   "breakout buffer in D units (0.1/0.25/0.5)",
+   "lookback bars for the breakout level",
+   "stop and target multiples",
+   "slot-median lookback (10/20/60 sessions)",
+   "recompute the diurnal table weekly vs daily"
+  ],
+  "why": "Andersen and Bollerslev show intraday volatility is the product of a strong deterministic diurnal factor and a persistent stochastic component, and that failing to separate them corrupts every volatility-conditioned inference. A conventional ATR is a blend of the two: an ATR computed on intraday bars is high simply because the sample straddles the open. Scaling both the trigger and the risk unit by the slot's own historical range means a 12-cent midday break and a 40-cent opening break are treated as equivalent events, and the stop distance stops being systematically too wide at lunch and too tight at the close.",
+  "source": "Andersen & Bollerslev, \"Intraday periodicity and volatility persistence in financial markets,\" Journal of Empirical Finance 4(2-3), 1997, 115-158; Andersen, Bollerslev, Dobrev & co-authors, \"Time-Varying Periodicity in Intraday Volatility,\" CREATES RP 2018-05 (pure.au.dk/ws/files/120472862/rp18_05.pdf)",
+  "novelty": "Both the entry threshold and the risk unit are functions of the clock, so the strategy's effective aggressiveness is constant in information terms across the session. The existing ATR expansion breakout uses a flat ATR and therefore concentrates its trades in the first hour by construction; this one deliberately does not.",
+  "ohlcv_only": true,
+  "_agent": "v2:6b9f2b5dcf3163de48a522f4062397cf31d99877dd8bfc1e6a1a94f14a7148f7"
+ },
+ {
+  "name": "Risk-Premium PCA (mean-tilted factor extraction)",
+  "category": "multi-signal combination / dimension reduction",
+  "side": "both",
+  "timeframe": "daily",
+  "ohlcv_only": true,
+  "inputs": [
+   "T x H matrix X of daily returns on the H characteristic-managed portfolios",
+   "X_bar = H-vector of column means of X",
+   "eigen-decomposition of (1/T) X'X + gamma * X_bar X_bar'"
+  ],
+  "entry_rule": "Build the H managed portfolios as above and standardise each column of X to unit standard deviation. Over a trailing 1260-session window form M = (1/T) X'X + gamma * X_bar X_bar', with gamma = 10. Take the first K = 4 eigenvectors of M as the loading matrix Lambda_hat (H x K). Factor returns Fhat = X Lambda_hat (Lambda_hat' Lambda_hat)^{-1}. Compute the tangency weights v = cov(Fhat)^{-1} mean(Fhat) on the same window, clip each element to +/- 3 standard deviations of its own history, and set the stock weight w_{i,t} = sum_p v_p * sum_j Lambda_hat[j,p] * z_{i,j,t}. Scale so sum|w| = 2 and enter every stock with |w_i| >= 0.05% of gross.",
+  "exit_rule": "Rebalance monthly to the new w. If any single retained factor's trailing 252-day Sharpe is below -0.3, set its v_p to zero for the next month and renormalise. Go flat if all K factors are suppressed.",
+  "why": "Ordinary PCA of a covariance matrix uses only the second moment and is blind to the first: a low-variance direction with a large mean - exactly what an arbitrageur wants - gets discarded as the last principal component. Adding gamma * X_bar X_bar' to the second-moment matrix makes the eigen-decomposition trade variance explained against mean return, so the extracted factors are simultaneously the ones that explain the panel and the ones that pay.",
+  "novelty": "A single tuning constant gamma turns dimension reduction into a Sharpe-aware operation; gamma = 0 recovers plain PCA and gamma = -1 recovers correlation-matrix PCA, so it nests the naive versions and can be swept against them directly. No corpus idea extracts latent factors at all, let alone with a pricing penalty.",
+  "source": "Lettau & Pelger, 'Estimating Latent Asset-Pricing Factors', NBER Working Paper 24618 (2018), Journal of Econometrics 218(1):1-31 (2020). The estimator is stated there as PCA of (1/T) X'X + gamma * X_bar X_bar' (with an optional weighting matrix Q, in their empirics the inverse diagonal matrix of return standard deviations), reporting 'Sharpe ratios more than twice as large as those based on conventional PCA'. Companion: Lettau & Pelger, 'Factors That Fit the Time Series and Cross-Section of Stock Returns', Review of Financial Studies (2020).",
+  "params": [
+   "gamma (0 / 1 / 10 / 50 / 100)",
+   "K (2 / 3 / 4 / 6)",
+   "estimation window",
+   "weighting matrix Q (identity vs inverse-stdev)",
+   "tangency vs equal-weight combination of the K factors"
+  ],
+  "_agent": "v2:ea925ed25b6af9d1d174935a23471f0383024a2b532396e09ec39a411346d203"
+ },
+ {
+  "name": "Renko Brick Velocity Burst",
+  "category": "alternative bar construction / Renko",
+  "side": "both",
+  "timeframe": "intraday minutes (bricks built from 1-minute closes)",
+  "ohlcv_only": true,
+  "inputs": [
+   "1-minute OHLCV closes",
+   "daily ATR(14) for brick sizing",
+   "brick timestamps (derived from bar timestamps)"
+  ],
+  "entry_rule": "Build close-only Renko bricks: brick size B = ATR(14) on DAILY bars, recomputed each Monday and held fixed for the week, rounded to the nearest cent. A new up-brick prints when a 1-minute close >= (top of last brick) + B; a new down-brick when a 1-minute close <= (bottom of last brick) - B; a direction reversal requires 2*B (standard close-based Renko). If k bricks print inside one minute bar, assign each a duration of 60/k seconds; otherwise brick i's duration d_i = (timestamp of brick i) - (timestamp of brick i-1) in seconds. Let P20 = the 20th percentile of {d_(i-50) ... d_(i-1)}. ENTER LONG on the close of brick i when: brick i is an up-brick, brick i-1 is an up-brick, d_i < P20 and d_(i-1) < P20. Mirror for short (two consecutive down-bricks, both faster than P20).",
+  "exit_rule": "Exit at the close of whichever comes first: (a) the first brick of the opposite colour, or (b) the first same-colour brick whose duration d > median{d_(i-50)...d_(i-1)} (the burst has decayed), or (c) a hard stop when price trades 2*B against the entry brick's top/bottom. No time-based exit \u2014 everything is measured in bricks.",
+  "why": "Renko discards time, so a brick's wall-clock duration is a pure measure of how fast volume/price is being consumed per unit of price movement. Two bricks printing far faster than usual means participants are crossing the spread repeatedly to get filled at successively worse prices \u2014 urgency, not drift. Institutional order slicing and short-covering both produce this signature. The behavioural claim is that urgency is autocorrelated over the next few price quanta, so the next brick is more likely to continue than reverse.",
+  "novelty": "Nothing in an MA cross or RSI sees this: both are functions of price sampled on the clock, whereas the signal here is the CLOCK ITSELF sampled on price. Two charts with identical brick sequences but different speeds are identical to every indicator on our exclusion list and opposite to this one. The exit is also brick-counted rather than price- or time-based.",
+  "params": [
+   "ATR length for B (10/14/20)",
+   "brick multiple (0.5x/1.0x/1.5x ATR)",
+   "percentile threshold (10/20/30)",
+   "streak length (2/3/4 bricks)",
+   "exit duration multiple (median x 1.0/1.5)",
+   "stop in bricks (1/2/3)"
+  ],
+  "source": "Renko construction and its algorithmic-trading properties: 'On Suitability of Renko Charts for Algorithmic Trading' (2024), DOI 10.1007/978-3-031-81261-3_6; 'Performance of Pairs Trading Strategies Based on Renko and Kagi Charts' (2025), DOI 10.33138/2957-0506.2025.20.483 (open access). The brick-duration signal itself is my synthesis \u2014 the papers establish the chart type, not this rule.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Laguerre RSI Unpinning",
+  "category": "Ehlers DSP / Laguerre cascade",
+  "side": "both",
+  "timeframe": "any (5-minute and daily)",
+  "ohlcv_only": true,
+  "inputs": [
+   "close (or HL2)",
+   "ATR(14)"
+  ],
+  "entry_rule": "Compute the four-stage LAGUERRE CASCADE with damping factor gamma = 0.5 on price P (use HL2): L0 = (1 - gamma)*P + gamma*L0[1]; L1 = -gamma*L0 + L0[1] + gamma*L1[1]; L2 = -gamma*L1 + L1[1] + gamma*L2[1]; L3 = -gamma*L2 + L2[1] + gamma*L3[1]. Accumulate CU and CD from zero each bar over the three adjacent pairs: if L0 >= L1 then CU += (L0 - L1) else CD += (L1 - L0); if L1 >= L2 then CU += (L1 - L2) else CD += (L2 - L1); if L2 >= L3 then CU += (L2 - L3) else CD += (L3 - L2). LRSI = CU/(CU + CD) when the denominator is non-zero, else carry the previous value. ENTER LONG at the close of bar t when LRSI[t] > 0.05 AND LRSI has been <= 0.05 on each of the three preceding bars \u2014 the 'unpinning' event. Mirror for short when LRSI < 0.95 after three or more consecutive bars >= 0.95.",
+  "exit_rule": "For a long, exit at the close of the first bar where EITHER (a) LRSI >= 0.95 (fully pinned at the opposite rail), or (b) LRSI falls back to <= 0.05 (the unpinning failed). Hard stop at 2.0 * ATR(14) below entry. There is no fixed profit target \u2014 the trade is defined entirely by the rail-to-rail traverse.",
+  "why": "Because the Laguerre cascade is a set of all-pass sections rather than an averaging window, LRSI saturates exactly at 0 or 1 whenever the four stages are perfectly ordered, and it sits pinned there through a persistent directional move. The pin is therefore a state, not a threshold crossing, and it typically persists for many bars. The FIRST bar on which the ordering breaks is the earliest possible evidence that the persistent flow has stopped \u2014 and because the cascade has near-zero lag over a very short effective data window, that evidence arrives well before any windowed oscillator could produce it.",
+  "novelty": "Distinct from an RSI extreme in both construction and trigger. Construction: no window, no averaging of gains and losses \u2014 the statistic is a ratio of differences between successive stages of an all-pass filter cascade. Trigger: the entry requires a MULTI-BAR SATURATED STATE followed by its termination, which is a state-machine condition rather than a level crossing; a plain 'RSI < 30' fires on a level regardless of how long it has been there. The exit is a traverse to the opposite rail, so the holding period is set by the move, not by a target.",
+  "params": [
+   "gamma (0.3/0.5/0.7/0.8)",
+   "price input (close/HL2/HLC3)",
+   "rail threshold (0.02/0.05/0.10)",
+   "required pinned bars (2/3/5)",
+   "exit rail (0.90/0.95/1.0)",
+   "ATR stop multiple"
+  ],
+  "source": "John F. Ehlers, 'Time Warp - Without Space Travel' (mesasoftware.com/papers/TimeWarp.pdf) for the Laguerre filter and Laguerre RSI. The exact CU/CD accumulation over the three adjacent stage pairs and the default gamma = 0.5 were verified against github.com/MathisWellmann/go_ehlers_indicators, file laguerre_rsi.go, which I fetched and read. The unpinning entry and rail-to-rail exit are my synthesis.",
+  "_agent": "v2:c89e2e1d898db584baf879b88855379da822896e033d783564f1c3d2beef6015"
+ },
+ {
+  "name": "Roughness Index of Log-Volatility",
+  "category": "volatility",
+  "side": "both",
+  "timeframe": "daily statistic, 5-minute input",
+  "ohlcv_only": true,
+  "inputs": [
+   "5-minute close for RV",
+   "daily close",
+   "ATR(14)",
+   "SMA20"
+  ],
+  "params": [
+   "lag set {1,2,3,4,5,8,12,16,25,40}",
+   "window T=500",
+   "persistent H threshold 0.25",
+   "rough H threshold 0.08",
+   "vol percentile 70",
+   "excursion 2.0 ATR"
+  ],
+  "entry_rule": "Daily volatility proxy: sigma_t = sqrt(RV_t) where RV_t = SUM of squared 5-minute log returns for session t. Set x_t = ln(sigma_t). Over a trailing window of T = 500 sessions and for each lag D in {1,2,3,4,5,8,12,16,25,40} compute the first absolute moment m(D) = (1/(T-D)) * SUM_t |x_{t+D} - x_t|. Fit H_vol = the OLS slope of ln m(D) on ln D across the ten lags (at q=1 the scaling m(q,D) ~ D^(qH) gives slope = H directly). PERSISTENT-VOL TREND ENTRY: LONG at the next open when H_vol >= 0.25 AND sigma_t >= its 70th percentile over the trailing 252 sessions AND the 20-session sum of daily log returns > 0; SHORT under the exact mirror (H_vol >= 0.25, sigma_t >= 70th percentile, 20-session sum < 0). ROUGH-VOL FADE ENTRY: when H_vol <= 0.08, SHORT at the next open if (C_t - SMA20)/ATR(14) >= +2.0, LONG at the next open if (C_t - SMA20)/ATR(14) <= -2.0. No trade for 0.08 < H_vol < 0.25.",
+  "exit_rule": "Trend leg: hold while H_vol >= 0.20 and the sign of the 20-session return sum is unchanged; exit at the close when either fails, or on a trailing stop 3.0*ATR(14) from the extreme close since entry. Fade leg: exit at the close on the first touch of SMA20, or on a stop 2.0*ATR(14) from entry, or after 5 sessions.",
+  "why": "Equity log-volatility is empirically a fractional Brownian motion with H of order 0.1 - it is far rougher than a standard diffusion, meaning a volatility shock decays almost immediately. When the rolling estimate of H_vol drifts up toward 0.25-0.35 the volatility process has temporarily become persistent: today's elevated volatility will still be here in a week. High AND persistent volatility with a directional tape is a regime that sustains trends, because the mean-reversion pressure that normally kills them is absent. Conversely at very low H_vol every volatility spike is a one-bar event, so a large ATR-normalized price excursion has no follow-through mechanism and should be faded.",
+  "novelty": "The Hurst exponent is estimated on the LOG-VOLATILITY series, not on price. This is a completely different object from a price-based DFA or R/S Hurst: price H hovers near 0.5 and moves little, while vol H sits near 0.1 and its excursions are large and economically meaningful. The estimator is also different - it is the q=1 absolute-increment scaling used in the rough-volatility literature, not a rescaled-range or detrended-fluctuation calculation.",
+  "source": "Gatheral, Jaisson & Rosenbaum, 'Volatility is rough', arXiv:1410.3394, published Quantitative Finance 18(6) 2018 - opened and verified this session; confirms 'log-volatility behaves essentially as a fractional Brownian motion with Hurst exponent H of order 0.1, at any reasonable time scale' and the m(q,Delta) ~ Delta^(qH) scaling framework. The rolling-window trading application and the two-branch entry are my synthesis.",
+  "_agent": "v2:eced6928834f6e397680bf5b6bea3e01ef64d11fe3b78e866d19e3945561f697"
+ },
+ {
+  "name": "Value Area Overlap Regime Switch",
+  "category": "volume profile / regime classification",
+  "side": "both",
+  "timeframe": "daily classification, 5-minute execution",
+  "entry_rule": "Each session compute [VAL_t, VAH_t] (70% value area) from that session's 1-minute volume profile. Overlap ratio R_t = length([VAL_t,VAH_t] INTERSECT [VAL_{t-1},VAH_{t-1}]) / length([VAL_t,VAH_t] UNION [VAL_{t-1},VAH_{t-1}]); R_t = 0 if disjoint. BALANCE regime if R_t >= 0.60 AND R_{t-1} >= 0.60. MIGRATION-UP regime if R_t <= 0.20 AND POC_t > POC_{t-1}; MIGRATION-DOWN if R_t <= 0.20 AND POC_t < POC_{t-1}. Next session, after 10:00 ET: (a) in BALANCE, SHORT on the first 5-minute bar that closes above VAH_t, and LONG on the first 5-minute bar that closes below VAL_t; (b) in MIGRATION-UP, LONG on the first 5-minute bar that closes above VAH_t; (c) in MIGRATION-DOWN, SHORT on the first 5-minute bar that closes below VAL_t. If 0.20 < R_t < 0.60, take no trade that day.",
+  "exit_rule": "BALANCE trades: target POC_t, stop 0.5 x ATR14(5-min) beyond the entry bar's extreme, flat at 15:55. MIGRATION trades: trailing stop at 1.5 x ATR14(5-min) from the best close since entry, no fixed target, flat at 15:55.",
+  "inputs": [
+   "1-minute OHLCV",
+   "5-minute OHLCV",
+   "daily VAH/VAL/POC series",
+   "ATR(14) on 5-minute bars"
+  ],
+  "params": [
+   "value area percentage",
+   "balance overlap threshold (0.5-0.75)",
+   "migration overlap threshold (0.10-0.30)",
+   "consecutive balance days required (1-3)",
+   "trailing ATR multiple"
+  ],
+  "why": "The same level - the edge of yesterday's value - means opposite things depending on whether the auction is rotating or discovering. Day-over-day overlap of the volume distribution is a direct measurement of which state you are in: heavily overlapping value areas mean both sides keep agreeing on the same prices (mean reversion at the edges), non-overlapping value areas mean the market is repricing and edge breaks continue. Most band-fade and breakout systems fail because they apply one mode unconditionally; the overlap ratio is the switch.",
+  "novelty": "The regime detector is the geometric overlap of two volume distributions, not volatility (squeeze), not trend strength (ADX), not a moving-average relationship. The same trigger price produces a long or a short depending on that overlap, which no single-mode system does.",
+  "ohlcv_only": true,
+  "source": "Auction-market-theory treatment of overlapping vs separated value areas, https://www.profitsmasher.com/2026/06/auction-market-theory.html and https://marketprofile.info/articles/value-area-explained (the sources say overlapping VAs = balance, separated = discovery, and prescribe fading vs following accordingly). The Jaccard-style overlap ratio and the numeric 0.60 / 0.20 cutoffs are my specification to make it computable.",
+  "_agent": "v2:74b72b10aad022b74885d9539dfb07c28d3f484da2b8b7010914406165497ee2"
+ },
+ {
+  "name": "KAMA noise-scaled excursion filter",
+  "category": "adaptive trend-following, stop-and-reverse",
+  "side": "both",
+  "timeframe": "daily or 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "close",
+   "KAMA(10,2,30)",
+   "rolling stdev of KAMA first differences"
+  ],
+  "entry_rule": "Efficiency Ratio ER_t = |Close_t - Close_{t-10}| / sum_{i=0..9} |Close_{t-i} - Close_{t-i-1}| (0 if the denominator is 0). Smoothing constant SC_t = [ ER_t * (2/(2+1) - 2/(30+1)) + 2/(30+1) ]^2. KAMA_t = KAMA_{t-1} + SC_t * (Close_t - KAMA_{t-1}), seeded with SMA(Close,10). FILTER_t = 0.1 * stdev(KAMA_i - KAMA_{i-1} for i in t-19..t). Maintain KAMA_min = the lowest KAMA value recorded since the system last went short (or since inception), and KAMA_max = the highest KAMA value since it last went long. ENTER LONG at the close of bar t when KAMA_t - KAMA_min > FILTER_t; on that entry reset KAMA_max := KAMA_t. ENTER SHORT when KAMA_max - KAMA_t > FILTER_t; on that entry reset KAMA_min := KAMA_t.",
+  "exit_rule": "The system is always in the market: the long is closed by the short entry condition and vice versa (stop-and-reverse). Optional risk overlay that does not change the signal: flatten to cash if the open position is worse than -3.0 * ATR(20) from entry, and stay flat until the next opposite signal.",
+  "params": [
+   "ER period (default 10)",
+   "fast constant period (default 2)",
+   "slow constant period (default 30)",
+   "filter coefficient f (default 0.1; sweep 0.0 to 0.5)",
+   "filter stdev lookback (default 20)",
+   "optional hard-stop ATR multiple"
+  ],
+  "why": "The efficiency ratio makes the average sprint in a directional market and crawl in a sideways one, so the average itself already adapts. The filter then solves the remaining problem: a slow-moving average still wiggles, and the size of that wiggle depends on the regime. Scaling the entry threshold to the standard deviation of KAMA's own bar-to-bar changes means the trigger demands a move that is large relative to how much the average is currently jittering, which is a self-calibrating noise gate rather than a fixed number of ticks.",
+  "novelty": "The trigger is a volatility-scaled displacement from the average's own local extreme, not the sign of the slope (Hull MA slope) and not a price/average crossover (EMA cross). Because the reference is a running extreme that only resets on a signal, the system will not flip on a single bar's turn - it requires the average to travel a measured distance back from its high-water mark.",
+  "source": "Perry J. Kaufman's Adaptive Moving Average. KAMA(10,2,30) formula - ER = Change/Volatility, SC = [ER * (2/3 - 2/31) + 2/31]^2, KAMA = prior KAMA + SC*(Price - prior KAMA), seeded with an SMA - verified from StockCharts ChartSchool 'Kaufman's Adaptive Moving Average (KAMA)' (fetched 2026-09-02). The percent-of-standard-deviation entry filter is Kaufman's own published refinement (Smarter Trading, 1995; Trading Systems and Methods); I pinned the coefficient at 0.1 and left it sweepable.",
+  "_agent": "v2:28e034d84f2a9fadfe2cd37476ed1f0fe31299b3ab96ab30d97df90c3ec92854"
+ },
+ {
+  "name": "FLOSS Arc-Curve Segmentation",
+  "category": "regime detection / matrix profile",
+  "side": "both",
+  "timeframe": "daily or 15-minute",
+  "ohlcv_only": true,
+  "inputs": [
+   "close (z-normalised subsequences)",
+   "matrix profile index",
+   "ATR(14)"
+  ],
+  "entry_rule": "On the trailing n = 1000 bars of close, compute the matrix profile INDEX I with subsequence length m = 30 using MASS (FFT-based z-normalised Euclidean distance) with an exclusion zone of m/2, keeping only arcs that point FORWARD in time (the online FLOSS variant, which is what makes it causal). Build the arc curve AC[i] = the number of pairs (j, I[j]) whose arc spans index i. Divide by the theoretical parabolic arc count 2*i*(n-i)/n to get the corrected arc curve CAC[i], clipped at 1. Declare a regime boundary at the most recent index i that is a local minimum of CAC with CAC[i] < 0.35 and is at least 5*m bars from any previously declared boundary. LONG entry at the next open when a boundary was declared within the last 3 bars AND the mean close over the bars since the boundary exceeds the mean close over the m bars immediately before it; SHORT if lower.",
+  "exit_rule": "Exit at the next declared regime boundary, or after 30 bars, or on a 2.5*ATR(14) trailing stop from the best close since entry - whichever first.",
+  "params": [
+   "subsequence length m (10-60)",
+   "history window n",
+   "CAC threshold (0.25-0.50)",
+   "minimum boundary spacing",
+   "entry recency window"
+  ],
+  "why": "Nearest-neighbour pointers between similar subsequences rarely cross a genuine semantic boundary: if the market's shape vocabulary changes at time i, subsequences after i will match each other rather than anything before i, so the arc count over i collapses. This detects a change in the KIND of behaviour - the character of the wiggles - independently of price level, volatility level, or trend. It is the one segmentation method here that will flag a regime change in which volatility and mean are both unchanged.",
+  "novelty": "Regime boundaries come from the topology of nearest-neighbour arcs, not from any moment of the return distribution. The only parameter that matters is the subsequence length m. Nothing in the existing 32 or in the other ideas here detects a change in pattern vocabulary at constant mean and variance.",
+  "source": "Gharghabi, Ding, Yeh, Kamgar, Ulanova & Keogh, 'Matrix Profile VIII: Domain Agnostic Online Semantic Segmentation at Superhuman Performance Levels', IEEE ICDM 2017 (FLUSS offline, FLOSS online with forward-only arcs). UCR Matrix Profile page: cs.ucr.edu/~eamonn/MatrixProfile.html. Financial application survey: 'Financial Time Series: Market Analysis Techniques Based on Matrix Profiles', MDPI Engineering Proceedings 5(1):45.",
+  "_agent": "v2:4be8d8c61b672363c49031031aba6f0b0f931cf893f733f55af94c7666302620"
+ }
+]
