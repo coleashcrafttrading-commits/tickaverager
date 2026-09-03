@@ -31,6 +31,21 @@ REPORT_DIR = ROOT / "reports"
 REPORT_DIR.mkdir(exist_ok=True)
 
 
+def clean_decay(row) -> Optional[float]:
+    """Decay, or None where the ratio is an artifact rather than a measurement.
+
+    search.py suppresses it below an in-sample score of 0.05, which still lets
+    through cases like +0.056 in / +0.589 out reading as "decay 10.5". A ratio
+    is only informative when its denominator is a real result, so the display
+    demands a clearly positive in-sample score before showing one.
+    """
+    tr = (row.get("train") or {}).get("median_score")
+    te = (row.get("test") or {}).get("median_score")
+    if tr is None or te is None or tr < 0.15:
+        return None
+    return round(te / tr, 3)
+
+
 def load_rounds() -> dict:
     out = {}
     for f in sorted(SEARCH.glob("round*.json")):
@@ -214,7 +229,7 @@ def render(rounds, field, finalists, total_bt, H) -> str:
         B.append('<div class="kpis">'
                  + H.kpi("Out of sample", num(te.get("median_score")))
                  + H.kpi("In sample", num(tr.get("median_score")))
-                 + H.kpi("Decay", str(w.get("decay")))
+                 + H.kpi("Decay", str(clean_decay(w) if clean_decay(w) is not None else "n/a"))
                  + H.kpi("Symbols", "%d of %d" % (te.get("symbols_profitable", 0),
                                                   te.get("symbols_scored", 0)))
                  + H.kpi("Trades", format(te.get("total_trades", 0), ","))
@@ -278,7 +293,7 @@ def render(rounds, field, finalists, total_bt, H) -> str:
             "R%d" % r["round"],
             num(te.get("median_score")),
             num((r.get("train") or {}).get("median_score")),
-            str(r.get("decay") or "—"),
+            str(clean_decay(r) if clean_decay(r) is not None else "—"),
             "%d/%d" % (te.get("symbols_profitable", 0), te.get("symbols_scored", 0)),
             format(te.get("total_trades", 0), ","),
             '<span class="%s">%s</span>' % (cls(te.get("sum_pl")), signed(te.get("sum_pl"))),
