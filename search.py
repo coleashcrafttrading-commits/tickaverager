@@ -399,9 +399,23 @@ def main(argv=None) -> int:
     ap.add_argument("--round", type=int, default=0)
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--only", default="",
+                    help="a previous round's json -- run only what it promoted")
     a = ap.parse_args(argv)
 
+    # THE FUNNEL ONLY FUNNELS IF EACH ROUND IS HANDED THE LAST ONE'S SURVIVORS.
+    # Invoked as `--round N` on its own, main() loaded the whole library every
+    # time, so round 2 re-ran all 264 families instead of round 1's 57 and took
+    # 199 minutes rather than 30. Round 3 at 50 symbols would have taken ten
+    # hours. `--all` chains correctly in one process; `--only` chains across
+    # processes, which is what a shell script needs.
     fams = load_families()
+    if a.only:
+        prev = json.loads(Path(a.only).read_text(encoding="utf-8"))
+        keep = set(prev.get("promoted") or [])
+        fams = [f for f in fams if f["slug"] in keep]
+        print("carrying %d families promoted by %s"
+              % (len(fams), Path(a.only).name))
     if a.limit:
         fams = fams[:a.limit]
     print("%d families loaded from %s\n" % (len(fams), FAM_DIR))
