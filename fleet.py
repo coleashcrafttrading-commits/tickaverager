@@ -130,7 +130,19 @@ SYMBOL_RE = re.compile(r"[A-Z][A-Z.\-]{0,9}")
 
 # =================================================================== fleet
 class Fleet:
-    def __init__(self) -> None:
+    def __init__(self, autostart: bool = False) -> None:
+        """autostart=False by default, and that default is a safety rule.
+
+        Constructing a Fleet used to START every engine flagged autostart --
+        armed, transmitting real orders. Any script that touched fleet.py for
+        any reason therefore became a second trading process against the same
+        account, racing the dashboard for the same fills and the same ledgers.
+        A research script asking for a symbol list did exactly that.
+
+        Only the dashboard passes autostart=True. Everything else gets an inert
+        fleet it can read from.
+        """
+        self._autostart = bool(autostart)
         self.lock = threading.RLock()
         self.cfg = load_raw_config()
         self.events: deque = deque(maxlen=300)
@@ -252,7 +264,7 @@ class Fleet:
         # anything flagged autostart comes up running -- still in whatever
         # dry/armed state it was left in, which the UI shouts about
         for sym, e in self.engines.items():
-            if e.cfg.get("autostart"):
+            if e.cfg.get("autostart") and self._autostart:
                 e.start()
                 self.ev("WARN", f"{sym}: autostart is on -- engine STARTED "
                                 f"({'dry run' if e.cfg.get('dry_run') else 'ARMED, LIVE ORDERS'}).",
@@ -867,5 +879,7 @@ def get_fleet() -> Fleet:
     global FLEET
     with _FLEET_LOCK:
         if FLEET is None:
-            FLEET = Fleet()
+            # The dashboard is the ONLY caller that may bring armed engines
+            # up on construction. Every other process gets an inert fleet.
+            FLEET = Fleet(autostart=os.environ.get("TICKAVERAGER_DASHBOARD") == "1")
     return FLEET

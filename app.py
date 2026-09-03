@@ -54,6 +54,10 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
+# This process IS the dashboard, and is therefore the one caller allowed to
+# bring armed engines up on construction. Every other script that imports
+# fleet.py gets an inert fleet -- see Fleet.__init__.
+os.environ["TICKAVERAGER_DASHBOARD"] = "1"
 
 logging.basicConfig(
     level=logging.INFO,
