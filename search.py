@@ -178,6 +178,10 @@ def variations(fam: dict, grid_names: list[str], cap: int = 0) -> list[dict]:
     return thin(out, cap)
 
 
+def num_or(x, dp=3):
+    return "n/a" if x is None else ("%+.*f" % (dp, x))
+
+
 def score_one(s: dict) -> Optional[float]:
     """Total P/L per dollar of the worst drawdown it took to earn it."""
     if s["total_trades"] < MIN_TRADES:
@@ -189,17 +193,30 @@ def score_one(s: dict) -> Optional[float]:
 
 
 def aggregate(per: dict) -> dict:
-    sc = [v["score"] for v in per.values() if v.get("score") is not None]
-    pos = [v for v in per.values() if (v.get("total_pl") or 0) > 0]
+    """Everything measured over the SAME set of symbols.
+
+    The first version counted `scored` over symbols that cleared the trade
+    minimum and `profitable` over every symbol that ran, then printed them as
+    one fraction -- producing "7 of 5 symbols profitable", which is not a
+    weaker claim than intended, it is not a claim at all. Both now count only
+    symbols that actually scored.
+    """
+    scored = {k: v for k, v in per.items() if v.get("score") is not None}
+    sc = [v["score"] for v in scored.values()]
+    pos = [v for v in scored.values() if (v.get("total_pl") or 0) > 0]
     return {
         "median_score": round(statistics.median(sc), 4) if sc else None,
-        "symbols_scored": len(sc),
+        "symbols_scored": len(scored),
         "symbols_profitable": len(pos),
-        "consistency": round(len(pos) / len(per), 3) if per else 0.0,
-        "total_trades": sum(v.get("trades", 0) for v in per.values()),
-        "sum_pl": round(sum(v.get("total_pl", 0.0) for v in per.values()), 2),
-        "sum_edge": round(sum(v.get("edge", 0.0) for v in per.values()), 2),
-        "beat_twin": sum(1 for v in per.values() if (v.get("edge") or 0) > 0),
+        "symbols_run": len(per),
+        "consistency": round(len(pos) / len(scored), 3) if scored else 0.0,
+        "total_trades": sum(v.get("trades", 0) for v in scored.values()),
+        "sum_pl": round(sum(v.get("total_pl", 0.0) for v in scored.values()), 2),
+        "sum_edge": round(sum(v.get("edge", 0.0) for v in scored.values()), 2),
+        "beat_twin": sum(1 for v in scored.values() if (v.get("edge") or 0) > 0),
+        "beat_twin_frac": (round(sum(1 for v in scored.values()
+                                     if (v.get("edge") or 0) > 0) / len(scored), 3)
+                           if scored else 0.0),
     }
 
 
@@ -282,9 +299,12 @@ def run_round(rnd: int, families: list[dict], log=print) -> dict:
             "note": fam.get("note", ""), "source": fam.get("source", ""),
             "params": vs[best_k], "train": best_agg, "test": te,
             "per_symbol_test": test.get(best_k, {}),
+            # A ratio against a near-zero or negative denominator is not a
+            # decay measurement, it is a division artifact -- the first run
+            # produced "decay 65.5" and "decay -10.9" and ranked on them.
             "decay": (round(te["median_score"] / best_agg["median_score"], 3)
                       if te["median_score"] is not None
-                      and best_agg["median_score"] else None),
+                      and (best_agg["median_score"] or 0) > 0.05 else None),
         })
         if fi % 10 == 0 or fi == len(families):
             log("  %4d/%-4d  %-38s  %s backtests  %ds"
@@ -292,19 +312,38 @@ def run_round(rnd: int, families: list[dict], log=print) -> dict:
                    int(time.time() - started)))
 
     # ---- promotion, on the TEST window but with the gates set in advance ----
+    # A family must work on BOTH windows. Gating on the test window alone
+    # selects for test-window luck: the first run promoted eleven families
+    # whose in-sample score was NEGATIVE and whose out-of-sample score happened
+    # to come out positive, and ranked one of them first at +1.85. That is not
+    # a strategy that survived scrutiny, it is a strategy that failed the
+    # window it was tuned on and got lucky on the window it was judged on.
+    #
+    # It must also BEAT THE PASSIVE TWIN on the majority of symbols. Scoring
+    # well while losing to simply holding the same exposure is not an edge,
+    # and 27 of the first 59 promotions were doing exactly that.
     kept, cut = [], []
     for r in results:
-        te = r["test"]
+        te, tr = r["test"], r["train"]
         why = None
         if te["median_score"] is None:
             why = "too few trades out of sample to score"
+        elif (tr["median_score"] or -9) <= 0:
+            why = "in-sample score %s -- it never worked on the window it was tuned on" % (
+                num_or(tr["median_score"]))
         elif te["median_score"] < cfg["min_score"]:
             why = "out-of-sample score %.3f below the %.2f gate" % (
                 te["median_score"], cfg["min_score"])
         elif te["consistency"] < cfg["consistency"]:
-            why = "profitable on only %.0f%% of symbols" % (te["consistency"] * 100)
+            why = "profitable on only %.0f%% of the symbols it scored on" % (
+                te["consistency"] * 100)
+        elif te.get("beat_twin_frac", 0) < 0.5:
+            why = "beat the passive twin on only %.0f%% of symbols" % (
+                te.get("beat_twin_frac", 0) * 100)
         (cut if why else kept).append(dict(r, cut_reason=why))
-    kept.sort(key=lambda r: -(r["test"]["median_score"] or 0))
+    # ranked by EDGE OVER THE TWIN, not by raw score: the question is whether
+    # the trading beat holding the same exposure, which is the whole point
+    kept.sort(key=lambda r: -(r["test"].get("sum_edge") or 0))
     kept = kept[:cfg["keep"]]
 
     out = {
