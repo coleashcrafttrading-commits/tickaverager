@@ -47,6 +47,7 @@ way of overfitting.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
 import json
 import math
 import statistics
@@ -64,19 +65,26 @@ MIN_TRADES = 20            # below this a "result" is a handful of coin flips
 
 
 # ------------------------------------------------------------------ rounds
+# `cap` bounds the variations tried per family in that round. The screen is
+# TRIAGE -- the question is "does this fire and is it not obviously worthless",
+# not "what is its best parameterisation" -- so trying 108 variations of a
+# family that is about to be cut is six hours spent to learn nothing. Later
+# rounds face a small field and can afford the full grid.
 ROUNDS = {
-    1: dict(name="screen", symbols=12, timeframe="5Min", days=120,
-            grids=["core"], min_score=0.0, consistency=0.45, keep=140),
-    2: dict(name="deepen", symbols=25, timeframe="5Min", days=120,
-            grids=["core", "wide", "trail"], min_score=0.10,
-            consistency=0.55, keep=45),
+    1: dict(name="screen", symbols=12, timeframe="5Min", days=90,
+            grids=["core"], cap=24, min_score=0.0, consistency=0.45, keep=80),
+    2: dict(name="deepen", symbols=20, timeframe="5Min", days=120,
+            grids=["core", "wide", "trail"], cap=54, min_score=0.10,
+            consistency=0.55, keep=30),
     3: dict(name="broaden", symbols=50, timeframe="5Min", days=120,
-            grids=["core", "wide", "trail"], min_score=0.15,
-            consistency=0.60, keep=18),
+            grids=["core", "wide", "trail"], cap=90, min_score=0.15,
+            consistency=0.60, keep=16),
     4: dict(name="broaden-15m", symbols=50, timeframe="15Min", days=250,
-            grids=["core", "wide", "trail"], min_score=0.10,
-            consistency=0.55, keep=12),
+            grids=["core", "wide", "trail"], cap=90, min_score=0.10,
+            consistency=0.55, keep=10),
 }
+
+WORKERS = 6            # symbols evaluated concurrently
 
 
 def load_families(only: Optional[list] = None) -> list[dict]:
@@ -136,7 +144,22 @@ def expand(grid: dict) -> list[dict]:
     return combos
 
 
-def variations(fam: dict, grid_names: list[str]) -> list[dict]:
+def thin(items: list, cap: int) -> list:
+    """Evenly spaced subset, endpoints kept.
+
+    Taking the FIRST `cap` items would sample one corner of the grid -- always
+    the lowest thresholds, always the tightest stops -- and a screen that only
+    ever sees one corner is not a screen. Even spacing keeps the extremes,
+    which is where a family usually reveals that it does not work at all.
+    """
+    if cap <= 0 or len(items) <= cap:
+        return items
+    step = (len(items) - 1) / (cap - 1)
+    idx = sorted({int(round(k * step)) for k in range(cap)})
+    return [items[j] for j in idx]
+
+
+def variations(fam: dict, grid_names: list[str], cap: int = 0) -> list[dict]:
     import research
     sig = expand(fam.get("grid") or {})
     ex = []
@@ -152,7 +175,7 @@ def variations(fam: dict, grid_names: list[str]) -> list[dict]:
                 if k in s:
                     v[k] = s[k]
             out.append(v)
-    return out
+    return thin(out, cap)
 
 
 def score_one(s: dict) -> Optional[float]:
@@ -203,32 +226,44 @@ def run_round(rnd: int, families: list[dict], log=print) -> dict:
         except Exception as e:
             log("  %-40s BUILD FAILED %r" % (fam["name"][:40], e))
             continue
-        vs = variations(fam, cfg["grids"])
+        vs = variations(fam, cfg["grids"], cfg.get("cap", 0))
         # train chooses, test reports -- never the other way round
         train, test = {}, {}
-        for sym, bars in data.items():
+
+        def one_symbol(item):
+            """Both windows for one symbol. Each run_many spawns its own child
+            process, so the orchestration is I/O-bound and threads are the
+            right tool -- the CPU work happens in the children."""
+            sym, bars = item
             tr, te = research.split(bars)
             opts = {"slippage": research.slippage_for(bars), "fee_per_share": 0.0,
                     "max_positions": 8, "bar_size": cfg["timeframe"]}
-            for win, store in (("train", train), ("test", test)):
-                bset = tr if win == "train" else te
+            got = {}
+            for win, bset in (("train", tr), ("test", te)):
                 reps = btcode.run_many(
                     bset, [{"id": str(k), "code": code, "params": v}
                            for k, v in enumerate(vs)],
                     opts=opts, slim=True, timeout=3600)
-                n_bt += len(reps)
-                for k, r in enumerate(reps):
-                    if not r.get("ok"):
-                        continue
-                    s = r["summary"]
-                    store.setdefault(k, {})[sym] = {
-                        "score": score_one(s), "total_pl": s["total_pl"],
-                        "trades": s["total_trades"],
-                        "edge": s.get("edge_vs_twin", 0.0),
-                        "twin": s.get("twin_dollars", 0.0),
-                        "dd": s.get("max_drawdown", 0.0),
-                        "tilt": s.get("tilt", 0.0),
-                    }
+                got[win] = reps
+            return sym, got
+
+        with cf.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            for sym, got in ex.map(one_symbol, list(data.items())):
+                for win, store in (("train", train), ("test", test)):
+                    reps = got[win]
+                    n_bt += len(reps)
+                    for k, r in enumerate(reps):
+                        if not r.get("ok"):
+                            continue
+                        s = r["summary"]
+                        store.setdefault(k, {})[sym] = {
+                            "score": score_one(s), "total_pl": s["total_pl"],
+                            "trades": s["total_trades"],
+                            "edge": s.get("edge_vs_twin", 0.0),
+                            "twin": s.get("twin_dollars", 0.0),
+                            "dd": s.get("max_drawdown", 0.0),
+                            "tilt": s.get("tilt", 0.0),
+                        }
         if not train:
             continue
         # the best variation ON TRAIN represents the family
