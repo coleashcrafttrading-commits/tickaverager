@@ -411,6 +411,17 @@ def report(trades: list[dict], bars: list[dict], *,
         "span_days": round(span_days, 2),
         "trades_per_day": round(len(trades) / span_days, 2) if span_days else 0.0,
         "buy_hold_pct": buy_hold,
+        # BUY AND HOLD MEANS BOUGHT LONG AND HELD. There is exactly one of
+        # these and it never changes sign with the strategy: 100 shares bought
+        # at the first bar's open, sold at the last close. Reporting a
+        # direction-matched variant alongside it and calling that a
+        # buy-and-hold too was confusing and wrong -- nobody "buys and holds"
+        # a short.
+        "buy_hold_dollars": (round((last - float(bars[0]["o"])) * 100.0, 2)
+                             if n >= 2 and float(bars[0]["o"]) else 0.0),
+        "vs_buy_hold": (round((net + open_pl)
+                              - (last - float(bars[0]["o"])) * 100.0, 2)
+                        if n >= 2 and float(bars[0]["o"]) else 0.0),
         # ---- the passive twin ----
         "twin_shares": round(twin_shares, 2),
         "gross_shares": round(gross_shares, 2),

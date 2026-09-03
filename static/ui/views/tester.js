@@ -199,14 +199,22 @@ async function draw(sym, tf, days) {
     + stat("Avg lots open", (s.avg_open_when_in ?? "—"), `max ${s.max_open ?? "—"}`)
     + stat("Peak capital", money0(s.peak_capital), "most committed at once");
 
-  const bh = s.buy_hold_pct;
-  const twin = s.twin_dollars, edge = s.edge_vs_twin;
+  // ONE benchmark, and it is always LONG: 100 shares bought at the first
+  // open and sold at the last close. There is no such thing as buying and
+  // holding a short, and reporting a direction-matched variant beside this
+  // one under the same name was confusing for no gain.
+  const bhD = s.buy_hold_dollars, vs = s.vs_buy_hold;
   el("tsBh").innerHTML = tableHTML(["", "Value"], [
-    [`This strategy`, `<b class="${(s.total_pl || 0) >= 0 ? "up" : "down"}">${sgn(s.total_pl)}</b>`],
-    [`Buy and hold, same window`, `<span class="${(bh || 0) >= 0 ? "up" : "down"}">${pct(bh, 2)}</span>`],
-    [`Passive twin (matched, signed)`, `<span class="${(twin || 0) >= 0 ? "up" : "down"}">${sgn(twin)}</span>`],
-    [`Edge over the twin`, `<b class="${(edge || 0) >= 0 ? "up" : "down"}">${sgn(edge)}</b>`],
-    [`Tilt`, `${s.tilt ?? "—"} <span class="faint">+1 all long, −1 all short</span>`],
+    [`This strategy`,
+     `<b class="${(s.total_pl || 0) >= 0 ? "up" : "down"}">${sgn(s.total_pl)}</b>`],
+    [`Bought 100 shares and held`,
+     `<span class="${(bhD || 0) >= 0 ? "up" : "down"}">${sgn(bhD)}</span>
+      <span class="faint">${pct(s.buy_hold_pct, 2)}</span>`],
+    [`Strategy minus buy and hold`,
+     `<b class="${(vs || 0) >= 0 ? "up" : "down"}">${sgn(vs)}</b>`],
+    [`Which was better`, (vs || 0) >= 0
+      ? `<b class="up">the strategy</b>`
+      : `<b class="down">buying and holding</b>`],
   ]);
 
   const rows = trades.slice(-80).reverse().map((t) => {
