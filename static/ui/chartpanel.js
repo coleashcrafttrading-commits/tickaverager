@@ -102,6 +102,7 @@ export class ChartPanel {
 
     this.$bar.querySelectorAll(".tfb").forEach((b) => {
       b.onclick = () => {
+        this.clearTrades();   // indices belong to the old bars
         this.tf = b.dataset.tf;
         this.days = (TFS.find((t) => t[0] === this.tf) || [null, 2])[1];
         this.chart.view = null;
@@ -235,8 +236,13 @@ export class ChartPanel {
   /* ----------------------------------------------------------------- data */
   async load() {
     try {
+      // The bars endpoint caps at 1,500 by default. A backtest over 250 days
+      // of 15-minute bars uses about 11,000, and a chart holding a fraction of
+      // them cannot carry that run's trade markers -- their indices would land
+      // on the wrong candles. Ask for what the window actually contains.
+      const lim = this.limit || 1500;
       const r = await GET(`/api/bars?symbol=${encodeURIComponent(this.symbol)}`
-                        + `&timeframe=${this.tf}&days=${this.days}`);
+                        + `&timeframe=${this.tf}&days=${this.days}&limit=${lim}`);
       this.bars = r.bars || [];
       if (this.onBars) this.onBars(this.bars);
       this.render();
@@ -246,6 +252,16 @@ export class ChartPanel {
   }
 
   setStatus(status) { this.status = status; this.render(); }
+
+  /* Backtest trades drawn on the candles. The inner chart has always been able
+     to draw these; the panel simply never passed them through, so a strategy
+     could be measured but not seen. */
+  setTrades(trades) { this.trades = trades || []; this.render(); }
+
+  /* Changing timeframe invalidates trade markers: their indices belong to the
+     bar array the backtest ran on. Clearing them is the honest response --
+     re-plotting them against different bars would silently move every arrow. */
+  clearTrades() { this.trades = []; }
 
   render() {
     if (!this.bars.length) return;
@@ -272,7 +288,8 @@ export class ChartPanel {
     }
 
     const lines = this.status ? orderLines(this.status) : [];
-    this.chart.setData(this.bars, { overlays, lines, keepView: true });
+    this.chart.setData(this.bars, { overlays, lines, keepView: true,
+                                    trades: this.trades || [] });
 
     const a14 = IND.atr(b.h, b.l, b.c, 14);
     const last = a14[a14.length - 1];

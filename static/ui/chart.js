@@ -321,7 +321,14 @@ export class Chart {
       const i = idx.get(t.t);
       if (i == null) continue;
       const x = S.x(i), y = S.y(t.price);
-      g.fillStyle = t.side === "buy" ? C.accent : C.up;
+      // An ENTRY is coloured by direction and an EXIT by outcome. Colouring
+      // every marker by order side makes a short-only strategy's winners and
+      // losers identical on screen, which defeats the point of looking.
+      const isEntry = t.kind !== "exit";
+      g.fillStyle = isEntry
+        ? (t.side === "buy" ? C.accent : C.warn)
+        : (t.win === false ? C.down : C.up);
+      g.globalAlpha = isEntry ? 1 : 0.85;
       g.beginPath();
       if (t.side === "buy") {
         g.moveTo(x, y + 9); g.lineTo(x - 4.5, y + 17); g.lineTo(x + 4.5, y + 17);
@@ -329,6 +336,7 @@ export class Chart {
         g.moveTo(x, y - 9); g.lineTo(x - 4.5, y - 17); g.lineTo(x + 4.5, y - 17);
       }
       g.closePath(); g.fill();
+      g.globalAlpha = 1;
     }
 
     /* ---- time axis ---- */
