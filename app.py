@@ -77,6 +77,17 @@ from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
 
 app = FastAPI(title="TickAverager Fleet / Alpaca")
 
+
+# Remote access needs a key; anything from this machine does not. The dashboard
+# arms engines and transmits orders, and it has no other authentication -- see
+# remoteauth.py for exactly how far that goes and how far it does not.
+try:
+    import remoteauth
+    DASH_TOKEN = remoteauth.install(app)
+except Exception as _e:                       # never let this stop the bot
+    DASH_TOKEN = ""
+    logging.getLogger("app").warning("remote auth not installed: %r", _e)
+
 NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache", "Expires": "0"}
 
