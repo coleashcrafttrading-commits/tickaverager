@@ -78,6 +78,46 @@ def evaluate(code, params, data, tf):
     return research.aggregate(per)
 
 
+
+# ------------------------------------------------------------------ formats
+def read_study(path):
+    """Load a results file from EITHER study format.
+
+    The first study kept 32 families in research.py and wrote {"ranked", "meta"}.
+    The second holds 264 families as files in research/families/ and writes the
+    funnel's {"kept", "symbols"}. Both are read here so validate and ablate work
+    on either, rather than silently finding no families and reporting that
+    nothing survived -- which looks exactly like a real finding.
+    """
+    import json
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = d.get("ranked")
+    if rows is None:
+        rows = d.get("kept") or []
+    for r in rows:
+        r.setdefault("family", r.get("name"))
+    syms = d.get("symbols")
+    if syms is None:
+        syms = list(d.get("meta") or {})
+    controls = [c for c in (d.get("selected") or [])
+                if str(c.get("family", "")).startswith("CONTROL")
+                and c.get("selected")]
+    return {"rows": rows, "symbols": syms, "timeframe": d.get("timeframe"),
+            "days": d.get("days", 120), "controls": controls, "raw": d}
+
+
+def family_index():
+    """Every family by name, from research.py AND from research/families/."""
+    import research
+    idx = {f["name"]: f for f in research.FAMILIES}
+    try:
+        import search
+        for f in search.load_families():
+            idx[f["name"]] = f
+    except Exception:
+        pass
+    return idx
+
 def main(argv=None) -> int:
     import research
 
@@ -87,11 +127,11 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     path = a.json or sorted(glob.glob(str(ROOT / "research" / "research_tf*.json")))[-1]
-    d = json.loads(Path(path).read_text(encoding="utf-8"))
-    tf, days = d["timeframe"], d["days"]
-    syms = list(d.get("meta") or {})
-    winners = [c for c in d.get("ranked", [])
-               if not c["family"].startswith("CONTROL")][:a.top]
+    st = read_study(path)
+    d = st["raw"]
+    tf, days, syms = st["timeframe"], st["days"], st["symbols"]
+    winners = [c for c in st["rows"]
+               if not str(c.get("family", "")).startswith("CONTROL")][:a.top]
     if not winners:
         print("nothing to ablate in %s" % Path(path).name)
         return 0
@@ -99,7 +139,7 @@ def main(argv=None) -> int:
     print("Ablation on %s (%s bars, %d days), out-of-sample window only\n"
           % (Path(path).name, tf, days))
     data = research.fetch(syms, tf, days)
-    fam_by_name = {f["name"]: f for f in research.FAMILIES}
+    fam_by_name = family_index()
 
     rand_fam = {"name": "rand", "code": RANDOM_SIGNAL,
                 "params": {"every": 30, "seed": 1}}
