@@ -1,0 +1,6056 @@
+{
+ "round": 4,
+ "name": "broaden-15m",
+ "when": "2026-09-03 05:36",
+ "symbols": [
+  "SPY",
+  "NVDA",
+  "MU",
+  "PLTR",
+  "TSLA",
+  "WMT",
+  "JPM",
+  "LLY",
+  "XOM",
+  "CAT",
+  "NEE",
+  "LIN",
+  "AMT",
+  "NFLX",
+  "XLK",
+  "MSTX",
+  "UVXY",
+  "GLD",
+  "LQD",
+  "SOFI",
+  "QQQ",
+  "AAPL",
+  "AMD",
+  "ORCL",
+  "HD",
+  "COST",
+  "BAC",
+  "UNH",
+  "CVX",
+  "BA",
+  "SO",
+  "FCX",
+  "PLD",
+  "VZ",
+  "XLF",
+  "SOXL",
+  "GDX",
+  "HYG",
+  "F",
+  "IWM",
+  "MSFT",
+  "AVGO",
+  "CRM",
+  "MCD",
+  "PG",
+  "GS",
+  "JNJ",
+  "COP",
+  "GE",
+  "TQQQ"
+ ],
+ "timeframe": "15Min",
+ "days": 250,
+ "grids": [
+  "core",
+  "wide",
+  "trail"
+ ],
+ "families_in": 12,
+ "n_backtests": 108000,
+ "seconds": 1442.6,
+ "promoted": [
+  "b010-close-above-prior-high-exhaustion",
+  "b010-strong-close-into-a-new-low",
+  "b006-bayesian-run-length-collapse",
+  "b016-net-edge-admission-gate",
+  "b009-bertram-cost-aware-ou-band-optimization"
+ ],
+ "kept": [
+  {
+   "slug": "b010-close-above-prior-high-exhaustion",
+   "name": "Consecutive Close-Above-Prior-High Exhaustion",
+   "note": "Counts consecutive bars whose close exceeds the PREVIOUS bar's high -- a strictly stiffer test than an up close, since the whole prior range was engulfed -- and shorts the first bar the streak reaches its threshold, optionally only beneath a 200 EMA. One entry per streak: the signal fires on the bar the counter crosses the threshold and never while it merely stays there. Covers on the first close beneath the previous bar's low.",
+   "source": "StockSharp/AlgoTrading, strategy API/1601-1700/1601_Consecutive_Close_High1_Mean_Reversion -- 'counts consecutive closes above the prior high and sells once the count reaches a threshold; position exits when price falls below the prior low; optional 200 EMA filter'",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 1.0,
+    "trail_atr": 1.0,
+    "side": "short",
+    "streak": 2,
+    "ema_on": 0,
+    "ema_n": 200,
+    "exit_signal_on": 1
+   },
+   "train": {
+    "median_score": 0.4937,
+    "symbols_scored": 50,
+    "symbols_profitable": 34,
+    "symbols_run": 50,
+    "consistency": 0.68,
+    "total_trades": 15338,
+    "sum_pl": 10950.93,
+    "sum_edge": 46183.72,
+    "beat_twin": 33,
+    "beat_twin_frac": 0.66
+   },
+   "test": {
+    "median_score": 0.5193,
+    "symbols_scored": 50,
+    "symbols_profitable": 39,
+    "symbols_run": 50,
+    "consistency": 0.78,
+    "total_trades": 10188,
+    "sum_pl": 77589.61,
+    "sum_edge": 76169.48,
+    "beat_twin": 39,
+    "beat_twin_frac": 0.78
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": -0.0615,
+     "total_pl": -124.52,
+     "trades": 235,
+     "edge": 112.61,
+     "twin": -237.13,
+     "dd": -2025.9,
+     "tilt": -1.0
+    },
+    "NVDA": {
+     "score": 0.9247,
+     "total_pl": 894.24,
+     "trades": 220,
+     "edge": 1083.75,
+     "twin": -189.51,
+     "dd": -967.06,
+     "tilt": -1.0
+    },
+    "MU": {
+     "score": 0.6362,
+     "total_pl": 11661.18,
+     "trades": 223,
+     "edge": 12173.56,
+     "twin": -512.38,
+     "dd": -18328.58,
+     "tilt": -1.0
+    },
+    "PLTR": {
+     "score": 0.5102,
+     "total_pl": 775.4,
+     "trades": 188,
+     "edge": 1325.05,
+     "twin": -549.65,
+     "dd": -1519.77,
+     "tilt": -1.0
+    },
+    "TSLA": {
+     "score": -0.1324,
+     "total_pl": -530.65,
+     "trades": 201,
+     "edge": -1673.1,
+     "twin": 1142.45,
+     "dd": -4007.7,
+     "tilt": -1.0
+    },
+    "WMT": {
+     "score": 1.5908,
+     "total_pl": 358.12,
+     "trades": 204,
+     "edge": 239.08,
+     "twin": 119.04,
+     "dd": -225.12,
+     "tilt": -1.0
+    },
+    "JPM": {
+     "score": 0.6536,
+     "total_pl": 806.79,
+     "trades": 237,
+     "edge": 1605.66,
+     "twin": -798.87,
+     "dd": -1234.37,
+     "tilt": -1.0
+    },
+    "LLY": {
+     "score": 4.385,
+     "total_pl": 14674.93,
+     "trades": 227,
+     "edge": 15439.1,
+     "twin": -764.17,
+     "dd": -3346.59,
+     "tilt": -1.0
+    },
+    "XOM": {
+     "score": 0.0337,
+     "total_pl": 25.93,
+     "trades": 272,
+     "edge": 205.56,
+     "twin": -179.63,
+     "dd": -768.92,
+     "tilt": -1.0
+    },
+    "CAT": {
+     "score": 1.3203,
+     "total_pl": 6201.4,
+     "trades": 201,
+     "edge": 5085.17,
+     "twin": 1116.23,
+     "dd": -4696.93,
+     "tilt": -1.0
+    },
+    "NEE": {
+     "score": 3.2552,
+     "total_pl": 738.93,
+     "trades": 203,
+     "edge": 666.45,
+     "twin": 72.48,
+     "dd": -227.0,
+     "tilt": -1.0
+    },
+    "LIN": {
+     "score": -0.6557,
+     "total_pl": -2099.66,
+     "trades": 144,
+     "edge": -2461.28,
+     "twin": 361.62,
+     "dd": -3202.18,
+     "tilt": -1.0
+    },
+    "AMT": {
+     "score": 1.4141,
+     "total_pl": 760.24,
+     "trades": 110,
+     "edge": 561.58,
+     "twin": 198.66,
+     "dd": -537.62,
+     "tilt": -1.0
+    },
+    "NFLX": {
+     "score": -0.0949,
+     "total_pl": -54.65,
+     "trades": 197,
+     "edge": -125.63,
+     "twin": 70.98,
+     "dd": -576.14,
+     "tilt": -1.0
+    },
+    "XLK": {
+     "score": 0.0351,
+     "total_pl": 28.0,
+     "trades": 264,
+     "edge": 63.23,
+     "twin": -35.23,
+     "dd": -798.39,
+     "tilt": -1.0
+    },
+    "MSTX": {
+     "score": 2.4403,
+     "total_pl": 513.74,
+     "trades": 223,
+     "edge": 322.89,
+     "twin": 190.85,
+     "dd": -210.52,
+     "tilt": -1.0
+    },
+    "UVXY": {
+     "score": 1.1693,
+     "total_pl": 404.02,
+     "trades": 204,
+     "edge": 237.97,
+     "twin": 166.05,
+     "dd": -345.52,
+     "tilt": -1.0
+    },
+    "GLD": {
+     "score": -0.2468,
+     "total_pl": -273.67,
+     "trades": 207,
+     "edge": -312.23,
+     "twin": 38.56,
+     "dd": -1108.96,
+     "tilt": -1.0
+    },
+    "LQD": {
+     "score": 2.7142,
+     "total_pl": 140.35,
+     "trades": 104,
+     "edge": 91.97,
+     "twin": 48.38,
+     "dd": -51.71,
+     "tilt": -1.0
+    },
+    "SOFI": {
+     "score": 0.0213,
+     "total_pl": 2.79,
+     "trades": 184,
+     "edge": 23.18,
+     "twin": -20.39,
+     "dd": -130.99,
+     "tilt": -1.0
+    },
+    "QQQ": {
+     "score": 0.5903,
+     "total_pl": 1551.35,
+     "trades": 250,
+     "edge": 1165.22,
+     "twin": 386.13,
+     "dd": -2627.92,
+     "tilt": -1.0
+    },
+    "AAPL": {
+     "score": 0.1033,
+     "total_pl": 117.4,
+     "trades": 204,
+     "edge": 310.08,
+     "twin": -192.68,
+     "dd": -1136.7,
+     "tilt": -1.0
+    },
+    "AMD": {
+     "score": 0.5273,
+     "total_pl": 3110.26,
+     "trades": 226,
+     "edge": 2465.01,
+     "twin": 645.25,
+     "dd": -5898.93,
+     "tilt": -1.0
+    },
+    "ORCL": {
+     "score": -0.6878,
+     "total_pl": -1549.14,
+     "trades": 205,
+     "edge": -2189.51,
+     "twin": 640.37,
+     "dd": -2252.43,
+     "tilt": -1.0
+    },
+    "HD": {
+     "score": 3.5834,
+     "total_pl": 3784.52,
+     "trades": 190,
+     "edge": 3756.81,
+     "twin": 27.71,
+     "dd": -1056.12,
+     "tilt": -1.0
+    },
+    "COST": {
+     "score": 0.6806,
+     "total_pl": 2768.55,
+     "trades": 188,
+     "edge": 1852.21,
+     "twin": 916.34,
+     "dd": -4067.6,
+     "tilt": -1.0
+    },
+    "BAC": {
+     "score": 0.3391,
+     "total_pl": 72.23,
+     "trades": 213,
+     "edge": 233.24,
+     "twin": -161.01,
+     "dd": -213.02,
+     "tilt": -1.0
+    },
+    "UNH": {
+     "score": 0.4199,
+     "total_pl": 640.15,
+     "trades": 235,
+     "edge": 868.9,
+     "twin": -228.75,
+     "dd": -1524.62,
+     "tilt": -1.0
+    },
+    "CVX": {
+     "score": -0.3705,
+     "total_pl": -502.84,
+     "trades": 260,
+     "edge": -138.99,
+     "twin": -363.85,
+     "dd": -1357.1,
+     "tilt": -1.0
+    },
+    "BA": {
+     "score": -0.4706,
+     "total_pl": -774.8,
+     "trades": 205,
+     "edge": -920.5,
+     "twin": 145.7,
+     "dd": -1646.27,
+     "tilt": -1.0
+    },
+    "SO": {
+     "score": 1.3721,
+     "total_pl": 264.51,
+     "trades": 124,
+     "edge": 176.79,
+     "twin": 87.72,
+     "dd": -192.78,
+     "tilt": -1.0
+    },
+    "FCX": {
+     "score": 0.6982,
+     "total_pl": 510.1,
+     "trades": 234,
+     "edge": 727.85,
+     "twin": -217.75,
+     "dd": -730.56,
+     "tilt": -1.0
+    },
+    "PLD": {
+     "score": 0.0278,
+     "total_pl": 15.43,
+     "trades": 109,
+     "edge": -51.78,
+     "twin": 67.21,
+     "dd": -554.31,
+     "tilt": -1.0
+    },
+    "VZ": {
+     "score": -0.9589,
+     "total_pl": -268.52,
+     "trades": 198,
+     "edge": -245.95,
+     "twin": -22.57,
+     "dd": -280.03,
+     "tilt": -1.0
+    },
+    "XLF": {
+     "score": -0.439,
+     "total_pl": -67.25,
+     "trades": 203,
+     "edge": 15.0,
+     "twin": -82.25,
+     "dd": -153.2,
+     "tilt": -1.0
+    },
+    "SOXL": {
+     "score": 3.5193,
+     "total_pl": 8488.95,
+     "trades": 237,
+     "edge": 6571.69,
+     "twin": 1917.26,
+     "dd": -2412.08,
+     "tilt": -1.0
+    },
+    "GDX": {
+     "score": 0.2279,
+     "total_pl": 105.79,
+     "trades": 228,
+     "edge": 295.71,
+     "twin": -189.92,
+     "dd": -464.15,
+     "tilt": -1.0
+    },
+    "HYG": {
+     "score": 0.0763,
+     "total_pl": 2.76,
+     "trades": 95,
+     "edge": -10.54,
+     "twin": 13.3,
+     "dd": -36.17,
+     "tilt": -1.0
+    },
+    "F": {
+     "score": 0.0889,
+     "total_pl": 4.81,
+     "trades": 176,
+     "edge": -27.54,
+     "twin": 32.35,
+     "dd": -54.11,
+     "tilt": -1.0
+    },
+    "IWM": {
+     "score": 1.7403,
+     "total_pl": 1016.17,
+     "trades": 231,
+     "edge": 1072.2,
+     "twin": -56.03,
+     "dd": -583.9,
+     "tilt": -1.0
+    },
+    "MSFT": {
+     "score": -0.0772,
+     "total_pl": -231.46,
+     "trades": 187,
+     "edge": 920.24,
+     "twin": -1151.7,
+     "dd": -2997.86,
+     "tilt": -1.0
+    },
+    "AVGO": {
+     "score": 1.086,
+     "total_pl": 2343.37,
+     "trades": 218,
+     "edge": 1274.1,
+     "twin": 1069.27,
+     "dd": -2157.77,
+     "tilt": -1.0
+    },
+    "CRM": {
+     "score": 1.2788,
+     "total_pl": 1862.27,
+     "trades": 227,
+     "edge": 2818.04,
+     "twin": -955.77,
+     "dd": -1456.3,
+     "tilt": -1.0
+    },
+    "MCD": {
+     "score": 0.5114,
+     "total_pl": 424.99,
+     "trades": 201,
+     "edge": 169.62,
+     "twin": 255.37,
+     "dd": -831.09,
+     "tilt": -1.0
+    },
+    "PG": {
+     "score": 0.2422,
+     "total_pl": 144.87,
+     "trades": 205,
+     "edge": 218.52,
+     "twin": -73.65,
+     "dd": -598.13,
+     "tilt": -1.0
+    },
+    "GS": {
+     "score": 3.8416,
+     "total_pl": 15350.23,
+     "trades": 209,
+     "edge": 15266.65,
+     "twin": 83.58,
+     "dd": -3995.77,
+     "tilt": -1.0
+    },
+    "JNJ": {
+     "score": 0.586,
+     "total_pl": 707.71,
+     "trades": 197,
+     "edge": 1660.69,
+     "twin": -952.98,
+     "dd": -1207.66,
+     "tilt": -1.0
+    },
+    "COP": {
+     "score": 2.1675,
+     "total_pl": 928.36,
+     "trades": 232,
+     "edge": 1161.83,
+     "twin": -233.47,
+     "dd": -428.3,
+     "tilt": -1.0
+    },
+    "GE": {
+     "score": 0.4728,
+     "total_pl": 658.76,
+     "trades": 205,
+     "edge": 1102.52,
+     "twin": -443.76,
+     "dd": -1393.26,
+     "tilt": -1.0
+    },
+    "TQQQ": {
+     "score": 1.9567,
+     "total_pl": 1207.17,
+     "trades": 248,
+     "edge": 986.8,
+     "twin": 220.37,
+     "dd": -616.95,
+     "tilt": -1.0
+    }
+   },
+   "decay": 1.052,
+   "cut_reason": null
+  },
+  {
+   "slug": "b010-strong-close-into-a-new-low",
+   "name": "Strong Close Into a New Low",
+   "note": "Shorts the bar that breaks to a new N-bar low and then closes in the top of its own range (IBS above threshold) -- a failed flush whose bounce is already spent by the close. Optional 200-EMA downtrend filter and an optional intraday session window given in UTC minutes-of-day. Covers on the first close beneath the previous bar's low, which is a bar-versus-bar test rather than an indicator.",
+   "source": "StockSharp/AlgoTrading, strategy API/1501-1600/1598_10_Bar_Low_Pullback -- 'Low breaks the previous LowestPeriod bars lowest low; IBS > IbsThreshold (0.85); optional close below EMA200; exit on close below previous low'",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 1.0,
+    "side": "short",
+    "n_low": 5,
+    "ibs_min": 0.75,
+    "ema_on": 0,
+    "ema_n": 200,
+    "session_on": 0,
+    "sess_start": 810,
+    "sess_end": 1200,
+    "exit_signal_on": 1
+   },
+   "train": {
+    "median_score": 0.8259,
+    "symbols_scored": 50,
+    "symbols_profitable": 39,
+    "symbols_run": 50,
+    "consistency": 0.78,
+    "total_trades": 10798,
+    "sum_pl": 64030.39,
+    "sum_edge": 87962.73,
+    "beat_twin": 39,
+    "beat_twin_frac": 0.78
+   },
+   "test": {
+    "median_score": 0.6896,
+    "symbols_scored": 50,
+    "symbols_profitable": 38,
+    "symbols_run": 50,
+    "consistency": 0.76,
+    "total_trades": 7329,
+    "sum_pl": 68260.87,
+    "sum_edge": 66622.07,
+    "beat_twin": 34,
+    "beat_twin_frac": 0.68
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": 3.6694,
+     "total_pl": 4080.33,
+     "trades": 179,
+     "edge": 4270.23,
+     "twin": -189.9,
+     "dd": -1111.99,
+     "tilt": -1.0
+    },
+    "NVDA": {
+     "score": 0.0654,
+     "total_pl": 121.56,
+     "trades": 167,
+     "edge": 267.15,
+     "twin": -145.59,
+     "dd": -1860.13,
+     "tilt": -1.0
+    },
+    "MU": {
+     "score": -0.4543,
+     "total_pl": -7954.6,
+     "trades": 189,
+     "edge": -7477.44,
+     "twin": -477.16,
+     "dd": -17511.35,
+     "tilt": -1.0
+    },
+    "PLTR": {
+     "score": 2.3617,
+     "total_pl": 1540.77,
+     "trades": 172,
+     "edge": 2032.88,
+     "twin": -492.11,
+     "dd": -652.4,
+     "tilt": -1.0
+    },
+    "TSLA": {
+     "score": -0.5465,
+     "total_pl": -1404.93,
+     "trades": 193,
+     "edge": -2487.44,
+     "twin": 1082.51,
+     "dd": -2570.99,
+     "tilt": -1.0
+    },
+    "WMT": {
+     "score": 0.5008,
+     "total_pl": 190.78,
+     "trades": 155,
+     "edge": 91.11,
+     "twin": 99.67,
+     "dd": -380.96,
+     "tilt": -1.0
+    },
+    "JPM": {
+     "score": 1.0439,
+     "total_pl": 854.73,
+     "trades": 151,
+     "edge": 1397.31,
+     "twin": -542.58,
+     "dd": -818.8,
+     "tilt": -1.0
+    },
+    "LLY": {
+     "score": 0.6883,
+     "total_pl": 4274.87,
+     "trades": 130,
+     "edge": 4750.07,
+     "twin": -475.2,
+     "dd": -6210.96,
+     "tilt": -1.0
+    },
+    "XOM": {
+     "score": 0.0007,
+     "total_pl": 0.69,
+     "trades": 179,
+     "edge": 123.02,
+     "twin": -122.33,
+     "dd": -1052.33,
+     "tilt": -1.0
+    },
+    "CAT": {
+     "score": 1.449,
+     "total_pl": 7192.91,
+     "trades": 116,
+     "edge": 6505.03,
+     "twin": 687.88,
+     "dd": -4964.21,
+     "tilt": -1.0
+    },
+    "NEE": {
+     "score": 1.2977,
+     "total_pl": 356.77,
+     "trades": 133,
+     "edge": 296.53,
+     "twin": 60.24,
+     "dd": -274.92,
+     "tilt": -1.0
+    },
+    "LIN": {
+     "score": 5.1197,
+     "total_pl": 4836.26,
+     "trades": 106,
+     "edge": 4552.19,
+     "twin": 284.07,
+     "dd": -944.63,
+     "tilt": -1.0
+    },
+    "AMT": {
+     "score": 2.0577,
+     "total_pl": 897.28,
+     "trades": 79,
+     "edge": 732.06,
+     "twin": 165.22,
+     "dd": -436.06,
+     "tilt": -1.0
+    },
+    "NFLX": {
+     "score": -0.396,
+     "total_pl": -290.99,
+     "trades": 168,
+     "edge": -359.87,
+     "twin": 68.88,
+     "dd": -734.81,
+     "tilt": -1.0
+    },
+    "XLK": {
+     "score": 4.213,
+     "total_pl": 1750.61,
+     "trades": 172,
+     "edge": 1774.07,
+     "twin": -23.46,
+     "dd": -415.53,
+     "tilt": -1.0
+    },
+    "MSTX": {
+     "score": 0.5122,
+     "total_pl": 146.39,
+     "trades": 200,
+     "edge": -29.03,
+     "twin": 175.42,
+     "dd": -285.8,
+     "tilt": -1.0
+    },
+    "UVXY": {
+     "score": -0.4762,
+     "total_pl": -164.82,
+     "trades": 161,
+     "edge": -310.97,
+     "twin": 146.15,
+     "dd": -346.11,
+     "tilt": -1.0
+    },
+    "GLD": {
+     "score": 5.5419,
+     "total_pl": 3233.08,
+     "trades": 211,
+     "edge": 3194.08,
+     "twin": 39.0,
+     "dd": -583.39,
+     "tilt": -1.0
+    },
+    "LQD": {
+     "score": 0.8637,
+     "total_pl": 54.87,
+     "trades": 68,
+     "edge": 17.6,
+     "twin": 37.27,
+     "dd": -63.53,
+     "tilt": -1.0
+    },
+    "SOFI": {
+     "score": 0.702,
+     "total_pl": 77.73,
+     "trades": 148,
+     "edge": 96.34,
+     "twin": -18.61,
+     "dd": -110.72,
+     "tilt": -1.0
+    },
+    "QQQ": {
+     "score": 1.8352,
+     "total_pl": 4375.38,
+     "trades": 189,
+     "edge": 4054.42,
+     "twin": 320.96,
+     "dd": -2384.17,
+     "tilt": -1.0
+    },
+    "AAPL": {
+     "score": 0.2278,
+     "total_pl": 316.68,
+     "trades": 158,
+     "edge": 498.29,
+     "twin": -181.61,
+     "dd": -1390.13,
+     "tilt": -1.0
+    },
+    "AMD": {
+     "score": 0.2459,
+     "total_pl": 1044.29,
+     "trades": 174,
+     "edge": 556.91,
+     "twin": 487.38,
+     "dd": -4246.16,
+     "tilt": -1.0
+    },
+    "ORCL": {
+     "score": 4.7364,
+     "total_pl": 3017.97,
+     "trades": 165,
+     "edge": 2492.93,
+     "twin": 525.04,
+     "dd": -637.18,
+     "tilt": -1.0
+    },
+    "HD": {
+     "score": 3.0361,
+     "total_pl": 2186.77,
+     "trades": 110,
+     "edge": 2168.59,
+     "twin": 18.18,
+     "dd": -720.26,
+     "tilt": -1.0
+    },
+    "COST": {
+     "score": -0.3536,
+     "total_pl": -1235.61,
+     "trades": 103,
+     "edge": -1849.11,
+     "twin": 613.5,
+     "dd": -3494.16,
+     "tilt": -1.0
+    },
+    "BAC": {
+     "score": -0.8789,
+     "total_pl": -324.16,
+     "trades": 164,
+     "edge": -177.43,
+     "twin": -146.73,
+     "dd": -368.82,
+     "tilt": -1.0
+    },
+    "UNH": {
+     "score": 0.2143,
+     "total_pl": 373.72,
+     "trades": 152,
+     "edge": 534.15,
+     "twin": -160.43,
+     "dd": -1743.85,
+     "tilt": -1.0
+    },
+    "CVX": {
+     "score": 0.8164,
+     "total_pl": 504.24,
+     "trades": 155,
+     "edge": 743.69,
+     "twin": -239.45,
+     "dd": -617.66,
+     "tilt": -1.0
+    },
+    "BA": {
+     "score": -0.1997,
+     "total_pl": -259.67,
+     "trades": 137,
+     "edge": -371.66,
+     "twin": 111.99,
+     "dd": -1300.08,
+     "tilt": -1.0
+    },
+    "SO": {
+     "score": 2.8212,
+     "total_pl": 418.25,
+     "trades": 75,
+     "edge": 351.58,
+     "twin": 66.67,
+     "dd": -148.25,
+     "tilt": -1.0
+    },
+    "FCX": {
+     "score": 2.0962,
+     "total_pl": 949.34,
+     "trades": 179,
+     "edge": 1116.53,
+     "twin": -167.19,
+     "dd": -452.89,
+     "tilt": -1.0
+    },
+    "PLD": {
+     "score": 0.0302,
+     "total_pl": 15.81,
+     "trades": 68,
+     "edge": -29.84,
+     "twin": 45.65,
+     "dd": -524.08,
+     "tilt": -1.0
+    },
+    "VZ": {
+     "score": -0.1712,
+     "total_pl": -35.59,
+     "trades": 123,
+     "edge": -17.55,
+     "twin": -18.04,
+     "dd": -207.87,
+     "tilt": -1.0
+    },
+    "XLF": {
+     "score": -0.535,
+     "total_pl": -76.06,
+     "trades": 166,
+     "edge": -2.82,
+     "twin": -73.24,
+     "dd": -142.17,
+     "tilt": -1.0
+    },
+    "SOXL": {
+     "score": 3.6963,
+     "total_pl": 11361.42,
+     "trades": 192,
+     "edge": 9593.22,
+     "twin": 1768.2,
+     "dd": -3073.73,
+     "tilt": -1.0
+    },
+    "GDX": {
+     "score": 0.8261,
+     "total_pl": 407.84,
+     "trades": 176,
+     "edge": 562.7,
+     "twin": -154.86,
+     "dd": -493.68,
+     "tilt": -1.0
+    },
+    "HYG": {
+     "score": 0.0402,
+     "total_pl": 2.31,
+     "trades": 63,
+     "edge": -7.98,
+     "twin": 10.29,
+     "dd": -57.46,
+     "tilt": -1.0
+    },
+    "F": {
+     "score": -0.5309,
+     "total_pl": -57.03,
+     "trades": 121,
+     "edge": -81.26,
+     "twin": 24.23,
+     "dd": -107.43,
+     "tilt": -1.0
+    },
+    "IWM": {
+     "score": 3.1311,
+     "total_pl": 1671.24,
+     "trades": 201,
+     "edge": 1723.17,
+     "twin": -51.93,
+     "dd": -533.75,
+     "tilt": -1.0
+    },
+    "MSFT": {
+     "score": 0.8468,
+     "total_pl": 2168.44,
+     "trades": 160,
+     "edge": 3186.27,
+     "twin": -1017.83,
+     "dd": -2560.77,
+     "tilt": -1.0
+    },
+    "AVGO": {
+     "score": -0.1729,
+     "total_pl": -485.73,
+     "trades": 162,
+     "edge": -1342.97,
+     "twin": 857.24,
+     "dd": -2809.7,
+     "tilt": -1.0
+    },
+    "CRM": {
+     "score": 2.1606,
+     "total_pl": 3294.68,
+     "trades": 151,
+     "edge": 4018.89,
+     "twin": -724.21,
+     "dd": -1524.9,
+     "tilt": -1.0
+    },
+    "MCD": {
+     "score": 0.2151,
+     "total_pl": 166.95,
+     "trades": 132,
+     "edge": -27.01,
+     "twin": 193.96,
+     "dd": -776.16,
+     "tilt": -1.0
+    },
+    "PG": {
+     "score": 0.6034,
+     "total_pl": 323.61,
+     "trades": 109,
+     "edge": 366.49,
+     "twin": -42.88,
+     "dd": -536.33,
+     "tilt": -1.0
+    },
+    "GS": {
+     "score": 6.3396,
+     "total_pl": 15957.51,
+     "trades": 135,
+     "edge": 15889.43,
+     "twin": 68.08,
+     "dd": -2517.11,
+     "tilt": -1.0
+    },
+    "JNJ": {
+     "score": -0.4628,
+     "total_pl": -644.48,
+     "trades": 94,
+     "edge": -118.95,
+     "twin": -525.53,
+     "dd": -1392.7,
+     "tilt": -1.0
+    },
+    "COP": {
+     "score": 0.4818,
+     "total_pl": 208.05,
+     "trades": 117,
+     "edge": 345.67,
+     "twin": -137.62,
+     "dd": -431.83,
+     "tilt": -1.0
+    },
+    "GE": {
+     "score": 0.6909,
+     "total_pl": 1366.49,
+     "trades": 136,
+     "edge": 1725.21,
+     "twin": -358.72,
+     "dd": -1977.9,
+     "tilt": -1.0
+    },
+    "TQQQ": {
+     "score": 2.2292,
+     "total_pl": 1453.92,
+     "trades": 185,
+     "edge": 1285.59,
+     "twin": 168.33,
+     "dd": -652.22,
+     "tilt": -1.0
+    }
+   },
+   "decay": 0.835,
+   "cut_reason": null
+  },
+  {
+   "slug": "b006-bayesian-run-length-collapse",
+   "name": "Bayesian Run-Length Collapse",
+   "note": "Runs Adams-MacKay Bayesian online change-point detection on log returns with a Normal-Inverse-Gamma conjugate prior, and trades the bar on which the MAP run length COLLAPSES instead of incrementing, gated on the posterior putting more than 30% of its mass on a run of five bars or fewer. Direction is read from the new segment, so the rule is agnostic between continuation and reversal.",
+   "source": "Adams & MacKay, 'Bayesian Online Changepoint Detection', arXiv:0710.3742 (2007) -- run-length posterior, message-passing recursion, constant hazard.",
+   "params": {
+    "tp_atr": 2.0,
+    "st_atr": 1.0,
+    "side": "both",
+    "hazard_lam": 500.0,
+    "conf": 0.2,
+    "m_look": 5,
+    "rl_cap": 150,
+    "kappa0": 1.0,
+    "alpha0": 1.0,
+    "stop_sig": 2.0,
+    "time_stop": 20,
+    "exit_signal_on": 1
+   },
+   "train": {
+    "median_score": 0.2687,
+    "symbols_scored": 50,
+    "symbols_profitable": 27,
+    "symbols_run": 50,
+    "consistency": 0.54,
+    "total_trades": 4570,
+    "sum_pl": -10393.81,
+    "sum_edge": -13111.63,
+    "beat_twin": 28,
+    "beat_twin_frac": 0.56
+   },
+   "test": {
+    "median_score": 0.4907,
+    "symbols_scored": 50,
+    "symbols_profitable": 34,
+    "symbols_run": 50,
+    "consistency": 0.68,
+    "total_trades": 2911,
+    "sum_pl": 32056.64,
+    "sum_edge": 31937.62,
+    "beat_twin": 33,
+    "beat_twin_frac": 0.66
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": -0.1238,
+     "total_pl": -149.27,
+     "trades": 66,
+     "edge": -174.33,
+     "twin": 25.06,
+     "dd": -1206.12,
+     "tilt": 0.198
+    },
+    "NVDA": {
+     "score": -0.7914,
+     "total_pl": -1781.31,
+     "trades": 80,
+     "edge": -1808.69,
+     "twin": 27.38,
+     "dd": -2250.87,
+     "tilt": 0.222
+    },
+    "MU": {
+     "score": -0.0379,
+     "total_pl": -520.92,
+     "trades": 69,
+     "edge": -595.66,
+     "twin": 74.74,
+     "dd": -13761.89,
+     "tilt": 0.25
+    },
+    "PLTR": {
+     "score": 3.8313,
+     "total_pl": 2041.94,
+     "trades": 81,
+     "edge": 2086.6,
+     "twin": -44.66,
+     "dd": -532.96,
+     "tilt": -0.131
+    },
+    "TSLA": {
+     "score": 0.4549,
+     "total_pl": 1004.72,
+     "trades": 103,
+     "edge": 1088.27,
+     "twin": -83.55,
+     "dd": -2208.9,
+     "tilt": 0.093
+    },
+    "WMT": {
+     "score": -0.3743,
+     "total_pl": -140.87,
+     "trades": 61,
+     "edge": -144.5,
+     "twin": 3.63,
+     "dd": -376.37,
+     "tilt": -0.074
+    },
+    "JPM": {
+     "score": 0.5264,
+     "total_pl": 446.64,
+     "trades": 49,
+     "edge": 436.64,
+     "twin": 10.0,
+     "dd": -848.45,
+     "tilt": 0.041
+    },
+    "LLY": {
+     "score": 1.2905,
+     "total_pl": 4637.47,
+     "trades": 58,
+     "edge": 4622.06,
+     "twin": 15.41,
+     "dd": -3593.54,
+     "tilt": 0.057
+    },
+    "XOM": {
+     "score": -0.7284,
+     "total_pl": -677.35,
+     "trades": 57,
+     "edge": -668.48,
+     "twin": -8.87,
+     "dd": -929.88,
+     "tilt": -0.13
+    },
+    "CAT": {
+     "score": 1.683,
+     "total_pl": 6958.2,
+     "trades": 54,
+     "edge": 7080.58,
+     "twin": -122.38,
+     "dd": -4134.34,
+     "tilt": 0.216
+    },
+    "NEE": {
+     "score": 0.1463,
+     "total_pl": 33.43,
+     "trades": 28,
+     "edge": 33.15,
+     "twin": 0.28,
+     "dd": -228.44,
+     "tilt": -0.021
+    },
+    "LIN": {
+     "score": 0.6824,
+     "total_pl": 928.06,
+     "trades": 39,
+     "edge": 960.76,
+     "twin": -32.7,
+     "dd": -1360.06,
+     "tilt": 0.255
+    },
+    "AMT": {
+     "score": 2.8143,
+     "total_pl": 1159.95,
+     "trades": 34,
+     "edge": 1161.29,
+     "twin": -1.34,
+     "dd": -412.17,
+     "tilt": 0.012
+    },
+    "NFLX": {
+     "score": 0.9696,
+     "total_pl": 683.87,
+     "trades": 74,
+     "edge": 684.75,
+     "twin": -0.88,
+     "dd": -705.33,
+     "tilt": 0.027
+    },
+    "XLK": {
+     "score": 1.7613,
+     "total_pl": 785.46,
+     "trades": 59,
+     "edge": 782.83,
+     "twin": 2.63,
+     "dd": -445.95,
+     "tilt": 0.181
+    },
+    "MSTX": {
+     "score": 1.2875,
+     "total_pl": 189.37,
+     "trades": 55,
+     "edge": 196.02,
+     "twin": -6.65,
+     "dd": -147.08,
+     "tilt": 0.096
+    },
+    "UVXY": {
+     "score": -0.1476,
+     "total_pl": -31.4,
+     "trades": 55,
+     "edge": -68.4,
+     "twin": 37.0,
+     "dd": -212.77,
+     "tilt": -0.36
+    },
+    "GLD": {
+     "score": -0.2725,
+     "total_pl": -421.86,
+     "trades": 66,
+     "edge": -417.32,
+     "twin": -4.54,
+     "dd": -1547.92,
+     "tilt": 0.162
+    },
+    "LQD": {
+     "score": 2.6392,
+     "total_pl": 181.63,
+     "trades": 46,
+     "edge": 178.52,
+     "twin": 3.11,
+     "dd": -68.82,
+     "tilt": -0.106
+    },
+    "SOFI": {
+     "score": 0.1718,
+     "total_pl": 16.87,
+     "trades": 64,
+     "edge": 13.99,
+     "twin": 2.88,
+     "dd": -98.2,
+     "tilt": 0.37
+    },
+    "QQQ": {
+     "score": -0.8746,
+     "total_pl": -4100.29,
+     "trades": 79,
+     "edge": -4064.79,
+     "twin": -35.5,
+     "dd": -4688.08,
+     "tilt": 0.158
+    },
+    "AAPL": {
+     "score": 1.7429,
+     "total_pl": 2225.54,
+     "trades": 71,
+     "edge": 2207.82,
+     "twin": 17.72,
+     "dd": -1276.89,
+     "tilt": 0.174
+    },
+    "AMD": {
+     "score": 0.8407,
+     "total_pl": 3973.83,
+     "trades": 76,
+     "edge": 4128.95,
+     "twin": -155.12,
+     "dd": -4726.96,
+     "tilt": 0.417
+    },
+    "ORCL": {
+     "score": 2.0751,
+     "total_pl": 2315.37,
+     "trades": 87,
+     "edge": 2325.49,
+     "twin": -10.12,
+     "dd": -1115.79,
+     "tilt": 0.024
+    },
+    "HD": {
+     "score": -0.7,
+     "total_pl": -929.49,
+     "trades": 50,
+     "edge": -929.49,
+     "twin": -0.0,
+     "dd": -1327.87,
+     "tilt": 0.0
+    },
+    "COST": {
+     "score": 0.6016,
+     "total_pl": 1286.33,
+     "trades": 37,
+     "edge": 1288.28,
+     "twin": -1.95,
+     "dd": -2138.24,
+     "tilt": 0.007
+    },
+    "BAC": {
+     "score": 0.8862,
+     "total_pl": 136.8,
+     "trades": 42,
+     "edge": 139.32,
+     "twin": -2.52,
+     "dd": -154.37,
+     "tilt": -0.057
+    },
+    "UNH": {
+     "score": 2.4662,
+     "total_pl": 2789.31,
+     "trades": 67,
+     "edge": 2831.97,
+     "twin": -42.66,
+     "dd": -1131.01,
+     "tilt": -0.443
+    },
+    "CVX": {
+     "score": 0.7061,
+     "total_pl": 310.52,
+     "trades": 49,
+     "edge": 309.97,
+     "twin": 0.55,
+     "dd": -439.75,
+     "tilt": 0.005
+    },
+    "BA": {
+     "score": 0.3131,
+     "total_pl": 319.56,
+     "trades": 52,
+     "edge": 322.55,
+     "twin": -2.99,
+     "dd": -1020.6,
+     "tilt": 0.068
+    },
+    "SO": {
+     "score": 3.0499,
+     "total_pl": 758.76,
+     "trades": 33,
+     "edge": 757.14,
+     "twin": 1.62,
+     "dd": -248.78,
+     "tilt": -0.067
+    },
+    "FCX": {
+     "score": 0.0224,
+     "total_pl": 8.98,
+     "trades": 60,
+     "edge": -2.48,
+     "twin": 11.46,
+     "dd": -400.32,
+     "tilt": 0.104
+    },
+    "PLD": {
+     "score": 10.6772,
+     "total_pl": 1949.98,
+     "trades": 31,
+     "edge": 1947.02,
+     "twin": 2.96,
+     "dd": -182.63,
+     "tilt": -0.123
+    },
+    "VZ": {
+     "score": -0.2592,
+     "total_pl": -64.12,
+     "trades": 49,
+     "edge": -66.52,
+     "twin": 2.4,
+     "dd": -247.39,
+     "tilt": 0.285
+    },
+    "XLF": {
+     "score": -0.2091,
+     "total_pl": -19.12,
+     "trades": 54,
+     "edge": -21.41,
+     "twin": 2.29,
+     "dd": -91.44,
+     "tilt": 0.065
+    },
+    "SOXL": {
+     "score": 1.5261,
+     "total_pl": 3842.16,
+     "trades": 78,
+     "edge": 4019.49,
+     "twin": -177.33,
+     "dd": -2517.62,
+     "tilt": 0.159
+    },
+    "GDX": {
+     "score": 0.3026,
+     "total_pl": 124.16,
+     "trades": 85,
+     "edge": 122.78,
+     "twin": 1.38,
+     "dd": -410.27,
+     "tilt": 0.011
+    },
+    "HYG": {
+     "score": 0.5335,
+     "total_pl": 24.75,
+     "trades": 47,
+     "edge": 22.08,
+     "twin": 2.67,
+     "dd": -46.39,
+     "tilt": -0.368
+    },
+    "F": {
+     "score": 2.266,
+     "total_pl": 176.36,
+     "trades": 53,
+     "edge": 176.18,
+     "twin": 0.18,
+     "dd": -77.83,
+     "tilt": -0.014
+    },
+    "IWM": {
+     "score": -0.1084,
+     "total_pl": -67.65,
+     "trades": 72,
+     "edge": -77.64,
+     "twin": 9.99,
+     "dd": -624.01,
+     "tilt": 0.388
+    },
+    "MSFT": {
+     "score": 0.3182,
+     "total_pl": 547.15,
+     "trades": 68,
+     "edge": 326.65,
+     "twin": 220.5,
+     "dd": -1719.57,
+     "tilt": 0.284
+    },
+    "AVGO": {
+     "score": -0.1695,
+     "total_pl": -802.5,
+     "trades": 81,
+     "edge": -935.2,
+     "twin": 132.7,
+     "dd": -4734.03,
+     "tilt": -0.196
+    },
+    "CRM": {
+     "score": 3.4839,
+     "total_pl": 2812.98,
+     "trades": 69,
+     "edge": 2649.8,
+     "twin": 163.18,
+     "dd": -807.42,
+     "tilt": 0.319
+    },
+    "MCD": {
+     "score": 0.422,
+     "total_pl": 202.93,
+     "trades": 48,
+     "edge": 187.58,
+     "twin": 15.35,
+     "dd": -480.87,
+     "tilt": -0.197
+    },
+    "PG": {
+     "score": 0.6991,
+     "total_pl": 199.38,
+     "trades": 38,
+     "edge": 192.09,
+     "twin": 7.29,
+     "dd": -285.19,
+     "tilt": 0.338
+    },
+    "GS": {
+     "score": -0.5682,
+     "total_pl": -2727.69,
+     "trades": 41,
+     "edge": -2724.97,
+     "twin": -2.72,
+     "dd": -4800.61,
+     "tilt": 0.092
+    },
+    "JNJ": {
+     "score": 1.7338,
+     "total_pl": 1305.64,
+     "trades": 42,
+     "edge": 1255.68,
+     "twin": 49.96,
+     "dd": -753.03,
+     "tilt": 0.176
+    },
+    "COP": {
+     "score": -0.0414,
+     "total_pl": -22.12,
+     "trades": 44,
+     "edge": -21.72,
+     "twin": -0.4,
+     "dd": -534.55,
+     "tilt": -0.005
+    },
+    "GE": {
+     "score": -0.0251,
+     "total_pl": -36.81,
+     "trades": 38,
+     "edge": -50.1,
+     "twin": 13.29,
+     "dd": -1467.2,
+     "tilt": 0.149
+    },
+    "TQQQ": {
+     "score": 0.2747,
+     "total_pl": 171.31,
+     "trades": 72,
+     "edge": 173.02,
+     "twin": -1.71,
+     "dd": -623.65,
+     "tilt": 0.013
+    }
+   },
+   "decay": 1.826,
+   "cut_reason": null
+  },
+  {
+   "slug": "b016-net-edge-admission-gate",
+   "name": "Net-Edge Admission Gate",
+   "note": "Gates a signal on cost rather than on strength. When the base rule fires (close crossing its EMA) three quantities are formed: the AGK EDGE effective-spread estimate over the trailing est_win OHLC bars as a fraction of price, with the Roll half-spread doubled as the fallback when EDGE is undefined; a square-root impact term y_imp*sigma_20*sqrt(Q/V20); and the conditional expected edge, the median forward h_bars log return over every past bar in the trailing edge_look window on which this same signal fired in this same direction, counting only fires at least h_bars old so the outcome was already observable. The trade is admitted only if the expected edge clears hurdle times the round trip, so the identical signal is accepted on a liquid name and refused on an illiquid one at the same dollar size. Cost enters the entry condition, not the P&L accounting.",
+   "source": "Ardia, D., Guidotti, E., Kroencke, T.A. (2024), 'Efficient Estimation of Bid-Ask Spreads from Open, High, Low, and Close Prices', Journal of Financial Economics 161:103916 (reference implementation at github.com/eguidotti/bidask); Roll (1984) as restated in Novy-Marx & Velikov, 'A Taxonomy of Anomalies and their Trading Costs' (NBER w20721), p.4; Toth et al. (2011) square-root law for the impact term.",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 2.0,
+    "side": "short",
+    "hurdle": 5.0,
+    "y_imp": 2.0,
+    "est_win": 120,
+    "ema_n": 20,
+    "est_step": 10,
+    "q_shares": 100.0,
+    "h_bars": 20,
+    "edge_look": 500,
+    "min_obs": 5,
+    "time_stop": 20
+   },
+   "train": {
+    "median_score": 0.2647,
+    "symbols_scored": 21,
+    "symbols_profitable": 11,
+    "symbols_run": 50,
+    "consistency": 0.524,
+    "total_trades": 592,
+    "sum_pl": -8831.9,
+    "sum_edge": 1050.8,
+    "beat_twin": 14,
+    "beat_twin_frac": 0.667
+   },
+   "test": {
+    "median_score": 1.0874,
+    "symbols_scored": 15,
+    "symbols_profitable": 12,
+    "symbols_run": 50,
+    "consistency": 0.8,
+    "total_trades": 440,
+    "sum_pl": 24030.56,
+    "sum_edge": 21700.61,
+    "beat_twin": 12,
+    "beat_twin_frac": 0.8
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": null,
+     "total_pl": -198.77,
+     "trades": 13,
+     "edge": -131.29,
+     "twin": -67.48,
+     "dd": -912.54,
+     "tilt": -1.0
+    },
+    "NVDA": {
+     "score": 1.5673,
+     "total_pl": 1938.06,
+     "trades": 37,
+     "edge": 2095.85,
+     "twin": -157.79,
+     "dd": -1236.58,
+     "tilt": -1.0
+    },
+    "MU": {
+     "score": -0.7406,
+     "total_pl": -7310.32,
+     "trades": 25,
+     "edge": -7041.56,
+     "twin": -268.76,
+     "dd": -9870.51,
+     "tilt": -1.0
+    },
+    "PLTR": {
+     "score": 0.2615,
+     "total_pl": 343.18,
+     "trades": 26,
+     "edge": 692.72,
+     "twin": -349.54,
+     "dd": -1312.31,
+     "tilt": -1.0
+    },
+    "TSLA": {
+     "score": 2.4649,
+     "total_pl": 4554.94,
+     "trades": 40,
+     "edge": 3459.71,
+     "twin": 1095.23,
+     "dd": -1847.91,
+     "tilt": -1.0
+    },
+    "WMT": {
+     "score": null,
+     "total_pl": 194.98,
+     "trades": 6,
+     "edge": 173.39,
+     "twin": 21.59,
+     "dd": -116.55,
+     "tilt": -1.0
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": 14.25,
+     "trades": 6,
+     "edge": 145.52,
+     "twin": -131.27,
+     "dd": -340.95,
+     "tilt": -1.0
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": -489.51,
+     "trades": 7,
+     "edge": -344.38,
+     "twin": -145.13,
+     "dd": -3098.71,
+     "tilt": -1.0
+    },
+    "XOM": {
+     "score": null,
+     "total_pl": -762.04,
+     "trades": 6,
+     "edge": -746.58,
+     "twin": -15.46,
+     "dd": -685.44,
+     "tilt": -1.0
+    },
+    "CAT": {
+     "score": null,
+     "total_pl": 3502.57,
+     "trades": 14,
+     "edge": 3057.34,
+     "twin": 445.23,
+     "dd": -4576.99,
+     "tilt": -1.0
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": 51.33,
+     "trades": 3,
+     "edge": 46.06,
+     "twin": 5.27,
+     "dd": -34.09,
+     "tilt": -1.0
+    },
+    "LIN": {
+     "score": 2.7524,
+     "total_pl": 3359.71,
+     "trades": 20,
+     "edge": 3075.64,
+     "twin": 284.07,
+     "dd": -1220.64,
+     "tilt": -1.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": 588.3,
+     "trades": 6,
+     "edge": 523.42,
+     "twin": 64.88,
+     "dd": -365.35,
+     "tilt": -1.0
+    },
+    "NFLX": {
+     "score": null,
+     "total_pl": 112.75,
+     "trades": 6,
+     "edge": 102.26,
+     "twin": 10.49,
+     "dd": -153.74,
+     "tilt": -1.0
+    },
+    "XLK": {
+     "score": null,
+     "total_pl": -379.68,
+     "trades": 16,
+     "edge": -368.66,
+     "twin": -11.02,
+     "dd": -557.45,
+     "tilt": -1.0
+    },
+    "MSTX": {
+     "score": 2.5436,
+     "total_pl": 635.27,
+     "trades": 30,
+     "edge": 496.44,
+     "twin": 138.83,
+     "dd": -249.75,
+     "tilt": -1.0
+    },
+    "UVXY": {
+     "score": -0.2908,
+     "total_pl": -95.83,
+     "trades": 27,
+     "edge": -210.57,
+     "twin": 114.74,
+     "dd": -329.5,
+     "tilt": -1.0
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": -492.18,
+     "trades": 4,
+     "edge": -494.99,
+     "twin": 2.81,
+     "dd": -593.28,
+     "tilt": -1.0
+    },
+    "LQD": {
+     "score": null,
+     "total_pl": -21.12,
+     "trades": 12,
+     "edge": -47.6,
+     "twin": 26.48,
+     "dd": -104.45,
+     "tilt": -1.0
+    },
+    "SOFI": {
+     "score": -0.6119,
+     "total_pl": -119.74,
+     "trades": 23,
+     "edge": -108.68,
+     "twin": -11.06,
+     "dd": -195.68,
+     "tilt": -1.0
+    },
+    "QQQ": {
+     "score": 1.9678,
+     "total_pl": 3363.04,
+     "trades": 30,
+     "edge": 3118.43,
+     "twin": 244.61,
+     "dd": -1709.04,
+     "tilt": -1.0
+    },
+    "AAPL": {
+     "score": null,
+     "total_pl": -905.19,
+     "trades": 8,
+     "edge": -876.08,
+     "twin": -29.11,
+     "dd": -1113.57,
+     "tilt": -1.0
+    },
+    "AMD": {
+     "score": 0.7731,
+     "total_pl": 4400.26,
+     "trades": 31,
+     "edge": 4001.91,
+     "twin": 398.35,
+     "dd": -5691.83,
+     "tilt": -1.0
+    },
+    "ORCL": {
+     "score": 0.8287,
+     "total_pl": 742.96,
+     "trades": 32,
+     "edge": 269.51,
+     "twin": 473.45,
+     "dd": -896.49,
+     "tilt": -1.0
+    },
+    "HD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "COST": {
+     "score": null,
+     "total_pl": -286.28,
+     "trades": 1,
+     "edge": -296.05,
+     "twin": 9.77,
+     "dd": -397.58,
+     "tilt": -1.0
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "UNH": {
+     "score": null,
+     "total_pl": 51.83,
+     "trades": 9,
+     "edge": 105.81,
+     "twin": -53.98,
+     "dd": -579.55,
+     "tilt": -1.0
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": 23.22,
+     "trades": 7,
+     "edge": 74.41,
+     "twin": -51.19,
+     "dd": -266.42,
+     "tilt": -1.0
+    },
+    "BA": {
+     "score": null,
+     "total_pl": 335.14,
+     "trades": 10,
+     "edge": 290.29,
+     "twin": 44.85,
+     "dd": -369.83,
+     "tilt": -1.0
+    },
+    "SO": {
+     "score": null,
+     "total_pl": 24.58,
+     "trades": 14,
+     "edge": -7.0,
+     "twin": 31.58,
+     "dd": -178.48,
+     "tilt": -1.0
+    },
+    "FCX": {
+     "score": null,
+     "total_pl": 223.46,
+     "trades": 7,
+     "edge": 262.56,
+     "twin": -39.1,
+     "dd": -138.75,
+     "tilt": -1.0
+    },
+    "PLD": {
+     "score": null,
+     "total_pl": 218.44,
+     "trades": 1,
+     "edge": 214.0,
+     "twin": 4.44,
+     "dd": -52.6,
+     "tilt": -1.0
+    },
+    "VZ": {
+     "score": null,
+     "total_pl": -65.72,
+     "trades": 9,
+     "edge": -58.75,
+     "twin": -6.97,
+     "dd": -106.85,
+     "tilt": -1.0
+    },
+    "XLF": {
+     "score": null,
+     "total_pl": 5.15,
+     "trades": 2,
+     "edge": 11.02,
+     "twin": -5.87,
+     "dd": -23.0,
+     "tilt": -1.0
+    },
+    "SOXL": {
+     "score": 2.1677,
+     "total_pl": 7460.51,
+     "trades": 43,
+     "edge": 5710.3,
+     "twin": 1750.21,
+     "dd": -3441.7,
+     "tilt": -1.0
+    },
+    "GDX": {
+     "score": null,
+     "total_pl": -0.94,
+     "trades": 15,
+     "edge": 62.55,
+     "twin": -63.49,
+     "dd": -309.99,
+     "tilt": -1.0
+    },
+    "HYG": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "F": {
+     "score": null,
+     "total_pl": 18.74,
+     "trades": 19,
+     "edge": 2.39,
+     "twin": 16.35,
+     "dd": -63.47,
+     "tilt": -1.0
+    },
+    "IWM": {
+     "score": null,
+     "total_pl": -238.42,
+     "trades": 6,
+     "edge": -232.91,
+     "twin": -5.51,
+     "dd": -307.05,
+     "tilt": -1.0
+    },
+    "MSFT": {
+     "score": 1.0874,
+     "total_pl": 2170.5,
+     "trades": 27,
+     "edge": 3074.14,
+     "twin": -903.64,
+     "dd": -1996.13,
+     "tilt": -1.0
+    },
+    "AVGO": {
+     "score": null,
+     "total_pl": 116.15,
+     "trades": 11,
+     "edge": -156.89,
+     "twin": 273.04,
+     "dd": -1388.26,
+     "tilt": -1.0
+    },
+    "CRM": {
+     "score": 4.2558,
+     "total_pl": 2183.89,
+     "trades": 22,
+     "edge": 2783.77,
+     "twin": -599.88,
+     "dd": -513.16,
+     "tilt": -1.0
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": -51.12,
+     "trades": 1,
+     "edge": -52.14,
+     "twin": 1.02,
+     "dd": -52.06,
+     "tilt": -1.0
+    },
+    "PG": {
+     "score": null,
+     "total_pl": -152.47,
+     "trades": 7,
+     "edge": -137.59,
+     "twin": -14.88,
+     "dd": -307.81,
+     "tilt": -1.0
+    },
+    "GS": {
+     "score": null,
+     "total_pl": -866.22,
+     "trades": 8,
+     "edge": -880.28,
+     "twin": 14.06,
+     "dd": -2271.85,
+     "tilt": -1.0
+    },
+    "JNJ": {
+     "score": null,
+     "total_pl": -63.11,
+     "trades": 1,
+     "edge": -55.71,
+     "twin": -7.4,
+     "dd": -152.77,
+     "tilt": -1.0
+    },
+    "COP": {
+     "score": null,
+     "total_pl": -57.9,
+     "trades": 4,
+     "edge": -38.41,
+     "twin": -19.49,
+     "dd": -170.63,
+     "tilt": -1.0
+    },
+    "GE": {
+     "score": null,
+     "total_pl": -230.17,
+     "trades": 4,
+     "edge": -185.88,
+     "twin": -44.29,
+     "dd": -442.09,
+     "tilt": -1.0
+    },
+    "TQQQ": {
+     "score": 0.5612,
+     "total_pl": 404.13,
+     "trades": 27,
+     "edge": 283.0,
+     "twin": 121.13,
+     "dd": -720.15,
+     "tilt": -1.0
+    }
+   },
+   "decay": 4.108,
+   "cut_reason": null
+  },
+  {
+   "slug": "b009-bertram-cost-aware-ou-band-optimization",
+   "name": "Bertram Cost-Aware OU Band Optimization",
+   "note": "SINGLE-SYMBOL ADAPTATION of a multi-symbol idea. The harness supplies one symbol, so the cointegrated second leg is replaced by the symbol's own trailing mean log price: x = log(C) - mean(log C, mu_win). Everything that makes the idea distinct is kept. An AR(1) fit of x gives theta = -log(rho) per bar and the stationary sd; entry a and exit m are then jointly chosen over a grid to maximise the RATE (m - a - cost)/E[T_cycle], with E[T] the exact OU first-passage time (pi^0.5/theta)*(F(w_m)-F(w_a)), F(w) = int_0^w e^(s^2)(1+erf s) ds, verified against the ODE it solves. The full cycle is a->m plus m->a, so capital's idle leg is paid for too. Bertram's Sharpe objective is not offered: at a zero risk-free rate it collapses to sqrt(E[T]/Var[T]), which is independent of the return per cycle and therefore ignores the cost term entirely - the rate objective is the one where cost bites. m* comes out well away from zero, which is the whole point.",
+   "source": "Bertram (2010), 'Analytic Solutions for Optimal Statistical Arbitrage Trading', Physica A 389(11); large-scale test with data-snooping controls in Cummins & Bucca (2012), 'Quantitative Spread Trading on Crude Oil and Refined Products Markets', Quantitative Finance. Trade-cycle decomposition T = T1 + T2 and the return function r(a,m,c) = m - a - c reproduced from Krauss (2015), FAU Discussion Paper 09/2015, section 4.2 (equations 22-24).",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 0.0,
+    "side": "long",
+    "c_cost": 0.001,
+    "fit_win": 400,
+    "hl_mult": 3.0,
+    "mu_win": 100,
+    "refit": 78,
+    "exit_signal_on": 1
+   },
+   "train": {
+    "median_score": 0.7718,
+    "symbols_scored": 15,
+    "symbols_profitable": 11,
+    "symbols_run": 50,
+    "consistency": 0.733,
+    "total_trades": 331,
+    "sum_pl": 36495.45,
+    "sum_edge": 39709.41,
+    "beat_twin": 14,
+    "beat_twin_frac": 0.933
+   },
+   "test": {
+    "median_score": 3.7255,
+    "symbols_scored": 1,
+    "symbols_profitable": 1,
+    "symbols_run": 50,
+    "consistency": 1.0,
+    "total_trades": 25,
+    "sum_pl": 8443.75,
+    "sum_edge": 7837.52,
+    "beat_twin": 1,
+    "beat_twin_frac": 1.0
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": null,
+     "total_pl": 1264.23,
+     "trades": 8,
+     "edge": 837.85,
+     "twin": 426.38,
+     "dd": -1746.55,
+     "tilt": 1.0
+    },
+    "NVDA": {
+     "score": null,
+     "total_pl": 1778.01,
+     "trades": 9,
+     "edge": 1369.99,
+     "twin": 408.02,
+     "dd": -2042.2,
+     "tilt": 1.0
+    },
+    "MU": {
+     "score": null,
+     "total_pl": 17751.74,
+     "trades": 13,
+     "edge": 16579.67,
+     "twin": 1172.07,
+     "dd": -25142.91,
+     "tilt": 1.0
+    },
+    "PLTR": {
+     "score": null,
+     "total_pl": 2629.29,
+     "trades": 8,
+     "edge": 1590.97,
+     "twin": 1038.32,
+     "dd": -746.63,
+     "tilt": 1.0
+    },
+    "TSLA": {
+     "score": null,
+     "total_pl": -2183.4,
+     "trades": 9,
+     "edge": 544.67,
+     "twin": -2728.07,
+     "dd": -10964.92,
+     "tilt": 1.0
+    },
+    "WMT": {
+     "score": null,
+     "total_pl": -765.86,
+     "trades": 8,
+     "edge": -467.47,
+     "twin": -298.39,
+     "dd": -1363.41,
+     "tilt": 1.0
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": 3121.97,
+     "trades": 9,
+     "edge": 1811.77,
+     "twin": 1310.2,
+     "dd": -1399.22,
+     "tilt": 1.0
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": 9365.73,
+     "trades": 8,
+     "edge": 7870.78,
+     "twin": 1494.95,
+     "dd": -11017.13,
+     "tilt": 1.0
+    },
+    "XOM": {
+     "score": null,
+     "total_pl": 1190.3,
+     "trades": 9,
+     "edge": 947.45,
+     "twin": 242.85,
+     "dd": -953.2,
+     "tilt": 1.0
+    },
+    "CAT": {
+     "score": null,
+     "total_pl": -17829.24,
+     "trades": 10,
+     "edge": -14545.96,
+     "twin": -3283.28,
+     "dd": -18808.5,
+     "tilt": 1.0
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": -6.4,
+     "trades": 15,
+     "edge": 149.39,
+     "twin": -155.79,
+     "dd": -683.0,
+     "tilt": 1.0
+    },
+    "LIN": {
+     "score": null,
+     "total_pl": 427.17,
+     "trades": 9,
+     "edge": 1287.78,
+     "twin": -860.61,
+     "dd": -5193.2,
+     "tilt": 1.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": 1399.15,
+     "trades": 13,
+     "edge": 1871.4,
+     "twin": -472.25,
+     "dd": -1111.0,
+     "tilt": 1.0
+    },
+    "NFLX": {
+     "score": null,
+     "total_pl": 1669.77,
+     "trades": 9,
+     "edge": 1781.15,
+     "twin": -111.38,
+     "dd": -378.18,
+     "tilt": 1.0
+    },
+    "XLK": {
+     "score": null,
+     "total_pl": -1675.31,
+     "trades": 8,
+     "edge": -1744.56,
+     "twin": 69.25,
+     "dd": -2479.4,
+     "tilt": 1.0
+    },
+    "MSTX": {
+     "score": null,
+     "total_pl": 622.44,
+     "trades": 17,
+     "edge": 1058.88,
+     "twin": -436.44,
+     "dd": -146.09,
+     "tilt": 1.0
+    },
+    "UVXY": {
+     "score": null,
+     "total_pl": -302.62,
+     "trades": 18,
+     "edge": 318.04,
+     "twin": -620.66,
+     "dd": -669.58,
+     "tilt": 1.0
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": 2218.7,
+     "trades": 10,
+     "edge": 2331.81,
+     "twin": -113.11,
+     "dd": -2680.0,
+     "tilt": 1.0
+    },
+    "LQD": {
+     "score": null,
+     "total_pl": -224.99,
+     "trades": 8,
+     "edge": -87.04,
+     "twin": -137.95,
+     "dd": -294.5,
+     "tilt": 1.0
+    },
+    "SOFI": {
+     "score": null,
+     "total_pl": 207.64,
+     "trades": 12,
+     "edge": 159.17,
+     "twin": 48.47,
+     "dd": -203.5,
+     "tilt": 1.0
+    },
+    "QQQ": {
+     "score": null,
+     "total_pl": -2379.71,
+     "trades": 8,
+     "edge": -1616.21,
+     "twin": -763.5,
+     "dd": -5562.69,
+     "tilt": 1.0
+    },
+    "AAPL": {
+     "score": null,
+     "total_pl": -614.4,
+     "trades": 5,
+     "edge": -948.51,
+     "twin": 334.11,
+     "dd": -3505.63,
+     "tilt": 1.0
+    },
+    "AMD": {
+     "score": null,
+     "total_pl": 6941.44,
+     "trades": 14,
+     "edge": 8428.35,
+     "twin": -1486.91,
+     "dd": -11410.78,
+     "tilt": 1.0
+    },
+    "ORCL": {
+     "score": null,
+     "total_pl": -788.39,
+     "trades": 12,
+     "edge": 1077.08,
+     "twin": -1865.47,
+     "dd": -3157.0,
+     "tilt": 1.0
+    },
+    "HD": {
+     "score": null,
+     "total_pl": -2534.4,
+     "trades": 8,
+     "edge": -2464.32,
+     "twin": -70.08,
+     "dd": -3390.2,
+     "tilt": 1.0
+    },
+    "COST": {
+     "score": null,
+     "total_pl": 4336.7,
+     "trades": 9,
+     "edge": 6276.84,
+     "twin": -1940.14,
+     "dd": -3083.0,
+     "tilt": 1.0
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": 500.0,
+     "trades": 10,
+     "edge": 213.55,
+     "twin": 286.45,
+     "dd": -312.5,
+     "tilt": 1.0
+    },
+    "UNH": {
+     "score": 3.7255,
+     "total_pl": 8443.75,
+     "trades": 25,
+     "edge": 7837.52,
+     "twin": 606.23,
+     "dd": -2266.45,
+     "tilt": 1.0
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": 613.8,
+     "trades": 7,
+     "edge": 71.6,
+     "twin": 542.2,
+     "dd": -1121.3,
+     "tilt": 1.0
+    },
+    "BA": {
+     "score": null,
+     "total_pl": -467.5,
+     "trades": 10,
+     "edge": 42.17,
+     "twin": -509.67,
+     "dd": -2884.0,
+     "tilt": 1.0
+    },
+    "SO": {
+     "score": null,
+     "total_pl": 165.07,
+     "trades": 14,
+     "edge": 437.67,
+     "twin": -272.6,
+     "dd": -615.58,
+     "tilt": 1.0
+    },
+    "FCX": {
+     "score": null,
+     "total_pl": -881.58,
+     "trades": 8,
+     "edge": -1367.99,
+     "twin": 486.41,
+     "dd": -1337.71,
+     "tilt": 1.0
+    },
+    "PLD": {
+     "score": null,
+     "total_pl": -295.96,
+     "trades": 8,
+     "edge": -136.18,
+     "twin": -159.78,
+     "dd": -1179.52,
+     "tilt": 1.0
+    },
+    "VZ": {
+     "score": null,
+     "total_pl": 373.17,
+     "trades": 6,
+     "edge": 329.31,
+     "twin": 43.86,
+     "dd": -344.0,
+     "tilt": 1.0
+    },
+    "XLF": {
+     "score": null,
+     "total_pl": 391.1,
+     "trades": 10,
+     "edge": 200.7,
+     "twin": 190.4,
+     "dd": -119.13,
+     "tilt": 1.0
+    },
+    "SOXL": {
+     "score": null,
+     "total_pl": -6001.05,
+     "trades": 14,
+     "edge": -1099.95,
+     "twin": -4901.1,
+     "dd": -12487.5,
+     "tilt": 1.0
+    },
+    "GDX": {
+     "score": null,
+     "total_pl": 1831.3,
+     "trades": 11,
+     "edge": 1431.31,
+     "twin": 399.99,
+     "dd": -481.0,
+     "tilt": 1.0
+    },
+    "HYG": {
+     "score": null,
+     "total_pl": -13.0,
+     "trades": 9,
+     "edge": 10.08,
+     "twin": -23.08,
+     "dd": -76.0,
+     "tilt": 1.0
+    },
+    "F": {
+     "score": null,
+     "total_pl": 115.94,
+     "trades": 14,
+     "edge": 194.73,
+     "twin": -78.79,
+     "dd": -115.95,
+     "tilt": 1.0
+    },
+    "IWM": {
+     "score": null,
+     "total_pl": 1386.6,
+     "trades": 16,
+     "edge": 1260.7,
+     "twin": 125.9,
+     "dd": -1208.6,
+     "tilt": 1.0
+    },
+    "MSFT": {
+     "score": null,
+     "total_pl": 992.24,
+     "trades": 5,
+     "edge": -1132.01,
+     "twin": 2124.25,
+     "dd": -2213.41,
+     "tilt": 1.0
+    },
+    "AVGO": {
+     "score": null,
+     "total_pl": -420.09,
+     "trades": 10,
+     "edge": 2180.62,
+     "twin": -2600.71,
+     "dd": -7641.3,
+     "tilt": 1.0
+    },
+    "CRM": {
+     "score": null,
+     "total_pl": 6895.75,
+     "trades": 7,
+     "edge": 5739.5,
+     "twin": 1156.25,
+     "dd": -1601.0,
+     "tilt": 1.0
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": 882.65,
+     "trades": 9,
+     "edge": 1625.73,
+     "twin": -743.08,
+     "dd": -1335.33,
+     "tilt": 1.0
+    },
+    "PG": {
+     "score": null,
+     "total_pl": 602.32,
+     "trades": 13,
+     "edge": 421.92,
+     "twin": 180.4,
+     "dd": -676.6,
+     "tilt": 1.0
+    },
+    "GS": {
+     "score": null,
+     "total_pl": -1979.95,
+     "trades": 7,
+     "edge": -1802.72,
+     "twin": -177.23,
+     "dd": -10586.5,
+     "tilt": 1.0
+    },
+    "JNJ": {
+     "score": null,
+     "total_pl": 102.0,
+     "trades": 5,
+     "edge": -1189.61,
+     "twin": 1291.61,
+     "dd": -1388.0,
+     "tilt": 1.0
+    },
+    "COP": {
+     "score": null,
+     "total_pl": -350.0,
+     "trades": 7,
+     "edge": -711.15,
+     "twin": 361.15,
+     "dd": -1187.8,
+     "tilt": 1.0
+    },
+    "GE": {
+     "score": null,
+     "total_pl": -923.62,
+     "trades": 10,
+     "edge": -2101.65,
+     "twin": 1178.03,
+     "dd": -2646.69,
+     "tilt": 1.0
+    },
+    "TQQQ": {
+     "score": null,
+     "total_pl": -606.84,
+     "trades": 11,
+     "edge": -166.11,
+     "twin": -440.73,
+     "dd": -1659.9,
+     "tilt": 1.0
+    }
+   },
+   "decay": 4.827,
+   "cut_reason": null
+  }
+ ],
+ "cut": [
+  {
+   "slug": "b001-haircut-sharpe-position-sizing",
+   "name": "Haircut Sharpe Position Sizing",
+   "note": "Ten ordinary candidate rules run side by side. At every recompute their expanding-window Sharpes become single-test t-stats and one-sided p-values, get adjusted for multiplicity by Bonferroni, Holm and BHY against a trial count of `trials`, are inverted back to a haircut Sharpe, and become a continuous weight w = clip(HSR/sr_target, 0, w_max); the traded signal is the sign of the w-weighted vote, so allocation moves continuously with multiple-testing-adjusted significance instead of switching on and off, and a rule whose w hits zero on retire_n consecutive recomputes is retired for good (retire_n=0 lets a rule come back). Sizing proper belongs to the harness, so the paper's risk fraction is expressed as the weight each rule carries in the vote. The trial count is swept over 4/10/40 rather than the paper's 100/578/5000: at intraday sample lengths a multiplicity of 100 haircuts every rule to zero and the family never trades at all, which is Harvey and Liu's point but produces no data.",
+   "source": "Harvey, C. & Liu, Y. (2015), 'Backtesting', Journal of Portfolio Management 42(1), 13-28 - the haircut Sharpe ratio and the exact Bonferroni / Holm / BHY adjusted p-value formulas, plus the finding that the haircut is non-linear and that the customary 50% haircut is too punitive for high-Sharpe and too lenient for low-Sharpe strategies. PDF: https://people.duke.edu/~charvey/Research/Published_Papers/P120_Backtesting.PDF . Companion: Harvey, C. & Liu, Y. (2014), 'Evaluating Trading Strategies', JPM 40(5), 108-118.",
+   "params": {
+    "tp_atr": 2.0,
+    "st_atr": 3.0,
+    "side": "short",
+    "trials": 40,
+    "method": "min",
+    "retire_n": 2,
+    "recompute": 500,
+    "min_obs": 400,
+    "sr_target": 0.06299,
+    "w_max": 0.25,
+    "debug": 0,
+    "exit_on_zero": 1,
+    "exit_on_flip": 1
+   },
+   "train": {
+    "median_score": 3.2197,
+    "symbols_scored": 5,
+    "symbols_profitable": 3,
+    "symbols_run": 50,
+    "consistency": 0.6,
+    "total_trades": 639,
+    "sum_pl": 6294.23,
+    "sum_edge": 5991.63,
+    "beat_twin": 3,
+    "beat_twin_frac": 0.6
+   },
+   "test": {
+    "median_score": -0.1989,
+    "symbols_scored": 4,
+    "symbols_profitable": 1,
+    "symbols_run": 50,
+    "consistency": 0.25,
+    "total_trades": 261,
+    "sum_pl": 149.91,
+    "sum_edge": 178.98,
+    "beat_twin": 1,
+    "beat_twin_frac": 0.25
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "NVDA": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "MU": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "PLTR": {
+     "score": -0.2804,
+     "total_pl": -350.01,
+     "trades": 26,
+     "edge": -149.9,
+     "twin": -200.11,
+     "dd": -1248.23,
+     "tilt": -1.0
+    },
+    "TSLA": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "WMT": {
+     "score": null,
+     "total_pl": 104.13,
+     "trades": 13,
+     "edge": 96.46,
+     "twin": 7.67,
+     "dd": -166.41,
+     "tilt": -1.0
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "XOM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "CAT": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "LIN": {
+     "score": -0.1175,
+     "total_pl": -239.69,
+     "trades": 45,
+     "edge": -466.76,
+     "twin": 227.07,
+     "dd": -2039.39,
+     "tilt": -1.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "NFLX": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "XLK": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "MSTX": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "UVXY": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "LQD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "SOFI": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "QQQ": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "AAPL": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "AMD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "ORCL": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "HD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "COST": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "UNH": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "BA": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "SO": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "FCX": {
+     "score": 2.9393,
+     "total_pl": 755.57,
+     "trades": 111,
+     "edge": 822.99,
+     "twin": -67.42,
+     "dd": -257.06,
+     "tilt": -1.0
+    },
+    "PLD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "VZ": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "XLF": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "SOXL": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "GDX": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "HYG": {
+     "score": -0.42,
+     "total_pl": -15.96,
+     "trades": 79,
+     "edge": -27.35,
+     "twin": 11.39,
+     "dd": -38.0,
+     "tilt": -1.0
+    },
+    "F": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "IWM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "MSFT": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "AVGO": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "CRM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "PG": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "GS": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "JNJ": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "COP": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "GE": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "TQQQ": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    }
+   },
+   "decay": -0.062,
+   "cut_reason": "out-of-sample score -0.199 below the 0.10 gate"
+  },
+  {
+   "slug": "b005-rogers-satchell-drift-detector",
+   "name": "Rogers-Satchell Drift Detector",
+   "note": "Ratio of the UNdemeaned close-to-close variance (expectation sigma^2 + mu^2) to the Rogers-Satchell range variance (drift-free), so DR-1 estimates (drift/vol)^2 per bar with no smoothing constant. Trades in the direction of the N-bar return sum when DR clears the gate and the close is the extreme of the last few bars; exits when DR collapses back into the noise. From Rogers & Satchell (1991).",
+   "source": "Rogers & Satchell (1991), 'Estimating variance from high, low and closing prices', Annals of Applied Probability 1(4), 504-512 (the drift-independent estimator); Parkinson (1980), Journal of Business 53(1), 61-65; Garman & Klass (1980), Journal of Business 53(1), 67-78. Estimator comparison and formulas: https://portfoliooptimizer.io/blog/range-based-volatility-estimators-overview-and-examples-of-usage/ and https://macrosynergy.com/research/six-ways-to-estimate-realized-volatility/ . The drift-ratio construction itself is my synthesis from those estimators' bias properties.",
+   "params": {
+    "tp_atr": 4.0,
+    "st_atr": 3.0,
+    "side": "long",
+    "rs_n": 40,
+    "dr_in": 1.25,
+    "conf": 5,
+    "dr_out": 1.05,
+    "exit_signal_on": 1,
+    "trail_atr": 2.0,
+    "time_stop": 25
+   },
+   "train": {
+    "median_score": -0.3331,
+    "symbols_scored": 50,
+    "symbols_profitable": 16,
+    "symbols_run": 50,
+    "consistency": 0.32,
+    "total_trades": 4638,
+    "sum_pl": -12487.33,
+    "sum_edge": -54023.55,
+    "beat_twin": 15,
+    "beat_twin_frac": 0.3
+   },
+   "test": {
+    "median_score": -0.0891,
+    "symbols_scored": 50,
+    "symbols_profitable": 23,
+    "symbols_run": 50,
+    "consistency": 0.46,
+    "total_trades": 3350,
+    "sum_pl": -7479.32,
+    "sum_edge": -6886.91,
+    "beat_twin": 18,
+    "beat_twin_frac": 0.36
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": 3.8637,
+     "total_pl": 4539.98,
+     "trades": 50,
+     "edge": 4311.2,
+     "twin": 228.78,
+     "dd": -1175.03,
+     "tilt": 1.0
+    },
+    "NVDA": {
+     "score": 0.5304,
+     "total_pl": 751.82,
+     "trades": 43,
+     "edge": 615.45,
+     "twin": 136.37,
+     "dd": -1417.33,
+     "tilt": 1.0
+    },
+    "MU": {
+     "score": 0.2494,
+     "total_pl": 4435.88,
+     "trades": 41,
+     "edge": 4057.89,
+     "twin": 377.99,
+     "dd": -17784.02,
+     "tilt": 1.0
+    },
+    "PLTR": {
+     "score": 4.7211,
+     "total_pl": 3209.71,
+     "trades": 51,
+     "edge": 2680.68,
+     "twin": 529.03,
+     "dd": -679.86,
+     "tilt": 1.0
+    },
+    "TSLA": {
+     "score": 0.4029,
+     "total_pl": 955.25,
+     "trades": 36,
+     "edge": 1747.15,
+     "twin": -791.9,
+     "dd": -2370.79,
+     "tilt": 1.0
+    },
+    "WMT": {
+     "score": 0.3353,
+     "total_pl": 392.67,
+     "trades": 83,
+     "edge": 579.49,
+     "twin": -186.82,
+     "dd": -1170.96,
+     "tilt": 1.0
+    },
+    "JPM": {
+     "score": 0.0636,
+     "total_pl": 107.93,
+     "trades": 85,
+     "edge": -1148.52,
+     "twin": 1256.45,
+     "dd": -1695.71,
+     "tilt": 1.0
+    },
+    "LLY": {
+     "score": -0.6449,
+     "total_pl": -7598.01,
+     "trades": 54,
+     "edge": -8183.66,
+     "twin": 585.65,
+     "dd": -11781.94,
+     "tilt": 1.0
+    },
+    "XOM": {
+     "score": 0.9025,
+     "total_pl": 1077.84,
+     "trades": 81,
+     "edge": 848.18,
+     "twin": 229.66,
+     "dd": -1194.22,
+     "tilt": 1.0
+    },
+    "CAT": {
+     "score": 0.3079,
+     "total_pl": 2840.84,
+     "trades": 93,
+     "edge": 5104.95,
+     "twin": -2264.11,
+     "dd": -9226.59,
+     "tilt": 1.0
+    },
+    "NEE": {
+     "score": -0.91,
+     "total_pl": -1186.47,
+     "trades": 92,
+     "edge": -1020.29,
+     "twin": -166.18,
+     "dd": -1303.79,
+     "tilt": 1.0
+    },
+    "LIN": {
+     "score": -0.7504,
+     "total_pl": -3634.99,
+     "trades": 65,
+     "edge": -3002.38,
+     "twin": -632.61,
+     "dd": -4843.88,
+     "tilt": 1.0
+    },
+    "AMT": {
+     "score": -0.7712,
+     "total_pl": -1626.14,
+     "trades": 45,
+     "edge": -1255.57,
+     "twin": -370.57,
+     "dd": -2108.66,
+     "tilt": 1.0
+    },
+    "NFLX": {
+     "score": -0.4771,
+     "total_pl": -215.05,
+     "trades": 38,
+     "edge": -167.69,
+     "twin": -47.36,
+     "dd": -450.79,
+     "tilt": 1.0
+    },
+    "XLK": {
+     "score": 0.0784,
+     "total_pl": 156.23,
+     "trades": 106,
+     "edge": 88.9,
+     "twin": 67.33,
+     "dd": -1992.84,
+     "tilt": 1.0
+    },
+    "MSTX": {
+     "score": -0.0093,
+     "total_pl": -3.69,
+     "trades": 78,
+     "edge": 261.86,
+     "twin": -265.55,
+     "dd": -397.48,
+     "tilt": 1.0
+    },
+    "UVXY": {
+     "score": -0.7744,
+     "total_pl": -985.76,
+     "trades": 68,
+     "edge": -728.6,
+     "twin": -257.16,
+     "dd": -1272.97,
+     "tilt": 1.0
+    },
+    "GLD": {
+     "score": -0.0577,
+     "total_pl": -142.96,
+     "trades": 73,
+     "edge": -75.12,
+     "twin": -67.84,
+     "dd": -2477.46,
+     "tilt": 1.0
+    },
+    "LQD": {
+     "score": -0.5995,
+     "total_pl": -121.19,
+     "trades": 61,
+     "edge": 13.33,
+     "twin": -134.52,
+     "dd": -202.15,
+     "tilt": 1.0
+    },
+    "SOFI": {
+     "score": 0.547,
+     "total_pl": 138.58,
+     "trades": 67,
+     "edge": 113.32,
+     "twin": 25.26,
+     "dd": -253.33,
+     "tilt": 1.0
+    },
+    "QQQ": {
+     "score": -0.6325,
+     "total_pl": -2453.92,
+     "trades": 46,
+     "edge": -2164.57,
+     "twin": -289.35,
+     "dd": -3879.58,
+     "tilt": 1.0
+    },
+    "AAPL": {
+     "score": 2.5952,
+     "total_pl": 2337.24,
+     "trades": 35,
+     "edge": 2203.41,
+     "twin": 133.83,
+     "dd": -900.6,
+     "tilt": 1.0
+    },
+    "AMD": {
+     "score": -0.1205,
+     "total_pl": -1069.41,
+     "trades": 52,
+     "edge": -518.7,
+     "twin": -550.71,
+     "dd": -8873.84,
+     "tilt": 1.0
+    },
+    "ORCL": {
+     "score": -0.2672,
+     "total_pl": -874.27,
+     "trades": 57,
+     "edge": -154.99,
+     "twin": -719.28,
+     "dd": -3272.16,
+     "tilt": 1.0
+    },
+    "HD": {
+     "score": -0.9603,
+     "total_pl": -3470.46,
+     "trades": 80,
+     "edge": -3417.62,
+     "twin": -52.84,
+     "dd": -3614.03,
+     "tilt": 1.0
+    },
+    "COST": {
+     "score": -0.674,
+     "total_pl": -4414.8,
+     "trades": 66,
+     "edge": -3027.59,
+     "twin": -1387.21,
+     "dd": -6550.12,
+     "tilt": 1.0
+    },
+    "BAC": {
+     "score": 0.0632,
+     "total_pl": 13.0,
+     "trades": 69,
+     "edge": -200.65,
+     "twin": 213.65,
+     "dd": -205.8,
+     "tilt": 1.0
+    },
+    "UNH": {
+     "score": -0.7015,
+     "total_pl": -1694.51,
+     "trades": 62,
+     "edge": -1956.48,
+     "twin": 261.97,
+     "dd": -2415.42,
+     "tilt": 1.0
+    },
+    "CVX": {
+     "score": 0.3486,
+     "total_pl": 402.41,
+     "trades": 92,
+     "edge": -256.49,
+     "twin": 658.9,
+     "dd": -1154.44,
+     "tilt": 1.0
+    },
+    "BA": {
+     "score": -0.1679,
+     "total_pl": -315.77,
+     "trades": 65,
+     "edge": -143.43,
+     "twin": -172.34,
+     "dd": -1880.51,
+     "tilt": 1.0
+    },
+    "SO": {
+     "score": -0.7691,
+     "total_pl": -672.2,
+     "trades": 58,
+     "edge": -470.59,
+     "twin": -201.61,
+     "dd": -874.0,
+     "tilt": 1.0
+    },
+    "FCX": {
+     "score": 0.3731,
+     "total_pl": 348.8,
+     "trades": 108,
+     "edge": -80.64,
+     "twin": 429.44,
+     "dd": -934.93,
+     "tilt": 1.0
+    },
+    "PLD": {
+     "score": -0.5431,
+     "total_pl": -721.77,
+     "trades": 60,
+     "edge": -549.1,
+     "twin": -172.67,
+     "dd": -1328.87,
+     "tilt": 1.0
+    },
+    "VZ": {
+     "score": -1.0,
+     "total_pl": -457.72,
+     "trades": 81,
+     "edge": -502.43,
+     "twin": 44.71,
+     "dd": -457.72,
+     "tilt": 1.0
+    },
+    "XLF": {
+     "score": 0.2973,
+     "total_pl": 40.42,
+     "trades": 88,
+     "edge": -106.78,
+     "twin": 147.2,
+     "dd": -135.97,
+     "tilt": 1.0
+    },
+    "SOXL": {
+     "score": 0.3675,
+     "total_pl": 2178.77,
+     "trades": 66,
+     "edge": 4453.27,
+     "twin": -2274.5,
+     "dd": -5929.12,
+     "tilt": 1.0
+    },
+    "GDX": {
+     "score": 1.5301,
+     "total_pl": 1153.62,
+     "trades": 87,
+     "edge": 833.41,
+     "twin": 320.21,
+     "dd": -753.96,
+     "tilt": 1.0
+    },
+    "HYG": {
+     "score": -0.8816,
+     "total_pl": -153.77,
+     "trades": 65,
+     "edge": -111.63,
+     "twin": -42.14,
+     "dd": -174.43,
+     "tilt": 1.0
+    },
+    "F": {
+     "score": -0.4804,
+     "total_pl": -99.92,
+     "trades": 62,
+     "edge": -62.72,
+     "twin": -37.2,
+     "dd": -207.98,
+     "tilt": 1.0
+    },
+    "IWM": {
+     "score": -0.9382,
+     "total_pl": -1920.54,
+     "trades": 64,
+     "edge": -1982.78,
+     "twin": 62.24,
+     "dd": -2047.14,
+     "tilt": 1.0
+    },
+    "MSFT": {
+     "score": 0.1673,
+     "total_pl": 383.61,
+     "trades": 38,
+     "edge": -673.59,
+     "twin": 1057.2,
+     "dd": -2292.56,
+     "tilt": 1.0
+    },
+    "AVGO": {
+     "score": -0.8388,
+     "total_pl": -4588.09,
+     "trades": 41,
+     "edge": -3765.93,
+     "twin": -822.16,
+     "dd": -5469.85,
+     "tilt": 1.0
+    },
+    "CRM": {
+     "score": -0.766,
+     "total_pl": -2191.23,
+     "trades": 94,
+     "edge": -4079.47,
+     "twin": 1888.24,
+     "dd": -2860.7,
+     "tilt": 1.0
+    },
+    "MCD": {
+     "score": -0.6748,
+     "total_pl": -786.85,
+     "trades": 57,
+     "edge": -480.82,
+     "twin": -306.03,
+     "dd": -1166.08,
+     "tilt": 1.0
+    },
+    "PG": {
+     "score": -0.384,
+     "total_pl": -425.69,
+     "trades": 66,
+     "edge": -537.25,
+     "twin": 111.56,
+     "dd": -1108.48,
+     "tilt": 1.0
+    },
+    "GS": {
+     "score": 0.706,
+     "total_pl": 6428.59,
+     "trades": 77,
+     "edge": 6578.01,
+     "twin": -149.42,
+     "dd": -9105.8,
+     "tilt": 1.0
+    },
+    "JNJ": {
+     "score": 0.7774,
+     "total_pl": 1070.02,
+     "trades": 73,
+     "edge": -780.42,
+     "twin": 1850.44,
+     "dd": -1376.43,
+     "tilt": 1.0
+    },
+    "COP": {
+     "score": 0.2121,
+     "total_pl": 254.81,
+     "trades": 92,
+     "edge": -224.86,
+     "twin": 479.67,
+     "dd": -1201.11,
+     "tilt": 1.0
+    },
+    "GE": {
+     "score": 0.5786,
+     "total_pl": 1302.46,
+     "trades": 78,
+     "edge": 378.63,
+     "twin": 923.83,
+     "dd": -2251.09,
+     "tilt": 1.0
+    },
+    "TQQQ": {
+     "score": -0.1315,
+     "total_pl": -174.62,
+     "trades": 61,
+     "edge": 75.32,
+     "twin": -249.94,
+     "dd": -1328.26,
+     "tilt": 1.0
+    }
+   },
+   "decay": null,
+   "cut_reason": "in-sample score -0.333 -- it never worked on the window it was tuned on"
+  },
+  {
+   "slug": "b012-ariel-semi-month-split",
+   "name": "Ariel semi-month exposure split",
+   "note": "Ariel's month partition, unconditional on price: long from the last trading day of the prior month through the Nth trading day of this one, then short (or flat) until the second-to-last session, flat for one day, repeat. Trading-day indices come from the session calendar -- weekday arithmetic with observed holidays removed -- so no price is used to place a session in its month. The daily hold is expressed as a state signal, which is what a rule with no exit event of its own has to be.",
+   "source": "Ariel, 'A Monthly Effect in Stock Returns', Journal of Financial Economics 18(1), 1987 - cited from the literature; not re-fetched this session (search budget exhausted). The exact split point (Ariel uses the last day of the prior month plus the first half of the month by trading-day count) is pinned to the 9th trading day here so the rule is unambiguous; sweep it.",
+   "params": {
+    "tp_atr": 4.0,
+    "st_atr": 3.0,
+    "side": "long",
+    "split_td": 8,
+    "short_half2": 0,
+    "long_last_day": 1,
+    "exit_on_flip": 1,
+    "exit_on_zero": 1
+   },
+   "train": {
+    "median_score": 0.6079,
+    "symbols_scored": 50,
+    "symbols_profitable": 32,
+    "symbols_run": 50,
+    "consistency": 0.64,
+    "total_trades": 4466,
+    "sum_pl": 138812.48,
+    "sum_edge": 52493.49,
+    "beat_twin": 31,
+    "beat_twin_frac": 0.62
+   },
+   "test": {
+    "median_score": -0.1541,
+    "symbols_scored": 50,
+    "symbols_profitable": 22,
+    "symbols_run": 50,
+    "consistency": 0.44,
+    "total_trades": 3109,
+    "sum_pl": -55646.57,
+    "sum_edge": -50952.56,
+    "beat_twin": 22,
+    "beat_twin_frac": 0.44
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": 0.2159,
+     "total_pl": 794.26,
+     "trades": 78,
+     "edge": 174.77,
+     "twin": 619.49,
+     "dd": -3678.98,
+     "tilt": 1.0
+    },
+    "NVDA": {
+     "score": 0.7147,
+     "total_pl": 2415.91,
+     "trades": 82,
+     "edge": 1893.21,
+     "twin": 522.7,
+     "dd": -3380.14,
+     "tilt": 1.0
+    },
+    "MU": {
+     "score": -0.5374,
+     "total_pl": -23016.51,
+     "trades": 69,
+     "edge": -24402.01,
+     "twin": 1385.5,
+     "dd": -42831.15,
+     "tilt": 1.0
+    },
+    "PLTR": {
+     "score": 0.49,
+     "total_pl": 1836.3,
+     "trades": 74,
+     "edge": 180.49,
+     "twin": 1655.81,
+     "dd": -3747.22,
+     "tilt": 1.0
+    },
+    "TSLA": {
+     "score": -0.617,
+     "total_pl": -4726.69,
+     "trades": 81,
+     "edge": -1224.88,
+     "twin": -3501.81,
+     "dd": -7660.77,
+     "tilt": 1.0
+    },
+    "WMT": {
+     "score": 0.8384,
+     "total_pl": 664.83,
+     "trades": 53,
+     "edge": 1016.08,
+     "twin": -351.25,
+     "dd": -793.01,
+     "tilt": 1.0
+    },
+    "JPM": {
+     "score": 1.7442,
+     "total_pl": 2479.55,
+     "trades": 42,
+     "edge": 424.23,
+     "twin": 2055.32,
+     "dd": -1421.57,
+     "tilt": 1.0
+    },
+    "LLY": {
+     "score": -0.2294,
+     "total_pl": -4143.81,
+     "trades": 60,
+     "edge": -6242.4,
+     "twin": 2098.59,
+     "dd": -18060.63,
+     "tilt": 1.0
+    },
+    "XOM": {
+     "score": 1.9412,
+     "total_pl": 1714.73,
+     "trades": 60,
+     "edge": 1326.36,
+     "twin": 388.37,
+     "dd": -883.33,
+     "tilt": 1.0
+    },
+    "CAT": {
+     "score": -0.4731,
+     "total_pl": -8402.37,
+     "trades": 56,
+     "edge": -5327.99,
+     "twin": -3074.38,
+     "dd": -17761.16,
+     "tilt": 1.0
+    },
+    "NEE": {
+     "score": -0.6607,
+     "total_pl": -661.86,
+     "trades": 55,
+     "edge": -457.37,
+     "twin": -204.49,
+     "dd": -1001.72,
+     "tilt": 1.0
+    },
+    "LIN": {
+     "score": 1.1854,
+     "total_pl": 3300.09,
+     "trades": 54,
+     "edge": 4398.04,
+     "twin": -1097.95,
+     "dd": -2784.0,
+     "tilt": 1.0
+    },
+    "AMT": {
+     "score": 0.9502,
+     "total_pl": 1090.94,
+     "trades": 39,
+     "edge": 1706.33,
+     "twin": -615.39,
+     "dd": -1148.12,
+     "tilt": 1.0
+    },
+    "NFLX": {
+     "score": -0.393,
+     "total_pl": -345.02,
+     "trades": 60,
+     "edge": -132.41,
+     "twin": -212.61,
+     "dd": -877.97,
+     "tilt": 1.0
+    },
+    "XLK": {
+     "score": -0.5903,
+     "total_pl": -1783.93,
+     "trades": 88,
+     "edge": -1872.6,
+     "twin": 88.67,
+     "dd": -3022.13,
+     "tilt": 1.0
+    },
+    "MSTX": {
+     "score": -0.8206,
+     "total_pl": -1261.52,
+     "trades": 72,
+     "edge": -679.3,
+     "twin": -582.22,
+     "dd": -1537.32,
+     "tilt": 1.0
+    },
+    "UVXY": {
+     "score": -0.1811,
+     "total_pl": -111.84,
+     "trades": 64,
+     "edge": 463.73,
+     "twin": -575.57,
+     "dd": -617.58,
+     "tilt": 1.0
+    },
+    "GLD": {
+     "score": -0.6101,
+     "total_pl": -2943.87,
+     "trades": 78,
+     "edge": -2820.72,
+     "twin": -123.15,
+     "dd": -4824.93,
+     "tilt": 1.0
+    },
+    "LQD": {
+     "score": -0.9507,
+     "total_pl": -482.88,
+     "trades": 53,
+     "edge": -326.95,
+     "twin": -155.93,
+     "dd": -507.93,
+     "tilt": 1.0
+    },
+    "SOFI": {
+     "score": -0.3169,
+     "total_pl": -155.5,
+     "trades": 78,
+     "edge": -219.33,
+     "twin": 63.83,
+     "dd": -490.75,
+     "tilt": 1.0
+    },
+    "QQQ": {
+     "score": -0.6981,
+     "total_pl": -4182.37,
+     "trades": 78,
+     "edge": -3244.77,
+     "twin": -937.6,
+     "dd": -5991.05,
+     "tilt": 1.0
+    },
+    "AAPL": {
+     "score": 0.1311,
+     "total_pl": 312.51,
+     "trades": 49,
+     "edge": -297.49,
+     "twin": 610.0,
+     "dd": -2384.48,
+     "tilt": 1.0
+    },
+    "AMD": {
+     "score": -0.5809,
+     "total_pl": -8248.14,
+     "trades": 65,
+     "edge": -6480.37,
+     "twin": -1767.77,
+     "dd": -14199.62,
+     "tilt": 1.0
+    },
+    "ORCL": {
+     "score": -0.3119,
+     "total_pl": -2744.62,
+     "trades": 80,
+     "edge": -794.18,
+     "twin": -1950.44,
+     "dd": -8800.42,
+     "tilt": 1.0
+    },
+    "HD": {
+     "score": -0.4823,
+     "total_pl": -1226.53,
+     "trades": 58,
+     "edge": -1146.16,
+     "twin": -80.37,
+     "dd": -2543.22,
+     "tilt": 1.0
+    },
+    "COST": {
+     "score": -0.0193,
+     "total_pl": -112.01,
+     "trades": 39,
+     "edge": 2644.83,
+     "twin": -2756.84,
+     "dd": -5808.04,
+     "tilt": 1.0
+    },
+    "BAC": {
+     "score": 2.8556,
+     "total_pl": 612.7,
+     "trades": 66,
+     "edge": 152.64,
+     "twin": 460.06,
+     "dd": -214.56,
+     "tilt": 1.0
+    },
+    "UNH": {
+     "score": 0.2977,
+     "total_pl": 792.57,
+     "trades": 53,
+     "edge": 151.23,
+     "twin": 641.34,
+     "dd": -2662.12,
+     "tilt": 1.0
+    },
+    "CVX": {
+     "score": 2.0271,
+     "total_pl": 2145.48,
+     "trades": 67,
+     "edge": 1258.69,
+     "twin": 886.79,
+     "dd": -1058.41,
+     "tilt": 1.0
+    },
+    "BA": {
+     "score": 0.1752,
+     "total_pl": 429.02,
+     "trades": 62,
+     "edge": 855.24,
+     "twin": -426.22,
+     "dd": -2448.62,
+     "tilt": 1.0
+    },
+    "SO": {
+     "score": -0.0448,
+     "total_pl": -28.12,
+     "trades": 43,
+     "edge": 235.57,
+     "twin": -263.69,
+     "dd": -627.95,
+     "tilt": 1.0
+    },
+    "FCX": {
+     "score": -0.4292,
+     "total_pl": -539.13,
+     "trades": 64,
+     "edge": -1105.43,
+     "twin": 566.3,
+     "dd": -1256.09,
+     "tilt": 1.0
+    },
+    "PLD": {
+     "score": 0.3364,
+     "total_pl": 286.79,
+     "trades": 33,
+     "edge": 481.44,
+     "twin": -194.65,
+     "dd": -852.57,
+     "tilt": 1.0
+    },
+    "VZ": {
+     "score": 0.3456,
+     "total_pl": 128.71,
+     "trades": 57,
+     "edge": 50.41,
+     "twin": 78.3,
+     "dd": -372.39,
+     "tilt": 1.0
+    },
+    "XLF": {
+     "score": 1.6215,
+     "total_pl": 232.41,
+     "trades": 68,
+     "edge": -16.78,
+     "twin": 249.19,
+     "dd": -143.33,
+     "tilt": 1.0
+    },
+    "SOXL": {
+     "score": -0.4395,
+     "total_pl": -5945.2,
+     "trades": 80,
+     "edge": -990.13,
+     "twin": -4955.07,
+     "dd": -13528.04,
+     "tilt": 1.0
+    },
+    "GDX": {
+     "score": -0.3723,
+     "total_pl": -842.44,
+     "trades": 86,
+     "edge": -1364.44,
+     "twin": 522.0,
+     "dd": -2263.08,
+     "tilt": 1.0
+    },
+    "HYG": {
+     "score": -0.6533,
+     "total_pl": -61.16,
+     "trades": 33,
+     "edge": -17.7,
+     "twin": -43.46,
+     "dd": -93.61,
+     "tilt": 1.0
+    },
+    "F": {
+     "score": -0.8403,
+     "total_pl": -454.66,
+     "trades": 74,
+     "edge": -346.9,
+     "twin": -107.76,
+     "dd": -541.09,
+     "tilt": 1.0
+    },
+    "IWM": {
+     "score": -0.6905,
+     "total_pl": -1817.39,
+     "trades": 72,
+     "edge": -1969.02,
+     "twin": 151.63,
+     "dd": -2632.0,
+     "tilt": 1.0
+    },
+    "MSFT": {
+     "score": 0.2335,
+     "total_pl": 1486.37,
+     "trades": 70,
+     "edge": -2309.32,
+     "twin": 3795.69,
+     "dd": -6365.33,
+     "tilt": 1.0
+    },
+    "AVGO": {
+     "score": 0.1739,
+     "total_pl": 1221.25,
+     "trades": 64,
+     "edge": 4160.58,
+     "twin": -2939.33,
+     "dd": -7022.36,
+     "tilt": 1.0
+    },
+    "CRM": {
+     "score": -0.127,
+     "total_pl": -566.79,
+     "trades": 60,
+     "edge": -3284.92,
+     "twin": 2718.13,
+     "dd": -4462.88,
+     "tilt": 1.0
+    },
+    "MCD": {
+     "score": 0.2174,
+     "total_pl": 498.28,
+     "trades": 58,
+     "edge": 1187.62,
+     "twin": -689.34,
+     "dd": -2292.03,
+     "tilt": 1.0
+    },
+    "PG": {
+     "score": 1.7108,
+     "total_pl": 1028.09,
+     "trades": 48,
+     "edge": 832.09,
+     "twin": 196.0,
+     "dd": -600.93,
+     "tilt": 1.0
+    },
+    "GS": {
+     "score": -0.3032,
+     "total_pl": -3268.19,
+     "trades": 56,
+     "edge": -3048.93,
+     "twin": -219.26,
+     "dd": -10778.36,
+     "tilt": 1.0
+    },
+    "JNJ": {
+     "score": 1.6608,
+     "total_pl": 2497.32,
+     "trades": 49,
+     "edge": 310.1,
+     "twin": 2187.22,
+     "dd": -1503.71,
+     "tilt": 1.0
+    },
+    "COP": {
+     "score": 2.8338,
+     "total_pl": 1818.96,
+     "trades": 52,
+     "edge": 1305.88,
+     "twin": 513.08,
+     "dd": -641.89,
+     "tilt": 1.0
+    },
+    "GE": {
+     "score": -0.8922,
+     "total_pl": -3474.67,
+     "trades": 47,
+     "edge": -4701.42,
+     "twin": 1226.75,
+     "dd": -3894.55,
+     "tilt": 1.0
+    },
+    "TQQQ": {
+     "score": -0.7173,
+     "total_pl": -1886.42,
+     "trades": 82,
+     "edge": -1338.2,
+     "twin": -548.22,
+     "dd": -2630.04,
+     "tilt": 1.0
+    }
+   },
+   "decay": -0.253,
+   "cut_reason": "out-of-sample score -0.154 below the 0.10 gate"
+  },
+  {
+   "slug": "b015-gap-cadence-run-in",
+   "name": "Gap-Cadence Event Calendar Run-In",
+   "note": "Reconstructs a recurring event calendar from the symbol's OWN bars: take the largest |open/prev-close - 1| jumps in a trailing window, keep the longest subset whose consecutive spacings all fall inside an admissible band, and forecast the next event at last + median spacing. Go long from entry_off bars before that forecast and exit exit_off bars before it -- always flat across the event itself. Self-falsifying: a forecast date that passes without a jump of stale_mult times the typical detected-event jump retires the symbol until a new event is observed. Spacings are in BARS, not sessions, because the probe data is far shorter than a quarterly cycle; on daily bars the band should be set to the 55-70 session spacing the source specifies, and the staleness reference is the median jump of the events the fit itself found rather than a 250-session median. Candidates are chosen with non-maximum suppression (min_sep bars apart, defaulting to half the low end of the spacing band) so that one violent event cannot occupy several candidate slots with its own neighbouring bars -- the source picks the 12 largest gap SESSIONS, which are distinct by construction.",
+   "source": "Beaver (1968) on announcement-period return variance and trading volume, cited in Kothari & Warner (2006) footnote 1. Frazzini & Lamont (2007) 'The Earnings Announcement Premium and Trading Volume' (NBER WP 13090) for the run-in premium. The gap-cadence reconstruction device itself is a synthesis -- no earnings calendar is available on this feed, so the event dates are inferred from the periodicity of the symbol's own overnight gaps, and the estimator is falsifiable.",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 3.0,
+    "trail_atr": 1.0,
+    "side": "long",
+    "entry_off": 60,
+    "exit_off": 1,
+    "min_dates": 7,
+    "look_n": 1600,
+    "cand_n": 12,
+    "span_lo": 100,
+    "span_hi": 260,
+    "drift_tol": 40,
+    "refit_every": 40,
+    "slack": 10,
+    "stale_mult": 0.5,
+    "exit_on_zero": 1,
+    "min_sep": 0
+   },
+   "train": {
+    "median_score": -0.0604,
+    "symbols_scored": 21,
+    "symbols_profitable": 9,
+    "symbols_run": 50,
+    "consistency": 0.429,
+    "total_trades": 566,
+    "sum_pl": 2718.91,
+    "sum_edge": -1752.91,
+    "beat_twin": 8,
+    "beat_twin_frac": 0.381
+   },
+   "test": {
+    "median_score": 1.106,
+    "symbols_scored": 1,
+    "symbols_profitable": 1,
+    "symbols_run": 50,
+    "consistency": 1.0,
+    "total_trades": 22,
+    "sum_pl": 160.98,
+    "sum_edge": 151.32,
+    "beat_twin": 1,
+    "beat_twin_frac": 1.0
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": null,
+     "total_pl": 1018.18,
+     "trades": 15,
+     "edge": 953.6,
+     "twin": 64.58,
+     "dd": -631.87,
+     "tilt": 1.0
+    },
+    "NVDA": {
+     "score": null,
+     "total_pl": 1044.58,
+     "trades": 13,
+     "edge": 991.71,
+     "twin": 52.87,
+     "dd": -479.04,
+     "tilt": 1.0
+    },
+    "MU": {
+     "score": null,
+     "total_pl": 763.2,
+     "trades": 1,
+     "edge": 752.42,
+     "twin": 10.78,
+     "dd": -1105.0,
+     "tilt": 1.0
+    },
+    "PLTR": {
+     "score": null,
+     "total_pl": -950.06,
+     "trades": 11,
+     "edge": -1090.91,
+     "twin": 140.85,
+     "dd": -1177.37,
+     "tilt": 1.0
+    },
+    "TSLA": {
+     "score": null,
+     "total_pl": 81.58,
+     "trades": 4,
+     "edge": 137.89,
+     "twin": -56.31,
+     "dd": -388.98,
+     "tilt": 1.0
+    },
+    "WMT": {
+     "score": null,
+     "total_pl": -72.17,
+     "trades": 12,
+     "edge": -43.92,
+     "twin": -28.25,
+     "dd": -254.03,
+     "tilt": 1.0
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": 587.5,
+     "trades": 14,
+     "edge": 441.23,
+     "twin": 146.27,
+     "dd": -448.79,
+     "tilt": 1.0
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": 590.43,
+     "trades": 5,
+     "edge": 542.91,
+     "twin": 47.52,
+     "dd": -1027.82,
+     "tilt": 1.0
+    },
+    "XOM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "CAT": {
+     "score": null,
+     "total_pl": -45.87,
+     "trades": 19,
+     "edge": 308.62,
+     "twin": -354.49,
+     "dd": -4166.28,
+     "tilt": 1.0
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": -34.49,
+     "trades": 7,
+     "edge": -17.4,
+     "twin": -17.09,
+     "dd": -199.69,
+     "tilt": 1.0
+    },
+    "LIN": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": 15.11,
+     "trades": 6,
+     "edge": 55.24,
+     "twin": -40.13,
+     "dd": -359.09,
+     "tilt": 1.0
+    },
+    "NFLX": {
+     "score": null,
+     "total_pl": 39.53,
+     "trades": 15,
+     "edge": 55.65,
+     "twin": -16.12,
+     "dd": -111.08,
+     "tilt": 1.0
+    },
+    "XLK": {
+     "score": null,
+     "total_pl": 303.26,
+     "trades": 5,
+     "edge": 300.23,
+     "twin": 3.03,
+     "dd": -208.59,
+     "tilt": 1.0
+    },
+    "MSTX": {
+     "score": null,
+     "total_pl": 62.0,
+     "trades": 14,
+     "edge": 116.44,
+     "twin": -54.44,
+     "dd": -72.25,
+     "tilt": 1.0
+    },
+    "UVXY": {
+     "score": null,
+     "total_pl": -80.17,
+     "trades": 7,
+     "edge": -58.09,
+     "twin": -22.08,
+     "dd": -83.62,
+     "tilt": 1.0
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": -367.76,
+     "trades": 13,
+     "edge": -354.52,
+     "twin": -13.24,
+     "dd": -942.7,
+     "tilt": 1.0
+    },
+    "LQD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "SOFI": {
+     "score": null,
+     "total_pl": -56.78,
+     "trades": 15,
+     "edge": -61.81,
+     "twin": 5.03,
+     "dd": -105.79,
+     "tilt": 1.0
+    },
+    "QQQ": {
+     "score": null,
+     "total_pl": 132.43,
+     "trades": 2,
+     "edge": 139.72,
+     "twin": -7.29,
+     "dd": -122.67,
+     "tilt": 1.0
+    },
+    "AAPL": {
+     "score": null,
+     "total_pl": 1506.55,
+     "trades": 15,
+     "edge": 1440.42,
+     "twin": 66.13,
+     "dd": -643.2,
+     "tilt": 1.0
+    },
+    "AMD": {
+     "score": null,
+     "total_pl": 135.75,
+     "trades": 6,
+     "edge": 208.26,
+     "twin": -72.51,
+     "dd": -2037.53,
+     "tilt": 1.0
+    },
+    "ORCL": {
+     "score": null,
+     "total_pl": -78.02,
+     "trades": 2,
+     "edge": -62.85,
+     "twin": -15.17,
+     "dd": -174.77,
+     "tilt": 1.0
+    },
+    "HD": {
+     "score": null,
+     "total_pl": 174.4,
+     "trades": 5,
+     "edge": 175.45,
+     "twin": -1.05,
+     "dd": -268.29,
+     "tilt": 1.0
+    },
+    "COST": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": -35.32,
+     "trades": 6,
+     "edge": -52.68,
+     "twin": 17.36,
+     "dd": -76.15,
+     "tilt": 1.0
+    },
+    "UNH": {
+     "score": null,
+     "total_pl": 176.41,
+     "trades": 5,
+     "edge": 153.76,
+     "twin": 22.65,
+     "dd": -589.3,
+     "tilt": 1.0
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": -18.87,
+     "trades": 12,
+     "edge": -82.72,
+     "twin": 63.85,
+     "dd": -318.92,
+     "tilt": 1.0
+    },
+    "BA": {
+     "score": null,
+     "total_pl": 91.04,
+     "trades": 4,
+     "edge": 101.91,
+     "twin": -10.87,
+     "dd": -359.13,
+     "tilt": 1.0
+    },
+    "SO": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "FCX": {
+     "score": null,
+     "total_pl": 521.39,
+     "trades": 13,
+     "edge": 478.58,
+     "twin": 42.81,
+     "dd": -284.84,
+     "tilt": 1.0
+    },
+    "PLD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "VZ": {
+     "score": 1.106,
+     "total_pl": 160.98,
+     "trades": 22,
+     "edge": 151.32,
+     "twin": 9.66,
+     "dd": -145.55,
+     "tilt": 1.0
+    },
+    "XLF": {
+     "score": null,
+     "total_pl": 12.78,
+     "trades": 6,
+     "edge": 5.06,
+     "twin": 7.72,
+     "dd": -45.53,
+     "tilt": 1.0
+    },
+    "SOXL": {
+     "score": null,
+     "total_pl": 710.5,
+     "trades": 1,
+     "edge": 749.05,
+     "twin": -38.55,
+     "dd": -184.32,
+     "tilt": 1.0
+    },
+    "GDX": {
+     "score": null,
+     "total_pl": 370.76,
+     "trades": 15,
+     "edge": 315.55,
+     "twin": 55.21,
+     "dd": -312.91,
+     "tilt": 1.0
+    },
+    "HYG": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "F": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "IWM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "MSFT": {
+     "score": null,
+     "total_pl": 3496.61,
+     "trades": 13,
+     "edge": 3226.9,
+     "twin": 269.71,
+     "dd": -1042.98,
+     "tilt": 1.0
+    },
+    "AVGO": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "CRM": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "PG": {
+     "score": null,
+     "total_pl": 78.05,
+     "trades": 16,
+     "edge": 55.74,
+     "twin": 22.31,
+     "dd": -303.62,
+     "tilt": 1.0
+    },
+    "GS": {
+     "score": null,
+     "total_pl": -1187.31,
+     "trades": 15,
+     "edge": -1159.66,
+     "twin": -27.65,
+     "dd": -6398.76,
+     "tilt": 1.0
+    },
+    "JNJ": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "COP": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "GE": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": 0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "TQQQ": {
+     "score": null,
+     "total_pl": 39.33,
+     "trades": 2,
+     "edge": 43.6,
+     "twin": -4.27,
+     "dd": -37.78,
+     "tilt": 1.0
+    }
+   },
+   "decay": null,
+   "cut_reason": "in-sample score -0.060 -- it never worked on the window it was tuned on"
+  },
+  {
+   "slug": "b021-amihud-illiquidity-reversal",
+   "name": "Amihud Illiquidity Reversal",
+   "note": "Bar-based Amihud lambda: rolling mean of |log return| / dollar volume. Buys when that ratio sits above its own trailing percentile AND price is more than atr_d ATRs below its 20-bar mean -- a decline produced by very little money changing hands. Exits when the ratio falls back under its trailing median, or price reclaims the mean, or the clock runs out. The percentile is a true rolling rank over the trailing window, not a fixed cut.",
+   "source": "Bar-based Amihud lambda, AFML pp.288-289, implemented as get_bar_based_amihud_lambda in mlfinlab/microstructural_features/second_generation.py - source read from the archived mlfinlab-master.zip at https://github.com/mnewls/MLFINLAB.",
+   "params": {
+    "tp_atr": 4.0,
+    "st_atr": 3.0,
+    "side": "long",
+    "illiq_n": 20,
+    "pct_in": 85.0,
+    "atr_d": 1.0,
+    "pct_win": 252,
+    "sma_n": 20,
+    "time_stop": 15,
+    "exit_signal_on": 1
+   },
+   "train": {
+    "median_score": 0.6223,
+    "symbols_scored": 50,
+    "symbols_profitable": 35,
+    "symbols_run": 50,
+    "consistency": 0.7,
+    "total_trades": 2961,
+    "sum_pl": 43879.78,
+    "sum_edge": 29827.6,
+    "beat_twin": 34,
+    "beat_twin_frac": 0.68
+   },
+   "test": {
+    "median_score": -0.0159,
+    "symbols_scored": 49,
+    "symbols_profitable": 22,
+    "symbols_run": 50,
+    "consistency": 0.449,
+    "total_trades": 1925,
+    "sum_pl": -18129.31,
+    "sum_edge": -16887.8,
+    "beat_twin": 20,
+    "beat_twin_frac": 0.408
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": -0.2566,
+     "total_pl": -410.61,
+     "trades": 37,
+     "edge": -472.95,
+     "twin": 62.34,
+     "dd": -1600.09,
+     "tilt": 1.0
+    },
+    "NVDA": {
+     "score": 0.806,
+     "total_pl": 738.11,
+     "trades": 46,
+     "edge": 655.69,
+     "twin": 82.42,
+     "dd": -915.74,
+     "tilt": 1.0
+    },
+    "MU": {
+     "score": -0.0425,
+     "total_pl": -627.31,
+     "trades": 51,
+     "edge": -921.94,
+     "twin": 294.63,
+     "dd": -14773.39,
+     "tilt": 1.0
+    },
+    "PLTR": {
+     "score": -0.0092,
+     "total_pl": -11.36,
+     "trades": 45,
+     "edge": -283.61,
+     "twin": 272.25,
+     "dd": -1241.27,
+     "tilt": 1.0
+    },
+    "TSLA": {
+     "score": 0.0809,
+     "total_pl": 209.54,
+     "trades": 48,
+     "edge": 748.98,
+     "twin": -539.44,
+     "dd": -2590.2,
+     "tilt": 1.0
+    },
+    "WMT": {
+     "score": 0.3955,
+     "total_pl": 144.46,
+     "trades": 35,
+     "edge": 180.57,
+     "twin": -36.11,
+     "dd": -365.23,
+     "tilt": 1.0
+    },
+    "JPM": {
+     "score": 1.5612,
+     "total_pl": 1309.23,
+     "trades": 35,
+     "edge": 1091.7,
+     "twin": 217.53,
+     "dd": -838.6,
+     "tilt": 1.0
+    },
+    "LLY": {
+     "score": 1.7755,
+     "total_pl": 7058.92,
+     "trades": 38,
+     "edge": 6830.31,
+     "twin": 228.61,
+     "dd": -3975.71,
+     "tilt": 1.0
+    },
+    "XOM": {
+     "score": -0.1887,
+     "total_pl": -134.68,
+     "trades": 40,
+     "edge": -206.53,
+     "twin": 71.85,
+     "dd": -713.62,
+     "tilt": 1.0
+    },
+    "CAT": {
+     "score": -0.3064,
+     "total_pl": -2930.74,
+     "trades": 48,
+     "edge": -2363.13,
+     "twin": -567.61,
+     "dd": -9565.77,
+     "tilt": 1.0
+    },
+    "NEE": {
+     "score": 0.2927,
+     "total_pl": 113.97,
+     "trades": 28,
+     "edge": 130.63,
+     "twin": -16.66,
+     "dd": -389.38,
+     "tilt": 1.0
+    },
+    "LIN": {
+     "score": -0.4855,
+     "total_pl": -1414.85,
+     "trades": 30,
+     "edge": -1220.49,
+     "twin": -194.36,
+     "dd": -2914.25,
+     "tilt": 1.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": 720.29,
+     "trades": 11,
+     "edge": 771.13,
+     "twin": -50.84,
+     "dd": -266.51,
+     "tilt": 1.0
+    },
+    "NFLX": {
+     "score": -0.3459,
+     "total_pl": -339.79,
+     "trades": 50,
+     "edge": -308.33,
+     "twin": -31.46,
+     "dd": -982.34,
+     "tilt": 1.0
+    },
+    "XLK": {
+     "score": -0.1946,
+     "total_pl": -218.04,
+     "trades": 49,
+     "edge": -234.47,
+     "twin": 16.43,
+     "dd": -1120.43,
+     "tilt": 1.0
+    },
+    "MSTX": {
+     "score": -0.9652,
+     "total_pl": -673.43,
+     "trades": 40,
+     "edge": -573.02,
+     "twin": -100.41,
+     "dd": -697.73,
+     "tilt": 1.0
+    },
+    "UVXY": {
+     "score": -0.549,
+     "total_pl": -176.11,
+     "trades": 45,
+     "edge": -72.56,
+     "twin": -103.55,
+     "dd": -320.77,
+     "tilt": 1.0
+    },
+    "GLD": {
+     "score": -0.8225,
+     "total_pl": -1242.06,
+     "trades": 45,
+     "edge": -1220.32,
+     "twin": -21.74,
+     "dd": -1510.12,
+     "tilt": 1.0
+    },
+    "LQD": {
+     "score": -0.6261,
+     "total_pl": -54.6,
+     "trades": 20,
+     "edge": -31.39,
+     "twin": -23.21,
+     "dd": -87.2,
+     "tilt": 1.0
+    },
+    "SOFI": {
+     "score": 0.036,
+     "total_pl": 5.49,
+     "trades": 54,
+     "edge": -4.31,
+     "twin": 9.8,
+     "dd": -152.71,
+     "tilt": 1.0
+    },
+    "QQQ": {
+     "score": 0.0338,
+     "total_pl": 113.82,
+     "trades": 37,
+     "edge": 235.4,
+     "twin": -121.58,
+     "dd": -3367.86,
+     "tilt": 1.0
+    },
+    "AAPL": {
+     "score": 0.725,
+     "total_pl": 921.77,
+     "trades": 36,
+     "edge": 841.09,
+     "twin": 80.68,
+     "dd": -1271.48,
+     "tilt": 1.0
+    },
+    "AMD": {
+     "score": -0.5083,
+     "total_pl": -4544.64,
+     "trades": 50,
+     "edge": -4272.96,
+     "twin": -271.68,
+     "dd": -8941.44,
+     "tilt": 1.0
+    },
+    "ORCL": {
+     "score": -0.5598,
+     "total_pl": -2391.41,
+     "trades": 61,
+     "edge": -1984.73,
+     "twin": -406.68,
+     "dd": -4271.9,
+     "tilt": 1.0
+    },
+    "HD": {
+     "score": -0.8127,
+     "total_pl": -2880.24,
+     "trades": 31,
+     "edge": -2869.37,
+     "twin": -10.87,
+     "dd": -3544.05,
+     "tilt": 1.0
+    },
+    "COST": {
+     "score": 0.2656,
+     "total_pl": 1285.44,
+     "trades": 40,
+     "edge": 1717.23,
+     "twin": -431.79,
+     "dd": -4840.52,
+     "tilt": 1.0
+    },
+    "BAC": {
+     "score": 2.4766,
+     "total_pl": 291.1,
+     "trades": 34,
+     "edge": 248.82,
+     "twin": 42.28,
+     "dd": -117.54,
+     "tilt": 1.0
+    },
+    "UNH": {
+     "score": -0.0039,
+     "total_pl": -5.77,
+     "trades": 36,
+     "edge": -86.93,
+     "twin": 81.16,
+     "dd": -1479.39,
+     "tilt": 1.0
+    },
+    "CVX": {
+     "score": 1.4587,
+     "total_pl": 984.48,
+     "trades": 46,
+     "edge": 804.48,
+     "twin": 180.0,
+     "dd": -674.88,
+     "tilt": 1.0
+    },
+    "BA": {
+     "score": -0.1532,
+     "total_pl": -219.84,
+     "trades": 37,
+     "edge": -159.5,
+     "twin": -60.34,
+     "dd": -1434.59,
+     "tilt": 1.0
+    },
+    "SO": {
+     "score": 0.0028,
+     "total_pl": 1.33,
+     "trades": 27,
+     "edge": 46.4,
+     "twin": -45.07,
+     "dd": -467.98,
+     "tilt": 1.0
+    },
+    "FCX": {
+     "score": -0.5444,
+     "total_pl": -382.1,
+     "trades": 38,
+     "edge": -468.73,
+     "twin": 86.63,
+     "dd": -701.88,
+     "tilt": 1.0
+    },
+    "PLD": {
+     "score": 0.0824,
+     "total_pl": 36.95,
+     "trades": 21,
+     "edge": 66.12,
+     "twin": -29.17,
+     "dd": -448.64,
+     "tilt": 1.0
+    },
+    "VZ": {
+     "score": 0.0464,
+     "total_pl": 7.32,
+     "trades": 35,
+     "edge": -1.87,
+     "twin": 9.19,
+     "dd": -157.6,
+     "tilt": 1.0
+    },
+    "XLF": {
+     "score": 0.7063,
+     "total_pl": 58.33,
+     "trades": 36,
+     "edge": 29.58,
+     "twin": 28.75,
+     "dd": -82.58,
+     "tilt": 1.0
+    },
+    "SOXL": {
+     "score": -0.7273,
+     "total_pl": -6922.53,
+     "trades": 60,
+     "edge": -5819.97,
+     "twin": -1102.56,
+     "dd": -9518.58,
+     "tilt": 1.0
+    },
+    "GDX": {
+     "score": -0.0547,
+     "total_pl": -20.01,
+     "trades": 35,
+     "edge": -108.9,
+     "twin": 88.89,
+     "dd": -366.01,
+     "tilt": 1.0
+    },
+    "HYG": {
+     "score": -0.0159,
+     "total_pl": -0.69,
+     "trades": 25,
+     "edge": 7.23,
+     "twin": -7.92,
+     "dd": -43.48,
+     "tilt": 1.0
+    },
+    "F": {
+     "score": 0.1034,
+     "total_pl": 10.28,
+     "trades": 41,
+     "edge": 23.14,
+     "twin": -12.86,
+     "dd": -99.45,
+     "tilt": 1.0
+    },
+    "IWM": {
+     "score": 4.056,
+     "total_pl": 1193.96,
+     "trades": 31,
+     "edge": 1177.91,
+     "twin": 16.05,
+     "dd": -294.37,
+     "tilt": 1.0
+    },
+    "MSFT": {
+     "score": -0.5357,
+     "total_pl": -1571.92,
+     "trades": 44,
+     "edge": -2245.22,
+     "twin": 673.3,
+     "dd": -2934.28,
+     "tilt": 1.0
+    },
+    "AVGO": {
+     "score": -0.8829,
+     "total_pl": -3479.88,
+     "trades": 43,
+     "edge": -2978.04,
+     "twin": -501.84,
+     "dd": -3941.28,
+     "tilt": 1.0
+    },
+    "CRM": {
+     "score": -0.7576,
+     "total_pl": -2219.99,
+     "trades": 49,
+     "edge": -2658.25,
+     "twin": 438.26,
+     "dd": -2930.32,
+     "tilt": 1.0
+    },
+    "MCD": {
+     "score": 0.5871,
+     "total_pl": 467.26,
+     "trades": 40,
+     "edge": 592.13,
+     "twin": -124.87,
+     "dd": -795.91,
+     "tilt": 1.0
+    },
+    "PG": {
+     "score": -0.7519,
+     "total_pl": -771.32,
+     "trades": 34,
+     "edge": -802.82,
+     "twin": 31.5,
+     "dd": -1025.78,
+     "tilt": 1.0
+    },
+    "GS": {
+     "score": 0.7792,
+     "total_pl": 3150.17,
+     "trades": 39,
+     "edge": 3190.44,
+     "twin": -40.27,
+     "dd": -4042.92,
+     "tilt": 1.0
+    },
+    "JNJ": {
+     "score": 0.0408,
+     "total_pl": 54.83,
+     "trades": 30,
+     "edge": -335.61,
+     "twin": 390.44,
+     "dd": -1343.68,
+     "tilt": 1.0
+    },
+    "COP": {
+     "score": 1.9555,
+     "total_pl": 858.13,
+     "trades": 31,
+     "edge": 776.59,
+     "twin": 81.54,
+     "dd": -438.84,
+     "tilt": 1.0
+    },
+    "GE": {
+     "score": -0.7828,
+     "total_pl": -2673.98,
+     "trades": 35,
+     "edge": -2845.81,
+     "twin": 171.83,
+     "dd": -3416.13,
+     "tilt": 1.0
+    },
+    "TQQQ": {
+     "score": -0.7056,
+     "total_pl": -826.3,
+     "trades": 39,
+     "edge": -730.48,
+     "twin": -95.82,
+     "dd": -1171.04,
+     "tilt": 1.0
+    }
+   },
+   "decay": -0.026,
+   "cut_reason": "out-of-sample score -0.016 below the 0.10 gate"
+  },
+  {
+   "slug": "b028-no-supply-no-demand-bar",
+   "name": "No Supply No Demand Bar",
+   "note": "Volume Spread Analysis read of an ABSENCE of participation: a narrow-range bar whose volume undercuts each of the previous two bars, closing in the half of its range that contradicts its own direction, taken only in the matching side of the SMA. Mandatory confirmation on the very next bar (close through the signal bar's extreme on higher volume) turns the qualitative read into a rule.",
+   "source": "Tom Williams, 'Master the Markets' (Volume Spread Analysis). Operational definition -- up/down bar, narrow spread, volume lower than the previous two bars, close position within the bar, confirming next bar on rising volume -- from tradingsetupsreview.com's VSA guide and atas.net's no-demand/no-supply article. 'Narrow spread' is undefined in both sources and is pinned here to a fraction of the mean range of the five bars before the signal bar.",
+   "params": {
+    "tp_atr": 4.0,
+    "st_atr": 1.5,
+    "side": "short",
+    "spread_mult": 0.7,
+    "close_pos": 0.5,
+    "vol_back": 2,
+    "sma_n": 20,
+    "time_stop": 8,
+    "exit_on_flip": 1
+   },
+   "train": {
+    "median_score": 1.2025,
+    "symbols_scored": 1,
+    "symbols_profitable": 1,
+    "symbols_run": 50,
+    "consistency": 1.0,
+    "total_trades": 20,
+    "sum_pl": 361.05,
+    "sum_edge": 428.64,
+    "beat_twin": 1,
+    "beat_twin_frac": 1.0
+   },
+   "test": {
+    "median_score": null,
+    "symbols_scored": 0,
+    "symbols_profitable": 0,
+    "symbols_run": 50,
+    "consistency": 0.0,
+    "total_trades": 0,
+    "sum_pl": 0,
+    "sum_edge": 0,
+    "beat_twin": 0,
+    "beat_twin_frac": 0.0
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": null,
+     "total_pl": -59.4,
+     "trades": 10,
+     "edge": -33.37,
+     "twin": -26.03,
+     "dd": -470.68,
+     "tilt": -1.0
+    },
+    "NVDA": {
+     "score": null,
+     "total_pl": -657.41,
+     "trades": 9,
+     "edge": -642.77,
+     "twin": -14.64,
+     "dd": -760.31,
+     "tilt": -1.0
+    },
+    "MU": {
+     "score": null,
+     "total_pl": -4342.02,
+     "trades": 6,
+     "edge": -4311.84,
+     "twin": -30.18,
+     "dd": -5660.12,
+     "tilt": -1.0
+    },
+    "PLTR": {
+     "score": null,
+     "total_pl": 29.84,
+     "trades": 15,
+     "edge": 132.04,
+     "twin": -102.2,
+     "dd": -235.15,
+     "tilt": -1.0
+    },
+    "TSLA": {
+     "score": null,
+     "total_pl": 1603.79,
+     "trades": 14,
+     "edge": 1394.92,
+     "twin": 208.87,
+     "dd": -1096.21,
+     "tilt": -1.0
+    },
+    "WMT": {
+     "score": null,
+     "total_pl": -83.07,
+     "trades": 9,
+     "edge": -97.6,
+     "twin": 14.53,
+     "dd": -173.02,
+     "tilt": -1.0
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": -452.27,
+     "trades": 10,
+     "edge": -354.75,
+     "twin": -97.52,
+     "dd": -490.87,
+     "tilt": -1.0
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": 18.89,
+     "trades": 7,
+     "edge": 90.81,
+     "twin": -71.92,
+     "dd": -1813.41,
+     "tilt": -1.0
+    },
+    "XOM": {
+     "score": null,
+     "total_pl": -10.45,
+     "trades": 8,
+     "edge": 4.1,
+     "twin": -14.55,
+     "dd": -202.85,
+     "tilt": -1.0
+    },
+    "CAT": {
+     "score": null,
+     "total_pl": -1174.18,
+     "trades": 5,
+     "edge": -1231.15,
+     "twin": 56.97,
+     "dd": -1657.13,
+     "tilt": -1.0
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": -85.81,
+     "trades": 2,
+     "edge": -87.8,
+     "twin": 1.99,
+     "dd": -85.81,
+     "tilt": -1.0
+    },
+    "LIN": {
+     "score": null,
+     "total_pl": -358.59,
+     "trades": 6,
+     "edge": -400.64,
+     "twin": 42.05,
+     "dd": -455.94,
+     "tilt": -1.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": -274.81,
+     "trades": 3,
+     "edge": -290.19,
+     "twin": 15.38,
+     "dd": -319.51,
+     "tilt": -1.0
+    },
+    "NFLX": {
+     "score": null,
+     "total_pl": 53.76,
+     "trades": 12,
+     "edge": 45.59,
+     "twin": 8.17,
+     "dd": -125.32,
+     "tilt": -1.0
+    },
+    "XLK": {
+     "score": null,
+     "total_pl": 106.1,
+     "trades": 8,
+     "edge": 108.93,
+     "twin": -2.83,
+     "dd": -254.24,
+     "tilt": -1.0
+    },
+    "MSTX": {
+     "score": null,
+     "total_pl": 250.87,
+     "trades": 14,
+     "edge": 222.14,
+     "twin": 28.73,
+     "dd": -171.35,
+     "tilt": -1.0
+    },
+    "UVXY": {
+     "score": null,
+     "total_pl": 60.83,
+     "trades": 12,
+     "edge": 35.95,
+     "twin": 24.88,
+     "dd": -92.37,
+     "tilt": -1.0
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": 305.24,
+     "trades": 11,
+     "edge": 299.68,
+     "twin": 5.56,
+     "dd": -196.83,
+     "tilt": -1.0
+    },
+    "LQD": {
+     "score": null,
+     "total_pl": -6.18,
+     "trades": 2,
+     "edge": -8.14,
+     "twin": 1.96,
+     "dd": -10.18,
+     "tilt": -1.0
+    },
+    "SOFI": {
+     "score": null,
+     "total_pl": -34.93,
+     "trades": 9,
+     "edge": -33.34,
+     "twin": -1.59,
+     "dd": -85.7,
+     "tilt": -1.0
+    },
+    "QQQ": {
+     "score": null,
+     "total_pl": -461.11,
+     "trades": 6,
+     "edge": -482.99,
+     "twin": 21.88,
+     "dd": -859.43,
+     "tilt": -1.0
+    },
+    "AAPL": {
+     "score": null,
+     "total_pl": -251.84,
+     "trades": 9,
+     "edge": -231.27,
+     "twin": -20.57,
+     "dd": -590.65,
+     "tilt": -1.0
+    },
+    "AMD": {
+     "score": null,
+     "total_pl": -642.94,
+     "trades": 9,
+     "edge": -703.52,
+     "twin": 60.58,
+     "dd": -1075.45,
+     "tilt": -1.0
+    },
+    "ORCL": {
+     "score": null,
+     "total_pl": -11.42,
+     "trades": 9,
+     "edge": -82.23,
+     "twin": 70.81,
+     "dd": -387.0,
+     "tilt": -1.0
+    },
+    "HD": {
+     "score": null,
+     "total_pl": -232.6,
+     "trades": 2,
+     "edge": -233.36,
+     "twin": 0.76,
+     "dd": -368.75,
+     "tilt": -1.0
+    },
+    "COST": {
+     "score": null,
+     "total_pl": -1298.39,
+     "trades": 8,
+     "edge": -1403.9,
+     "twin": 105.51,
+     "dd": -1497.64,
+     "tilt": -1.0
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": -33.88,
+     "trades": 6,
+     "edge": -20.72,
+     "twin": -13.16,
+     "dd": -139.0,
+     "tilt": -1.0
+    },
+    "UNH": {
+     "score": null,
+     "total_pl": -691.54,
+     "trades": 10,
+     "edge": -665.87,
+     "twin": -25.67,
+     "dd": -873.72,
+     "tilt": -1.0
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": -5.42,
+     "trades": 3,
+     "edge": 6.69,
+     "twin": -12.11,
+     "dd": -80.34,
+     "tilt": -1.0
+    },
+    "BA": {
+     "score": null,
+     "total_pl": -143.74,
+     "trades": 4,
+     "edge": -152.98,
+     "twin": 9.24,
+     "dd": -260.04,
+     "tilt": -1.0
+    },
+    "SO": {
+     "score": null,
+     "total_pl": 45.01,
+     "trades": 2,
+     "edge": 42.58,
+     "twin": 2.43,
+     "dd": -39.0,
+     "tilt": -1.0
+    },
+    "FCX": {
+     "score": null,
+     "total_pl": -139.83,
+     "trades": 7,
+     "edge": -122.64,
+     "twin": -17.19,
+     "dd": -191.58,
+     "tilt": -1.0
+    },
+    "PLD": {
+     "score": null,
+     "total_pl": 62.38,
+     "trades": 2,
+     "edge": 58.58,
+     "twin": 3.8,
+     "dd": -96.0,
+     "tilt": -1.0
+    },
+    "VZ": {
+     "score": null,
+     "total_pl": -19.01,
+     "trades": 6,
+     "edge": -17.03,
+     "twin": -1.98,
+     "dd": -51.49,
+     "tilt": -1.0
+    },
+    "XLF": {
+     "score": null,
+     "total_pl": 7.0,
+     "trades": 3,
+     "edge": 10.86,
+     "twin": -3.86,
+     "dd": -27.5,
+     "tilt": -1.0
+    },
+    "SOXL": {
+     "score": null,
+     "total_pl": 101.85,
+     "trades": 18,
+     "edge": -216.84,
+     "twin": 318.69,
+     "dd": -2319.07,
+     "tilt": -1.0
+    },
+    "GDX": {
+     "score": null,
+     "total_pl": 218.88,
+     "trades": 8,
+     "edge": 236.82,
+     "twin": -17.94,
+     "dd": -77.02,
+     "tilt": -1.0
+    },
+    "HYG": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0,
+     "edge": 0.0,
+     "twin": -0.0,
+     "dd": 0.0,
+     "tilt": 0.0
+    },
+    "F": {
+     "score": null,
+     "total_pl": 2.81,
+     "trades": 7,
+     "edge": -0.57,
+     "twin": 3.38,
+     "dd": -11.73,
+     "tilt": -1.0
+    },
+    "IWM": {
+     "score": null,
+     "total_pl": -76.29,
+     "trades": 11,
+     "edge": -69.52,
+     "twin": -6.77,
+     "dd": -303.2,
+     "tilt": -1.0
+    },
+    "MSFT": {
+     "score": null,
+     "total_pl": -327.37,
+     "trades": 9,
+     "edge": -189.56,
+     "twin": -137.81,
+     "dd": -1224.92,
+     "tilt": -1.0
+    },
+    "AVGO": {
+     "score": null,
+     "total_pl": 1321.25,
+     "trades": 10,
+     "edge": 1217.53,
+     "twin": 103.72,
+     "dd": -424.94,
+     "tilt": -1.0
+    },
+    "CRM": {
+     "score": null,
+     "total_pl": 1229.93,
+     "trades": 10,
+     "edge": 1335.61,
+     "twin": -105.68,
+     "dd": -284.48,
+     "tilt": -1.0
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": -196.8,
+     "trades": 6,
+     "edge": -224.44,
+     "twin": 27.64,
+     "dd": -321.68,
+     "tilt": -1.0
+    },
+    "PG": {
+     "score": null,
+     "total_pl": -37.75,
+     "trades": 4,
+     "edge": -33.37,
+     "twin": -4.38,
+     "dd": -84.56,
+     "tilt": -1.0
+    },
+    "GS": {
+     "score": null,
+     "total_pl": -1758.11,
+     "trades": 7,
+     "edge": -1765.14,
+     "twin": 7.03,
+     "dd": -2407.88,
+     "tilt": -1.0
+    },
+    "JNJ": {
+     "score": null,
+     "total_pl": 8.06,
+     "trades": 2,
+     "edge": 26.56,
+     "twin": -18.5,
+     "dd": -143.26,
+     "tilt": -1.0
+    },
+    "COP": {
+     "score": null,
+     "total_pl": -99.17,
+     "trades": 2,
+     "edge": -93.6,
+     "twin": -5.57,
+     "dd": -128.17,
+     "tilt": -1.0
+    },
+    "GE": {
+     "score": null,
+     "total_pl": 460.91,
+     "trades": 7,
+     "edge": 502.54,
+     "twin": -41.63,
+     "dd": -383.75,
+     "tilt": -1.0
+    },
+    "TQQQ": {
+     "score": null,
+     "total_pl": -78.59,
+     "trades": 8,
+     "edge": -96.5,
+     "twin": 17.91,
+     "dd": -256.01,
+     "tilt": -1.0
+    }
+   },
+   "decay": null,
+   "cut_reason": "too few trades out of sample to score"
+  },
+  {
+   "slug": "b039-naked-poc-magnet",
+   "name": "Naked POC Magnet",
+   "note": "A real volume-at-price profile is built for each regular-hours session: bins bin_pct percent of the session open wide, every bar's volume spread evenly over the bins its [low, high] covers, and the POC is the midpoint of the fullest bin. A finished session's POC joins a list and stays on it only while it remains NAKED - the moment any later session's range contains that price it is struck off, so membership is a topological fact about the tape rather than a threshold. Between start_min and end_min ET the nearest naked POC above and below the last price are measured in units of the SESSION ATR(14) built from the same profiles; the setup trades toward whichever is nearer, provided it sits between min_atr and max_atr away - close enough to be reachable, far enough to be worth the trip. One trade per level per day. Exit is the level itself, or flat at flat_min ET. The 1.0 x session-ATR stop the idea specifies is carried as st_atr in BAR-ATR units, which is the only stop unit the shared harness has.",
+   "source": "Market Profile / volume profile lineage (Steidlmayer, CBOT Liquidity Data Bank). Definitions and the naked/virgin POC concept per LuxAlgo concept library, https://www.luxalgo.com/library/concept/naked-poc/ and https://www.luxalgo.com/library/concept/point-of-control/ ; profile construction per TradingView docs, https://www.tradingview.com/support/solutions/43000502040-volume-profile-indicators-basic-concepts/ . Exact bin widths, ATR gating and the 60-session horizon are the harvesting agent's specification.",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 6.0,
+    "side": "long",
+    "min_atr": 0.8,
+    "max_atr": 1.0,
+    "bin_pct": 0.1,
+    "look_sess": 40,
+    "start_min": 600,
+    "end_min": 900,
+    "flat_min": 955,
+    "atr_sess": 14,
+    "exit_signal_on": 1
+   },
+   "train": {
+    "median_score": 0.2217,
+    "symbols_scored": 24,
+    "symbols_profitable": 16,
+    "symbols_run": 50,
+    "consistency": 0.667,
+    "total_trades": 577,
+    "sum_pl": 2418.2,
+    "sum_edge": 1284.4,
+    "beat_twin": 13,
+    "beat_twin_frac": 0.542
+   },
+   "test": {
+    "median_score": -0.1147,
+    "symbols_scored": 4,
+    "symbols_profitable": 2,
+    "symbols_run": 50,
+    "consistency": 0.5,
+    "total_trades": 88,
+    "sum_pl": 763.5,
+    "sum_edge": 844.2,
+    "beat_twin": 2,
+    "beat_twin_frac": 0.5
+   },
+   "per_symbol_test": {
+    "SPY": {
+     "score": null,
+     "total_pl": -1152.81,
+     "trades": 14,
+     "edge": -1231.21,
+     "twin": 78.4,
+     "dd": -3367.71,
+     "tilt": 1.0
+    },
+    "NVDA": {
+     "score": null,
+     "total_pl": -186.25,
+     "trades": 9,
+     "edge": -228.81,
+     "twin": 42.56,
+     "dd": -673.81,
+     "tilt": 1.0
+    },
+    "MU": {
+     "score": null,
+     "total_pl": -3533.0,
+     "trades": 7,
+     "edge": -3631.45,
+     "twin": 98.45,
+     "dd": -13400.19,
+     "tilt": 1.0
+    },
+    "PLTR": {
+     "score": null,
+     "total_pl": -358.98,
+     "trades": 9,
+     "edge": -509.27,
+     "twin": 150.29,
+     "dd": -808.15,
+     "tilt": 1.0
+    },
+    "TSLA": {
+     "score": null,
+     "total_pl": 600.83,
+     "trades": 7,
+     "edge": 824.23,
+     "twin": -223.4,
+     "dd": -1590.05,
+     "tilt": 1.0
+    },
+    "WMT": {
+     "score": null,
+     "total_pl": -312.14,
+     "trades": 13,
+     "edge": -265.33,
+     "twin": -46.81,
+     "dd": -419.68,
+     "tilt": 1.0
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": 56.1,
+     "trades": 3,
+     "edge": -2.66,
+     "twin": 58.76,
+     "dd": -347.15,
+     "tilt": 1.0
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": -2552.2,
+     "trades": 8,
+     "edge": -2698.61,
+     "twin": 146.41,
+     "dd": -4001.46,
+     "tilt": 1.0
+    },
+    "XOM": {
+     "score": null,
+     "total_pl": 66.88,
+     "trades": 15,
+     "edge": 10.94,
+     "twin": 55.94,
+     "dd": -315.12,
+     "tilt": 1.0
+    },
+    "CAT": {
+     "score": null,
+     "total_pl": -1812.11,
+     "trades": 5,
+     "edge": -1594.77,
+     "twin": -217.34,
+     "dd": -5117.71,
+     "tilt": 1.0
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": 328.15,
+     "trades": 16,
+     "edge": 376.14,
+     "twin": -47.99,
+     "dd": -134.6,
+     "tilt": 1.0
+    },
+    "LIN": {
+     "score": null,
+     "total_pl": -911.52,
+     "trades": 13,
+     "edge": -701.27,
+     "twin": -210.25,
+     "dd": -1534.76,
+     "tilt": 1.0
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": -669.71,
+     "trades": 7,
+     "edge": -582.75,
+     "twin": -86.96,
+     "dd": -752.47,
+     "tilt": 1.0
+    },
+    "NFLX": {
+     "score": null,
+     "total_pl": -176.89,
+     "trades": 13,
+     "edge": -153.38,
+     "twin": -23.51,
+     "dd": -561.29,
+     "tilt": 1.0
+    },
+    "XLK": {
+     "score": 1.4117,
+     "total_pl": 1025.48,
+     "trades": 22,
+     "edge": 1006.27,
+     "twin": 19.21,
+     "dd": -726.4,
+     "tilt": 1.0
+    },
+    "MSTX": {
+     "score": null,
+     "total_pl": -129.42,
+     "trades": 16,
+     "edge": -54.41,
+     "twin": -75.01,
+     "dd": -248.62,
+     "tilt": 1.0
+    },
+    "UVXY": {
+     "score": null,
+     "total_pl": -80.7,
+     "trades": 12,
+     "edge": -21.93,
+     "twin": -58.77,
+     "dd": -238.31,
+     "tilt": 1.0
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": -1097.23,
+     "trades": 6,
+     "edge": -1090.45,
+     "twin": -6.78,
+     "dd": -1272.33,
+     "tilt": 1.0
+    },
+    "LQD": {
+     "score": null,
+     "total_pl": -146.46,
+     "trades": 16,
+     "edge": -101.51,
+     "twin": -44.95,
+     "dd": -163.46,
+     "tilt": 1.0
+    },
+    "SOFI": {
+     "score": null,
+     "total_pl": 173.02,
+     "trades": 17,
+     "edge": 161.1,
+     "twin": 11.92,
+     "dd": -132.32,
+     "tilt": 1.0
+    },
+    "QQQ": {
+     "score": null,
+     "total_pl": -1738.57,
+     "trades": 11,
+     "edge": -1642.77,
+     "twin": -95.8,
+     "dd": -1895.5,
+     "tilt": 1.0
+    },
+    "AAPL": {
+     "score": null,
+     "total_pl": 544.33,
+     "trades": 7,
+     "edge": 502.88,
+     "twin": 41.45,
+     "dd": -307.17,
+     "tilt": 1.0
+    },
+    "AMD": {
+     "score": null,
+     "total_pl": 4396.59,
+     "trades": 14,
+     "edge": 4640.74,
+     "twin": -244.15,
+     "dd": -3382.82,
+     "tilt": 1.0
+    },
+    "ORCL": {
+     "score": null,
+     "total_pl": 559.51,
+     "trades": 11,
+     "edge": 764.87,
+     "twin": -205.36,
+     "dd": -503.0,
+     "tilt": 1.0
+    },
+    "HD": {
+     "score": null,
+     "total_pl": -987.26,
+     "trades": 16,
+     "edge": -968.26,
+     "twin": -19.0,
+     "dd": -1161.11,
+     "tilt": 1.0
+    },
+    "COST": {
+     "score": null,
+     "total_pl": -2245.12,
+     "trades": 11,
+     "edge": -1862.17,
+     "twin": -382.95,
+     "dd": -3420.71,
+     "tilt": 1.0
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": -73.48,
+     "trades": 6,
+     "edge": -104.0,
+     "twin": 30.52,
+     "dd": -105.0,
+     "tilt": 1.0
+    },
+    "UNH": {
+     "score": null,
+     "total_pl": -1455.59,
+     "trades": 12,
+     "edge": -1529.58,
+     "twin": 73.99,
+     "dd": -2122.4,
+     "tilt": 1.0
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": -180.38,
+     "trades": 10,
+     "edge": -287.17,
+     "twin": 106.79,
+     "dd": -551.88,
+     "tilt": 1.0
+    },
+    "BA": {
+     "score": null,
+     "total_pl": -104.7,
+     "trades": 6,
+     "edge": -74.8,
+     "twin": -29.9,
+     "dd": -753.7,
+     "tilt": 1.0
+    },
+    "SO": {
+     "score": null,
+     "total_pl": -176.5,
+     "trades": 9,
+     "edge": -127.11,
+     "twin": -49.39,
+     "dd": -253.0,
+     "tilt": 1.0
+    },
+    "FCX": {
+     "score": -0.3735,
+     "total_pl": -142.45,
+     "trades": 20,
+     "edge": -265.15,
+     "twin": 122.7,
+     "dd": -381.44,
+     "tilt": 1.0
+    },
+    "PLD": {
+     "score": -0.3597,
+     "total_pl": -209.09,
+     "trades": 25,
+     "edge": -104.48,
+     "twin": -104.61,
+     "dd": -581.24,
+     "tilt": 1.0
+    },
+    "VZ": {
+     "score": null,
+     "total_pl": 264.38,
+     "trades": 7,
+     "edge": 258.16,
+     "twin": 6.22,
+     "dd": -50.0,
+     "tilt": 1.0
+    },
+    "XLF": {
+     "score": null,
+     "total_pl": -54.52,
+     "trades": 7,
+     "edge": -74.26,
+     "twin": 19.74,
+     "dd": -109.0,
+     "tilt": 1.0
+    },
+    "SOXL": {
+     "score": null,
+     "total_pl": -4029.8,
+     "trades": 8,
+     "edge": -3680.27,
+     "twin": -349.53,
+     "dd": -5083.31,
+     "tilt": 1.0
+    },
+    "GDX": {
+     "score": null,
+     "total_pl": -46.48,
+     "trades": 12,
+     "edge": -100.86,
+     "twin": 54.38,
+     "dd": -258.45,
+     "tilt": 1.0
+    },
+    "HYG": {
+     "score": null,
+     "total_pl": -44.87,
+     "trades": 15,
+     "edge": -35.17,
+     "twin": -9.7,
+     "dd": -62.87,
+     "tilt": 1.0
+    },
+    "F": {
+     "score": null,
+     "total_pl": -39.82,
+     "trades": 9,
+     "edge": -30.82,
+     "twin": -9.0,
+     "dd": -89.32,
+     "tilt": 1.0
+    },
+    "IWM": {
+     "score": null,
+     "total_pl": 305.1,
+     "trades": 4,
+     "edge": 299.75,
+     "twin": 5.35,
+     "dd": -268.0,
+     "tilt": 1.0
+    },
+    "MSFT": {
+     "score": null,
+     "total_pl": -1692.43,
+     "trades": 12,
+     "edge": -2143.27,
+     "twin": 450.84,
+     "dd": -2030.45,
+     "tilt": 1.0
+    },
+    "AVGO": {
+     "score": null,
+     "total_pl": 913.92,
+     "trades": 13,
+     "edge": 1280.0,
+     "twin": -366.08,
+     "dd": -1818.41,
+     "tilt": 1.0
+    },
+    "CRM": {
+     "score": null,
+     "total_pl": 621.7,
+     "trades": 8,
+     "edge": 380.81,
+     "twin": 240.89,
+     "dd": -458.65,
+     "tilt": 1.0
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": -783.45,
+     "trades": 17,
+     "edge": -641.69,
+     "twin": -141.76,
+     "dd": -1575.6,
+     "tilt": 1.0
+    },
+    "PG": {
+     "score": null,
+     "total_pl": 26.67,
+     "trades": 8,
+     "edge": 5.96,
+     "twin": 20.71,
+     "dd": -260.13,
+     "tilt": 1.0
+    },
+    "GS": {
+     "score": null,
+     "total_pl": -3705.41,
+     "trades": 6,
+     "edge": -3688.95,
+     "twin": -16.46,
+     "dd": -5058.88,
+     "tilt": 1.0
+    },
+    "JNJ": {
+     "score": null,
+     "total_pl": -609.34,
+     "trades": 6,
+     "edge": -822.14,
+     "twin": 212.8,
+     "dd": -718.14,
+     "tilt": 1.0
+    },
+    "COP": {
+     "score": null,
+     "total_pl": -839.33,
+     "trades": 9,
+     "edge": -895.41,
+     "twin": 56.08,
+     "dd": -890.83,
+     "tilt": 1.0
+    },
+    "GE": {
+     "score": null,
+     "total_pl": -717.52,
+     "trades": 9,
+     "edge": -868.1,
+     "twin": 150.58,
+     "dd": -1303.44,
+     "tilt": 1.0
+    },
+    "TQQQ": {
+     "score": 0.1303,
+     "total_pl": 89.56,
+     "trades": 21,
+     "edge": 207.56,
+     "twin": -118.0,
+     "dd": -687.19,
+     "tilt": 1.0
+    }
+   },
+   "decay": -0.517,
+   "cut_reason": "out-of-sample score -0.115 below the 0.10 gate"
+  }
+ ],
+ "exec_lesson": {
+  "flat": {
+   "chosen_by": 8,
+   "median_train": 0.6151,
+   "median_test": 0.2374,
+   "decay": 0.386
+  },
+  "trail": {
+   "chosen_by": 3,
+   "median_train": -0.0604,
+   "median_test": 0.5193,
+   "decay": -8.598
+  }
+ }
+}

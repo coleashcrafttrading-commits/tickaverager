@@ -1,0 +1,1389 @@
+{
+ "source": "round4_broaden-15m.json",
+ "timeframe": "15Min",
+ "original_days": 250,
+ "fetched_days": 625,
+ "earlier_from": "2024-12-17T10:45:00Z",
+ "earlier_to": "2025-12-29T11:45:00Z",
+ "control_bar": null,
+ "rows": [
+  {
+   "family": "Consecutive Close-Above-Prior-High Exhaustion",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 1.0,
+    "trail_atr": 1.0,
+    "side": "short",
+    "streak": 2,
+    "ema_on": 0,
+    "ema_n": 200,
+    "exit_signal_on": 1
+   },
+   "reported_oos": 0.5193,
+   "earlier": 0.2709,
+   "consistency": 0.64,
+   "symbols": 50,
+   "trades": 38032,
+   "sum_pl": 48174.07,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.348932349304117,
+     "total_pl": -2215.04,
+     "trades": 953
+    },
+    "NVDA": {
+     "score": -0.7830302031819435,
+     "total_pl": -2756.65,
+     "trades": 801
+    },
+    "MU": {
+     "score": -0.8358452627472165,
+     "total_pl": -6962.8,
+     "trades": 907
+    },
+    "PLTR": {
+     "score": -0.9177315325449407,
+     "total_pl": -6282.01,
+     "trades": 831
+    },
+    "TSLA": {
+     "score": -0.062362330095190655,
+     "total_pl": -766.11,
+     "trades": 799
+    },
+    "WMT": {
+     "score": 0.03541243179629828,
+     "total_pl": 33.1,
+     "trades": 841
+    },
+    "JPM": {
+     "score": 0.7855952517772998,
+     "total_pl": 1913.93,
+     "trades": 837
+    },
+    "LLY": {
+     "score": 0.07850758520155782,
+     "total_pl": 1126.66,
+     "trades": 760
+    },
+    "XOM": {
+     "score": 0.0005304718167901908,
+     "total_pl": 0.7,
+     "trades": 880
+    },
+    "CAT": {
+     "score": -0.030790117828934982,
+     "total_pl": -124.28,
+     "trades": 704
+    },
+    "NEE": {
+     "score": 1.523968119513322,
+     "total_pl": 791.61,
+     "trades": 726
+    },
+    "LIN": {
+     "score": 0.07851639912300254,
+     "total_pl": 193.74,
+     "trades": 527
+    },
+    "AMT": {
+     "score": 2.1065187761432536,
+     "total_pl": 2241.02,
+     "trades": 440
+    },
+    "NFLX": {
+     "score": 0.36006147765945773,
+     "total_pl": 327.98,
+     "trades": 755
+    },
+    "XLK": {
+     "score": 2.468498665307498,
+     "total_pl": 2857.46,
+     "trades": 952
+    },
+    "MSTX": {
+     "score": 0.005829084693632673,
+     "total_pl": 119.02,
+     "trades": 828
+    },
+    "UVXY": {
+     "score": 1.5411575138968756,
+     "total_pl": 7718.61,
+     "trades": 721
+    },
+    "GLD": {
+     "score": 0.5111876907221475,
+     "total_pl": 1269.78,
+     "trades": 961
+    },
+    "LQD": {
+     "score": 0.00048086831077831976,
+     "total_pl": 0.14,
+     "trades": 453
+    },
+    "SOFI": {
+     "score": -0.6827978612662061,
+     "total_pl": -577.21,
+     "trades": 722
+    },
+    "QQQ": {
+     "score": -0.640705708498501,
+     "total_pl": -3754.67,
+     "trades": 920
+    },
+    "AAPL": {
+     "score": 2.4489057470117035,
+     "total_pl": 3925.4,
+     "trades": 805
+    },
+    "AMD": {
+     "score": -0.8447624477740286,
+     "total_pl": -4518.93,
+     "trades": 844
+    },
+    "ORCL": {
+     "score": -0.16007077594415203,
+     "total_pl": -1043.98,
+     "trades": 893
+    },
+    "HD": {
+     "score": 5.783903784486818,
+     "total_pl": 7737.88,
+     "trades": 657
+    },
+    "COST": {
+     "score": 2.3145379221559117,
+     "total_pl": 11793.89,
+     "trades": 663
+    },
+    "BAC": {
+     "score": -0.9407347058147673,
+     "total_pl": -900.65,
+     "trades": 842
+    },
+    "UNH": {
+     "score": 2.1074110307525253,
+     "total_pl": 8228.85,
+     "trades": 784
+    },
+    "CVX": {
+     "score": 3.3445454078751475,
+     "total_pl": 3257.42,
+     "trades": 838
+    },
+    "BA": {
+     "score": 3.8878428090729984,
+     "total_pl": 4459.9,
+     "trades": 859
+    },
+    "SO": {
+     "score": 0.8429675013319126,
+     "total_pl": 379.74,
+     "trades": 475
+    },
+    "FCX": {
+     "score": 2.313665630550622,
+     "total_pl": 833.66,
+     "trades": 829
+    },
+    "PLD": {
+     "score": 2.398827484138912,
+     "total_pl": 2090.89,
+     "trades": 429
+    },
+    "VZ": {
+     "score": 2.1805992670834233,
+     "total_pl": 505.79,
+     "trades": 767
+    },
+    "XLF": {
+     "score": -0.3963419919674073,
+     "total_pl": -137.17,
+     "trades": 831
+    },
+    "SOXL": {
+     "score": -0.38350200145408353,
+     "total_pl": -458.91,
+     "trades": 891
+    },
+    "GDX": {
+     "score": -0.7991613346887522,
+     "total_pl": -1069.15,
+     "trades": 918
+    },
+    "HYG": {
+     "score": 2.0992056639613192,
+     "total_pl": 243.13,
+     "trades": 404
+    },
+    "F": {
+     "score": -0.9754201680672268,
+     "total_pl": -278.58,
+     "trades": 501
+    },
+    "IWM": {
+     "score": 0.18165641453279227,
+     "total_pl": 520.64,
+     "trades": 929
+    },
+    "MSFT": {
+     "score": -0.2866384564342417,
+     "total_pl": -1775.43,
+     "trades": 891
+    },
+    "AVGO": {
+     "score": -0.8794238580968345,
+     "total_pl": -6730.82,
+     "trades": 915
+    },
+    "CRM": {
+     "score": 2.222099466891134,
+     "total_pl": 5068.52,
+     "trades": 823
+    },
+    "MCD": {
+     "score": 2.9279954887328175,
+     "total_pl": 3998.09,
+     "trades": 646
+    },
+    "PG": {
+     "score": 0.962005553767862,
+     "total_pl": 807.19,
+     "trades": 676
+    },
+    "GS": {
+     "score": 0.8569382946841981,
+     "total_pl": 8892.92,
+     "trades": 699
+    },
+    "JNJ": {
+     "score": 1.1632306057385757,
+     "total_pl": 1039.87,
+     "trades": 657
+    },
+    "COP": {
+     "score": 4.586486912645853,
+     "total_pl": 2908.75,
+     "trades": 652
+    },
+    "GE": {
+     "score": 2.6438502527293397,
+     "total_pl": 3860.18,
+     "trades": 741
+    },
+    "TQQQ": {
+     "score": -0.46847963247017216,
+     "total_pl": -620.0,
+     "trades": 855
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Strong Close Into a New Low",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 1.0,
+    "side": "short",
+    "n_low": 5,
+    "ibs_min": 0.75,
+    "ema_on": 0,
+    "ema_n": 200,
+    "session_on": 0,
+    "sess_start": 810,
+    "sess_end": 1200,
+    "exit_signal_on": 1
+   },
+   "reported_oos": 0.6896,
+   "earlier": 0.3947,
+   "consistency": 0.64,
+   "symbols": 50,
+   "trades": 25942,
+   "sum_pl": 101934.67,
+   "per_symbol": {
+    "SPY": {
+     "score": 1.173399269564483,
+     "total_pl": 2223.31,
+     "trades": 693
+    },
+    "NVDA": {
+     "score": -0.481780572037182,
+     "total_pl": -1212.29,
+     "trades": 607
+    },
+    "MU": {
+     "score": 0.47288610333065256,
+     "total_pl": 1705.18,
+     "trades": 654
+    },
+    "PLTR": {
+     "score": -0.5167813977482049,
+     "total_pl": -2123.77,
+     "trades": 630
+    },
+    "TSLA": {
+     "score": 0.048541680004883646,
+     "total_pl": 326.02,
+     "trades": 594
+    },
+    "WMT": {
+     "score": 3.9558370191663315,
+     "total_pl": 1180.58,
+     "trades": 549
+    },
+    "JPM": {
+     "score": 1.7889547443638176,
+     "total_pl": 1937.76,
+     "trades": 516
+    },
+    "LLY": {
+     "score": 3.21680163482873,
+     "total_pl": 19456.31,
+     "trades": 464
+    },
+    "XOM": {
+     "score": -0.031724188682022224,
+     "total_pl": -43.11,
+     "trades": 509
+    },
+    "CAT": {
+     "score": 0.22608660555512028,
+     "total_pl": 952.27,
+     "trades": 375
+    },
+    "NEE": {
+     "score": 1.7405826269032953,
+     "total_pl": 856.21,
+     "trades": 434
+    },
+    "LIN": {
+     "score": 1.7757984921928855,
+     "total_pl": 3245.84,
+     "trades": 359
+    },
+    "AMT": {
+     "score": 1.51186146357471,
+     "total_pl": 2211.43,
+     "trades": 322
+    },
+    "NFLX": {
+     "score": 0.6432746732530616,
+     "total_pl": 625.07,
+     "trades": 501
+    },
+    "XLK": {
+     "score": 0.22684513445540727,
+     "total_pl": 187.61,
+     "trades": 530
+    },
+    "MSTX": {
+     "score": 4.137887551703818,
+     "total_pl": 29631.33,
+     "trades": 666
+    },
+    "UVXY": {
+     "score": 5.665727259839069,
+     "total_pl": 13188.17,
+     "trades": 643
+    },
+    "GLD": {
+     "score": 0.08712958034414701,
+     "total_pl": 184.97,
+     "trades": 682
+    },
+    "LQD": {
+     "score": 0.36394207672774687,
+     "total_pl": 53.03,
+     "trades": 305
+    },
+    "SOFI": {
+     "score": -0.7180193879490591,
+     "total_pl": -453.3,
+     "trades": 569
+    },
+    "QQQ": {
+     "score": 1.5350689023435682,
+     "total_pl": 3628.12,
+     "trades": 694
+    },
+    "AAPL": {
+     "score": -0.878304910886011,
+     "total_pl": -2739.96,
+     "trades": 622
+    },
+    "AMD": {
+     "score": -0.6817348716196103,
+     "total_pl": -4947.05,
+     "trades": 656
+    },
+    "ORCL": {
+     "score": 0.4254975689175869,
+     "total_pl": 1536.71,
+     "trades": 631
+    },
+    "HD": {
+     "score": -0.5171557172390853,
+     "total_pl": -1228.25,
+     "trades": 403
+    },
+    "COST": {
+     "score": 2.1694561599210704,
+     "total_pl": 9763.03,
+     "trades": 412
+    },
+    "BAC": {
+     "score": 1.985996122003016,
+     "total_pl": 645.27,
+     "trades": 533
+    },
+    "UNH": {
+     "score": 2.948735065030946,
+     "total_pl": 9585.63,
+     "trades": 570
+    },
+    "CVX": {
+     "score": 0.12983831455169034,
+     "total_pl": 90.1,
+     "trades": 509
+    },
+    "BA": {
+     "score": 0.8158912624909299,
+     "total_pl": 1428.03,
+     "trades": 557
+    },
+    "SO": {
+     "score": 1.1420124822073798,
+     "total_pl": 417.2,
+     "trades": 313
+    },
+    "FCX": {
+     "score": 0.8399577052380437,
+     "total_pl": 309.81,
+     "trades": 513
+    },
+    "PLD": {
+     "score": 1.9933154053015751,
+     "total_pl": 1037.72,
+     "trades": 281
+    },
+    "VZ": {
+     "score": -0.483518172271598,
+     "total_pl": -188.78,
+     "trades": 514
+    },
+    "XLF": {
+     "score": -0.30917955213536313,
+     "total_pl": -129.37,
+     "trades": 587
+    },
+    "SOXL": {
+     "score": -0.316371913850464,
+     "total_pl": -451.7,
+     "trades": 598
+    },
+    "GDX": {
+     "score": -0.40064751733873444,
+     "total_pl": -522.22,
+     "trades": 608
+    },
+    "HYG": {
+     "score": -0.24109128383142595,
+     "total_pl": -44.45,
+     "trades": 277
+    },
+    "F": {
+     "score": -0.9639824540222945,
+     "total_pl": -239.54,
+     "trades": 383
+    },
+    "IWM": {
+     "score": 1.1400431479223336,
+     "total_pl": 1093.86,
+     "trades": 714
+    },
+    "MSFT": {
+     "score": -0.29703570478856484,
+     "total_pl": -1038.82,
+     "trades": 678
+    },
+    "AVGO": {
+     "score": -0.24424524341790566,
+     "total_pl": -1000.79,
+     "trades": 670
+    },
+    "CRM": {
+     "score": 2.349443035681942,
+     "total_pl": 5188.51,
+     "trades": 523
+    },
+    "MCD": {
+     "score": -0.7693081670604511,
+     "total_pl": -1712.68,
+     "trades": 423
+    },
+    "PG": {
+     "score": 2.3750291598626987,
+     "total_pl": 1425.35,
+     "trades": 423
+    },
+    "GS": {
+     "score": 1.1122040474405892,
+     "total_pl": 5045.18,
+     "trades": 360
+    },
+    "JNJ": {
+     "score": 0.6733655917776286,
+     "total_pl": 953.25,
+     "trades": 420
+    },
+    "COP": {
+     "score": 0.21790077287459486,
+     "total_pl": 131.1,
+     "trades": 402
+    },
+    "GE": {
+     "score": -0.04795691309612804,
+     "total_pl": -109.7,
+     "trades": 427
+    },
+    "TQQQ": {
+     "score": -0.19346501464576057,
+     "total_pl": -123.51,
+     "trades": 639
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Bayesian Run-Length Collapse",
+   "params": {
+    "tp_atr": 2.0,
+    "st_atr": 1.0,
+    "side": "both",
+    "hazard_lam": 500.0,
+    "conf": 0.2,
+    "m_look": 5,
+    "rl_cap": 150,
+    "kappa0": 1.0,
+    "alpha0": 1.0,
+    "stop_sig": 2.0,
+    "time_stop": 20,
+    "exit_signal_on": 1
+   },
+   "reported_oos": 0.4907,
+   "earlier": 0.4247,
+   "consistency": 0.54,
+   "symbols": 50,
+   "trades": 9648,
+   "sum_pl": 32789.14,
+   "per_symbol": {
+    "SPY": {
+     "score": -0.34143690641794183,
+     "total_pl": -1705.87,
+     "trades": 231
+    },
+    "NVDA": {
+     "score": -0.5892803173403853,
+     "total_pl": -1247.86,
+     "trades": 242
+    },
+    "MU": {
+     "score": -0.9093874194327507,
+     "total_pl": -4555.84,
+     "trades": 275
+    },
+    "PLTR": {
+     "score": -0.7034515522605955,
+     "total_pl": -3450.05,
+     "trades": 247
+    },
+    "TSLA": {
+     "score": -0.48646132946474246,
+     "total_pl": -2900.55,
+     "trades": 248
+    },
+    "WMT": {
+     "score": 0.2843432908329285,
+     "total_pl": 310.21,
+     "trades": 203
+    },
+    "JPM": {
+     "score": 1.3790154598788436,
+     "total_pl": 1443.25,
+     "trades": 163
+    },
+    "LLY": {
+     "score": 1.4836855518763128,
+     "total_pl": 9803.66,
+     "trades": 171
+    },
+    "XOM": {
+     "score": 1.6597207486313288,
+     "total_pl": 782.16,
+     "trades": 171
+    },
+    "CAT": {
+     "score": 1.1080586042464975,
+     "total_pl": 5323.59,
+     "trades": 167
+    },
+    "NEE": {
+     "score": 4.815371579211649,
+     "total_pl": 1534.37,
+     "trades": 134
+    },
+    "LIN": {
+     "score": -0.21554230433633476,
+     "total_pl": -595.33,
+     "trades": 100
+    },
+    "AMT": {
+     "score": 7.843981762917934,
+     "total_pl": 5161.34,
+     "trades": 94
+    },
+    "NFLX": {
+     "score": 3.856099596605926,
+     "total_pl": 1663.29,
+     "trades": 195
+    },
+    "XLK": {
+     "score": 1.0873208379272326,
+     "total_pl": 739.65,
+     "trades": 168
+    },
+    "MSTX": {
+     "score": -0.5182221981011708,
+     "total_pl": -10312.43,
+     "trades": 251
+    },
+    "UVXY": {
+     "score": 1.1902278491753004,
+     "total_pl": 3927.74,
+     "trades": 200
+    },
+    "GLD": {
+     "score": -0.8854220365985432,
+     "total_pl": -3040.07,
+     "trades": 225
+    },
+    "LQD": {
+     "score": 22.109527312856358,
+     "total_pl": 2404.19,
+     "trades": 135
+    },
+    "SOFI": {
+     "score": -0.7412555950348391,
+     "total_pl": -642.55,
+     "trades": 218
+    },
+    "QQQ": {
+     "score": -0.6204007261600496,
+     "total_pl": -2781.79,
+     "trades": 265
+    },
+    "AAPL": {
+     "score": -0.6827795124555381,
+     "total_pl": -1099.91,
+     "trades": 267
+    },
+    "AMD": {
+     "score": 1.624436820567933,
+     "total_pl": 2358.0,
+     "trades": 289
+    },
+    "ORCL": {
+     "score": 1.2237384697896947,
+     "total_pl": 3445.35,
+     "trades": 250
+    },
+    "HD": {
+     "score": 1.6929279589293353,
+     "total_pl": 3640.54,
+     "trades": 139
+    },
+    "COST": {
+     "score": 1.4180923206814997,
+     "total_pl": 5240.39,
+     "trades": 133
+    },
+    "BAC": {
+     "score": 3.584887678692988,
+     "total_pl": 789.93,
+     "trades": 180
+    },
+    "UNH": {
+     "score": -0.05658389253155755,
+     "total_pl": -397.92,
+     "trades": 186
+    },
+    "CVX": {
+     "score": 1.5457102494891652,
+     "total_pl": 1225.47,
+     "trades": 156
+    },
+    "BA": {
+     "score": 2.2433715312886195,
+     "total_pl": 2396.19,
+     "trades": 204
+    },
+    "SO": {
+     "score": 17.426268786756697,
+     "total_pl": 3200.16,
+     "trades": 133
+    },
+    "FCX": {
+     "score": 0.5651532227767938,
+     "total_pl": 210.61,
+     "trades": 179
+    },
+    "PLD": {
+     "score": 4.559122115612249,
+     "total_pl": 3273.86,
+     "trades": 116
+    },
+    "VZ": {
+     "score": -0.49380343556357364,
+     "total_pl": -125.91,
+     "trades": 193
+    },
+    "XLF": {
+     "score": -0.2359051824308622,
+     "total_pl": -101.51,
+     "trades": 213
+    },
+    "SOXL": {
+     "score": -0.7363900337204946,
+     "total_pl": -786.17,
+     "trades": 293
+    },
+    "GDX": {
+     "score": -0.6720250869918529,
+     "total_pl": -645.05,
+     "trades": 296
+    },
+    "HYG": {
+     "score": 20.87279920870425,
+     "total_pl": 1055.12,
+     "trades": 136
+    },
+    "F": {
+     "score": -0.8370112272551298,
+     "total_pl": -86.48,
+     "trades": 243
+    },
+    "IWM": {
+     "score": -0.5445502966266833,
+     "total_pl": -1257.53,
+     "trades": 231
+    },
+    "MSFT": {
+     "score": -0.27554862176179484,
+     "total_pl": -1252.25,
+     "trades": 220
+    },
+    "AVGO": {
+     "score": -0.6489076155727092,
+     "total_pl": -4399.97,
+     "trades": 241
+    },
+    "CRM": {
+     "score": 1.1831685682755309,
+     "total_pl": 2562.4,
+     "trades": 180
+    },
+    "MCD": {
+     "score": -0.09066149384748022,
+     "total_pl": -138.81,
+     "trades": 129
+    },
+    "PG": {
+     "score": 0.14696911784207117,
+     "total_pl": 188.41,
+     "trades": 129
+    },
+    "GS": {
+     "score": 2.2431683994613296,
+     "total_pl": 8278.57,
+     "trades": 125
+    },
+    "JNJ": {
+     "score": -0.008711920933826821,
+     "total_pl": -10.71,
+     "trades": 136
+    },
+    "COP": {
+     "score": 3.646812189323536,
+     "total_pl": 1687.38,
+     "trades": 135
+    },
+    "GE": {
+     "score": 0.6741413125827533,
+     "total_pl": 1904.22,
+     "trades": 152
+    },
+    "TQQQ": {
+     "score": -0.21262105826765737,
+     "total_pl": -226.35,
+     "trades": 261
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Net-Edge Admission Gate",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 2.0,
+    "side": "short",
+    "hurdle": 5.0,
+    "y_imp": 2.0,
+    "est_win": 120,
+    "ema_n": 20,
+    "est_step": 10,
+    "q_shares": 100.0,
+    "h_bars": 20,
+    "edge_look": 500,
+    "min_obs": 5,
+    "time_stop": 20
+   },
+   "reported_oos": 1.0874,
+   "earlier": -0.3236,
+   "consistency": 0.344,
+   "symbols": 32,
+   "trades": 1692,
+   "sum_pl": 14131.52,
+   "per_symbol": {
+    "SPY": {
+     "score": 0.025022377571395592,
+     "total_pl": 61.78,
+     "trades": 41
+    },
+    "NVDA": {
+     "score": -0.19387210908179142,
+     "total_pl": -974.25,
+     "trades": 105
+    },
+    "MU": {
+     "score": -0.5273492148260757,
+     "total_pl": -1609.57,
+     "trades": 55
+    },
+    "PLTR": {
+     "score": 0.0271942792312717,
+     "total_pl": 47.46,
+     "trades": 50
+    },
+    "TSLA": {
+     "score": 0.5523578919731026,
+     "total_pl": 4165.48,
+     "trades": 125
+    },
+    "WMT": {
+     "score": 1.410151924524959,
+     "total_pl": 318.37,
+     "trades": 25
+    },
+    "JPM": {
+     "score": null,
+     "total_pl": -1493.18,
+     "trades": 14
+    },
+    "LLY": {
+     "score": null,
+     "total_pl": -526.56,
+     "trades": 18
+    },
+    "XOM": {
+     "score": -0.8440559122159996,
+     "total_pl": -370.76,
+     "trades": 26
+    },
+    "CAT": {
+     "score": -0.8519916732578622,
+     "total_pl": -1755.81,
+     "trades": 20
+    },
+    "NEE": {
+     "score": null,
+     "total_pl": -335.33,
+     "trades": 10
+    },
+    "LIN": {
+     "score": null,
+     "total_pl": -1163.08,
+     "trades": 12
+    },
+    "AMT": {
+     "score": null,
+     "total_pl": 4.94,
+     "trades": 13
+    },
+    "NFLX": {
+     "score": -0.5796051417676363,
+     "total_pl": -471.19,
+     "trades": 36
+    },
+    "XLK": {
+     "score": 1.139453645296675,
+     "total_pl": 453.4,
+     "trades": 26
+    },
+    "MSTX": {
+     "score": 3.442141115412798,
+     "total_pl": 25508.09,
+     "trades": 38
+    },
+    "UVXY": {
+     "score": -0.35698449420253936,
+     "total_pl": -518.47,
+     "trades": 71
+    },
+    "GLD": {
+     "score": null,
+     "total_pl": -687.94,
+     "trades": 8
+    },
+    "LQD": {
+     "score": 2.026986268751488,
+     "total_pl": 255.38,
+     "trades": 27
+    },
+    "SOFI": {
+     "score": -0.9042615004067268,
+     "total_pl": -544.7,
+     "trades": 62
+    },
+    "QQQ": {
+     "score": -0.28912271213108304,
+     "total_pl": -1176.05,
+     "trades": 74
+    },
+    "AAPL": {
+     "score": -0.7034225184326605,
+     "total_pl": -2184.76,
+     "trades": 36
+    },
+    "AMD": {
+     "score": -0.8723014483670845,
+     "total_pl": -2895.09,
+     "trades": 87
+    },
+    "ORCL": {
+     "score": -0.8053880379232766,
+     "total_pl": -3361.44,
+     "trades": 54
+    },
+    "HD": {
+     "score": 0.11226003269791511,
+     "total_pl": 266.42,
+     "trades": 43
+    },
+    "COST": {
+     "score": 2.5144762126360467,
+     "total_pl": 6267.86,
+     "trades": 27
+    },
+    "BAC": {
+     "score": null,
+     "total_pl": -152.78,
+     "trades": 17
+    },
+    "UNH": {
+     "score": -0.22488461494845946,
+     "total_pl": -1189.86,
+     "trades": 46
+    },
+    "CVX": {
+     "score": null,
+     "total_pl": -386.45,
+     "trades": 8
+    },
+    "BA": {
+     "score": null,
+     "total_pl": -283.06,
+     "trades": 13
+    },
+    "SO": {
+     "score": null,
+     "total_pl": -64.83,
+     "trades": 5
+    },
+    "FCX": {
+     "score": -0.8624502982107357,
+     "total_pl": -347.05,
+     "trades": 21
+    },
+    "PLD": {
+     "score": null,
+     "total_pl": -168.54,
+     "trades": 5
+    },
+    "VZ": {
+     "score": null,
+     "total_pl": -100.47,
+     "trades": 15
+    },
+    "XLF": {
+     "score": 0.13084057971014493,
+     "total_pl": 22.57,
+     "trades": 29
+    },
+    "SOXL": {
+     "score": -0.5452932431784395,
+     "total_pl": -795.97,
+     "trades": 89
+    },
+    "GDX": {
+     "score": -0.8280913399396811,
+     "total_pl": -134.54,
+     "trades": 27
+    },
+    "HYG": {
+     "score": null,
+     "total_pl": 0.0,
+     "trades": 0
+    },
+    "F": {
+     "score": null,
+     "total_pl": 5.39,
+     "trades": 17
+    },
+    "IWM": {
+     "score": -0.3751941698241946,
+     "total_pl": -516.89,
+     "trades": 44
+    },
+    "MSFT": {
+     "score": -0.9142474189691305,
+     "total_pl": -2844.37,
+     "trades": 27
+    },
+    "AVGO": {
+     "score": -0.6075570119025744,
+     "total_pl": -1190.35,
+     "trades": 34
+    },
+    "CRM": {
+     "score": -0.01625379147574838,
+     "total_pl": -35.26,
+     "trades": 33
+    },
+    "MCD": {
+     "score": null,
+     "total_pl": 275.65,
+     "trades": 18
+    },
+    "PG": {
+     "score": -0.7412652196929592,
+     "total_pl": -448.08,
+     "trades": 21
+    },
+    "GS": {
+     "score": null,
+     "total_pl": -1963.21,
+     "trades": 10
+    },
+    "JNJ": {
+     "score": -0.29019488428745427,
+     "total_pl": -181.07,
+     "trades": 26
+    },
+    "COP": {
+     "score": null,
+     "total_pl": -88.21,
+     "trades": 2
+    },
+    "GE": {
+     "score": null,
+     "total_pl": -1249.46,
+     "trades": 16
+    },
+    "TQQQ": {
+     "score": 0.5680282695863925,
+     "total_pl": 310.24,
+     "trades": 66
+    }
+   },
+   "is_control": false
+  },
+  {
+   "family": "Bertram Cost-Aware OU Band Optimization",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 0.0,
+    "side": "long",
+    "c_cost": 0.001,
+    "fit_win": 400,
+    "hl_mult": 3.0,
+    "mu_win": 100,
+    "refit": 78,
+    "exit_signal_on": 1
+   },
+   "reported_oos": 3.7255,
+   "earlier": 0.4191,
+   "consistency": 0.72,
+   "symbols": 50,
+   "trades": 2295,
+   "sum_pl": 51127.73,
+   "per_symbol": {
+    "SPY": {
+     "score": 1.0626538280640274,
+     "total_pl": 10280.06,
+     "trades": 42
+    },
+    "NVDA": {
+     "score": 0.15095289528417255,
+     "total_pl": 845.54,
+     "trades": 42
+    },
+    "MU": {
+     "score": 1.4006127805666724,
+     "total_pl": 7017.0,
+     "trades": 46
+    },
+    "PLTR": {
+     "score": 1.6688589980740975,
+     "total_pl": 6576.99,
+     "trades": 47
+    },
+    "TSLA": {
+     "score": 0.7961633858724028,
+     "total_pl": 14425.35,
+     "trades": 55
+    },
+    "WMT": {
+     "score": -0.024174691679103206,
+     "total_pl": -49.73,
+     "trades": 35
+    },
+    "JPM": {
+     "score": 0.5311229697180817,
+     "total_pl": 3918.45,
+     "trades": 50
+    },
+    "LLY": {
+     "score": -0.39487075800551347,
+     "total_pl": -10311.73,
+     "trades": 39
+    },
+    "XOM": {
+     "score": -0.08517953295516714,
+     "total_pl": -147.91,
+     "trades": 40
+    },
+    "CAT": {
+     "score": 2.3600578599204662,
+     "total_pl": 19839.85,
+     "trades": 50
+    },
+    "NEE": {
+     "score": 0.17583662588660923,
+     "total_pl": 184.69,
+     "trades": 43
+    },
+    "LIN": {
+     "score": 0.2591076124478556,
+     "total_pl": 1814.94,
+     "trades": 58
+    },
+    "AMT": {
+     "score": -0.4592073261244391,
+     "total_pl": -2412.96,
+     "trades": 44
+    },
+    "NFLX": {
+     "score": 0.20235432778000512,
+     "total_pl": 418.92,
+     "trades": 50
+    },
+    "XLK": {
+     "score": 0.6514951967771925,
+     "total_pl": 1681.9,
+     "trades": 44
+    },
+    "MSTX": {
+     "score": -0.9120380659891297,
+     "total_pl": -45139.5,
+     "trades": 64
+    },
+    "UVXY": {
+     "score": -0.19584891720921643,
+     "total_pl": -2120.75,
+     "trades": 68
+    },
+    "GLD": {
+     "score": 1.3736292657250635,
+     "total_pl": 3914.5,
+     "trades": 30
+    },
+    "LQD": {
+     "score": 1.3162274368231048,
+     "total_pl": 729.19,
+     "trades": 34
+    },
+    "SOFI": {
+     "score": 1.8802160466939628,
+     "total_pl": 1079.15,
+     "trades": 53
+    },
+    "QQQ": {
+     "score": 0.8484644897925794,
+     "total_pl": 8297.27,
+     "trades": 44
+    },
+    "AAPL": {
+     "score": -0.13574909400841906,
+     "total_pl": -834.58,
+     "trades": 39
+    },
+    "AMD": {
+     "score": 1.0371622417489224,
+     "total_pl": 5283.18,
+     "trades": 40
+    },
+    "ORCL": {
+     "score": 0.00027861144970141457,
+     "total_pl": 2.72,
+     "trades": 44
+    },
+    "HD": {
+     "score": -0.014962051999089038,
+     "total_pl": -113.0,
+     "trades": 50
+    },
+    "COST": {
+     "score": 0.14620275829055007,
+     "total_pl": 2363.91,
+     "trades": 55
+    },
+    "BAC": {
+     "score": 0.17077705731894932,
+     "total_pl": 180.94,
+     "trades": 41
+    },
+    "UNH": {
+     "score": -0.6862625455064602,
+     "total_pl": -24034.63,
+     "trades": 39
+    },
+    "CVX": {
+     "score": 0.2837742857142857,
+     "total_pl": 993.21,
+     "trades": 47
+    },
+    "BA": {
+     "score": -0.5542863358034348,
+     "total_pl": -4280.77,
+     "trades": 36
+    },
+    "SO": {
+     "score": 1.580025727985031,
+     "total_pl": 1351.08,
+     "trades": 57
+    },
+    "FCX": {
+     "score": 0.8983523043858951,
+     "total_pl": 1128.6,
+     "trades": 44
+    },
+    "PLD": {
+     "score": 0.6734267321174771,
+     "total_pl": 1691.52,
+     "trades": 52
+    },
+    "VZ": {
+     "score": 0.42262261886905655,
+     "total_pl": 225.41,
+     "trades": 40
+    },
+    "XLF": {
+     "score": 0.352890061791967,
+     "total_pl": 328.95,
+     "trades": 43
+    },
+    "SOXL": {
+     "score": 0.19613882392651352,
+     "total_pl": 325.41,
+     "trades": 52
+    },
+    "GDX": {
+     "score": 1.4318165324043834,
+     "total_pl": 1972.9,
+     "trades": 37
+    },
+    "HYG": {
+     "score": -0.3643876240935969,
+     "total_pl": -201.51,
+     "trades": 24
+    },
+    "F": {
+     "score": 1.0011136546433212,
+     "total_pl": 161.81,
+     "trades": 43
+    },
+    "IWM": {
+     "score": 0.4155838965420771,
+     "total_pl": 1975.69,
+     "trades": 46
+    },
+    "MSFT": {
+     "score": 0.8493118510128084,
+     "total_pl": 4483.84,
+     "trades": 43
+    },
+    "AVGO": {
+     "score": 0.5259733003805781,
+     "total_pl": 3200.8,
+     "trades": 48
+    },
+    "CRM": {
+     "score": -0.589167362284613,
+     "total_pl": -4340.72,
+     "trades": 52
+    },
+    "MCD": {
+     "score": 1.899542541403372,
+     "total_pl": 5074.21,
+     "trades": 55
+    },
+    "PG": {
+     "score": -0.20379890118991745,
+     "total_pl": -369.09,
+     "trades": 47
+    },
+    "GS": {
+     "score": 1.1948786533323035,
+     "total_pl": 21504.96,
+     "trades": 49
+    },
+    "JNJ": {
+     "score": 2.716649619121962,
+     "total_pl": 4037.05,
+     "trades": 45
+    },
+    "COP": {
+     "score": -0.002345061136418125,
+     "total_pl": -6.26,
+     "trades": 51
+    },
+    "GE": {
+     "score": 1.5479477701293556,
+     "total_pl": 7110.56,
+     "trades": 47
+    },
+    "TQQQ": {
+     "score": 0.45487462813429663,
+     "total_pl": 1070.32,
+     "trades": 51
+    }
+   },
+   "is_control": false
+  }
+ ],
+ "held_up": [
+  "Consecutive Close-Above-Prior-High Exhaustion",
+  "Strong Close Into a New Low",
+  "Bertram Cost-Aware OU Band Optimization"
+ ]
+}

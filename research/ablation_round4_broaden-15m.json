@@ -1,0 +1,254 @@
+{
+ "source": "round4_broaden-15m.json",
+ "timeframe": "15Min",
+ "rows": [
+  {
+   "family": "Consecutive Close-Above-Prior-High Exhaustion",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 1.0,
+    "trail_atr": 1.0,
+    "side": "short",
+    "streak": 2,
+    "ema_on": 0,
+    "ema_n": 200,
+    "exit_signal_on": 1
+   },
+   "full": {
+    "median_score": 0.5227,
+    "mean_score": 0.8606,
+    "worst_score": -0.9589,
+    "best_score": 4.3769,
+    "symbols_scored": 50,
+    "symbols_profitable": 39,
+    "consistency": 0.78,
+    "total_trades": 10190,
+    "sum_pl": 77488.33
+   },
+   "exec_only": {
+    "median_score": 0.0528,
+    "mean_score": 0.5239,
+    "worst_score": -0.9983,
+    "best_score": 7.5837,
+    "symbols_scored": 50,
+    "symbols_profitable": 27,
+    "consistency": 0.54,
+    "total_trades": 3566,
+    "sum_pl": 1379.04
+   },
+   "no_adds": {
+    "median_score": 0.5227,
+    "mean_score": 0.8606,
+    "worst_score": -0.9589,
+    "best_score": 4.3769,
+    "symbols_scored": 50,
+    "symbols_profitable": 39,
+    "consistency": 0.78,
+    "total_trades": 10190,
+    "sum_pl": 77488.33
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Strong Close Into a New Low",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 1.0,
+    "side": "short",
+    "n_low": 5,
+    "ibs_min": 0.75,
+    "ema_on": 0,
+    "ema_n": 200,
+    "session_on": 0,
+    "sess_start": 810,
+    "sess_end": 1200,
+    "exit_signal_on": 1
+   },
+   "full": {
+    "median_score": 0.6896,
+    "mean_score": 1.2455,
+    "worst_score": -0.8789,
+    "best_score": 6.3396,
+    "symbols_scored": 50,
+    "symbols_profitable": 38,
+    "consistency": 0.76,
+    "total_trades": 7329,
+    "sum_pl": 68274.02
+   },
+   "exec_only": {
+    "median_score": -0.4997,
+    "mean_score": -0.4796,
+    "worst_score": -0.9933,
+    "best_score": 0.1083,
+    "symbols_scored": 30,
+    "symbols_profitable": 3,
+    "consistency": 0.1,
+    "total_trades": 1250,
+    "sum_pl": -75749.8
+   },
+   "no_adds": {
+    "median_score": 0.6896,
+    "mean_score": 1.2455,
+    "worst_score": -0.8789,
+    "best_score": 6.3396,
+    "symbols_scored": 50,
+    "symbols_profitable": 38,
+    "consistency": 0.76,
+    "total_trades": 7329,
+    "sum_pl": 68274.02
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Bayesian Run-Length Collapse",
+   "params": {
+    "tp_atr": 2.0,
+    "st_atr": 1.0,
+    "side": "both",
+    "hazard_lam": 500.0,
+    "conf": 0.2,
+    "m_look": 5,
+    "rl_cap": 150,
+    "kappa0": 1.0,
+    "alpha0": 1.0,
+    "stop_sig": 2.0,
+    "time_stop": 20,
+    "exit_signal_on": 1
+   },
+   "full": {
+    "median_score": 0.53,
+    "mean_score": 0.9841,
+    "worst_score": -0.8746,
+    "best_score": 10.6772,
+    "symbols_scored": 50,
+    "symbols_profitable": 35,
+    "consistency": 0.7,
+    "total_trades": 2909,
+    "sum_pl": 32404.73
+   },
+   "exec_only": {
+    "median_score": -0.0968,
+    "mean_score": 0.1136,
+    "worst_score": -0.9599,
+    "best_score": 2.2392,
+    "symbols_scored": 50,
+    "symbols_profitable": 22,
+    "consistency": 0.44,
+    "total_trades": 6210,
+    "sum_pl": -37978.05
+   },
+   "no_adds": {
+    "median_score": 0.53,
+    "mean_score": 0.9841,
+    "worst_score": -0.8746,
+    "best_score": 10.6772,
+    "symbols_scored": 50,
+    "symbols_profitable": 35,
+    "consistency": 0.7,
+    "total_trades": 2909,
+    "sum_pl": 32404.73
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Net-Edge Admission Gate",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 2.0,
+    "side": "short",
+    "hurdle": 5.0,
+    "y_imp": 2.0,
+    "est_win": 120,
+    "ema_n": 20,
+    "est_step": 10,
+    "q_shares": 100.0,
+    "h_bars": 20,
+    "edge_look": 500,
+    "min_obs": 5,
+    "time_stop": 20
+   },
+   "full": {
+    "median_score": 0.958,
+    "mean_score": 1.2033,
+    "worst_score": -0.7406,
+    "best_score": 4.2558,
+    "symbols_scored": 14,
+    "symbols_profitable": 11,
+    "consistency": 0.786,
+    "total_trades": 680,
+    "sum_pl": 20683.26
+   },
+   "exec_only": {
+    "median_score": -0.2585,
+    "mean_score": 0.0834,
+    "worst_score": -0.9432,
+    "best_score": 4.5024,
+    "symbols_scored": 50,
+    "symbols_profitable": 17,
+    "consistency": 0.34,
+    "total_trades": 3576,
+    "sum_pl": -68259.55
+   },
+   "no_adds": {
+    "median_score": 0.958,
+    "mean_score": 1.2033,
+    "worst_score": -0.7406,
+    "best_score": 4.2558,
+    "symbols_scored": 14,
+    "symbols_profitable": 11,
+    "consistency": 0.786,
+    "total_trades": 680,
+    "sum_pl": 20683.26
+   },
+   "verdict": "signal carries it"
+  },
+  {
+   "family": "Bertram Cost-Aware OU Band Optimization",
+   "params": {
+    "tp_atr": 0.0,
+    "st_atr": 0.0,
+    "side": "long",
+    "c_cost": 0.001,
+    "fit_win": 400,
+    "hl_mult": 3.0,
+    "mu_win": 100,
+    "refit": 78,
+    "exit_signal_on": 1
+   },
+   "full": {
+    "median_score": 3.7255,
+    "mean_score": 3.7255,
+    "worst_score": 3.7255,
+    "best_score": 3.7255,
+    "symbols_scored": 1,
+    "symbols_profitable": 1,
+    "consistency": 1.0,
+    "total_trades": 515,
+    "sum_pl": 8443.75
+   },
+   "exec_only": {
+    "median_score": null,
+    "mean_score": null,
+    "worst_score": null,
+    "best_score": null,
+    "symbols_scored": 0,
+    "symbols_profitable": 0,
+    "consistency": 0.0,
+    "total_trades": 0,
+    "sum_pl": 0.0
+   },
+   "no_adds": {
+    "median_score": 3.7255,
+    "mean_score": 3.7255,
+    "worst_score": 3.7255,
+    "best_score": 3.7255,
+    "symbols_scored": 1,
+    "symbols_profitable": 1,
+    "consistency": 1.0,
+    "total_trades": 515,
+    "sum_pl": 8443.75
+   },
+   "verdict": "signal carries it"
+  }
+ ]
+}

@@ -8,23 +8,43 @@ one fails.
 
 ## Where things are
 
+**COMPLETE.** 3 September 2026, 05:52. 1,100,304 backtests over 5.6 hours.
+
 | # | Stage | State | Artifact |
 |---|---|---|---|
-| 1 | Harvest 829 ideas from public sources | **DONE** | `research/ideas/harvest.json` |
-| 2 | Triage to 590 implementable | **DONE** | `research/ideas/implementable.json` |
-| 3 | Select 320, split into 40 batches | **DONE** | `research/batches/batch_*.json` |
-| 4 | 50-symbol universe | **DONE** | `research/universe.json` |
-| 5 | Engine: exit_on_zero, exit_signal, scale-outs | **DONE** | `research.py`, `btcode.py` |
-| 6 | Implement 320 families | RUNNING | `research/families/*.json` |
-| 7 | Validate + repair all families | RUNNING | `research/families/_famcheck.json` |
-| 8 | Round 1 screen (12 symbols) | TODO | `research/search/round1_screen.json` |
-| 9 | Round 2 deepen (25 symbols) | TODO | `research/search/round2_deepen.json` |
-| 10 | Round 3 broaden (50 symbols) | TODO | `research/search/round3_broaden.json` |
-| 11 | Round 4 15-minute (50 symbols, 250d) | TODO | `research/search/round4_broaden-15m.json` |
-| 12 | Validate finalists on an earlier window | TODO | `research/validation_*.json` |
-| 13 | Ablate finalists (signal vs execution) | TODO | `research/ablation_*.json` |
-| 14 | Cost ladder + passive twin on finalists | TODO | in the report |
-| 15 | Full ranked document + top 5 | TODO | `reports/`, artifact |
+| 1-5 | Harvest, triage, universe, engine | DONE | `research/ideas/`, `research/universe.json` |
+| 6-7 | 264 families implemented and validated | DONE | `research/families/` (all OK) |
+| 8 | R1 screen 264 -> 57, 12 symbols | DONE | `research/search/round1_screen.json` |
+| 9 | R2 deepen -> 30, 20 symbols | DONE | `round2_deepen.json` |
+| 10 | R3 broaden 30 -> 12, 50 symbols | DONE | `round3_broaden.json` |
+| 11 | R4 15-minute 12 -> 5, 250 days | DONE | `round4_broaden-15m.json` |
+| 12 | Earlier-year validation | DONE | `research/validation_round4_broaden-15m.json` |
+| 13 | Ablation | DONE | `research/ablation_round4_broaden-15m.json` |
+| 14-15 | Report and artifact | DONE | `reports/strategy_study_2026-09-03_0552.html` |
+
+### The answer
+
+Three families cleared every test: 50 symbols, two bar sizes, a year of
+earlier data, and an ablation showing the signal rather than the position
+management is doing the work.
+
+  Consecutive Close-Above-Prior-High Exhaustion   4 of 4 checks
+  Strong Close Into a New Low                     4 of 4 checks
+  Bayesian Run-Length Collapse                    3 of 4 (earlier-window
+                                                  consistency 54%, below the
+                                                  60% bar)
+
+Both leaders are short-only mean-reversion rules from the free StockSharp
+library. Net-Edge Admission Gate failed the earlier year (-0.324). Bertram
+Cost-Aware OU is excluded from ranking: one scored symbol, 25 trades.
+
+### What is NOT done
+
+- No borrow cost is modelled anywhere, and both leaders are short-only.
+- Nothing has been forward-tested or traded.
+- Round 2 evaluated all 264 families rather than round 1's 57 (a chaining bug,
+  since fixed with `--only`). It cost time, not truth: every round applied the
+  same gates to a superset of what it should have seen.
 
 ## How to resume each stage
 
