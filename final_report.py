@@ -31,6 +31,27 @@ REPORT_DIR = ROOT / "reports"
 REPORT_DIR.mkdir(exist_ok=True)
 
 
+# A percentage gate is not a gate when the denominator is two. "No Supply No
+# Demand Bar" reached the final twelve on 2 scored symbols and 50 trades, at a
+# nominal +3.083 out of sample, purely because 2 of 2 is 100% consistent. A
+# result measured on one or two symbols is a coin landing the same way twice,
+# and it must not sit in a top five beside one measured on fifty.
+MIN_SYMBOLS = 15
+MIN_TRADES_FINAL = 200
+
+
+def thin_result(row) -> Optional[str]:
+    """Why this row is too thin to be treated as a finding, or None."""
+    te = row.get("test") or {}
+    n = te.get("symbols_scored") or 0
+    t = te.get("total_trades") or 0
+    if n < MIN_SYMBOLS:
+        return "scored on only %d symbol%s" % (n, "" if n == 1 else "s")
+    if t < MIN_TRADES_FINAL:
+        return "only %s trades across the whole universe" % format(t, ",")
+    return None
+
+
 def clean_decay(row) -> Optional[float]:
     """Decay, or None where the ratio is an artifact rather than a measurement.
 
@@ -156,18 +177,25 @@ def main(argv=None) -> int:
              len(field)))
 
     deepest = max(rounds)
-    finalists = [r for r in field if r["round"] == deepest
-                 and r["slug"] in set(rounds[deepest].get("promoted", []))]
-    finalists = finalists[:a.top]
-    if not finalists:
-        finalists = [r for r in field if not r.get("cut_reason")][:a.top]
-    print("finalists: %d" % len(finalists))
+    pool = [r for r in field if r["round"] == deepest
+            and r["slug"] in set(rounds[deepest].get("promoted", []))]
+    if not pool:
+        pool = [r for r in field if not r.get("cut_reason")]
+    thin = [(r, thin_result(r)) for r in pool]
+    solid = [r for r, why in thin if why is None]
+    excluded = [(r, why) for r, why in thin if why is not None]
+    for r, why in excluded:
+        print("  excluded from the top five: %-38s %s" % (r["name"][:38], why))
+    solid.sort(key=lambda r: -((r.get("test") or {}).get("sum_edge") or 0))
+    finalists = solid[:a.top]
+    print("finalists: %d (from %d promoted, %d too thin to rank)"
+          % (len(finalists), len(pool), len(excluded)))
     if not a.no_deep and finalists:
         print("re-running finalists for full statistics...")
         deep(finalists, rounds)
 
     total_bt = sum(d.get("n_backtests", 0) for d in rounds.values())
-    body = render(rounds, field, finalists, total_bt, H)
+    body = render(rounds, field, finalists, total_bt, H, excluded)
     out = REPORT_DIR / ("strategy_study_%s.html" % time.strftime("%Y-%m-%d_%H%M"))
     out.write_text(H.page("Strategy Study", body,
                           "%s backtests &middot; %d families &middot; 50 symbols"
@@ -177,7 +205,7 @@ def main(argv=None) -> int:
     return 0
 
 
-def render(rounds, field, finalists, total_bt, H) -> str:
+def render(rounds, field, finalists, total_bt, H, excluded=()) -> str:
     B = []
     esc, money, signed, num, cls = H.esc, H.money, H.signed, H.num, H.cls
 
@@ -211,6 +239,19 @@ def render(rounds, field, finalists, total_bt, H) -> str:
                  "two of its five 'strategies'.</p>")
         B.append(H.table(["Round", "Structure", "Chosen by", "Train", "Test",
                           "Decay"], rows))
+
+    # ---- excluded as too thin ----
+    if excluded:
+        B.append("<h2>Promoted, but too thin to rank</h2>")
+        B.append("<p>A percentage gate stops being a gate when the denominator "
+                 "is two. These cleared every round on too few symbols or too "
+                 "few trades for the result to mean anything, and are recorded "
+                 "here rather than quietly dropped or, worse, ranked.</p>")
+        B.append(H.table(["Family", "Out of sample", "Symbols", "Trades", "Why excluded"],
+                         [[esc(r["name"]), num((r.get("test") or {}).get("median_score")),
+                           str((r.get("test") or {}).get("symbols_scored", 0)),
+                           format((r.get("test") or {}).get("total_trades", 0), ","),
+                           esc(why)] for r, why in excluded]))
 
     # ---- the finalists ----
     B.append("<h2>The finalists</h2>")
