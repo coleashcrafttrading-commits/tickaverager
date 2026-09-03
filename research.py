@@ -85,17 +85,39 @@ PARAMS = {
     "cooldown":  0,          # bars to sit out after any exit
     "time_stop": 0,          # 0 = off. Otherwise close after N bars
     "exit_on_flip": 0,       # 1 = close when the signal reverses
+    "exit_on_zero": 0,       # 1 = close when the signal returns to 0.
+                             #     Many published rules are stated as a
+                             #     CONDITION TO BE IN, not as an entry event
+                             #     with a separate exit -- "hold while the
+                             #     trend t-stat exceeds 2". Without this those
+                             #     rules cannot be expressed at all, and get
+                             #     silently converted into something else.
+    "exit_signal_on": 0,     # 1 = honour the family's own exit_signal()
+    "tp1_atr":   0.0,        # 0 = off. First target for a partial exit
+    "tp1_frac":  0.5,        # fraction of the position closed at tp1
+    "be_after_tp1": 1,       # move the remaining stop to breakeven after tp1
 %(FAMILY_PARAMS)s
 }
 
 
+def exit_signal(ctx, i):
+    """Overridden by any family that has its own exit condition.
+
+    Defined here so a family without one needs no boilerplate, and so a family
+    WITH one simply defines it after this prelude and shadows this default.
+    """
+    return False
+
+
 def init(ctx):
     ctx.a = ctx.indicator("atr", period=ctx.p.atr_n)
+    ctx._tp1_done = False
     ctx._last_exit = -10**9
     ctx._adds = 0
     ctx._ref = None          # the price the last add was measured from
     ctx._dir = 0
     ctx._n_before = 0
+    ctx._tp1_done = False
     family_init(ctx)
 
 
@@ -104,6 +126,7 @@ def _flatten(ctx, why):
     ctx._adds = 0
     ctx._ref = None
     ctx._dir = 0
+    ctx._tp1_done = False
     ctx._last_exit = ctx._i
 
 
@@ -119,6 +142,7 @@ def on_bar(ctx, i):
         ctx._adds = 0
         ctx._ref = None
         ctx._dir = 0
+        ctx._tp1_done = False
         ctx._last_exit = i
 
     sig = signal(ctx, i)
@@ -133,6 +157,39 @@ def on_bar(ctx, i):
         if ctx.p.exit_on_flip and sig and sig != d:
             _flatten(ctx, "signal flipped")
             return
+        if ctx.p.exit_on_zero and not sig:
+            _flatten(ctx, "signal went flat")
+            return
+        if ctx.p.exit_signal_on:
+            try:
+                if exit_signal(ctx, i):
+                    _flatten(ctx, "family exit signal")
+                    return
+            except Exception as e:
+                ctx.log("exit_signal failed: " + repr(e))
+        # ---- scale out at a first target ----
+        # A single all-or-nothing target cannot express the very common
+        # "bank half, run the rest at breakeven" structure, and forcing those
+        # rules into one target changes what is being tested.
+        if ctx.p.tp1_atr > 0 and not ctx._tp1_done:
+            reached = (px >= ctx.positions[0]["entry"] + a * ctx.p.tp1_atr) if d > 0 \
+                else (px <= ctx.positions[0]["entry"] - a * ctx.p.tp1_atr)
+            if reached:
+                ctx._tp1_done = True
+                for p in list(ctx.positions):
+                    part = int(p["shares"] * ctx.p.tp1_frac)
+                    if part > 0:
+                        ctx.exit(p, shares=part, why="first target")
+                if ctx.p.be_after_tp1:
+                    for p in ctx.positions:
+                        p["stop"] = p["entry"]
+                if not ctx.positions:
+                    ctx._adds = 0
+                    ctx._ref = None
+                    ctx._dir = 0
+                    ctx._tp1_done = False
+                    ctx._last_exit = i
+                return
         if ctx.p.time_stop:
             oldest = min(p["entry_i"] for p in ctx.positions)
             if i - oldest >= ctx.p.time_stop:

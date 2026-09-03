@@ -280,12 +280,28 @@ class Ctx:
                               "stop": stop, "tag": str(tag)[:60],
                               "decided_i": self._i})
 
-    def exit(self, why="signal", position=None):
-        """Close one position at this bar's close (minus slippage)."""
+    def exit(self, why="signal", position=None, shares=None):
+        """Close a position, or PART of one, at this bar's close minus slippage.
+
+        Partial closes exist because "bank half and run the rest at breakeven"
+        is one of the most common published exit structures, and forcing it
+        into a single all-or-nothing target silently tests a different
+        strategy. A partial close books its own trade row and shrinks the
+        live position, so the share count and the P/L both stay honest.
+        """
         p = position or self.position
         if p is None:
             return
-        self._close(p, self._cols["c"][self._i], why)
+        px = self._cols["c"][self._i]
+        if shares is None or int(shares) >= int(p["shares"]):
+            self._close(p, px, why)
+            return
+        n = int(shares)
+        if n <= 0:
+            return
+        part = dict(p, shares=n)
+        self._close(part, px, why, remove=False)
+        p["shares"] = int(p["shares"]) - n
 
     def exit_all(self, why="signal"):
         for p in list(self.positions):
@@ -302,7 +318,7 @@ class Ctx:
             p["stop"] = stop
 
     # ---------------- internals ----------------
-    def _close(self, p, price, why):
+    def _close(self, p, price, why, remove=True):
         slip = float(self._opts["slippage"])
         d = -1.0 if p["side"] == "short" else 1.0
         fill = price - slip * d
@@ -315,7 +331,7 @@ class Ctx:
             "exit_i": self._i, "exit_t": self.bars[self._i]["t"],
             "exit": round(fill, 4), "why": why, "fees": round(fees, 4),
         })
-        if p in self.positions:
+        if remove and p in self.positions:
             self.positions.remove(p)
 
 
