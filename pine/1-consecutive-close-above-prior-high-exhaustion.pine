@@ -1,0 +1,179 @@
+//@version=5
+// ============================================================================
+// Consecutive Close-Above-Prior-High Exhaustion
+//
+// Counts consecutive closes above the previous bar's high and shorts the bar the streak first reaches its threshold. Covers on the first close back below the previous bar's low.
+//
+// FROM THE STUDY -- 15Min bars, 250 days, 50 symbols, OUT OF SAMPLE:
+//   total P/L                  +$80,349   100 shares a trade, summed over 50 symbols
+//   vs buy and hold            +$85,117   beat it on 28 of 50 symbols
+//   trades                       10,252
+//   median win rate               52.9%
+//   pooled profit factor          1.174
+//   worst drawdown             -$18,329   on a single symbol
+//   median exposure                9.8%   of all bars
+//
+// Set the chart to 15Min to reproduce those conditions. Other timeframes
+// will give other answers -- the study only tested this one.
+//
+// NO REPAINTING. Every one of these matters and all of them are set:
+//   * every decision is gated on barstate.isconfirmed, so nothing acts on a
+//     bar that is still forming and can still change its mind
+//   * calc_on_every_tick=false -- the script runs once per closed bar
+//   * process_orders_on_close=false -- an order decided on a close fills at the
+//     NEXT bar's open, never at the close that triggered it
+//   * no request.security() anywhere, so there is no higher-timeframe lookahead
+//     to get wrong. If you add one, it MUST be
+//     lookahead=barmerge.lookahead_off, or it will read the future
+//   * every series is indexed backwards ([1] is the PREVIOUS bar). Nothing
+//     reads forward, because Pine cannot -- but the same rule is enforced in
+//     our own backtester, where it can
+//
+// HONESTY NOTES, so this agrees with our backtest rather than flattering it:
+//   * a signal on a closed bar fills at the NEXT bar's open
+//   * a position never exits on the bar it opened
+//   * stop and target inside one bar resolve as the STOP
+//   * commission and slippage are ON below; turn them off and the equity curve
+//     becomes fiction
+//   * NO BORROW COST is modelled, and this is short-only. Real shorting is not
+//     free, so live results are worse than this by an unmeasured amount.
+// ============================================================================
+strategy("Consecutive Close-Above-Prior-High Exhaustion", overlay=true, initial_capital=100000,
+     default_qty_type=strategy.fixed, default_qty_value=100,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.005,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=false,
+     close_entries_rule="ANY", pyramiding=0)
+
+// ------------------------------------------------------------------ inputs
+
+streak    = input.int(2, "Closes above the prior high", minval=1)
+useEma    = input.bool(false, "Require price under the EMA")
+emaLen    = input.int(200, "EMA length", minval=2)
+
+atrLen   = input.int(14, "ATR length", minval=1)
+stopAtr  = input.float(1.0, "Stop, in ATR", minval=0, step=0.25)
+targAtr  = input.float(0.0, "Target, in ATR (0 = none)", minval=0, step=0.25)
+trailAtr = input.float(1.0, "Trail, in ATR (0 = off)", minval=0, step=0.25)
+showLine = input.bool(true,  "Join each entry to its exit")
+showArrow= input.bool(true,  "Arrows at entries and exits")
+
+// -------------------------------------------------------------- the signal
+
+ema200 = ta.ema(close, emaLen)
+
+// how many bars in a row have closed above the PREVIOUS bar's high --
+// a stiffer test than an up-close, because the whole prior range was engulfed
+var int run = 0
+run := close > high[1] ? nz(run[1]) + 1 : 0
+
+// fire only on the bar the streak REACHES the threshold, not every bar after
+reached  = run >= streak and nz(run[1]) < streak
+emaOk    = not useEma or close < ema200
+wantShort = reached and emaOk
+wantLong  = false
+
+// cover on the first close back below the previous bar's low
+exitNow = close < low[1]
+
+atr = ta.atr(atrLen)
+
+// ---------------------------------------------------------------- plotting
+
+plot(useEma ? ema200 : na, "EMA", color=color.new(color.orange, 0), linewidth=1)
+
+// ================================ EXECUTION =================================
+// Mirrors btcode: decide on the close, fill at the next open, stop before
+// target, trail only once the trade is ahead by trailAtr.
+var float stopLevel  = na
+var float targLevel  = na
+var int   entryBar   = na
+var float entryPrice = na
+
+inPos = strategy.position_size != 0
+
+// ---- manage an open position ----
+// EVERY decision waits for barstate.isconfirmed. Without it the exit rule is
+// evaluated against a bar that is still forming: close moves, exitNow flips
+// true, the trade closes, then the bar finishes somewhere else and the whole
+// thing is redrawn as if it never happened. That is repainting, and it is what
+// makes a backtest disagree with the chart people were actually looking at.
+if inPos and barstate.isconfirmed
+    // the family's own exit rule comes first, exactly as it does in the runner
+    if exitNow
+        strategy.close_all(comment="signal")
+    else
+        // trail: only after the trade is ahead by trailAtr, and it never
+        // loosens -- for a short the stop only ever ratchets DOWN
+        if trailAtr > 0
+            gain = (entryPrice - close) * (strategy.position_size < 0 ? 1 : -1)
+            if gain > atr * trailAtr
+                want = strategy.position_size < 0 ? close + atr * trailAtr
+                                                  : close - atr * trailAtr
+                stopLevel := strategy.position_size < 0
+                             ? math.min(nz(stopLevel, want), want)
+                             : math.max(nz(stopLevel, want), want)
+        if not na(stopLevel) or targAtr > 0
+            strategy.exit("x", stop=stopLevel,
+                          limit=(targAtr > 0 ? targLevel : na))
+
+// ---- open a new one ----
+if not inPos and (wantShort or wantLong) and barstate.isconfirmed
+    sdir = wantShort ? -1 : 1
+    strategy.entry(wantShort ? "S" : "L",
+                   wantShort ? strategy.short : strategy.long)
+    // levels are set from THIS close; the fill happens at the next open, so
+    // they are refreshed on the entry bar below
+    stopLevel  := stopAtr  > 0 ? close - atr * stopAtr  * sdir : na
+    targLevel  := targAtr  > 0 ? close + atr * targAtr  * sdir : na
+
+// once filled, re-anchor the levels to the ACTUAL entry price
+if inPos and na(entryBar)
+    entryBar   := bar_index
+    entryPrice := strategy.position_avg_price
+    d          = strategy.position_size < 0 ? -1 : 1
+    // a long stops BELOW entry and a short ABOVE it: entry - atr*stop*d
+    stopLevel  := stopAtr > 0 ? entryPrice - atr * stopAtr * d : na
+    targLevel  := targAtr > 0 ? entryPrice + atr * targAtr * d      : na
+
+// ---- draw the trade when it closes ----
+var int   lastTrades = 0
+if strategy.closedtrades > lastTrades
+    lastTrades := strategy.closedtrades
+    ix         = strategy.closedtrades - 1
+    eBar       = strategy.closedtrades.entry_bar_index(ix)
+    xBar       = strategy.closedtrades.exit_bar_index(ix)
+    ePx        = strategy.closedtrades.entry_price(ix)
+    xPx        = strategy.closedtrades.exit_price(ix)
+    won        = strategy.closedtrades.profit(ix) > 0
+    col        = won ? color.new(color.teal, 20) : color.new(color.red, 20)
+    if showLine
+        line.new(eBar, ePx, xBar, xPx, xloc=xloc.bar_index,
+                 color=col, width=2, style=line.style_solid)
+        label.new(xBar, xPx, str.tostring(strategy.closedtrades.profit(ix), "#.##"),
+                  xloc=xloc.bar_index, yloc=yloc.price, textcolor=col,
+                  style=label.style_none, size=size.tiny)
+    entryBar   := na
+    entryPrice := na
+    stopLevel  := na
+    targLevel  := na
+
+// ---- arrows ----
+justOpened = inPos and not inPos[1]
+justClosed = not inPos and inPos[1]
+plotshape(showArrow and justOpened and strategy.position_size < 0,
+          title="short entry", style=shape.triangledown, location=location.abovebar,
+          color=color.new(color.red, 0), size=size.tiny, text="S")
+plotshape(showArrow and justOpened and strategy.position_size > 0,
+          title="long entry", style=shape.triangleup, location=location.belowbar,
+          color=color.new(color.teal, 0), size=size.tiny, text="L")
+// exits are marked where they happened, not at zero -- plotshape with a bool
+// and location.absolute anchors to y=0 and vanishes off the bottom of the chart
+plotshape(showArrow and justClosed, title="exit", style=shape.xcross,
+          location=location.belowbar, color=color.new(color.gray, 0),
+          size=size.tiny, text="x")
+
+// the live stop, so you can see what the trade is actually risking
+plot(inPos ? stopLevel : na, "stop", color=color.new(color.red, 45),
+     style=plot.style_linebr, linewidth=1)
+plot(inPos and targAtr > 0 ? targLevel : na, "target",
+     color=color.new(color.teal, 45), style=plot.style_linebr, linewidth=1)

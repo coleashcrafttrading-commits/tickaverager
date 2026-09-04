@@ -53,6 +53,7 @@ VIEWS.tester = {
               numbers only describe that one.</div>
             <div class="row-btns">
               <button class="btn primary" id="tsRun">Run it</button>
+              <button class="btn" id="tsPine">Pine Script</button>
             </div>
             <div id="tsStatus" class="tip"></div>`)}
           ${card("Result", `<div id="tsStats"></div>`)}
@@ -82,6 +83,7 @@ VIEWS.tester = {
       : `<option value="">no saved strategies</option>`;
 
     el("tsRun").onclick = run;
+    el("tsPine").onclick = showPine;
     el("tsSym").onkeydown = (e) => { if (e.key === "Enter") run(); };
     run();
   },
@@ -232,4 +234,40 @@ async function draw(sym, tf, days) {
   el("tsTrades").innerHTML = tableHTML(
     ["Entered", "Side", "Shares", "In", "Out", "P/L", "Why"], rows,
     "No trades on this symbol and window.");
+}
+
+
+/* The same strategy as Pine Script, for looking at it in TradingView with the
+   entries, exits and connecting lines drawn. The execution half is generated
+   from one hand-written template that mirrors this project's runner, so the
+   two agree instead of telling different stories. */
+async function showPine() {
+  const slug = el("tsCode").value || "";
+  const m = slug.match(/^study-(\d+)-/);
+  if (!m) {
+    toast("Pine is generated for the study's finalists — pick one of the ★ strategies.", "err");
+    return;
+  }
+  const b = el("tsPine");
+  b.disabled = true;
+  try {
+    const r = await GET("/api/pine/" + m[1]);
+    const box = el("tsStats");
+    box.insertAdjacentHTML("beforebegin", `
+      <div class="note info" id="tsPineBox">
+        <b>${esc(r.name)}</b> as Pine Script
+        <div class="tip">Paste into TradingView → Pine Editor → Add to chart.
+          Set the chart to <b>${esc(r.timeframe)}</b>; the study only tested that.</div>
+        <div class="row-btns" style="margin:8px 0">
+          <button class="btn sm primary" id="tsPineCopy">Copy</button>
+          <button class="btn sm" id="tsPineHide">Hide</button>
+        </div>
+        <pre class="mono" style="white-space:pre-wrap;font-size:10.5px;max-height:320px;overflow:auto">${esc(r.pine)}</pre>
+      </div>`);
+    el("tsPineCopy").onclick = () => navigator.clipboard.writeText(r.pine).then(
+      () => toast("Pine Script copied.", "ok"), () => toast("Could not copy.", "err"));
+    el("tsPineHide").onclick = () => el("tsPineBox").remove();
+  } catch (e) {
+    toast(esc(e.message), "err");
+  } finally { b.disabled = false; }
 }

@@ -634,6 +634,20 @@ def backtest_detail(job_id: str, row: int = 0):
 
 
 # ================================================================ coded tests
+# ================================================================ pine
+@app.get("/api/pine/{rank}")
+def pine_for(rank: int):
+    """The Pine Script for one of the study's finalists."""
+    import pinegen
+    try:
+        r = pinegen.build(int(rank))
+    except SystemExit as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(400, repr(e))
+    return {"ok": True, **r}
+
+
 # =========================================================== AI indicators
 @app.get("/api/indicators/custom")
 def indicators_custom():
