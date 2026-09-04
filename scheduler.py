@@ -333,14 +333,16 @@ def readiness() -> dict:
     except Exception:
         untrusted.append(str(ROOT))
 
-    if untrusted:
-        return {"ready": False, "cli": exe, "trusted": False, "auth": mode,
-                "untrusted_keys": untrusted,
-                "problem": "This folder is not a trusted Claude Code workspace "
-                           f"under {untrusted[0]!r}, so the CLI ignores the "
-                           f"permissions in .claude/settings.json.",
-                "fix": "Open a terminal in this folder and run `claude` once, and "
-                       "accept the trust prompt. One time only."}
+    # TRUST IS NOT AUTHENTICATION, and treating it as one was wrong.
+    # An untrusted workspace makes the CLI ignore the permissions.allow entries
+    # in .claude/settings.json -- so an agent that needs to run Bash or edit a
+    # file is degraded. But the model still answers: verified directly, the CLI
+    # returned "TRUST OK" and billed for it while this flag was False. Blocking
+    # on it meant reporting "cannot reach a model" about a setup that could.
+    #
+    # So trust is now a WARNING carried alongside a ready result, not a veto.
+    # Only the things that actually need the permissions say so.
+    trusted = not untrusted
 
     # Trust is not the same as being able to authenticate, and claiming "ready"
     # when the CLI will bounce every run with "Not logged in" is the kind of
@@ -360,8 +362,19 @@ def readiness() -> dict:
                                "restart the dashboard (billed per token). Either "
                                "one is enough, and both are one-time."}
 
-    return {"ready": True, "cli": exe, "trusted": True, "auth": mode,
-            "problem": "", "fix": ""}
+    out = {"ready": True, "cli": exe, "trusted": trusted, "auth": mode,
+           "problem": "", "fix": ""}
+    if not trusted:
+        out["warning"] = (
+            "This folder is not a trusted Claude Code workspace under %r, so "
+            "the CLI ignores the permissions in .claude/settings.json. Text "
+            "generation works; an agent that needs to run commands or edit "
+            "files will be restricted." % untrusted[0])
+        out["fix"] = ("Run the CLI interactively in this folder once and accept "
+                      "the trust prompt, or set projects[%r]."
+                      "hasTrustDialogAccepted to true in ~/.claude.json."
+                      % untrusted[0])
+    return out
 
 
 def smoke_test(timeout: int = 120) -> dict:

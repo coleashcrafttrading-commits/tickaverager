@@ -187,7 +187,8 @@ function renderResult(ind) {
     <div class="f2">
       <div><h4>Parameters</h4><div class="scroll">${tableHTML(["Name", "Default"],
         Object.entries(ind.params || {}).map(([k, v]) =>
-          [`<code>${esc(k)}</code>`, esc(v)]), "None.")}</div></div>
+          `<tr><td><code>${esc(k)}</code></td><td class="num">${esc(v)}</td></tr>`),
+        "None.")}</div></div>
       <div><h4>Draws</h4><p class="sub">${ind.panel
         ? "in its own pane below the price" : "over the price candles"}</p></div>
     </div>
@@ -330,12 +331,13 @@ function renderList() {
   if (!h) return;
   installAll(custom);
   h.innerHTML = tableHTML(["Indicator", "Draws", ""],
-    custom.map((c) => [
-      `<b>${esc(c.name)}</b><br><span class="faint" style="font-size:11px">${esc((c.note || "").slice(0, 70))}</span>`,
-      c.panel ? "own pane" : "on price",
-      `<button class="btn sm" data-use="${esc(c.key)}">Show</button>
-       <button class="btn sm" data-del="${esc(c.key)}">×</button>`,
-    ]), "None yet. Describe one on the left.");
+    custom.map((c) => `<tr>
+      <td style="text-align:left"><b>${esc(c.name)}</b><br>
+        <span class="faint" style="font-size:11px">${esc((c.note || "").slice(0, 64))}</span></td>
+      <td class="faint">${c.panel ? "own pane" : "on price"}</td>
+      <td><button class="btn sm" data-use="${esc(c.key)}">Show</button>
+          <button class="btn sm" data-del="${esc(c.key)}">×</button></td>
+    </tr>`), "None yet. Describe one on the left.");
 
   h.querySelectorAll("[data-use]").forEach((b) => {
     b.onclick = () => {
