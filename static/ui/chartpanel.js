@@ -58,7 +58,29 @@ export class ChartPanel {
     this._build();
   }
 
+  /* Live bars. The panel already redrew on every dashboard poll, but it was
+     redrawing the SAME bars -- new candles arrived only when the timeframe
+     changed or the view remounted, so an intraday chart could sit stale for
+     hours. This refetches on a cadence matched to the bar size: no point
+     asking for 1-minute bars every two seconds, and less point still asking
+     for daily bars that often. */
+  startLive() {
+    this.stopLive();
+    const every = { "1Min": 20000, "5Min": 60000, "15Min": 120000,
+                    "30Min": 180000, "1Hour": 300000, "1Day": 900000
+                  }[this.tf] || 60000;
+    this._live = setInterval(() => {
+      if (document.hidden) return;          // nothing polls behind a hidden tab
+      this.load({ quiet: true });
+    }, every);
+  }
+
+  stopLive() {
+    if (this._live) { clearInterval(this._live); this._live = null; }
+  }
+
   destroy() {
+    this.stopLive();
     if (this.chart) this.chart.destroy();
     for (const p of (this._panes || [])) if (p.ro) p.ro.disconnect();
   }
@@ -106,6 +128,8 @@ export class ChartPanel {
         this.tf = b.dataset.tf;
         this.days = (TFS.find((t) => t[0] === this.tf) || [null, 2])[1];
         this.chart.view = null;
+        this.chart.userMoved = false;   // a new timeframe starts fresh
+        this.startLive();               // and re-paces the live refresh
         this._persist();
         this._syncTfs();
         this.load();
@@ -234,7 +258,7 @@ export class ChartPanel {
   }
 
   /* ----------------------------------------------------------------- data */
-  async load() {
+  async load({ quiet = false } = {}) {
     try {
       // The bars endpoint caps at 1,500 by default. A backtest over 250 days
       // of 15-minute bars uses about 11,000, and a chart holding a fraction of
@@ -243,10 +267,17 @@ export class ChartPanel {
       const lim = this.limit || 1500;
       const r = await GET(`/api/bars?symbol=${encodeURIComponent(this.symbol)}`
                         + `&timeframe=${this.tf}&days=${this.days}&limit=${lim}`);
-      this.bars = r.bars || [];
+      const next = r.bars || [];
+      // A quiet refresh that returns nothing, or fewer bars than we already
+      // hold, is a hiccup rather than history being rewritten -- taking it
+      // would blank a chart somebody is looking at.
+      if (quiet && (!next.length || next.length < this.bars.length - 2)) return;
+      this.bars = next;
       if (this.onBars) this.onBars(this.bars);
       this.render();
+      if (!this._live) this.startLive();
     } catch (e) {
+      if (quiet) return;                 // a failed poll is not worth a wipe
       this.$price.innerHTML = `<div class="empty">Chart unavailable — ${esc(e.message)}</div>`;
     }
   }

@@ -56,6 +56,9 @@ export class Chart {
     this.view = null;           // [i0, i1] visible bar range
     this.priceRange = null;     // null = autoscale
     this.autoScale = true;
+    // set by any deliberate pan or zoom, cleared by Fit. While true the chart
+    // never re-anchors itself to the newest bar.
+    this.userMoved = false;
     this.hover = null;
     this._drag = null;
 
@@ -93,18 +96,24 @@ export class Chart {
       this.view = [Math.max(0, n - 220), n];
       this.priceRange = null;
       this.autoScale = true;
+    } else if (this.userMoved) {
+      // ONCE YOU MOVE THE CHART, IT STAYS WHERE YOU PUT IT.
+      // Nothing here touches the view again until Fit. The old rule was
+      // "follow the newest bar if the view is at the right edge", but a view
+      // panned PAST the last bar also satisfies "at the edge" -- so every
+      // poll, two seconds apart, re-anchored view[1] to the bar count and
+      // yanked the chart back. It did that even when no new bars had arrived,
+      // because the re-anchor was unconditional.
     } else {
-      // new bars arrived on the right: follow them only if we were at the edge
-      const atEdge = this.view[1] >= had - 1;
-      if (atEdge) {
-        const shift = this.bars.length - had;
-        this.view = [this.view[0] + shift, this.bars.length];
-      }
+      // not moved by hand: follow new bars, and only when there ARE new bars
+      const shift = this.bars.length - had;
+      if (shift > 0) this.view = [this.view[0] + shift, this.view[1] + shift];
     }
     this.draw();
   }
 
   resetView() {
+    this.userMoved = false;          // Fit hands control back to the chart
     const n = this.bars.length;
     this.view = [Math.max(0, n - 220), n];
     this.priceRange = null;
@@ -454,6 +463,7 @@ export class Chart {
   }
 
   _panX(dxFrac) {
+    this.userMoved = true;
     // The span NEVER changes here -- panning slides the window, it does not
     // resize it. The old clamp allowed only a quarter-span of empty room on
     // the right, so dragging the newest candle leftward hit a wall and the
@@ -487,6 +497,7 @@ export class Chart {
         const dx = e.clientX - this._drag.x;
         const dy = e.clientY - this._drag.y;
 
+        this.userMoved = true;
         if (this._drag.zone === "price") {
           // stretch price about the middle -- the aspect ratio control
           this._lockPrice();
@@ -567,6 +578,7 @@ export class Chart {
 
     cv.addEventListener("wheel", (e) => {
       e.preventDefault();
+      this.userMoved = true;         // zooming is moving it too
       const r = cv.getBoundingClientRect();
       if (e.shiftKey) {
         this._lockPrice();
