@@ -12,6 +12,7 @@ import "./views/ticker.js";
 import "./views/backtest.js";
 import "./views/performance.js";
 import "./views/tester.js";
+import "./views/research.js";
 import "./views/strategies.js";
 import "./views/risk.js";
 import "./views/agents.js";
@@ -59,8 +60,7 @@ function paintRail() {
     + `<div class="nav-label">Research</div>`
     + item("performance", "Performance", "◧")
     + item("strategies", "Strategies", "◇")
-    + item("tester", "Strategy tester", "◭")
-    + item("backtest", "Backtest", "◫")
+    + item("research", "Research", "◭")
     + item("risk", "Risk", "◎")
     + `<div class="nav-label">System</div>`
     + item("agents", "Agents", "◈")
@@ -175,6 +175,16 @@ window.addEventListener("hashchange", () => {
   const v = readHash();
   if (sig(v) !== sig(S.view)) { S.view = v; S.ticker = null; render(true); tick(); }
 });
+
+// Load AI-written indicators before the first chart draws, so they are in the
+// picker everywhere rather than only after visiting the builder.
+(async () => {
+  try {
+    const r = await GET("/api/indicators/custom");
+    const m = await import("./views/research.js");
+    if (m.installAll) m.installAll(r.indicators || []);
+  } catch (e) { /* the dashboard works without them */ }
+})();
 
 initTheme();
 S.view = readHash();

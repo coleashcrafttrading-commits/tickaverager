@@ -634,6 +634,34 @@ def backtest_detail(job_id: str, row: int = 0):
 
 
 # ================================================================ coded tests
+# =========================================================== AI indicators
+@app.get("/api/indicators/custom")
+def indicators_custom():
+    """Every AI-written indicator, for the chart's picker."""
+    import aiwrite
+    return {"ok": True, "indicators": aiwrite.listing(),
+            "ready": aiwrite.readiness()}
+
+
+@app.post("/api/indicators/ai")
+def indicators_ai(body: dict = Body(...)):
+    """Describe an indicator in English; get one the chart can draw."""
+    import aiwrite
+    desc = (body.get("description") or "").strip()
+    if not desc:
+        raise HTTPException(400, "Describe the indicator you want.")
+    r = aiwrite.build(desc, timeout=int(body.get("timeout") or 180))
+    if r.get("ok") and body.get("save", True):
+        r["key"] = aiwrite.save(r["indicator"])
+    return r
+
+
+@app.delete("/api/indicators/custom/{key}")
+def indicators_custom_delete(key: str):
+    import aiwrite
+    return {"ok": aiwrite.delete(key)}
+
+
 @app.get("/api/code")
 def code_list():
     import btcode
