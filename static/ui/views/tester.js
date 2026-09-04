@@ -131,7 +131,8 @@ async function run() {
     toast(esc(e.message), "err");
   } finally {
     running = false;
-    el("tsRun").disabled = false;
+    const b = el("tsRun");
+    if (b) b.disabled = false;
   }
 }
 

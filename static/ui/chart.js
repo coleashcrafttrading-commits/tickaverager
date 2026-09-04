@@ -65,6 +65,9 @@ export class Chart {
     this.cv = host.querySelector("canvas");
     this.tt = host.querySelector(".chart-tt");
     this.ctx = this.cv.getContext("2d");
+    // a handle on the element, so the chart can be inspected from the console
+    // without hunting through the module graph
+    this.cv.__chart = this;
 
     this._bind();
     this._ro = new ResizeObserver(() => this.draw());
@@ -111,6 +114,11 @@ export class Chart {
 
   /* ----------------------------------------------------------- geometry */
   _slice() {
+    // view is null until the first setData, and a ResizeObserver fires draw()
+    // the moment the chart is observed -- before any data exists. Destructuring
+    // null there threw "object null is not iterable" and took the whole view
+    // down with it, from a stack that pointed at the observer rather than here.
+    if (!this.view || !this.bars || !this.bars.length) return [];
     const [a, b] = this.view;
     return this.bars.slice(Math.max(0, Math.floor(a)), Math.ceil(b));
   }
@@ -118,6 +126,9 @@ export class Chart {
   _scales(w, h) {
     const seg = this._slice();
     if (!seg.length) return null;
+    const [va, vb] = this.view;
+    const vspan = Math.max(1e-9, vb - va);
+    const base = Math.max(0, Math.floor(va));
     let lo, hi, vmax = 0;
     for (const b of seg) vmax = Math.max(vmax, b.v || 0);
 
@@ -148,7 +159,15 @@ export class Chart {
     const span = Math.max(1e-9, hi - lo);
     return {
       seg, lo, hi, vmax, plotH, plotW, volH,
-      x: (i) => (i + 0.5) * (plotW / seg.length),
+      // Spacing comes from the VIEW SPAN, never from seg.length. Dividing by
+      // the number of visible bars means that as soon as the window extends
+      // past the last bar -- which panning freely now allows -- the remaining
+      // bars spread out to fill the width. That is the "stretch": the candles
+      // were not moving, they were being re-spaced. Mapping each bar to its
+      // own position in the window keeps every candle the same width no matter
+      // where the window sits.
+      x: (i) => ((base + i) - va + 0.5) * (plotW / vspan),
+      bw: plotW / vspan,
       y: (p) => this.padT + plotH - ((p - lo) / span) * plotH,
       py: (y) => lo + ((this.padT + plotH - y) / plotH) * span,
       vy: (v) => h - this.padB - (vmax ? (v / vmax) * (volH - 8) : 0),
@@ -220,7 +239,7 @@ export class Chart {
 
     /* ---- volume ---- */
     if (volH) {
-      const bw = Math.max(1, plotW / seg.length * 0.62);
+      const bw = Math.max(1, S.bw * 0.62);
       for (let i = 0; i < seg.length; i++) {
         const b = seg[i];
         g.fillStyle = (b.c >= b.o ? C.up : C.down) + "2e";
@@ -261,7 +280,7 @@ export class Chart {
 
     /* ---- price ---- */
     const style = this.opt.candleStyle;
-    const bw = Math.max(1, Math.min(16, plotW / seg.length * 0.68));
+    const bw = Math.max(1, Math.min(16, S.bw * 0.68));
     if (style === "line") {
       g.strokeStyle = C.accent; g.lineWidth = 1.6; g.beginPath();
       for (let i = 0; i < seg.length; i++) {
@@ -341,7 +360,7 @@ export class Chart {
 
     /* ---- time axis ---- */
     g.fillStyle = C.text; g.font = "10.5px system-ui"; g.textAlign = "center";
-    const every = Math.max(1, Math.floor(seg.length / 8));
+    const every = Math.max(1, Math.floor(seg.length / 8));   // label density
     const multiDay = seg.length > 1 &&
       String(seg[0].t).slice(0, 10) !== String(seg[seg.length - 1].t).slice(0, 10);
     for (let i = 0; i < seg.length; i += every) {
@@ -384,6 +403,10 @@ export class Chart {
      charting package puts this in a legend row instead. The panel supplies a
      destination through opt.readout. */
   _readout(b) {
+    // Written into a fixed-height row. Letting it size itself pushed the whole
+    // chart down by a line the moment the cursor touched the canvas and pulled
+    // it back up on the way out, so the chart twitched with every pass of the
+    // mouse.
     const dest = this.opt.readout;
     if (this.tt) this.tt.hidden = true;
     if (!dest) return;
@@ -431,15 +454,23 @@ export class Chart {
   }
 
   _panX(dxFrac) {
+    // The span NEVER changes here -- panning slides the window, it does not
+    // resize it. The old clamp allowed only a quarter-span of empty room on
+    // the right, so dragging the newest candle leftward hit a wall and the
+    // price axis kept rescaling against it: the chart appeared to stretch
+    // rather than move, which is the "stretch effect" and was really the pan
+    // silently refusing to pan.
+    //
+    // Now the last bar can be dragged to the left edge and the first to the
+    // right edge. You cannot lose the data -- one bar always stays on screen,
+    // and Fit brings everything back -- but within that the canvas is free.
     const span = this.view[1] - this.view[0];
+    const n = Math.max(1, this.bars.length);
     let a = this.view[0] + dxFrac * span;
-    let b = a + span;
-    const n = this.bars.length;
-    // allow a little empty space on the right, like every charting package
-    const maxRight = n + span * 0.25;
-    if (a < -span * 0.25) { b -= a + span * 0.25; a = -span * 0.25; }
-    if (b > maxRight) { a -= b - maxRight; b = maxRight; }
-    this.view = [a, b];
+    const minA = -(span - 1);       // last bar parked at the left edge
+    const maxA = n - 1;             // first bar parked at the right edge
+    a = Math.max(minA, Math.min(maxA, a));
+    this.view = [a, a + span];
   }
 
   /* ------------------------------------------------------------ events */
@@ -494,7 +525,15 @@ export class Chart {
       }
 
       if (e.clientX - r.left > plotW) { this.hover = null; this.draw(); return; }
-      this.hover = Math.floor((e.clientX - r.left) / (plotW / seg.length));
+      // invert the same mapping the bars are drawn with, otherwise the
+      // crosshair reads a different bar than the one under the cursor
+      const S2 = this._S;
+      if (!S2) { this.hover = null; this.draw(); return; }
+      const vspan2 = this.view[1] - this.view[0];
+      const baseIdx = Math.max(0, Math.floor(this.view[0]));
+      const at = this.view[0] + ((e.clientX - r.left) / plotW) * vspan2;
+      const idx = Math.round(at - baseIdx - 0.5);
+      this.hover = (idx >= 0 && idx < seg.length) ? idx : null;
       this.draw();
     });
 
@@ -512,7 +551,7 @@ export class Chart {
       };
       cv.style.cursor = zone === "price" ? "ns-resize"
         : zone === "time" ? "ew-resize" : "grabbing";
-      cv.focus();
+      cv.focus({ preventScroll: true });
     });
 
     window.addEventListener("mouseup", () => {

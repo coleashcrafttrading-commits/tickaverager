@@ -405,11 +405,22 @@ canvas.chart { display: block; width: 100%; }
 
 /* ---- chart legend readout: OHLC in the toolbar, never over the candles ---- */
 .chart-readout {
-  display: inline-flex; align-items: baseline; gap: 5px;
-  margin-left: 12px; min-height: 16px;
+  /* FIXED height and a reserved line. An inline-flex box that collapses when
+     empty and expands when filled shoves everything below it down the moment
+     the cursor enters the chart -- the chart visibly jumped on every hover.
+     The row now occupies the same space whether or not it has content. */
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 12px;
+  height: 20px; line-height: 20px; flex: 0 1 auto; min-width: 0;
   font-family: var(--mono, ui-monospace, monospace); font-size: 11px;
-  white-space: nowrap; overflow: hidden;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.chart-bar { min-height: 30px; align-items: center; }
+
+/* No focus ring on the chart canvas. It is focusable so it can take keyboard
+   input, but a white box around a chart on every click is just noise. */
+canvas.chart, canvas.chart:focus, canvas.chart:focus-visible,
+canvas:focus, canvas:focus-visible { outline: none !important; box-shadow: none !important; }
 .chart-readout .ro-t { color: var(--faint); margin-right: 5px; }
 .chart-readout .ro-k { color: var(--faint); }
 .chart-readout .ro-v { color: var(--text); }
