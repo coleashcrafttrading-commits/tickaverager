@@ -154,14 +154,18 @@ TEMPLATE = r'''//@version=6
 //   * a signal on a closed bar fills at the NEXT bar's open
 //   * a position never exits on the bar it opened
 //   * stop and target inside one bar resolve as the STOP
-//   * commission and slippage are ON below; turn them off and the equity curve
-//     becomes fiction
+//   * COSTS ARE SET TO MATCH THE STUDY: slippage 3 ticks per fill, commission
+//     zero. The study charged a modelled ~$0.03/share on every fill and no
+//     commission, so this reproduces it. Slippage is per-symbol in reality --
+//     about 1 tick on WMT and NEE, 3 on NVDA and SPY, 28 on MU -- so raise it
+//     in Properties for anything less liquid than a mega-cap, and never lower
+//     it to make the curve look better.
 //   * NO BORROW COST is modelled, and this is short-only. Real shorting is not
 //     free, so live results are worse than this by an unmeasured amount.
 // ============================================================================
 strategy("{name}", overlay=true, initial_capital=100000,
      default_qty_type=strategy.fixed, default_qty_value={shares},
-     commission_type=strategy.commission.cash_per_contract, commission_value=0.005,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0,
      slippage={slippage_ticks}, calc_on_every_tick=false, process_orders_on_close=false,
      close_entries_rule="ANY", pyramiding=0)
 
@@ -314,7 +318,12 @@ def build(rank: int = 1) -> dict:
         atr_n=int(p.get("atr_n", 14) or 14),
         st_atr=p.get("st_atr", 1.0), tp_atr=p.get("tp_atr", 0.0),
         trail_atr=p.get("trail_atr", 0.0),
-        slippage_ticks=1,
+        # TradingView counts slippage in TICKS, and the study charged dollars
+        # per share on every fill. At 1 tick with a 0.005 commission the script
+        # was costing about half what the study did, which would have made
+        # TradingView's equity curve look better than the result it is meant to
+        # reproduce. This is the study's own median, in ticks.
+        slippage_ticks=3,
         pl=money(a["sum_pl"]), vsbh=money(a["sum_vs_long_bh"]),
         beat=a["symbols_beating_long_bh"],
         trades=format(a["total_trades"], ","),

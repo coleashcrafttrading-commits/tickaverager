@@ -43,15 +43,19 @@
 //   * a signal on a closed bar fills at the NEXT bar's open
 //   * a position never exits on the bar it opened
 //   * stop and target inside one bar resolve as the STOP
-//   * commission and slippage are ON below; turn them off and the equity curve
-//     becomes fiction
+//   * COSTS ARE SET TO MATCH THE STUDY: slippage 3 ticks per fill, commission
+//     zero. The study charged a modelled ~$0.03/share on every fill and no
+//     commission, so this reproduces it. Slippage is per-symbol in reality --
+//     about 1 tick on WMT and NEE, 3 on NVDA and SPY, 28 on MU -- so raise it
+//     in Properties for anything less liquid than a mega-cap, and never lower
+//     it to make the curve look better.
 //   * NO BORROW COST is modelled, and this is short-only. Real shorting is not
 //     free, so live results are worse than this by an unmeasured amount.
 // ============================================================================
 strategy("Strong Close Into a New Low", overlay=true, initial_capital=100000,
      default_qty_type=strategy.fixed, default_qty_value=100,
-     commission_type=strategy.commission.cash_per_contract, commission_value=0.005,
-     slippage=1, calc_on_every_tick=false, process_orders_on_close=false,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0,
+     slippage=3, calc_on_every_tick=false, process_orders_on_close=false,
      close_entries_rule="ANY", pyramiding=0)
 
 // ------------------------------------------------------------------ inputs
