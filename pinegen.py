@@ -61,13 +61,17 @@ var int run = 0
 run := close > high[1] ? nz(run[1]) + 1 : 0
 
 // fire only on the bar the streak REACHES the threshold, not every bar after
-reached  = run >= streak and nz(run[1]) < streak
-emaOk    = not useEma or close < ema200
+reached   = run >= streak and nz(run[1]) < streak
+// v6 short-circuits, so the cheap flag is tested before the EMA comparison
+emaOk     = not useEma or (not na(ema200) and close < ema200)
 wantShort = reached and emaOk
 wantLong  = false
 
-// cover on the first close back below the previous bar's low
-exitNow = close < low[1]''',
+// cover on the first close back below the previous bar's low.
+// bar_index > 0 is explicit: under v6 a comparison against low[1] on bar zero
+// is false rather than na, and relying on that silently is how a rule breaks
+// when it is copied somewhere else
+exitNow = bar_index > 0 and close < low[1]''',
         "plots": '''
 plot(useEma ? ema200 : na, "EMA", color=color.new(color.orange, 0), linewidth=1)''',
         "note": "Counts consecutive closes above the previous bar's high and "
@@ -84,17 +88,18 @@ emaLen  = input.int({ema_n}, "EMA length", minval=2)''',
 ema200 = ta.ema(close, emaLen)
 
 // a break to a new N-bar low ...
-newLow = low <= ta.lowest(low, lowLen)[1]
+prevLowest = ta.lowest(low, lowLen)[1]
+newLow = not na(prevLowest) and low <= prevLowest
 // ... that then closes in the top of its own range: a failed flush whose
 // bounce is already spent by the close
 rng = high - low
 ibs = rng > 0 ? (close - low) / rng : 0.5
 
-emaOk     = not useEma or close < ema200
+emaOk     = not useEma or (not na(ema200) and close < ema200)
 wantShort = newLow and ibs > ibsMin and emaOk
 wantLong  = false
 
-exitNow = close < low[1]''',
+exitNow = bar_index > 0 and close < low[1]''',
         "plots": '''
 plot(useEma ? ema200 : na, "EMA", color=color.new(color.orange, 0), linewidth=1)''',
         "note": "Shorts a bar that breaks to a new N-bar low and then closes in "
@@ -104,7 +109,7 @@ plot(useEma ? ema200 : na, "EMA", color=color.new(color.orange, 0), linewidth=1)
 }
 
 
-TEMPLATE = r'''//@version=5
+TEMPLATE = r'''//@version=6
 // ============================================================================
 // {name}
 //
@@ -121,6 +126,16 @@ TEMPLATE = r'''//@version=5
 //
 // Set the chart to {timeframe} to reproduce those conditions. Other timeframes
 // will give other answers -- the study only tested this one.
+//
+// PINE v6. The current version -- released November 2024, still the latest.
+// Three of its changes matter here:
+//   * bool is STRICTLY true or false and can no longer hold na, so a comparison
+//     against a missing bar (close > high[1] on the very first bar) now yields
+//     false instead of na. Every guard below relies on that rather than on nz()
+//     wrappers that v5 needed.
+//   * and/or short-circuit, so the cheap test goes first in each condition
+//   * the 9,000-trade backtest limit is gone, which this strategy needs: it
+//     takes over ten thousand trades across the study universe
 //
 // NO REPAINTING. Every one of these matters and all of them are set:
 //   * every decision is gated on barstate.isconfirmed, so nothing acts on a
