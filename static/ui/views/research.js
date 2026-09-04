@@ -15,6 +15,7 @@ import {
   S, VIEWS, GET, POST, DEL, act, toast, el, esc, card, tableHTML, go,
 } from "../core.js";
 import { CATALOG, cols } from "../ind.js";
+import { ChartPanel } from "../chartpanel.js";
 
 const TABS = [
   ["indicators", "Indicator builder"],
@@ -49,6 +50,7 @@ VIEWS.research = {
 let custom = [];
 let ready = null;
 let last = null;
+let bpanel = null;          // the builder's own chart
 
 const EXAMPLES = [
   "An EMA of the typical price, but the period shortens when volatility rises",
@@ -72,6 +74,13 @@ async function mountBuilder() {
             <button class="btn primary" id="aiGo">Build it</button>
             <span class="faint" id="aiStatus"></span>
           </div>`)}
+        ${card("On the chart", `
+          <div class="row-btns" style="margin-bottom:10px">
+            <input id="aiSym" value="SPY" style="width:110px" placeholder="symbol">
+            <button class="btn sm" id="aiLoad">Load</button>
+            <span class="faint" id="aiChartNote" style="align-self:center"></span>
+          </div>
+          <div id="aiChart"></div>`)}
         ${card("Result", `<div id="aiOut"><div class="empty">Nothing built yet.</div></div>`)}
       </div>
       <div>
@@ -96,6 +105,16 @@ async function mountBuilder() {
     b.onclick = () => { el("aiDesc").value = EXAMPLES[+b.dataset.ex]; };
   });
   el("aiGo").onclick = build;
+
+  bpanel = new ChartPanel(el("aiChart"), { key: "builder", symbol: "SPY" });
+  await bpanel.load();
+  el("aiLoad").onclick = async () => {
+    bpanel.symbol = (el("aiSym").value || "SPY").trim().toUpperCase();
+    if (bpanel._persist) bpanel._persist();
+    await bpanel.load();
+    if (last) plot(last);
+  };
+  el("aiSym").onkeydown = (e) => { if (e.key === "Enter") el("aiLoad").click(); };
 
   await refresh();
 }
@@ -183,7 +202,8 @@ function renderResult(ind) {
       () => toast("Could not copy.", "err"));
   };
   const p = el("aiPlot");
-  if (p) p.onclick = () => { install(ind); go({ kind: "research", tab: "tester" }); };
+  if (p) p.onclick = () => plot(ind);
+  if (check.ok) plot(ind);            // draw it as soon as it is built
 }
 
 /* An indicator is offered only once it has RUN. A generated function that
@@ -260,6 +280,22 @@ export function verify(ind) {
   return { ok: true,
            msg: `${names.length} series (${names.join(", ")}), `
               + `${Math.max(...formed)} of ${n} bars formed, and no look-ahead.` };
+}
+
+/* Put it on the builder's own chart, so you see the thing you just described
+   rather than reading its source and hoping. */
+function plot(ind) {
+  install(ind);
+  if (!bpanel) return;
+  bpanel.actives = (bpanel.actives || []).filter((a) => a.kind !== ind.key);
+  bpanel.actives.push({ kind: ind.key, params: { ...(ind.params || {}) },
+                        color: "var(--accent)" });
+  if (bpanel._persist) bpanel._persist();
+  bpanel.render();
+  const n = (bpanel.bars || []).length;
+  el("aiChartNote").textContent = n
+    ? `${ind.name} on ${bpanel.symbol}, ${n.toLocaleString()} bars`
+    : "load a symbol to see it";
 }
 
 /* Add it to the chart's live catalogue for this session. */

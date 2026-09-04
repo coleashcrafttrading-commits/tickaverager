@@ -371,7 +371,13 @@ canvas.chart { display: block; width: 100%; }
   font-variant-numeric: tabular-nums; white-space: nowrap;
   box-shadow: 0 6px 20px rgba(0,0,0,.4);
 }
-.chart-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+/* NOWRAP is the whole fix for "the chart moves down when I hover". The bar
+   wrapped to a second line the moment the OHLC readout gained text, which made
+   the toolbar taller and pushed every chart below it down -- then pulled it
+   back up when the cursor left. A fixed min-height could not help, because the
+   problem was the wrap, not the height. The readout truncates instead. */
+.chart-bar { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap;
+             overflow: hidden; }
 .chart-bar .btn.sm.on { border-color: var(--accent); color: var(--accent); }
 
 .skel {
@@ -415,7 +421,15 @@ canvas.chart { display: block; width: 100%; }
   font-family: var(--mono, ui-monospace, monospace); font-size: 11px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.chart-bar { min-height: 30px; align-items: center; }
+/* FIXED height, not min-height. nowrap stopped the bar becoming two rows, but
+   the readout's own line box is still taller than the buttons, so the row grew
+   by ~6px the moment it had text and the chart shifted by that much. A fixed
+   height cannot grow, whatever goes in it. */
+.chart-bar { height: 30px; min-height: 30px; max-height: 30px;
+             align-items: center; }
+.chart-bar > * { align-self: center; }
+.chart-bar > .btn, .chart-bar > .tfb { flex: 0 0 auto; }
+.chart-readout, .chart-readout * { line-height: 1 !important; }
 
 /* No focus ring on the chart canvas. It is focusable so it can take keyboard
    input, but a white box around a chart on every click is just noise. */
