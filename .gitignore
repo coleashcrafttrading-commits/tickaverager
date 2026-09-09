@@ -19,3 +19,6 @@ research/scanner/
 # per-machine, written by the app at runtime -- template is config.example.json
 config.json
 .env.bak*
+
+# agent worktrees (isolated checkouts) are never part of the repo
+.claude/worktrees/

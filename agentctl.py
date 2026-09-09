@@ -46,6 +46,43 @@ AUDIT_PATH = STATE_DIR / "audit.jsonl"
 FREEZE_PATH = STATE_DIR / "FROZEN"
 
 API = os.environ.get("TICKAVERAGER_API", "http://127.0.0.1:8010")
+# Which account this run acts on. --account on the command line wins; the
+# scheduler sets the env for its agents; a human with neither gets the
+# default account -- the legacy single-account behaviour, unchanged.
+ACCOUNT = os.environ.get("TICKAVERAGER_ACCOUNT", "default") or "default"
+# routes that are shared across accounts and must NOT be prefixed
+SHARED_PREFIXES = ("/api/accounts", "/api/strategies", "/api/code", "/api/indicators",
+                   "/api/scanner", "/api/pine", "/api/research", "/api/risk/profiles",
+                   "/api/risk/bank", "/api/health", "/api/restart")
+
+
+def _scoped(path: str) -> str:
+    if any(path.startswith(p) for p in SHARED_PREFIXES) or path.startswith("/api/a/"):
+        return path
+    return path.replace("/api/", f"/api/a/{ACCOUNT}/", 1) if path.startswith("/api/") else path
+
+
+def _acct():
+    """The account record for ACCOUNT (None for a plain default install)."""
+    try:
+        import accounts
+        return accounts.Registry().get(ACCOUNT)
+    except Exception:
+        return None
+
+
+def _state_dir() -> Path:
+    a = _acct()
+    return Path(a.state_dir) if a is not None else STATE_DIR
+
+
+def _journal_path():
+    import journal
+    return journal.JOURNAL_PATH if ACCOUNT == "default" else _state_dir() / "journal.jsonl"
+
+
+def _freeze_path() -> Path:
+    return FREEZE_PATH if ACCOUNT == "default" else _state_dir() / "FROZEN"
 
 # Actions that can move money. Blocked while frozen, always audited.
 RISK_ACTIONS = {"arm", "flatten", "add", "set", "start", "panic", "remove"}
@@ -58,6 +95,7 @@ def audit(action: str, actor: str, detail: dict, ok: bool = True,
     row = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "actor": actor or "unknown",
+        "account": ACCOUNT,
         "action": action,
         "ok": ok,
         "detail": detail,
@@ -83,20 +121,23 @@ def read_audit(limit: int = 50) -> list[dict]:
 
 # =================================================================== freeze
 def frozen() -> str:
-    """Non-empty reason string when trading is frozen."""
-    if not FREEZE_PATH.exists():
-        return ""
-    try:
-        return FREEZE_PATH.read_text(encoding="utf-8").strip() or "frozen (no reason given)"
-    except OSError:
-        return "frozen"
+    """Non-empty reason string when trading is frozen: the machine-wide file
+    first (absolute for every account), then this account's own."""
+    for p in dict.fromkeys((FREEZE_PATH, _freeze_path())):
+        if not p.exists():
+            continue
+        try:
+            return p.read_text(encoding="utf-8").strip() or "frozen (no reason given)"
+        except OSError:
+            return "frozen"
+    return ""
 
 
 # ====================================================================== http
 def _http(method: str, path: str, body: Any = None) -> Any:
     import urllib.error
     import urllib.request
-    url = API.rstrip("/") + path
+    url = API.rstrip("/") + _scoped(path)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
                                  headers={"content-type": "application/json"})
@@ -169,15 +210,15 @@ def cmd_ticker(a) -> int:
 
 def cmd_stats(a) -> int:
     import journal
-    rows = journal.load(symbol=(a.symbol or "").upper(), days=a.days)
-    return _out({"ok": True, "symbol": a.symbol or "ALL", "days": a.days,
+    rows = journal.load(symbol=(a.symbol or "").upper(), days=a.days, path=_journal_path())
+    return _out({"ok": True, "account": ACCOUNT, "symbol": a.symbol or "ALL", "days": a.days,
                  "rows": len(rows), "stats": journal.stats(rows)})
 
 
 def cmd_inventory(a) -> int:
     import journal
-    inv = journal.open_inventory(journal.load(symbol=(a.symbol or "").upper()))
-    return _out({"ok": True, "lots": len(inv),
+    inv = journal.open_inventory(journal.load(symbol=(a.symbol or "").upper(), path=_journal_path()))
+    return _out({"ok": True, "account": ACCOUNT, "lots": len(inv),
                  "capital_tied_up": round(sum(x["cost"] for x in inv), 2),
                  "oldest_days": max([x["age_days"] for x in inv], default=0),
                  "inventory": inv})
@@ -230,7 +271,7 @@ def cmd_health(a) -> int:
 
     try:
         import journal
-        inv = journal.open_inventory(journal.load())
+        inv = journal.open_inventory(journal.load(path=_journal_path()))
         stuck = [x for x in inv if x["age_days"] > 3]
         if stuck:
             problems.append({
@@ -355,14 +396,15 @@ def cmd_remove(a) -> int:
 
 
 def cmd_freeze(a) -> int:
-    STATE_DIR.mkdir(exist_ok=True)
+    fp = _freeze_path()
+    fp.parent.mkdir(parents=True, exist_ok=True)
     reason = a.reason or "frozen by agent"
-    FREEZE_PATH.write_text(
+    fp.write_text(
         f"{reason}\nfrozen at {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n",
         encoding="utf-8")
-    audit("freeze", a.actor, {"reason": reason})
-    return _out({"ok": True, "frozen": reason,
-                 "effect": "no agent can arm any ticker until state/FROZEN is deleted"})
+    audit("freeze", a.actor, {"reason": reason, "scope": "machine" if fp == FREEZE_PATH else ACCOUNT})
+    return _out({"ok": True, "frozen": reason, "scope": "machine" if fp == FREEZE_PATH else ACCOUNT,
+                 "effect": f"no agent can arm any ticker {'on any account' if fp == FREEZE_PATH else 'on ' + ACCOUNT} until {fp} is deleted"})
 
 
 def cmd_unfreeze(a) -> int:
@@ -372,12 +414,13 @@ def cmd_unfreeze(a) -> int:
     if a.confirm != "UNFREEZE":
         return _fail("Unfreezing requires --confirm UNFREEZE. "
                      "This is meant to be a decision a person makes.")
-    existed = FREEZE_PATH.exists()
+    fp = _freeze_path()
+    existed = fp.exists()
     try:
-        FREEZE_PATH.unlink()
+        fp.unlink()
     except OSError:
         pass
-    audit("unfreeze", a.actor, {"was_frozen": existed})
+    audit("unfreeze", a.actor, {"was_frozen": existed, "scope": "machine" if fp == FREEZE_PATH else ACCOUNT})
     return _out({"ok": True, "was_frozen": existed})
 
 
@@ -533,16 +576,27 @@ def cmd_journal_backfill(a) -> int:
     load_dotenv(ROOT / ".env")
     import journal
     from broker import Alpaca
-    b = Alpaca(os.environ["APCA_API_KEY_ID"], os.environ["APCA_API_SECRET_KEY"],
-               os.environ.get("APCA_API_BASE_URL", "https://paper-api.alpaca.markets"),
-               os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets"))
+    acc = _acct()
+    if acc is not None and getattr(acc, "keys", "env") != "env":
+        key, sec = acc.credentials()
+        base, data = acc.base_url, acc.data_url
+        cfg_path, sdir = Path(acc.config_path), Path(acc.state_dir)
+    else:
+        key, sec = os.environ["APCA_API_KEY_ID"], os.environ["APCA_API_SECRET_KEY"]
+        base = os.environ.get("APCA_API_BASE_URL", "https://paper-api.alpaca.markets")
+        data = os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets")
+        cfg_path, sdir = ROOT / "config.json", STATE_DIR
+    b = Alpaca(key, sec, base, data)
     sym = a.symbol.upper()
-    cfg = json.loads((ROOT / "config.json").read_text())["tickers"].get(sym, {})
-    res = journal.backfill_from_orders(b, sym, cfg, limit=a.limit)
-    led_path = STATE_DIR / f"lots_{sym}.json"
+    cfg = json.loads(cfg_path.read_text())["tickers"].get(sym, {}) if cfg_path.exists() else {}
+    jp = _journal_path()
+    with journal.target(jp, ACCOUNT):
+        res = journal.backfill_from_orders(b, sym, cfg, limit=a.limit)
+    led_path = sdir / f"lots_{sym}.json"
     if led_path.exists():
         led = {l["id"] for l in json.loads(led_path.read_text()).get("open_lots", [])}
-        res["reconcile"] = journal.reconcile_with_ledger(sym, led)
+        res["reconcile"] = journal.reconcile_with_ledger(sym, led, path=jp, state_dir=sdir,
+                                                         account=ACCOUNT)
     audit("journal_backfill", a.actor, res)
     return _out(res)
 
@@ -556,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--actor", default=None,
                         help="who is doing this -- shows up in the audit log")
+    common.add_argument("--account", default=None,
+                        help="which account to act on (default: $TICKAVERAGER_ACCOUNT or 'default')")
 
     p = argparse.ArgumentParser(prog="agentctl", parents=[common],
                                 description="Audited control surface for the TickAverager fleet.")
@@ -691,6 +747,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--limit", type=int, default=500)
 
     a = p.parse_args(argv)
+
+    global ACCOUNT
+
+    if getattr(a, 'account', None):
+
+        ACCOUNT = str(a.account).strip() or ACCOUNT
     if not getattr(a, "actor", None):
         a.actor = os.environ.get("AGENT_NAME", "human")
     return a.fn(a)

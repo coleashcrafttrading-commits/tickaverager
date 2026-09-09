@@ -13,10 +13,11 @@
 # that stays owned by /tune.
 set -euo pipefail
 cd "$(dirname "$0")"
-SYM="${1:?usage: apply_v2.sh SYMBOL [off|flatten|reverse]}"
+SYM="${1:?usage: apply_v2.sh SYMBOL [off|flatten|reverse] [account]}"
 MODE="${2:-reverse}"
+ACCT="${3:-${TICKAVERAGER_ACCOUNT:-default}}"
 ARGS="$(.venv/Scripts/python -c 'import engine; print(engine.v2_args())')"
-.venv/Scripts/python agentctl.py set "$SYM" $ARGS reversal_mode="$MODE" --actor ladder-v2
+.venv/Scripts/python agentctl.py --account "$ACCT" set "$SYM" $ARGS reversal_mode="$MODE" --actor ladder-v2
 echo
 echo "$SYM is on ladder v2 (reversal_mode=$MODE). Verify:"
 echo "  .venv/Scripts/python agentctl.py health"

@@ -78,25 +78,31 @@ def _blank_config() -> dict:
     return {"version": 2, "global": dict(GLOBAL_DEFAULTS), "tickers": {}}
 
 
-def load_raw_config() -> dict:
-    """Read config.json, migrating the old single-symbol layout if found.
+def load_raw_config(path: Optional[Path] = None) -> dict:
+    """Read config.json (an account's, or the root one), migrating the old
+    single-symbol layout if found.
 
     v1 was one flat dict for one symbol. It is lifted into tickers[<symbol>]
     verbatim so an existing ladder keeps every setting -- and its running
     position -- exactly as it was.
     """
-    if not CONFIG_PATH.exists():
+    cp = Path(path) if path else CONFIG_PATH
+    if not cp.exists():
         return _blank_config()
     try:
-        raw = json.loads(CONFIG_PATH.read_text())
+        raw = json.loads(cp.read_text())
     except Exception as e:
-        LOG.error("config.json unreadable (%s) -- starting from defaults", e)
+        LOG.error("%s unreadable (%s) -- starting from defaults", cp.name, e)
         return _blank_config()
 
     if isinstance(raw.get("tickers"), dict):                 # already v2
         cfg = _blank_config()
         cfg["global"].update(raw.get("global") or {})
         cfg["tickers"] = raw["tickers"]
+        # the agent schedules live here too; dropping them reset every
+        # schedule to its default on each boot
+        if isinstance(raw.get("agents"), dict):
+            cfg["agents"] = raw["agents"]
         return cfg
 
     # ---- v1 -> v2 migration ----
@@ -109,7 +115,7 @@ def load_raw_config() -> dict:
     tk = {k: v for k, v in raw.items() if k in TICKER_DEFAULTS}
     tk.setdefault("symbol", sym)
     cfg["tickers"][sym] = tk
-    backup = CONFIG_PATH.with_name("config.v1.backup.json")
+    backup = cp.with_name("config.v1.backup.json")
     try:
         backup.write_text(json.dumps(raw, indent=2))
     except OSError:
@@ -119,10 +125,12 @@ def load_raw_config() -> dict:
     return cfg
 
 
-def save_raw_config(cfg: dict) -> None:
-    tmp = CONFIG_PATH.with_suffix(".tmp")
+def save_raw_config(cfg: dict, path: Optional[Path] = None) -> None:
+    cp = Path(path) if path else CONFIG_PATH
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cp.with_suffix(".tmp")
     tmp.write_text(json.dumps(cfg, indent=2))
-    os.replace(tmp, CONFIG_PATH)
+    os.replace(tmp, cp)
 
 
 SYMBOL_RE = re.compile(r"[A-Z][A-Z.\-]{0,9}")
@@ -130,8 +138,13 @@ SYMBOL_RE = re.compile(r"[A-Z][A-Z.\-]{0,9}")
 
 # =================================================================== fleet
 class Fleet:
-    def __init__(self, autostart: bool = False) -> None:
+    def __init__(self, autostart: bool = False, account: Any = None) -> None:
         """autostart=False by default, and that default is a safety rule.
+
+        `account` is an accounts.Account: the key pair, label and directories
+        this fleet belongs to. None means the legacy single-account layout
+        (keys from the environment, ROOT/config.json, ROOT/state) -- which is
+        also exactly what the seeded "default" account resolves to.
 
         Constructing a Fleet used to START every engine flagged autostart --
         armed, transmitting real orders. Any script that touched fleet.py for
@@ -144,7 +157,19 @@ class Fleet:
         """
         self._autostart = bool(autostart)
         self.lock = threading.RLock()
-        self.cfg = load_raw_config()
+        # ---- identity: which account this fleet IS ----
+        self.acct = account
+        self.account_id = str(getattr(account, "id", "") or "default")
+        self.label = str(getattr(account, "label", "") or "Default")
+        self.state_dir = Path(getattr(account, "state_dir", None) or (ROOT / "state"))
+        self.config_path = Path(getattr(account, "config_path", None) or CONFIG_PATH)
+        self.resume_path = self.state_dir / "resume.json"
+        import journal as _journal
+        # the default account keeps the module path (which honours the
+        # TICKAVERAGER_JOURNAL override the tests rely on)
+        self.journal_path = (_journal.JOURNAL_PATH if self.account_id == "default"
+                             else self.state_dir / "journal.jsonl")
+        self.cfg = load_raw_config(self.config_path)
         self.events: deque = deque(maxlen=300)
         self.broker: Optional[Alpaca] = None
         self.engines: dict[str, Any] = {}          # symbol -> Engine
@@ -200,14 +225,21 @@ class Fleet:
 
     # -------------------------------------------------------- connection
     def _connect(self) -> None:
-        key = os.environ.get("APCA_API_KEY_ID", "")
-        sec = os.environ.get("APCA_API_SECRET_KEY", "")
-        base = os.environ.get("APCA_API_BASE_URL", "https://paper-api.alpaca.markets")
-        data = os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets")
+        acct = self.acct
+        feed = "sip"
+        if acct is not None and str(getattr(acct, "keys", "")) != "env":
+            key, sec = acct.credentials()
+            base, data = acct.base_url, acct.data_url
+            feed = getattr(acct, "feed", "sip") or "sip"
+        else:
+            key = os.environ.get("APCA_API_KEY_ID", "")
+            sec = os.environ.get("APCA_API_SECRET_KEY", "")
+            base = os.environ.get("APCA_API_BASE_URL", "https://paper-api.alpaca.markets")
+            data = os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets")
         if not key or not sec:
-            self.ev("ERR", "No API keys in the environment -- broker not connected.")
+            self.ev("ERR", f"No API keys for account {self.account_id} -- broker not connected.")
             return
-        self.broker = Alpaca(key, sec, base, data, feed="sip")
+        self.broker = Alpaca(key, sec, base, data, feed=feed)
         try:
             self.account = self.broker.account()
             self.ev("INFO", f"Connected to {base} | account "
@@ -217,7 +249,31 @@ class Fleet:
             self.ev("ERR", f"Connect failed: {e}")
 
     def is_paper(self) -> bool:
+        if self.acct is not None and getattr(self.acct, "base_url", ""):
+            return "paper" in str(self.acct.base_url).lower()
         return "paper" in os.environ.get("APCA_API_BASE_URL", "paper").lower()
+
+    # ------------------------------------------------------ account facts
+    def account_info(self) -> dict:
+        return {"id": self.account_id, "label": self.label,
+                "account_number": self.account.get("account_number", ""),
+                "paper": self.is_paper()}
+
+    def summary_row(self, frozen_reason: str = "") -> dict:
+        """What the dashboard rail paints for this account."""
+        eng = list(self.engines.values())
+        return {"id": self.account_id, "label": self.label,
+                "account_number": self.account.get("account_number", ""),
+                "paper": self.is_paper(),
+                "feed": str(getattr(self.acct, "feed", "sip") or "sip"),
+                "key_last4": (self.acct.key_last4() if self.acct is not None else ""),
+                "is_default": self.account_id == "default",
+                "connected": self.broker is not None and bool(self.account),
+                "equity": float(self.account.get("equity") or 0),
+                "running": sum(1 for e in eng if e.running),
+                "armed": sum(1 for e in eng if not e.cfg.get("dry_run")),
+                "lots": sum(len(e.ledger.open_lots) for e in eng),
+                "frozen": frozen_reason}
 
     # ------------------------------------------------------------ config
     @property
@@ -228,7 +284,7 @@ class Fleet:
 
     def save(self) -> None:
         with self.lock:
-            save_raw_config(self.cfg)
+            save_raw_config(self.cfg, self.config_path)
 
     def ticker_cfg(self, symbol: str) -> dict:
         return self.cfg["tickers"].setdefault(symbol, {})
@@ -616,8 +672,8 @@ class Fleet:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._poll_loop, name="fleet-md",
-                                        daemon=True)
+        self._thread = threading.Thread(target=self._poll_loop,
+                                        name=f"fleet-md-{self.account_id}", daemon=True)
         self._thread.start()
 
     def _poll_loop(self) -> None:
@@ -639,14 +695,14 @@ class Fleet:
     # ---------------------------------------------------------- restart
     def write_resume(self, symbols: list[str]) -> None:
         """Remember which ladders were running, for the boot after a restart."""
-        RESUME_PATH.parent.mkdir(exist_ok=True)
-        tmp = RESUME_PATH.with_suffix(".tmp")
+        self.resume_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.resume_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"symbols": sorted(symbols), "at": time.time()}))
-        os.replace(tmp, RESUME_PATH)
+        os.replace(tmp, self.resume_path)
 
     def clear_resume(self) -> None:
         try:
-            RESUME_PATH.unlink()
+            self.resume_path.unlink()
         except OSError:
             pass
 
@@ -659,10 +715,10 @@ class Fleet:
         live order flow because of a decision made hours ago is not something
         this should ever do quietly.
         """
-        if not RESUME_PATH.exists():
+        if not self.resume_path.exists():
             return
         try:
-            d = json.loads(RESUME_PATH.read_text())
+            d = json.loads(self.resume_path.read_text())
         except Exception:
             d = {}
         self.clear_resume()
@@ -944,11 +1000,24 @@ FLEET: Optional[Fleet] = None
 _FLEET_LOCK = threading.Lock()
 
 
+def _default_account():
+    """The seeded default account record, if the registry has one. Its paths
+    are the legacy ones either way, so a missing registry changes nothing."""
+    try:
+        import accounts
+        return accounts.Registry().get(accounts.DEFAULT_ID)
+    except Exception:
+        return None
+
+
 def get_fleet() -> Fleet:
+    """The DEFAULT account's fleet (legacy single-fleet entry point). Other
+    accounts are reached through the app's registry, never through here."""
     global FLEET
     with _FLEET_LOCK:
         if FLEET is None:
             # The dashboard is the ONLY caller that may bring armed engines
             # up on construction. Every other process gets an inert fleet.
-            FLEET = Fleet(autostart=os.environ.get("TICKAVERAGER_DASHBOARD") == "1")
+            FLEET = Fleet(autostart=os.environ.get("TICKAVERAGER_DASHBOARD") == "1",
+                          account=_default_account())
     return FLEET

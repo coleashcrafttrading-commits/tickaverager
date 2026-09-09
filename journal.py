@@ -28,6 +28,7 @@ import json
 import os
 import re
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -42,6 +43,33 @@ JOURNAL_PATH = Path(os.environ.get("TICKAVERAGER_JOURNAL",
                                    str(STATE_DIR / "journal.jsonl")))
 
 _LOCK = threading.Lock()
+
+# Multi-account: every write goes to the journal of the account it belongs
+# to. The engine functions find it on engine.fleet (journal_path, account_id);
+# everything else passes path= explicitly or sets a target() for a block.
+_CTX = threading.local()
+
+
+@contextmanager
+def target(path: Optional[Path], account: str = ""):
+    """Route journal writes inside the block to another account's journal."""
+    old = (getattr(_CTX, "path", None), getattr(_CTX, "account", ""))
+    _CTX.path, _CTX.account = (Path(path) if path else None), (account or "")
+    try:
+        yield
+    finally:
+        _CTX.path, _CTX.account = old
+
+
+def _resolve(path: Optional[Path], account: str) -> tuple[Path, str]:
+    p = Path(path) if path else (getattr(_CTX, "path", None) or JOURNAL_PATH)
+    a = account or getattr(_CTX, "account", "") or ""
+    return p, a
+
+
+def _where(engine: Any) -> tuple[Optional[Path], str]:
+    fl = getattr(engine, "fleet", None)
+    return (getattr(fl, "journal_path", None), str(getattr(fl, "account_id", "") or ""))
 
 # The settings that actually change the shape of a trade. Snapshotted on every
 # row so performance can be sliced by configuration, which is the whole point.
@@ -64,12 +92,15 @@ def cfg_hash(cfg: dict) -> str:
 
 
 # ====================================================================== write
-def append(row: dict) -> None:
+def append(row: dict, path: Optional[Path] = None, account: str = "") -> None:
     """One line, one event. Flushed immediately -- a crash must not eat it."""
     row.setdefault("ts", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    p, a = _resolve(path, account)
+    if a and "account" not in row:
+        row["account"] = a
     with _LOCK:
-        STATE_DIR.mkdir(exist_ok=True)
-        with JOURNAL_PATH.open("a", encoding="utf-8") as fh:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, default=str) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
@@ -78,6 +109,7 @@ def append(row: dict) -> None:
 def record_open(engine: Any, lot: Any, why: str = "") -> None:
     cfg = engine.cfg
     led = engine.ledger
+    jp, ja = _where(engine)
     append({
         "event":       "open",
         "symbol":      engine.symbol,
@@ -97,13 +129,14 @@ def record_open(engine: Any, lot: Any, why: str = "") -> None:
         "why":         why,
         "cfg_hash":    cfg_hash(cfg),
         "cfg":         cfg_snapshot(cfg),
-    })
+    }, jp, ja)
 
 
 def record_close(engine: Any, lot: Any, shares: int, price: float,
                  realized: float, partial: bool, why: str = "") -> None:
     cfg = engine.cfg
     held = _hold_seconds(lot.entry_time)
+    jp, ja = _where(engine)
     append({
         "event":       "partial" if partial else "close",
         "symbol":      engine.symbol,
@@ -121,11 +154,11 @@ def record_close(engine: Any, lot: Any, shares: int, price: float,
         "dry_run":     bool(cfg.get("dry_run")),
         "cfg_hash":    cfg_hash(cfg),
         "cfg":         cfg_snapshot(cfg),
-    })
+    }, jp, ja)
 
 
 def record_lot_delta(symbol: str, gone: list, added: list, why: str,
-                     cfg: dict) -> dict:
+                     cfg: dict, path: Optional[Path] = None, account: str = "") -> dict:
     """Journal the lots a rebuild removed and the lots it created.
 
     Without this the journal silently leaks: a rebuild swaps the whole lot list
@@ -143,20 +176,21 @@ def record_lot_delta(symbol: str, gone: list, added: list, why: str,
                 "shares": int(l.shares), "entry_price": round(float(l.entry_price), 4),
                 "exit_price": 0.0, "realized": 0.0, "hold_seconds": 0,
                 "inferred": True, "dry_run": False, "why": f"ladder rebuilt: {why}",
-                "cfg_hash": h, "cfg": snap})
+                "cfg_hash": h, "cfg": snap}, path, account)
     for i, l in enumerate(added, 1):
         append({"event": "open", "symbol": symbol, "lot_id": l.id,
                 "shares": int(l.shares), "entry_price": round(float(l.entry_price), 4),
                 "tp_price": round(float(l.tp_price), 4),
                 "cost": round(l.shares * float(l.entry_price), 2),
                 "rung": i, "inferred": True, "dry_run": False,
-                "why": f"ladder rebuilt: {why}", "cfg_hash": h, "cfg": snap})
+                "why": f"ladder rebuilt: {why}", "cfg_hash": h, "cfg": snap}, path, account)
     return {"closed": len(gone), "opened": len(added)}
 
 
-def record_event(symbol: str, event: str, **kw) -> None:
+def record_event(symbol: str, event: str, *, path: Optional[Path] = None,
+                 account: str = "", **kw) -> None:
     """Anything else worth keeping: halts, arms, config changes, agent actions."""
-    append({"event": event, "symbol": symbol, **kw})
+    append({"event": event, "symbol": symbol, **kw}, path, account)
 
 
 def _hold_seconds(entry_time: str) -> int:
@@ -171,16 +205,17 @@ def _hold_seconds(entry_time: str) -> int:
 
 # ======================================================================= read
 def load(symbol: str = "", days: Optional[int] = None,
-         events: Iterable[str] = ()) -> list[dict]:
+         events: Iterable[str] = (), path: Optional[Path] = None) -> list[dict]:
     """Every row, newest last. Bad lines are skipped, never fatal."""
-    if not JOURNAL_PATH.exists():
+    jp, _ = _resolve(path, "")
+    if not jp.exists():
         return []
     cutoff = None
     if days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     want = set(events)
     out: list[dict] = []
-    with JOURNAL_PATH.open(encoding="utf-8") as fh:
+    with jp.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -513,7 +548,9 @@ def backfill_from_orders(broker: Any, symbol: str, cfg: dict,
             "entries": len(entries), "exits": len(exits), "rows_written": wrote}
 
 
-def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str]) -> dict:
+def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str],
+                          path: Optional[Path] = None, state_dir: Optional[Path] = None,
+                          account: str = "") -> dict:
     """Close out journal lots the ledger no longer has.
 
     The ledger is the truth for what is open right now. A lot it has dropped
@@ -523,7 +560,7 @@ def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str]) -> dict:
     left to inflate the stuck-inventory figure forever.
     """
     live = set(open_lot_ids)
-    rows = load(symbol=symbol)
+    rows = load(symbol=symbol, path=path)
     inv = open_inventory(rows)
     stale = [x for x in inv if x["lot_id"] not in live]
     # the ledger is the truth for what is open, so a lot it holds that the
@@ -536,11 +573,11 @@ def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str]) -> dict:
                 "exit_price": 0.0, "realized": 0.0, "hold_seconds": 0,
                 "inferred": True, "dry_run": False,
                 "why": "not in the ledger and no sell on record -- closed by an "
-                       "adopt, a flatten or a manual sale. P/L unknown."})
+                       "adopt, a flatten or a manual sale. P/L unknown."}, path, account)
     # Read the real shares and price off the ledger. Recording these as zero
     # makes the row invisible to open_inventory, which silently leaves the two
     # still disagreeing -- the exact failure this function exists to catch.
-    led_path = STATE_DIR / f"lots_{symbol}.json"
+    led_path = (Path(state_dir) if state_dir else STATE_DIR) / f"lots_{symbol}.json"
     led_lots = {}
     try:
         led_lots = {l["id"]: l for l in
@@ -558,23 +595,24 @@ def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str]) -> dict:
                 "entry_time": l.get("entry_time", ""),
                 "inferred": True, "dry_run": False,
                 "why": "in the ledger but absent from the journal -- "
-                       "recorded so the two agree"})
+                       "recorded so the two agree"}, path, account)
     return {"ok": True, "symbol": symbol, "inferred_closes": len(stale),
             "missing_from_journal": missing,
             "lot_ids": [x["lot_id"] for x in stale]}
 
 
-def purge_symbol(symbol: str) -> dict:
+def purge_symbol(symbol: str, path: Optional[Path] = None) -> dict:
     """Physically remove every row for a symbol. For test pollution only.
 
     The journal is append-only by design, so this is the one deliberate
     exception -- rows for a symbol that never traded are not history, they are
     contamination, and leaving them in corrupts every aggregate.
     """
-    if not JOURNAL_PATH.exists():
+    jp, _ = _resolve(path, "")
+    if not jp.exists():
         return {"ok": True, "removed": 0}
     kept, removed = [], 0
-    for line in JOURNAL_PATH.read_text(encoding="utf-8").splitlines():
+    for line in jp.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         try:
@@ -585,9 +623,9 @@ def purge_symbol(symbol: str) -> dict:
             pass
         kept.append(line)
     with _LOCK:
-        tmp = JOURNAL_PATH.with_suffix(".tmp")
+        tmp = jp.with_suffix(".tmp")
         tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
-        os.replace(tmp, JOURNAL_PATH)
+        os.replace(tmp, jp)
     return {"ok": True, "removed": removed, "symbol": symbol}
 
 

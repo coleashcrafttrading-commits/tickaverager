@@ -471,18 +471,20 @@ def _hhmm(s: str) -> tuple[int, int]:
 
 
 # ================================================================= run log
-def log_run(row: dict) -> None:
-    STATE_DIR.mkdir(exist_ok=True)
-    with RUNS_PATH.open("a", encoding="utf-8") as fh:
+def log_run(row: dict, path: Optional[Path] = None) -> None:
+    p = Path(path) if path else RUNS_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, default=str) + "\n")
         fh.flush()
 
 
-def read_runs(job_id: str = "", limit: int = 40) -> list[dict]:
-    if not RUNS_PATH.exists():
+def read_runs(job_id: str = "", limit: int = 40, path: Optional[Path] = None) -> list[dict]:
+    p = Path(path) if path else RUNS_PATH
+    if not p.exists():
         return []
     out = []
-    for line in RUNS_PATH.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             r = json.loads(line)
         except json.JSONDecodeError:
@@ -494,15 +496,27 @@ def read_runs(job_id: str = "", limit: int = 40) -> list[dict]:
 
 
 # ================================================================ scheduler
+_RUN_LOCK = threading.Lock()              # one agent at a time, across EVERY account
+
+
 class Scheduler:
     def __init__(self, fleet: Any) -> None:
         self.fleet = fleet
         self.lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._run_lock = threading.Lock()     # one agent at a time, ever
+        self._run_lock = _RUN_LOCK            # one agent at a time, ever
+        self.account_id = str(getattr(fleet, "account_id", "") or "default")
+        self.runs_path = Path(getattr(fleet, "state_dir", None) or STATE_DIR) / "agent_runs.jsonl"
         self.running_job = ""
         self.started_at = 0.0
+
+    def _log_run(self, row: dict) -> None:
+        row.setdefault("account", self.account_id)
+        log_run(row, self.runs_path)
+
+    def _read_runs(self, job_id: str = "", limit: int = 40) -> list[dict]:
+        return read_runs(job_id, limit, self.runs_path)
 
     # ---- config lives in config.json alongside everything else ----
     @property
@@ -547,7 +561,7 @@ class Scheduler:
         jobs = []
         for jid, spec in JOBS.items():
             s = self.sched_for(jid)
-            runs = read_runs(jid, limit=1)
+            runs = self._read_runs(jid, limit=1)
             last = runs[0] if runs else None
             last_ts = None
             if last:
@@ -609,7 +623,7 @@ class Scheduler:
                 row.update({"ok": False, "status": "blocked",
                             "error": ready["problem"], "fix": ready["fix"],
                             "seconds": 0})
-                log_run(row)
+                self._log_run(row)
                 self.fleet.ev("WARN", f"Agent {job_id} could not run: {ready['problem']}")
                 return
 
@@ -617,7 +631,13 @@ class Scheduler:
                    "--permission-mode", "bypassPermissions",
                    "--output-format", "json"]
             row["auth"] = ready.get("auth", "")
-            env = dict(os.environ, AGENT_NAME=f"scheduled-{job_id}")
+            env = dict(os.environ, AGENT_NAME=f"scheduled-{job_id}",
+                       TICKAVERAGER_ACCOUNT=self.account_id)
+            if self.account_id != "default":
+                # an agent for another account must never inherit the default
+                # account's keys; it reaches its own account through agentctl
+                for k in ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY"):
+                    env.pop(k, None)
             self.fleet.ev("INFO", f"Agent {job_id} started ({trigger}).")
             p = subprocess.run(cmd, cwd=str(ROOT), env=env, capture_output=True,
                                text=True, timeout=MAX_RUN_SECONDS,
@@ -645,7 +665,7 @@ class Scheduler:
                         "seconds": round(time.time() - started, 1)})
             self.fleet.ev("ERR", f"Agent {job_id} crashed: {e!r}")
         finally:
-            log_run(row)
+            self._log_run(row)
             self.running_job, self.started_at = "", 0.0
             self._run_lock.release()
 
@@ -681,7 +701,7 @@ class Scheduler:
                 continue
             if s.get("market_hours_only") and not _session_open():
                 continue
-            runs = read_runs(jid, limit=1)
+            runs = self._read_runs(jid, limit=1)
             last_ts = None
             if runs:
                 try:
@@ -708,12 +728,31 @@ def _parse_cli(stdout: str) -> tuple[str, float, str]:
     return stdout, 0.0, ""
 
 
-SCHEDULER: Optional[Scheduler] = None
+SCHEDULER: Optional[Scheduler] = None          # the default account's (legacy name)
+SCHEDULERS: dict[str, Scheduler] = {}
+_SCHED_LOCK = threading.Lock()
 
 
 def get_scheduler(fleet: Any) -> Scheduler:
+    """One scheduler per fleet (its schedules live in that account's config);
+    runs are serialized process-wide by _RUN_LOCK."""
     global SCHEDULER
-    if SCHEDULER is None:
-        SCHEDULER = Scheduler(fleet)
-        SCHEDULER.start()
-    return SCHEDULER
+    aid = str(getattr(fleet, "account_id", "") or "default")
+    with _SCHED_LOCK:
+        sch = SCHEDULERS.get(aid)
+        if sch is None:
+            sch = Scheduler(fleet)
+            sch.start()
+            SCHEDULERS[aid] = sch
+        if aid == "default":
+            SCHEDULER = sch
+    return sch
+
+
+def stop_all() -> None:
+    with _SCHED_LOCK:
+        for sch in list(SCHEDULERS.values()):
+            try:
+                sch.stop()
+            except Exception:
+                pass

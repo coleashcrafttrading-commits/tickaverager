@@ -151,6 +151,36 @@ subprocess gets `TICKAVERAGER_ACCOUNT=<id>` and no other account's keys.
 * Per-user identity. One dashboard token still grants everything to both
   partners; the audit trail's `--actor` is the attribution.
 * Moving the default account's files under `state/accounts/default/`.
+* Per-account report folders: reports are generated for the account you are
+  on (the fleet passed in is that account's) but land in the shared
+  `reports/` listing.
+* The backtest job table is shared; each job records the account whose
+  config and broker it used.
 * A Supabase backend. The registry file and per-account directories are the
   shape Supabase will mirror (accounts, configs, ledgers, journal rows keyed by
   account id).
+
+## Implementation notes (server)
+
+* `accounts.py` -- `Account` (paths, credentials, public view) and
+  `Registry` (load/save, seed_default_from_env, validate_keys, add, rename,
+  remove, fleet attach).
+* `fleet.py` -- `Fleet(autostart, account=None)`: `account_id`, `label`,
+  `state_dir`, `config_path`, `resume_path`, `journal_path`; keys and feed
+  from the record; `is_paper()` from its base URL; `account_info()`,
+  `summary_row()`. `load_raw_config(path)` now also keeps the `agents`
+  section (it was dropped on every boot before). `get_fleet()` is the
+  DEFAULT account's fleet.
+* `engine.py` -- `Ledger.load(symbol, state_dir)`, `frozen(state_dir)`
+  (machine-wide first, then the account's), `is_paper()` via the fleet;
+  module-level `_aid_of/_sdir_of/_jpath_of` so fixture engines resolve.
+* `journal.py` -- `append(row, path, account)`, `load(..., path)`,
+  `record_lot_delta/record_event(..., path=, account=)`, `target()` context
+  manager; rows carry `account`.
+* `scheduler.py` -- one `Scheduler` per fleet, `_RUN_LOCK` process-wide,
+  runs under the account's state dir, `TICKAVERAGER_ACCOUNT` in the agent's
+  environment and no other account's keys.
+* `agentctl.py` -- `--account` / `TICKAVERAGER_ACCOUNT`, `_scoped()` route
+  prefixing, per-account journal/freeze/backfill, audit rows carry `account`.
+* `app.py` -- `REG`, `cur()` dependency, every account route registered
+  scoped and legacy, `/api/accounts*`, `/api/health`, boot per account.

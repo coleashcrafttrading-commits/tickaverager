@@ -267,8 +267,29 @@ def _now_ny() -> datetime:
     return datetime.now(NY)
 
 
-def frozen() -> str:
-    """Non-empty reason when trading is frozen for the whole machine.
+def _fleet_attr(obj, name: str, default=None):
+    """An engine-shaped object's fleet attribute, or the default. Module-level
+    so the offline fixtures that bypass Engine.__init__ (test_rules'
+    FakeEngine) resolve exactly like a real engine with no fleet."""
+    return getattr(getattr(obj, "fleet", None), name, default)
+
+
+def _aid_of(obj) -> str:
+    return str(_fleet_attr(obj, "account_id", "") or "default")
+
+
+def _sdir_of(obj):
+    return _fleet_attr(obj, "state_dir", None)
+
+
+def _jpath_of(obj):
+    return _fleet_attr(obj, "journal_path", None)
+
+
+def frozen(state_dir: Optional[Path] = None) -> str:
+    """Non-empty reason when trading is frozen for the whole machine -- or,
+    given an account's state_dir, for that account (checked SECOND: the
+    machine-wide file is absolute for every account).
 
     A FILE, not a setting, and checked on every entry rather than only at arm
     time. That means a human can stop all order flow with a text editor while
@@ -279,13 +300,18 @@ def frozen() -> str:
     live, and a lot missing one still gets covered. Freezing means "stop opening
     new risk", never "stop protecting what is already open".
     """
-    try:
-        if not FREEZE_PATH.exists():
-            return ""
-        return FREEZE_PATH.read_text(encoding="utf-8").strip().splitlines()[0] \
-            if FREEZE_PATH.read_text(encoding="utf-8").strip() else "frozen"
-    except OSError:
-        return ""
+    for p in (FREEZE_PATH,
+              (Path(state_dir) / "FROZEN") if state_dir and Path(state_dir) != STATE_DIR else None):
+        if p is None:
+            continue
+        try:
+            if not p.exists():
+                continue
+            txt = p.read_text(encoding="utf-8").strip()
+            return txt.splitlines()[0] if txt else "frozen"
+        except OSError:
+            continue
+    return ""
 
 
 def _parse_hms(s: str) -> dtime:
@@ -386,26 +412,34 @@ class Ledger:
 
     # ---- persistence ----
     @staticmethod
-    def path_for(symbol: str) -> Path:
-        return STATE_DIR / f"lots_{symbol}.json"
+    def path_for(symbol: str, state_dir: Optional[Path] = None) -> Path:
+        return (Path(state_dir) if state_dir else STATE_DIR) / f"lots_{symbol}.json"
 
     @classmethod
-    def load(cls, symbol: str) -> "Ledger":
-        p = cls.path_for(symbol)
-        if not p.exists():
-            return cls(symbol=symbol)
-        try:
-            d = json.loads(p.read_text())
-            lots = [Lot(**x) for x in d.pop("open_lots", [])]
-            d.pop("symbol", None)
-            return cls(symbol=symbol, open_lots=lots, **d)
-        except Exception as e:
-            LOG.error("ledger for %s unreadable (%s) -- starting empty", symbol, e)
-            return cls(symbol=symbol)
+    def load(cls, symbol: str, state_dir: Optional[Path] = None) -> "Ledger":
+        """A ledger lives in its ACCOUNT's state directory: two accounts on the
+        same symbol never share one. The directory rides on the instance
+        (not a dataclass field, so asdict/save never write it)."""
+        d = Path(state_dir) if state_dir else STATE_DIR
+        p = cls.path_for(symbol, d)
+        led = None
+        if p.exists():
+            try:
+                raw = json.loads(p.read_text())
+                lots = [Lot(**x) for x in raw.pop("open_lots", [])]
+                raw.pop("symbol", None)
+                led = cls(symbol=symbol, open_lots=lots, **raw)
+            except Exception as e:
+                LOG.error("ledger for %s unreadable (%s) -- starting empty", symbol, e)
+        if led is None:
+            led = cls(symbol=symbol)
+        led._dir = d
+        return led
 
     def save(self) -> None:
-        STATE_DIR.mkdir(exist_ok=True)
-        p = self.path_for(self.symbol)
+        d = Path(getattr(self, "_dir", None) or STATE_DIR)
+        d.mkdir(parents=True, exist_ok=True)
+        p = self.path_for(self.symbol, d)
         tmp = p.with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(self), indent=2))
         os.replace(tmp, p)
@@ -470,7 +504,7 @@ class Engine:
         self.done_for_day = False
         self.last_error = ""
 
-        self.ledger = Ledger.load(self.symbol)
+        self.ledger = Ledger.load(self.symbol, getattr(fleet, "state_dir", None))
 
         # live snapshots for the dashboard
         self.quote: dict = {}
@@ -548,7 +582,24 @@ class Engine:
         return self.cfg.get(key, default)
 
     def is_paper(self) -> bool:
+        fl = getattr(self, "fleet", None)
+        if fl is not None and callable(getattr(fl, "is_paper", None)):
+            try:
+                return bool(fl.is_paper())
+            except Exception:
+                pass
         return "paper" in os.environ.get("APCA_API_BASE_URL", "paper").lower()
+
+    # ---- the account this ladder belongs to (all via the fleet; offline
+    # fixtures have none, and every default below is the single-account one)
+    def _aid(self) -> str:
+        return _aid_of(self)
+
+    def _sdir(self) -> Optional[Path]:
+        return _sdir_of(self)
+
+    def _jpath(self) -> Optional[Path]:
+        return _jpath_of(self)
 
     # ---------------- attention: loud, but never blocking ----------------
     def flag(self, key: str, msg: str) -> None:
@@ -572,7 +623,7 @@ class Engine:
             self.halt_reason = reason
             self.ev("HALT", f"HALTED: {reason}")
             try:
-                journal.record_event(self.symbol, "halt", reason=reason,
+                journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="halt", reason=reason,
                                      lots=len(self.ledger.open_lots),
                                      shares=self.ledger.shares)
             except Exception:
@@ -603,7 +654,7 @@ class Engine:
             self._stop.clear()
             self.running = True
             self._thread = threading.Thread(target=self._loop,
-                                            name=f"ladder-{self.symbol}", daemon=True)
+                                            name=f"ladder-{_aid_of(self)}-{self.symbol}", daemon=True)
             self._thread.start()
         self.ev("INFO", f"Engine STARTED on {self.symbol} "
                         f"({'DRY RUN -- decides and logs, transmits nothing' if self.cfg['dry_run'] else 'ARMED -- LIVE ORDERS'})")
@@ -1122,7 +1173,8 @@ class Engine:
         self.ledger.save()
         if gone or added:
             try:
-                journal.record_lot_delta(self.symbol, gone, added, why, self.cfg)
+                journal.record_lot_delta(self.symbol, gone, added, why, self.cfg,
+                                         path=_jpath_of(self), account=_aid_of(self))
             except Exception as e:
                 LOG.warning("journal rebuild delta %s: %s", self.symbol, e)
         if rebuilt:
@@ -1134,7 +1186,7 @@ class Engine:
         for l in rebuilt:
             self._place_tp(l)
         try:
-            journal.record_event(self.symbol, "ladder_rebuilt", why=why,
+            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="ladder_rebuilt", why=why,
                                  lots=len(rebuilt),
                                  shares=sum(l.shares for l in rebuilt),
                                  dropped=len(gone), created=len(added))
@@ -1274,7 +1326,7 @@ class Engine:
         self.mismatch_strikes = 0
         self._mismatch_since = 0.0
         try:
-            journal.record_event(self.symbol, "auto_reconcile",
+            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="auto_reconcile",
                                  broker_qty=before[0], ledger_before=before[1],
                                  ledger_after=self.ledger.signed_shares, gap=gap)
         except Exception:
@@ -1990,7 +2042,7 @@ class Engine:
         ignore_session lets those same entries run outside the new-lot window
         (they are not new risk -- the same shares the ladder held a minute
         ago -- and the close that preceded them had no window either)."""
-        fz = frozen()
+        fz = frozen(_sdir_of(self))
         if fz:                                       return f"FROZEN: {fz}"
         if self.halted:                              return f"HALTED: {self.halt_reason}"
         if time.time() < self._entry_backoff_until:
@@ -2224,7 +2276,7 @@ class Engine:
         self.ev("TP", f"BASKET {'BUY' if short else 'SELL'} {qty} sh @ ${px:.2f} for "
                       f"{len(lots)} lot(s): {why}")
         try:
-            journal.record_event(self.symbol, "basket_close_sent", why=why, shares=qty,
+            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="basket_close_sent", why=why, shares=qty,
                                  lots=[l.id for l in lots], order=o.get("id", ""))
         except Exception:
             pass
@@ -2771,7 +2823,7 @@ class Engine:
                              type="market", time_in_force="day", client_order_id=coid)
             self.ev("TP", f"Strategy exit order sent for lot {lot.id} ({why}).")
             try:
-                journal.record_event(self.symbol, "strategy_exit", lot_id=lot.id,
+                journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="strategy_exit", lot_id=lot.id,
                                      shares=lot.shares, why=why,
                                      order=o.get("id", ""))
             except Exception:
@@ -3115,7 +3167,7 @@ class Engine:
             self.ev("WARN", f"Add skipped -- {blocked}.")
             return False
 
-        fz = frozen()
+        fz = frozen(_sdir_of(self))
         if fz:
             self.ev("WARN", f"Entry blocked -- trading is FROZEN ({fz}). "
                             f"Delete state/FROZEN to resume.")

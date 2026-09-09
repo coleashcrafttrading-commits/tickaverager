@@ -66,14 +66,15 @@ logging.basicConfig(
               logging.FileHandler(ROOT / "averager.log", encoding="utf-8")],
 )
 
-from fastapi import Body, FastAPI, HTTPException          # noqa: E402
+from fastapi import Body, Depends, FastAPI, HTTPException, Request   # noqa: E402
 from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 
+import accounts                                           # noqa: E402
 import journal                                            # noqa: E402
 import scheduler                                          # noqa: E402
 from engine import TICKER_DEFAULTS, frozen                # noqa: E402
 from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
-                   get_fleet, supervised)
+                   Fleet, get_fleet, supervised)
 
 app = FastAPI(title="TickAverager Fleet / Alpaca")
 
@@ -90,6 +91,146 @@ except Exception as _e:                       # never let this stop the bot
 
 NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache", "Expires": "0"}
+
+# ============================================================== accounts
+# One Alpaca key pair = one Fleet. The registry holds the records (no
+# secrets); boot() builds a Fleet per account. Every account-scoped route is
+# registered twice: under /api/a/{acct}/... and, bound to the default account,
+# at its legacy path -- see docs/multi_account.md.
+REG = accounts.Registry()
+_BOOT_LOCK = threading.Lock()
+
+
+def _fleet_of(acct_id: str) -> Fleet:
+    f = REG.fleet(acct_id)
+    if f is None:
+        if acct_id == accounts.DEFAULT_ID:
+            return get_fleet()
+        raise HTTPException(404, f"no such account: {acct_id}")
+    return f
+
+
+def cur(request: Request) -> Fleet:
+    """The fleet a request is about: /api/a/{acct}/... names it; a legacy
+    unprefixed path means the default account."""
+    return _fleet_of(str(request.path_params.get("acct") or accounts.DEFAULT_ID))
+
+
+def _all_fleets() -> list:
+    """Every fleet that exists -- without constructing one as a side effect."""
+    import fleet as _fleet_mod
+    seen, out = set(), []
+    for f in list(REG.fleets.values()) + ([_fleet_mod.FLEET] if _fleet_mod.FLEET else []):
+        if f is not None and id(f) not in seen:
+            seen.add(id(f))
+            out.append(f)
+    return out
+
+
+def _summaries() -> list[dict]:
+    rows = []
+    for acc in REG.active():
+        f = REG.fleet(acc.id)
+        if f is None:
+            rows.append({**acc.public(), "connected": False, "equity": 0.0,
+                         "running": 0, "armed": 0, "lots": 0, "frozen": ""})
+            continue
+        rows.append(f.summary_row(frozen(f.state_dir)))
+    return rows
+
+
+def _start_fleet(acc) -> Fleet:
+    """Build (and autostart) the fleet for one account and attach it."""
+    if acc.is_default:
+        f = get_fleet()
+    else:
+        f = Fleet(autostart=True, account=acc)
+    REG.attach(acc.id, f)
+    if not acc.account_number and f.account.get("account_number"):
+        acc.account_number = str(f.account.get("account_number"))
+        REG.save()
+    return f
+
+
+@app.get("/api/health")
+def health():
+    """Unscoped, for deploy scripts and the rail: every account at a glance."""
+    return {"ok": True, "accounts": _summaries(), "default": accounts.DEFAULT_ID,
+            "frozen": frozen()}
+
+
+@app.get("/api/accounts")
+def accounts_list():
+    return {"accounts": _summaries(), "default": accounts.DEFAULT_ID}
+
+
+@app.post("/api/accounts")
+def accounts_add(body: dict = Body(...)):
+    """Drop a key pair, get a clean fleet for it. Keys are validated with
+    Alpaca first, stored only on this server, never echoed back."""
+    try:
+        acc = REG.add(str(body.get("label") or ""), str(body.get("key_id") or ""),
+                      str(body.get("secret") or ""),
+                      base_url=str(body.get("base_url") or accounts.PAPER_URL),
+                      data_url=str(body.get("data_url") or accounts.DATA_URL))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        f = _start_fleet(acc)
+    except Exception as e:
+        REG.remove(acc.id)
+        raise HTTPException(500, f"the account was validated but its fleet failed to start: {e}")
+    logging.getLogger("app").info("account added: %s (%s)", acc.id, acc.account_number)
+    return {"ok": True, "account": f.summary_row(frozen(f.state_dir))}
+
+
+@app.post("/api/accounts/{acct_id}/rename")
+def accounts_rename(acct_id: str, body: dict = Body(...)):
+    try:
+        acc = REG.rename(acct_id, str(body.get("label") or ""))
+    except KeyError:
+        raise HTTPException(404, f"no such account: {acct_id}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    f = REG.fleet(acct_id)
+    if f is not None:
+        f.label = acc.label
+    return {"ok": True, "account": (f.summary_row(frozen(f.state_dir)) if f else acc.public())}
+
+
+@app.post("/api/accounts/{acct_id}/test")
+def accounts_test(acct_id: str):
+    acc = REG.get(acct_id)
+    if acc is None:
+        raise HTTPException(404, f"no such account: {acct_id}")
+    key, sec = acc.credentials()
+    try:
+        info = REG.validate_keys(key, sec, acc.base_url, acc.data_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, **info}
+
+
+@app.delete("/api/accounts/{acct_id}")
+def accounts_delete(acct_id: str):
+    acc = REG.get(acct_id)
+    if acc is None:
+        raise HTTPException(404, f"no such account: {acct_id}")
+    if acc.is_default:
+        raise HTTPException(409, "the default account cannot be removed")
+    f = REG.fleet(acct_id)
+    if f is not None:
+        busy = [s for s, e in f.engines.items()
+                if e.running or not e.cfg.get("dry_run") or e.ledger.open_lots]
+        if busy:
+            raise HTTPException(409, f"{acc.label} still has running, armed or invested tickers "
+                                     f"({', '.join(sorted(busy))}). Stop and disarm them, close the lots, then remove.")
+        try:
+            f.shutdown()
+        except Exception:
+            pass
+    REG.remove(acct_id)
+    return {"ok": True, "removed": acct_id, "note": "files kept under state/accounts/"}
 
 
 @app.get("/")
@@ -117,30 +258,34 @@ def ui_asset(path: str):
     return FileResponse(f, media_type=kind, headers=NO_CACHE)
 
 
-def _engine(sym: str):
+def _engine(f: Fleet, sym: str):
     try:
-        return get_fleet().engine(sym)
+        return f.engine(sym)
     except KeyError as e:
         raise HTTPException(404, str(e))
 
 
 # ====================================================================== fleet
+@app.get("/api/a/{acct}/overview")
 @app.get("/api/overview")
-def overview():
-    return {**get_fleet().overview(), "frozen": frozen()}
+def overview(f: Fleet = Depends(cur)):
+    return {**f.overview(), "frozen": frozen(f.state_dir),
+            "account": f.account_info(), "accounts": _summaries()}
 
 
+@app.get("/api/a/{acct}/settings")
 @app.get("/api/settings")
-def get_settings():
-    f = get_fleet()
+def get_settings(f: Fleet = Depends(cur)):
     return {"global": f.gcfg, "defaults": GLOBAL_DEFAULTS,
             "ticker_defaults": TICKER_DEFAULTS, "supervised": supervised(),
-            "paper": f.is_paper(), "account": f.account}
+            "paper": f.is_paper(), "account": f.account,
+            "account_info": f.summary_row(frozen(f.state_dir))}
 
 
+@app.post("/api/a/{acct}/settings")
 @app.post("/api/settings")
-def set_settings(patch: dict = Body(...)):
-    return {"ok": True, "global": get_fleet().update_global(patch)}
+def set_settings(patch: dict = Body(...), f: Fleet = Depends(cur)):
+    return {"ok": True, "global": f.update_global(patch)}
 
 
 @app.post("/api/restart")
@@ -159,19 +304,23 @@ def restart(body: dict = Body(default={})):
             "bring it back up. Close the window and start it again by hand, or "
             "relaunch with start_bot.bat to enable this button.")
 
-    f = get_fleet()
-    was_running = sorted(s for s, e in f.engines.items() if e.running)
-    resume = bool(body.get("resume")) and bool(was_running)
-    if resume:
-        f.write_resume(was_running)
-    else:
-        f.clear_resume()
-
-    f.ev("WARN", "RESTART requested from the dashboard. Engines are stopping; "
-                 "take-profits resting at Alpaca stay live throughout. "
-                 + (f"Will resume: {', '.join(was_running)}." if resume
-                    else "Ladders will come back STOPPED."))
-    f.shutdown()
+    # the process hosts EVERY account's fleet: a restart is a restart for all
+    was_running_all: list[str] = []
+    for f in _all_fleets():
+        was_running = sorted(s for s, e in f.engines.items() if e.running)
+        resume = bool(body.get("resume")) and bool(was_running)
+        if resume:
+            f.write_resume(was_running)
+        else:
+            f.clear_resume()
+        was_running_all += [f"{f.account_id}:{s}" for s in was_running]
+        f.ev("WARN", "RESTART requested from the dashboard (every account). Engines are "
+                     "stopping; take-profits resting at Alpaca stay live throughout. "
+                     + (f"Will resume: {', '.join(was_running)}." if resume
+                        else "Ladders will come back STOPPED."))
+        f.shutdown()
+    resume = bool(body.get("resume")) and bool(was_running_all)
+    was_running = was_running_all
 
     # the response has to reach the browser before the process goes away, and
     # the engine threads need a moment to fall out of their loops. Ledger writes
@@ -180,9 +329,9 @@ def restart(body: dict = Body(default={})):
     return {"ok": True, "resume": resume, "was_running": was_running}
 
 
+@app.post("/api/a/{acct}/fleet/{action}")
 @app.post("/api/fleet/{action}")
-def fleet_action(action: str, body: dict = Body(default={})):
-    f = get_fleet()
+def fleet_action(action: str, body: dict = Body(default={}), f: Fleet = Depends(cur)):
     if action == "start_all":
         return f.start_all()
     if action == "stop_all":
@@ -197,20 +346,20 @@ def fleet_action(action: str, body: dict = Body(default={})):
 
 
 # ==================================================================== tickers
+@app.get("/api/a/{acct}/tickers")
 @app.get("/api/tickers")
-def list_tickers():
-    f = get_fleet()
+def list_tickers(f: Fleet = Depends(cur)):
     return {"symbols": f.symbols(),
             "tickers": [f.engines[s].summary() for s in f.symbols()]}
 
 
+@app.post("/api/a/{acct}/tickers")
 @app.post("/api/tickers")
-def add_ticker(body: dict = Body(...)):
+def add_ticker(body: dict = Body(...), f: Fleet = Depends(cur)):
     """Add the strategy to a new symbol. It arrives STOPPED and in DRY RUN."""
     sym = str(body.get("symbol") or "").strip().upper()
     if not sym:
         raise HTTPException(400, "A symbol is required.")
-    f = get_fleet()
     look = f.inspect(sym)
     if not look.get("ok"):
         raise HTTPException(400, look.get("msg", f"{sym} cannot be traded."))
@@ -221,29 +370,33 @@ def add_ticker(body: dict = Body(...)):
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/a/{acct}/ticker/{sym}")
 @app.get("/api/ticker/{sym}")
-def ticker_status(sym: str):
-    return _engine(sym).status()
+def ticker_status(sym: str, f: Fleet = Depends(cur)):
+    return _engine(f, sym).status()
 
 
+@app.delete("/api/a/{acct}/ticker/{sym}")
 @app.delete("/api/ticker/{sym}")
-def delete_ticker(sym: str, force: bool = False):
+def delete_ticker(sym: str, force: bool = False, f: Fleet = Depends(cur)):
     try:
-        return get_fleet().remove_ticker(sym, force=force)
+        return f.remove_ticker(sym, force=force)
     except KeyError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
         raise HTTPException(409, str(e))
 
 
+@app.post("/api/a/{acct}/ticker/{sym}/config")
 @app.post("/api/ticker/{sym}/config")
-def ticker_config(sym: str, patch: dict = Body(...)):
-    return {"ok": True, "config": _engine(sym).update_config(patch)}
+def ticker_config(sym: str, patch: dict = Body(...), f: Fleet = Depends(cur)):
+    return {"ok": True, "config": _engine(f, sym).update_config(patch)}
 
 
+@app.post("/api/a/{acct}/ticker/{sym}/{action}")
 @app.post("/api/ticker/{sym}/{action}")
-def ticker_action(sym: str, action: str, body: dict = Body(default={})):
-    e = _engine(sym)
+def ticker_action(sym: str, action: str, body: dict = Body(default={}), f: Fleet = Depends(cur)):
+    e = _engine(f, sym)
 
     if action == "start":
         e.start()
@@ -257,9 +410,9 @@ def ticker_action(sym: str, action: str, body: dict = Body(default={})):
         want_live = bool(body.get("live"))
         if want_live and body.get("confirm") != "ARM":
             raise HTTPException(400, "Arming requires confirm='ARM'.")
-        if want_live and frozen():
-            raise HTTPException(409, f"Trading is FROZEN: {frozen()}. "
-                                     f"Delete state/FROZEN to lift it.")
+        if want_live and frozen(f.state_dir):
+            raise HTTPException(409, f"Trading is FROZEN: {frozen(f.state_dir)}. "
+                                     f"Delete the FROZEN file to lift it.")
         e.update_config({"dry_run": not want_live})
         e.ev("WARN" if want_live else "INFO",
              f"*** {e.symbol} ARMED: orders will now transmit to Alpaca. ***" if want_live
@@ -272,7 +425,7 @@ def ticker_action(sym: str, action: str, body: dict = Body(default={})):
         if not e.broker:
             raise HTTPException(503, "Broker not connected.")
         res = e.flatten_all()
-        get_fleet().refresh(force=True)
+        f.refresh(force=True)
         return res
 
     if action == "cancel_tps":
@@ -297,26 +450,29 @@ def ticker_action(sym: str, action: str, body: dict = Body(default={})):
     raise HTTPException(404, f"Unknown ticker action {action!r}.")
 
 
+@app.get("/api/a/{acct}/ticker/{sym}/orders")
 @app.get("/api/ticker/{sym}/orders")
-def ticker_orders(sym: str, status: str = "all", limit: int = 50):
-    e = _engine(sym)
+def ticker_orders(sym: str, status: str = "all", limit: int = 50, f: Fleet = Depends(cur)):
+    e = _engine(f, sym)
     if not e.broker:
         raise HTTPException(503, "Broker not connected.")
     return e.broker.orders(status=status, symbols=e.symbol, limit=limit)
 
 
 # ================================================================ performance
+@app.get("/api/a/{acct}/performance")
 @app.get("/api/performance")
-def performance(symbol: str = "", days: int = 0):
+def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
     """What the ladders have actually done, out of the append-only journal.
 
     Separate from /api/ticker because this is HISTORY -- it survives lots
     closing, config changes and restarts, none of which the live ledger does.
     """
-    rows = journal.load(symbol=symbol.upper(), days=days or None)
-    inv = journal.open_inventory(journal.load(symbol=symbol.upper()))
+    rows = journal.load(symbol=symbol.upper(), days=days or None, path=f.journal_path)
+    inv = journal.open_inventory(journal.load(symbol=symbol.upper(), path=f.journal_path))
     return {
         "ok": True,
+        "account": f.account_id,
         "symbol": symbol.upper() or "ALL",
         "days": days or None,
         "rows": len(rows),
@@ -328,32 +484,39 @@ def performance(symbol: str = "", days: int = 0):
     }
 
 
+@app.get("/api/a/{acct}/journal")
 @app.get("/api/journal")
-def get_journal(symbol: str = "", days: int = 0, limit: int = 200):
-    rows = journal.load(symbol=symbol.upper(), days=days or None)
+def get_journal(symbol: str = "", days: int = 0, limit: int = 200, f: Fleet = Depends(cur)):
+    rows = journal.load(symbol=symbol.upper(), days=days or None, path=f.journal_path)
     return {"ok": True, "rows": len(rows), "journal": rows[-limit:][::-1]}
 
 
+@app.get("/api/a/{acct}/audit")
 @app.get("/api/audit")
-def get_audit(limit: int = 100):
-    """Every action an agent took, and whether it was refused."""
+def get_audit(limit: int = 100, f: Fleet = Depends(cur)):
+    """Every action an agent took on THIS account, and whether it was refused.
+    Rows written before accounts existed carry no account and count as default."""
     import agentctl
-    return {"ok": True, "frozen": frozen(),
-            "entries": agentctl.read_audit(limit)}
+    rows = [r for r in agentctl.read_audit(limit * 4)
+            if str(r.get("account") or accounts.DEFAULT_ID) == f.account_id][:limit]
+    return {"ok": True, "frozen": frozen(f.state_dir), "account": f.account_id,
+            "entries": rows}
 
 
 # ===================================================================== agents
-def _sched():
-    return scheduler.get_scheduler(get_fleet())
+def _sched(f: Fleet):
+    return scheduler.get_scheduler(f)
 
 
+@app.get("/api/a/{acct}/agents")
 @app.get("/api/agents")
-def agents():
-    return _sched().status()
+def agents(f: Fleet = Depends(cur)):
+    return {**_sched(f).status(), "account": f.account_id}
 
 
+@app.post("/api/a/{acct}/agents/selftest")
 @app.post("/api/agents/selftest")
-def agents_selftest():
+def agents_selftest(f: Fleet = Depends(cur)):
     """Ask the model one trivial question and report exactly what came back.
 
     A green readiness light is an inference from config files; this is
@@ -363,30 +526,34 @@ def agents_selftest():
     return scheduler.smoke_test()
 
 
+@app.post("/api/a/{acct}/agents/{job_id}")
 @app.post("/api/agents/{job_id}")
-def agent_config(job_id: str, patch: dict = Body(...)):
+def agent_config(job_id: str, patch: dict = Body(...), f: Fleet = Depends(cur)):
     try:
-        return {"ok": True, "schedule": _sched().update(job_id, patch)}
+        return {"ok": True, "schedule": _sched(f).update(job_id, patch)}
     except KeyError as e:
         raise HTTPException(404, str(e))
 
 
+@app.post("/api/a/{acct}/agents/{job_id}/run")
 @app.post("/api/agents/{job_id}/run")
-def agent_run(job_id: str, body: dict = Body(default={})):
+def agent_run(job_id: str, body: dict = Body(default={}), f: Fleet = Depends(cur)):
     try:
-        return _sched().run(job_id, trigger=str(body.get("trigger") or "manual"))
+        return _sched(f).run(job_id, trigger=str(body.get("trigger") or "manual"))
     except KeyError as e:
         raise HTTPException(404, str(e))
 
 
+@app.get("/api/a/{acct}/agents/{job_id}/runs")
 @app.get("/api/agents/{job_id}/runs")
-def agent_runs(job_id: str, limit: int = 20):
-    return {"ok": True, "runs": scheduler.read_runs(job_id, limit)}
+def agent_runs(job_id: str, limit: int = 20, f: Fleet = Depends(cur)):
+    return {"ok": True, "runs": _sched(f)._read_runs(job_id, limit)}
 
 
 # ======================================================================= risk
+@app.get("/api/a/{acct}/risk")
 @app.get("/api/risk")
-def risk():
+def risk(f: Fleet = Depends(cur)):
     """Exposure and volatility per ladder, plus what a move against you costs.
 
     ATR is the honest unit for this strategy: a $0.10 target on a symbol that
@@ -394,7 +561,6 @@ def risk():
     ranges $0.15, and dollar settings alone hide that completely.
     """
     import trend
-    f = get_fleet()
     g = f.gcfg
     p = f.portfolio()
     out = []
@@ -483,8 +649,9 @@ def risk():
 
 
 # =================================================================== reports
+@app.post("/api/a/{acct}/reports")
 @app.post("/api/reports")
-def report_make(body: dict = Body(default={})):
+def report_make(body: dict = Body(default={}), f: Fleet = Depends(cur)):
     """Generate a report. HTML by default; pass format="pdf" for the old one.
 
     HTML because it opens in a tab with a title, draws charts, and still
@@ -501,20 +668,20 @@ def report_make(body: dict = Body(default={})):
     try:
         if fmt == "pdf":
             import report
-            path = report.build_report(get_fleet(), kind=kind, days=days, note=note)
+            path = report.build_report(f, kind=kind, days=days, note=note)
         else:
             import htmlreport
-            path = htmlreport.build_operational(get_fleet(), kind=kind,
-                                                days=days, note=note)
+            path = htmlreport.build_operational(f, kind=kind, days=days, note=note)
     except Exception as e:
         raise HTTPException(500, f"report failed: {e}")
-    get_fleet().ev("INFO", f"Report generated: {path.name}")
+    f.ev("INFO", f"Report generated: {path.name}")
     return {"ok": True, "name": path.name, "url": f"/reports/{path.name}",
             "format": fmt}
 
 
+@app.get("/api/a/{acct}/reports")
 @app.get("/api/reports")
-def report_list(limit: int = 60):
+def report_list(limit: int = 60, f: Fleet = Depends(cur)):
     import report
     return {"ok": True, "reports": report.listing(limit)}
 
@@ -545,8 +712,9 @@ def report_get(name: str, download: int = 0):
     return FileResponse(f, media_type=media, headers=NO_CACHE)
 
 
+@app.delete("/api/a/{acct}/reports/{name}")
 @app.delete("/api/reports/{name}")
-def report_delete(name: str):
+def report_delete(name: str, f: Fleet = Depends(cur)):
     import report
     f = (report.REPORT_DIR / name).resolve()
     if not str(f).startswith(str(report.REPORT_DIR.resolve())) or not f.is_file():
@@ -598,8 +766,9 @@ def strategy_validate(spec: dict = Body(...)):
 
 
 # =================================================================== backtest
+@app.post("/api/a/{acct}/backtest")
 @app.post("/api/backtest")
-def backtest_submit(spec: dict = Body(...)):
+def backtest_submit(spec: dict = Body(...), f: Fleet = Depends(cur)):
     """Queue a backtest or a parameter sweep.
 
     spec: {symbol, timeframe, days, config:{...}, sweep:{param:[values]}, label}
@@ -609,14 +778,16 @@ def backtest_submit(spec: dict = Body(...)):
     import btjobs
     if not spec.get("symbol"):
         raise HTTPException(400, "A symbol is required.")
+    spec = dict(spec, account=f.account_id)
     try:
-        return btjobs.submit(get_fleet(), spec)
+        return btjobs.submit(f, spec)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/a/{acct}/backtest/{job_id}/detail")
 @app.get("/api/backtest/{job_id}/detail")
-def backtest_detail(job_id: str, row: int = 0):
+def backtest_detail(job_id: str, row: int = 0, f: Fleet = Depends(cur)):
     """The full report for one row of a finished sweep.
 
     Only the winner's curve is kept when a job finishes -- keeping all of them
@@ -625,7 +796,7 @@ def backtest_detail(job_id: str, row: int = 0):
     """
     import btjobs
     try:
-        rep = btjobs.detail(get_fleet(), job_id, row)
+        rep = btjobs.detail(f, job_id, row)
     except KeyError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
@@ -858,14 +1029,16 @@ def risk_bank_add(body: dict = Body(...)):
     return {"ok": True, "entry": row}
 
 
+@app.get("/api/a/{acct}/backtest/jobs")
 @app.get("/api/backtest/jobs")
-def backtest_jobs(limit: int = 15):
+def backtest_jobs(limit: int = 15, f: Fleet = Depends(cur)):
     import btjobs
     return {"ok": True, "jobs": btjobs.recent(limit), "cache": btjobs.CACHE.stats()}
 
 
+@app.get("/api/a/{acct}/backtest/{job_id}")
 @app.get("/api/backtest/{job_id}")
-def backtest_status(job_id: str, limit: int = 250):
+def backtest_status(job_id: str, limit: int = 250, f: Fleet = Depends(cur)):
     import btjobs
     try:
         return btjobs.status(job_id, limit)
@@ -874,9 +1047,10 @@ def backtest_status(job_id: str, limit: int = 250):
 
 
 # ======================================================================= bars
+@app.get("/api/a/{acct}/bars")
 @app.get("/api/bars")
 def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
-         limit: int = 1500):
+         limit: int = 1500, f: Fleet = Depends(cur)):
     """OHLCV for the dashboard chart.
 
     The same Alpaca bars the engine decides on, so the candles on screen are
@@ -884,7 +1058,6 @@ def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
     because a reverse split otherwise draws a cliff that never happened.
     """
     from datetime import datetime, timedelta, timezone
-    f = get_fleet()
     if not f.broker:
         raise HTTPException(503, "Broker not connected.")
     sym = symbol.upper()
@@ -904,53 +1077,73 @@ def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
 
 
 # ===================================================================== lookup
+@app.get("/api/a/{acct}/search")
 @app.get("/api/search")
-def search(q: str = "", limit: int = 25):
-    return get_fleet().search(q, limit=limit)
+def search(q: str = "", limit: int = 25, f: Fleet = Depends(cur)):
+    return f.search(q, limit=limit)
 
 
+@app.get("/api/a/{acct}/inspect/{sym}")
 @app.get("/api/inspect/{sym}")
-def inspect(sym: str):
-    r = get_fleet().inspect(sym)
+def inspect(sym: str, f: Fleet = Depends(cur)):
+    r = f.inspect(sym)
     return JSONResponse(r, status_code=200)
 
 
 # ============================================================ compat (old UI)
 @app.get("/api/symbol/{sym}")
-def check_symbol(sym: str):
-    return get_fleet().inspect(sym)
+def check_symbol(sym: str, f: Fleet = Depends(cur)):
+    return f.inspect(sym)
 
 
 # ====================================================================== boot
-@app.on_event("startup")
-def boot():
-    f = get_fleet()
+def _boot_fleet(f: Fleet) -> None:
     armed = [s for s, e in f.engines.items() if not e.cfg.get("dry_run")]
     running = [s for s, e in f.engines.items() if e.running]
-    f.ev("INFO", f"Dashboard up. {len(f.engines)} ticker(s): "
+    f.ev("INFO", f"[{f.label}] Dashboard up. {len(f.engines)} ticker(s): "
                  f"{', '.join(f.symbols()) or 'none configured'}.")
     if armed:
         # dry_run persists per ticker, so a restart comes back however it was
         # left. Say which ones are hot -- never assume the safe one.
-        f.ev("WARN", f"STILL ARMED from the last run: {', '.join(sorted(armed))}. "
+        f.ev("WARN", f"[{f.label}] STILL ARMED from the last run: {', '.join(sorted(armed))}. "
                      f"Starting {'those engines' if not running else 'them'} resumes "
                      f"LIVE order flow immediately.")
     if running:
-        f.ev("WARN", f"Autostarted and RUNNING now: {', '.join(sorted(running))}.")
-
+        f.ev("WARN", f"[{f.label}] Autostarted and RUNNING now: {', '.join(sorted(running))}.")
     sch = scheduler.get_scheduler(f)
     ready = scheduler.readiness()
     on = [j["id"] for j in sch.status()["jobs"] if j["schedule"].get("enabled")]
     if not ready["ready"]:
         f.ev("WARN", f"Agent scheduler: {ready['problem']} -- {ready['fix']}")
     else:
-        f.ev("INFO", f"Agent scheduler up. Enabled: {', '.join(on) or 'none'}.")
+        f.ev("INFO", f"[{f.label}] Agent scheduler up. Enabled: {', '.join(on) or 'none'}.")
+
+
+@app.on_event("startup")
+def boot():
+    with _BOOT_LOCK:
+        # the default account: seeded from .env on a legacy install, zero file moves
+        acc = REG.seed_default_from_env()
+        if acc is not None:
+            _boot_fleet(_start_fleet(acc))
+        else:
+            logging.getLogger("app").warning(
+                "no default account: no APCA keys in the environment and no accounts.json")
+        for acc in REG.active():
+            if acc.is_default or REG.fleet(acc.id) is not None:
+                continue
+            try:
+                _boot_fleet(_start_fleet(acc))
+            except Exception as e:
+                logging.getLogger("app").error("account %s failed to start: %r", acc.id, e)
 
 
 @app.on_event("shutdown")
 def bye():
-    f = get_fleet()
-    if scheduler.SCHEDULER:
-        scheduler.SCHEDULER.stop()
-    f.shutdown()
-    f.ev("INFO", "Dashboard shutting down. Resting take-profits stay live at Alpaca.")
+    scheduler.stop_all()
+    for f in _all_fleets():
+        try:
+            f.shutdown()
+            f.ev("INFO", f"[{f.label}] Dashboard shutting down. Resting take-profits stay live at Alpaca.")
+        except Exception:
+            pass
