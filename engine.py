@@ -200,6 +200,7 @@ TICKER_DEFAULTS: dict[str, Any] = {
     "entry_ma":          "vwap",       # with_trend: the MA the first candle must clear (vwap | ema)
     "entry_ma_period":   20,           # with_trend + ema: 1-minute EMA length
     "bias_source":       "rd",         # rd = R AND D (the design) | 1h = sign of the 1h SuperTrend
+    "preset":            "basic",      # the named strategy this ticker is on ("custom" once edited by hand)
     "bar_size":          "1Min",
 
     # --- safety ---
@@ -490,6 +491,13 @@ class Engine:
         # config.json's tickers[symbol] -- there is only ever one copy of a
         # ladder's settings, which is what keeps the UI and the engine honest.
         self.cfg = fleet.ticker_cfg(self.symbol)
+        if "preset" not in self.cfg:
+            # a ticker configured before presets existed: name what it is on
+            try:
+                import presets as _presets
+                self.cfg["preset"] = _presets.infer(self.cfg)
+            except Exception:
+                self.cfg["preset"] = "custom"
         for k, v in TICKER_DEFAULTS.items():
             self.cfg.setdefault(k, v)
         self.cfg["symbol"] = self.symbol
@@ -3435,6 +3443,17 @@ class Engine:
             for k, v in patch.items():
                 if k not in TICKER_DEFAULTS:
                     continue
+                # a CLI that turns "off"/"on" into booleans must not turn a
+                # string setting into False: the words are the value
+                if isinstance(TICKER_DEFAULTS[k], str) and isinstance(v, bool):
+                    v = "on" if v else "off"
+                if k == "reversal_mode":
+                    v = str(v).strip().lower()
+                    if v in ("", "false", "none", "0", "no"):
+                        v = "off"
+                    if v not in ("off", "flatten", "reverse"):
+                        rejected.append(k)
+                        continue
                 if k == "symbol":
                     # A ticker IS its symbol -- it keys the ledger, the config
                     # and every client_order_id. Renaming one in place is what
@@ -3479,6 +3498,13 @@ class Engine:
                 elif isinstance(TICKER_DEFAULTS[k], bool):
                     v = bool(v)
                 clean[k] = v
+            # editing any strategy setting by hand takes the ticker off its preset
+            if "preset" not in clean:
+                touched = {k for k, v in clean.items()
+                           if k not in ("dry_run", "autostart", "notes", "created", "symbol")
+                           and self.cfg.get(k) != v}
+                if touched and self.cfg.get("preset", "custom") != "custom":
+                    clean["preset"] = "custom"
             self.cfg.update(clean)
             self.fleet.save()
 

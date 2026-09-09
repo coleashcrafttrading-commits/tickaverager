@@ -512,3 +512,10 @@ tr.on > td { background: var(--accent-dim); }
 }
 .eqc-ro .up { color: var(--up); }
 .eqc-ro .down { color: var(--down); }
+
+/* Active strategy bar on the ticker page */
+.strat { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+         padding: 2px 0 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line, #263038); }
+.strat-k { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.strat-sel { font-size: 14px; padding: 7px 10px; min-width: 280px; }
+.strat-d { font-size: 12px; max-width: 60ch; }

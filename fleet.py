@@ -371,6 +371,11 @@ class Fleet:
                 for k in ("symbol", "dry_run", "autostart", "created"):
                     src.pop(k, None)
                 base.update(src)
+            else:
+                # a new ticker starts on the default named strategy
+                import presets
+                base.update(presets.settings(presets.DEFAULT))
+                base["preset"] = presets.DEFAULT
             base["symbol"] = sym
             base["dry_run"] = True            # ALWAYS added disarmed
             base["autostart"] = False

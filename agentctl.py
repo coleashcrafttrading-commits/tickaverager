@@ -95,7 +95,7 @@ def _freeze_path() -> Path:
     return FREEZE_PATH if ACCOUNT == "default" else _state_dir() / "FROZEN"
 
 # Actions that can move money. Blocked while frozen, always audited.
-RISK_ACTIONS = {"arm", "flatten", "add", "set", "start", "panic", "remove"}
+RISK_ACTIONS = {"arm", "flatten", "add", "set", "start", "panic", "remove", "preset"}
 
 
 # ==================================================================== audit
@@ -178,8 +178,17 @@ def _fail(msg: str) -> int:
     return 1
 
 
-def _coerce(v: str) -> Any:
-    """k=v pairs arrive as strings; make numbers numbers and bools bools."""
+def _coerce(v: str, key: str = "") -> Any:
+    """k=v pairs arrive as strings; make numbers numbers and bools bools --
+    except for a STRING setting, whose words are its value ("off" is a
+    reversal mode, not False)."""
+    if key:
+        try:
+            from engine import TICKER_DEFAULTS
+            if isinstance(TICKER_DEFAULTS.get(key), str):
+                return v.strip()
+        except Exception:
+            pass
     low = v.strip().lower()
     if low in ("true", "yes", "on"):
         return True
@@ -201,7 +210,7 @@ def _kvs(pairs: list[str]) -> dict:
         if "=" not in p:
             raise SystemExit(_fail(f"--set expects key=value, got {p!r}"))
         k, v = p.split("=", 1)
-        out[k.strip()] = _coerce(v)
+        out[k.strip()] = _coerce(v, k.strip())
     return out
 
 
@@ -316,6 +325,14 @@ def cmd_add(a) -> int:
     audit("add", a.actor, detail)
     return _out({"ok": True, "added": sym,
                  "note": "arrives STOPPED and in DRY RUN", "status": r})
+
+
+def cmd_preset(a) -> int:
+    """Put a named strategy on a ticker (see /api/presets)."""
+    sym = a.symbol.upper()
+    r = _http("POST", f"/api/ticker/{sym}/preset", {"id": a.preset})
+    audit("preset", a.actor, {"symbol": sym, "preset": a.preset})
+    return _out(r)
 
 
 def cmd_set(a) -> int:
@@ -660,6 +677,9 @@ def main(argv: list[str] | None = None) -> int:
 
     s = add("set", cmd_set, "change a ladder's settings")
     s.add_argument("pairs", nargs="+", help="key=value ...")
+
+    s = add("preset", cmd_preset, "put a named strategy on a ticker (basic, ladder_v3, ...)")
+    s.add_argument("preset")
 
     add("start", cmd_start, "start a ladder's engine")
     add("stop", cmd_stop, "stop a ladder's engine")

@@ -44,10 +44,30 @@ function liveNotes(s) {
   return b.join("");
 }
 
+let PRESETS = [];          // from /api/presets, shared across accounts
+
+function presetOptions(current) {
+  const opts = PRESETS.map((p) =>
+    `<option value="${esc(p.id)}"${p.id === current ? " selected" : ""}>${esc(p.label)}</option>`);
+  opts.push(`<option value="custom"${current === "custom" || !PRESETS.some((p) => p.id === current) ? " selected" : ""}>Custom (edited by hand)</option>`);
+  return opts.join("");
+}
+
+function presetDesc(id) {
+  const p = PRESETS.find((x) => x.id === id);
+  return p ? p.description : (id === "custom" ? "Settings were edited by hand on the Settings tab." : "");
+}
+
 function mountLive(sym) {
   el("view").innerHTML = `
     <div id="tkNotes"></div>
     ${card("", `
+      <div class="strat" id="tkStrat">
+        <span class="strat-k">Active strategy</span>
+        <select id="tkPreset" class="strat-sel"><option>Loading…</option></select>
+        <button class="btn sm primary" id="tkApply">Apply</button>
+        <span class="strat-d faint" id="tkPresetDesc"></span>
+      </div>
       <div style="display:flex;align-items:baseline;gap:18px;flex-wrap:wrap">
         <div><div class="stat-k">Last</div>
           <div class="stat-v num" id="tkPx">—</div></div>
@@ -138,11 +158,43 @@ function mountLive(sym) {
     toast(`${sym} flattened: cancelled ${r.cancelled}, sold ${r.sold} sh.`, "ok");
   });
 
+  // ---- the Active strategy dropdown ----
+  const sel = el("tkPreset");
+  const fill = () => {
+    const cur = (S.ticker && S.ticker.config && S.ticker.config.preset) || "custom";
+    sel.innerHTML = presetOptions(cur);
+    el("tkPresetDesc").textContent = presetDesc(sel.value);
+  };
+  GET("/api/presets").then((r) => { PRESETS = r.presets || []; fill(); })
+    .catch((e) => { sel.innerHTML = `<option>presets unavailable</option>`; toast(esc(e.message), "err"); });
+  sel.addEventListener("change", () => { el("tkPresetDesc").textContent = presetDesc(sel.value); });
+  el("tkApply").onclick = A(async () => {
+    const id = sel.value;
+    const p = PRESETS.find((x) => x.id === id);
+    if (!p) { toast("Pick a named strategy to apply.", "err"); return; }
+    const s = S.ticker, cur = (s && s.config && s.config.preset) || "custom";
+    if (!await ask({
+      title: `Put ${sym} on "${esc(p.label)}"?`, ok: "Apply strategy",
+      body: `<b>${esc(p.description)}</b><br><br>This overwrites ${sym}'s strategy settings on
+        <b>${esc(acctLabel())}</b> (currently: ${esc(cur)}). Open lots keep their exits; a changed
+        take-profit re-prices resting sells. Arming is unchanged.`,
+    })) return;
+    await POST(`/api/ticker/${sym}/preset`, { id });
+    toast(`${sym} is now on ${esc(p.label)}.`, "ok");
+  });
+
   panel = new ChartPanel(el("chartHost"), { key: "ticker", symbol: sym });
   panel.load();
 }
 
 function paintLive() {
+  // keep the strategy dropdown honest without fighting the user's cursor
+  const sel = el("tkPreset");
+  if (sel && PRESETS.length && document.activeElement !== sel && S.ticker && S.ticker.config) {
+    const cur = S.ticker.config.preset || "custom";
+    const want = PRESETS.some((p) => p.id === cur) ? cur : "custom";
+    if (sel.value !== want) { sel.value = want; el("tkPresetDesc").textContent = presetDesc(want); }
+  }
   const s = S.ticker;
   if (!s || !el("tkStats")) return;
   const A = s.alpaca, c = s.config, P = s.pnl;

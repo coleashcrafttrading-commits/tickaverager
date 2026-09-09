@@ -82,7 +82,7 @@ const TIMEOUT_MS = { GET: 12000, POST: 240000, DELETE: 30000 };
 export const SHARED_API = [
   "/api/accounts", "/api/strategies", "/api/code", "/api/indicators",
   "/api/scanner", "/api/pine", "/api/research", "/api/risk/profiles",
-  "/api/risk/bank", "/api/health", "/api/restart",
+  "/api/risk/bank", "/api/health", "/api/restart", "/api/presets",
 ];
 export function api(path) {
   if (!path.startsWith("/api/") || path.startsWith("/api/a/")) return path;

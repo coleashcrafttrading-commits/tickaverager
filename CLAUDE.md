@@ -58,6 +58,9 @@ lot still waits for the 09:35-15:30 window (Glenn's call to widen it).
 Trend bars (1h / 4h / seeded 1m history) are pulled split-adjusted: they feed
 indicators, never order prices. Basket closes book their fills
 deepest-underwater-first with a `why`; they never use `flatten_all`.
+`flatten` is the researched staged unwind (half on the 1h flip at depth >=4,
+the rest only if the 4h regime agrees 4h later). Replays in
+`research/ladder_v2/`; ranked by P/L per $ of drawdown, never by profit.
 
 ## Accounts (from 9 Sep 2026)
 
@@ -73,9 +76,16 @@ an account; without it you are acting on the default one. Machine-wide
 Adding keys whose Alpaca account number is already registered is refused --
 two fleets on one account is the in-process "two servers" case. Paper only.
 Full contract: `docs/multi_account.md`.
-`flatten` is the researched staged unwind (half on the 1h flip at depth >=4,
-the rest only if the 4h regime agrees 4h later). Replays in
-`research/ladder_v2/`; ranked by P/L per $ of drawdown, never by profit.
+
+## Strategy presets
+
+`presets.py` holds the named strategies a ticker can be put on in one step:
+`basic` (the plain $0.10 ladder: first red 1-minute candle, 1 share, +1 share
+every $0.10 down, each lot exits $0.10 up, no filter, no flip, no cap, no lot
+limit, any hour -- the DEFAULT for new tickers), `ladder_v3`, and
+`ladder_v3_flatten`. The ticker page's **Active strategy** dropdown applies
+one; `agentctl preset SYM basic` does the same from the CLI. Editing any
+setting by hand stamps the ticker `custom`.
 
 ## Production is the VM (from 9 Sep 2026)
 

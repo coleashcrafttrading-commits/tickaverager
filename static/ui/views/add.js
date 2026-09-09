@@ -130,7 +130,7 @@ async function pick(sym) {
     }
     el("aTpl").style.display = el("aCfgCard").style.display = "";
     el("aCfgSym").textContent = r.symbol;
-    el("aCopy").innerHTML = ['<option value="">Strategy defaults</option>']
+    el("aCopy").innerHTML = ['<option value="">Basic $0.10 ladder (the default strategy)</option>']
       .concat((S.ov && S.ov.tickers || []).map((t) =>
         `<option value="${t.symbol}">Copy ${t.symbol}</option>`)).join("");
     el("aCopy").value = st.copyFrom || "";
@@ -143,9 +143,14 @@ async function pick(sym) {
 async function template() {
   let cfg;
   try {
-    cfg = st.copyFrom
-      ? (await GET("/api/ticker/" + st.copyFrom)).config
-      : (await GET("/api/settings")).ticker_defaults;
+    if (st.copyFrom) {
+      cfg = (await GET("/api/ticker/" + st.copyFrom)).config;
+    } else {
+      // what a new ticker actually gets: the defaults with the default preset on top
+      const [st_, pr] = await Promise.all([GET("/api/settings"), GET("/api/presets")]);
+      const d = (pr.presets || []).find((p) => p.id === pr.default);
+      cfg = Object.assign({}, st_.ticker_defaults, d ? d.settings : {}, { preset: pr.default });
+    }
   } catch (e) { toast(esc(e.message), "err"); return; }
   cfg = Object.assign({}, cfg,
     { symbol: st.picked, dry_run: true, autostart: false, notes: "" });

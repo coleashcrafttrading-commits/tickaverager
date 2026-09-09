@@ -168,6 +168,13 @@ def health():
             "frozen": frozen()}
 
 
+@app.get("/api/presets")
+def presets_list():
+    """The named strategies any ticker can be put on (shared across accounts)."""
+    import presets
+    return {"ok": True, "default": presets.DEFAULT, "presets": presets.listing()}
+
+
 @app.get("/api/accounts")
 def accounts_list():
     return {"accounts": _summaries(), "default": accounts.DEFAULT_ID}
@@ -415,6 +422,22 @@ def delete_ticker(sym: str, force: bool = False, f: Fleet = Depends(cur)):
 @app.post("/api/ticker/{sym}/config")
 def ticker_config(sym: str, patch: dict = Body(...), f: Fleet = Depends(cur)):
     return {"ok": True, "config": _engine(f, sym).update_config(patch)}
+
+
+@app.post("/api/a/{acct}/ticker/{sym}/preset")
+@app.post("/api/ticker/{sym}/preset")
+def ticker_preset(sym: str, body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Put a named strategy on a ticker: its settings are applied through
+    update_config (every guard and re-cover rule runs) and the ticker is
+    stamped with the preset. Declared before /{action} on purpose."""
+    import presets
+    pid = str(body.get("id") or body.get("preset") or "").strip()
+    if pid not in presets.PRESETS:
+        raise HTTPException(404, f"no such strategy preset: {pid!r}")
+    e = _engine(f, sym)
+    cfg = e.update_config({**presets.settings(pid), "preset": pid})
+    e.ev("INFO", f"Strategy set to {presets.PRESETS[pid]['label']} ({pid}).")
+    return {"ok": True, "preset": pid, "config": cfg}
 
 
 @app.post("/api/a/{acct}/ticker/{sym}/{action}")
