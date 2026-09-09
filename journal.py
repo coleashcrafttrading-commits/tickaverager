@@ -132,6 +132,7 @@ def record_open(engine: Any, lot: Any, why: str = "") -> None:
         "last_price":  engine.last_price,
         "session":     engine._session_now(),
         "dry_run":     bool(cfg.get("dry_run")),
+        "entry_latency_ms": round(float(getattr(lot, "entry_latency_ms", 0) or 0), 1),
         "why":         why,
         "cfg_hash":    cfg_hash(cfg),
         "cfg":         cfg_snapshot(cfg),

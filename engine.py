@@ -392,6 +392,8 @@ class Lot:
     armed: bool = False         # trail mode: has this lot reached its target?
     peak: float = 0.0           # trail mode: highest price seen since arming
     side: str = "long"          # long | short; never mix on one ledger
+    entry_latency_ms: float = 0.0   # strategy trigger -> entry order accepted by Alpaca
+    tp_latency_ms: float = 0.0      # fill booked -> take-profit accepted by Alpaca
 
     @property
     def cost(self) -> float:
@@ -1405,7 +1407,8 @@ class Engine:
             qty = int(float(o.get("filled_qty") or 0))
             self.pending_entry = None
             self._open_lot(pe["lot_id"], qty, price, pe.get("why", ""),
-                           side=pe.get("side", "long"))
+                           side=pe.get("side", "long"),
+                           latency_ms=float(pe.get("latency_ms") or 0))
         elif status in ("canceled", "cancelled", "expired", "rejected", "suspended"):
             if status == "rejected":
                 self._back_off_entries(f"Entry {pe['client_order_id']} was REJECTED by "
@@ -1493,7 +1496,7 @@ class Engine:
         self.ev("WARN", f"REVERSAL: {shares} sh back at the head of the queue ({why}, try {tries + 1})")
 
     def _open_lot(self, lot_id: str, shares: int, price: float, why: str = "",
-                  side: str = "") -> None:
+                  side: str = "", latency_ms: float = 0.0) -> None:
         if shares <= 0 or price <= 0:
             self.ev("ERR", f"Entry {lot_id} reported a fill of {shares} @ {price} -- ignoring.")
             return
@@ -1504,7 +1507,7 @@ class Engine:
         tp = _round_cent(price + d * float(self.cfg["take_profit"]))
         lot = Lot(id=lot_id, shares=shares, entry_price=price,
                   entry_time=_now_ny().isoformat(timespec="seconds"), tp_price=tp,
-                  side=side)
+                  side=side, entry_latency_ms=round(float(latency_ms or 0), 1))
         self.ledger.open_lots.append(lot)
         self.ledger.save()
         # the ledger forgets a lot the moment it closes; the journal does not
@@ -1513,7 +1516,8 @@ class Engine:
         except Exception as e:
             LOG.warning("journal open %s: %s", lot_id, e)
         self.ev("FILL", f"{'SOLD SHORT' if d < 0 else 'BOUGHT'} lot {lot_id}: "
-                        f"{shares} @ ${price:.4f} -> TP ${tp:.2f} | "
+                        f"{shares} @ ${price:.4f} -> TP ${tp:.2f}"
+                        + (f" | order placed in {float(latency_ms):.0f} ms" if latency_ms else "") + " | "
                         f"ladder now {len(self.ledger.open_lots)} lot(s), {self.ledger.shares} sh "
                         f"@ avg ${self.ledger.avg_price:.4f}")
         self._place_tp(lot)
@@ -1602,10 +1606,12 @@ class Engine:
             # a cancel is what made a re-place look successful while doing nothing.
             lot.tp_seq += 1
             coid = f"tp-{lot.id}-{lot.tp_seq}"
+            t0 = time.perf_counter()
             try:
                 place = b.buy_limit_gtc if short else b.sell_limit_gtc
                 o = place(self.symbol, lot.shares, lot.tp_price, coid,
                           extended_hours=xh)
+                lot.tp_latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
             except AlpacaError as e:
                 body = (e.body or "").lower()
                 if "client_order_id" in body:
@@ -2109,6 +2115,7 @@ class Engine:
 
         o, c = float(bar["o"]), float(bar["c"])
         red = c < o
+        t_trig = time.perf_counter()          # the moment the strategy is asked
 
         # A strategy in charge of entries replaces BOTH the first-entry rule and
         # the add rule -- it decides, on its own conditions, whether to open
@@ -2117,17 +2124,17 @@ class Engine:
         if want is not None:
             if want:
                 self._submit_entry(f"strategy {self._strat_slug}: entry conditions met "
-                                   f"on close ${c:.2f}")
+                                   f"on close ${c:.2f}", t_trigger=t_trig)
             return
 
         if not self.ledger.open_lots:
             ok, why = self._first_entry_ok(bar)
             if ok:
-                self._submit_entry(why)
+                self._submit_entry(why, t_trigger=t_trig)
             return
 
         if self._add_trigger_met(c):
-            self._submit_entry(self._add_reason(c))
+            self._submit_entry(self._add_reason(c), t_trigger=t_trig)
 
     def _entry_ma(self) -> Optional[float]:
         """The MA the first candle must clear under first_entry=with_trend:
@@ -2262,9 +2269,11 @@ class Engine:
             ref = float(self.quote.get("bp") or 0) or self.last_price
             px = _round_cent(max(0.01, ref - off))
         coid = f"xs-{lots[0].id}-{int(time.time()) % 100000}"
+        t0 = time.perf_counter()
         try:
             place = b.buy_limit_gtc if short else b.sell_limit_gtc
             o = place(self.symbol, qty, px, coid, extended_hours=self.wants_extended())
+            lat = round((time.perf_counter() - t0) * 1000.0, 1)
         except AlpacaError as e:
             self.flag("basket", f"basket {'buy' if short else 'sell'} of {qty} sh rejected: "
                                 f"{str(e)[:120]}. Re-placing per-lot TPs.")
@@ -2282,9 +2291,9 @@ class Engine:
         self.ledger.unwind = uw
         self.ledger.save()
         self.ev("TP", f"BASKET {'BUY' if short else 'SELL'} {qty} sh @ ${px:.2f} for "
-                      f"{len(lots)} lot(s): {why}")
+                      f"{len(lots)} lot(s) in {lat:.0f} ms: {why}")
         try:
-            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="basket_close_sent", why=why, shares=qty,
+            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="basket_close_sent", why=why, shares=qty, latency_ms=lat,
                                  lots=[l.id for l in lots], order=o.get("id", ""))
         except Exception:
             pass
@@ -2775,7 +2784,8 @@ class Engine:
             self.ledger.unwind = u
             self.ledger.save()
             ok = self._submit_entry(f"REVERSAL: re-opening {sh} sh {new} "
-                                    f"({len(queue)} lot(s) to go)", shares=sh)
+                                    f"({len(queue)} lot(s) to go)", shares=sh,
+                                    t_trigger=time.perf_counter())
             if not ok:
                 # refused (buying power, portfolio cap, FROZEN, rejection):
                 # nothing was sent, so the lot goes back to the head of the
@@ -3118,10 +3128,14 @@ class Engine:
         return (f"close ${close:.2f} is ${abs(anchor - close):.2f} {way} last fill "
                 f"${anchor:.4f} (trigger {trig})")
 
-    def _submit_entry(self, why: str, shares: Optional[int] = None) -> bool:
+    def _submit_entry(self, why: str, shares: Optional[int] = None,
+                      t_trigger: Optional[float] = None) -> bool:
         """Open one lot. `shares` overrides the sizing rule -- a reversal
         mirrors the closed lots share for share, so it must not be re-sized
-        by the cap or the dollar rule on the way back in."""
+        by the cap or the dollar rule on the way back in. `t_trigger` is the
+        perf_counter() moment the strategy fired; the order's latency is
+        measured from there to Alpaca's acceptance and travels with the lot."""
+        t0 = t_trigger if t_trigger is not None else time.perf_counter()
         side = self.next_side()
         mode = str(self.cfg.get("side_mode") or "auto").lower()
         # A ledger never mixes sides, and neither does the account. These guards
@@ -3183,7 +3197,8 @@ class Engine:
 
         if self.cfg["dry_run"]:
             self.ev("DRY", f"[dry] would {self.entry_side(side).upper()} {shares} "
-                           f"{self.symbol} -- {why}")
+                           f"{self.symbol} -- {why} "
+                           f"(decided in {(time.perf_counter() - t0) * 1000:.1f} ms)")
             return True
 
         b = self.broker
@@ -3235,8 +3250,10 @@ class Engine:
                                          f"reversal dropped with {left} lot(s) never re-opened; the "
                                          f"ladder is FLAT, not reversed")
                 else:
-                    self.flag("short", f"{self.symbol}: Alpaca refused the short ({str(e)[:80]}) -- "
-                                       f"no shorts until the borrow returns")
+                    self.flag("short", f"{self.symbol}: Alpaca has no borrow for this name "
+                                       f"({str(e)[:80]}) -- SHORT entries only; long entries are "
+                                       f"unaffected. Clears when the borrow returns or the ladder "
+                                       f"goes long-only.")
                 return False
             if shares and (self.ledger.unwind or {}).get("reverse_to") and any(
                     k in msg for k in ("insufficient qty", "held_for_orders", "wash trade")):
@@ -3245,12 +3262,15 @@ class Engine:
                 return False
             self._back_off_entries(f"Entry order rejected: {str(e)[:140]}")
             return False
+        lat = round((time.perf_counter() - t0) * 1000.0, 1)   # trigger -> accepted
         self.pending_entry = {"lot_id": lot_id, "client_order_id": coid,
                               "order_id": o.get("id", ""), "sent_at": time.time(),
                               "why": why, "side": side, "mirror": bool(shares),
-                              "shares": int(shares_sent)}
+                              "shares": int(shares_sent), "latency_ms": lat}
+        if side == "long":
+            self.unflag("short")             # a long ladder is never held up by a borrow
         self.ev("ORDER", f"{self.entry_side(side).upper()} {shares} {self.symbol} sent "
-                         f"({self.cfg.get('entry_order_type')}) -- {why}")
+                         f"({self.cfg.get('entry_order_type')}) in {lat:.0f} ms -- {why}")
         self._watch_entry_fill()      # get the take-profit resting ASAP
         return True
 
@@ -3294,7 +3314,8 @@ class Engine:
                 self.pending_entry = None
                 self._open_lot(pe["lot_id"], int(float(o.get("filled_qty") or 0)),
                                float(o.get("filled_avg_price") or 0), pe.get("why", ""),
-                               side=pe.get("side", "long"))
+                               side=pe.get("side", "long"),
+                               latency_ms=float(pe.get("latency_ms") or 0))
                 self.ev("INFO", f"Entry -> take-profit resting in {gap:.2f}s.")
                 return
             if status in ("canceled", "cancelled", "expired", "rejected"):
@@ -3507,6 +3528,8 @@ class Engine:
                     clean["preset"] = "custom"
             self.cfg.update(clean)
             self.fleet.save()
+            if str(self.cfg.get("side_mode") or "auto").lower() in ("auto", "long"):
+                self.unflag("short")         # a long-only ladder has no borrow to wait for
 
             # the extended_hours flag is baked into an order at submission, so
             # every resting TP has to be re-placed for the change to mean anything

@@ -225,7 +225,7 @@ function paintLive() {
 
   const byCoid = Object.fromEntries((A.orders || []).map((o) => [o.coid, o]));
   el("tkLots").innerHTML = tableHTML(
-    ["Lot", "Shares", "Entry", "Target", "To go", "P/L", "Resting"],
+    ["Lot", "Shares", "Entry", "Target", "To go", "P/L", "Placed in", "Resting"],
     (s.lots || []).map((l) => {
       const pl = (s.last_price - l.entry_price) * l.shares;
       const to = l.tp_price - s.last_price;
@@ -242,6 +242,7 @@ function paintLive() {
         <td class="num">${px(l.tp_price)}</td>
         <td class="num ${to <= 0 ? "up" : "faint"}">${to <= 0 ? "at target" : "$" + to.toFixed(2)}</td>
         <td class="num">${sgn(pl)}</td>
+        <td class="num faint" title="strategy trigger → entry accepted by Alpaca; take-profit accepted in ${l.tp_latency_ms ? l.tp_latency_ms.toFixed(0) + " ms" : "—"}">${l.entry_latency_ms ? l.entry_latency_ms.toFixed(0) + " ms" : "—"}</td>
         <td style="text-align:right">${sell}</td></tr>`;
     }), `Flat — no open lots on ${s.symbol}.`);
 

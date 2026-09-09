@@ -35,7 +35,7 @@ def flat(**over):
     e.block_reason = lambda **kw: ""
     e.calls = []
 
-    def _submit(why, shares=None):
+    def _submit(why, shares=None, **kw):
         e.calls.append((why, shares))
         return True
     e._submit_entry = _submit
@@ -115,7 +115,7 @@ def main() -> int:
     e = flat(**R)
     e.trend = {"bias": "short", "M": -1}
 
-    def _slow(why, shares=None):
+    def _slow(why, shares=None, **kw):
         e.calls.append((why, shares))
         e.pending_entry = {"lot_id": "x"}            # not filled yet
         return True
@@ -128,7 +128,7 @@ def main() -> int:
     check("record kept", e.ledger.unwind.get("reverse_to"), "short")
     check("next tick, entry still working: waits", e._maybe_reverse_entry(), False)
     e.pending_entry = None
-    e._submit_entry = lambda why, shares=None: (e.calls.append((why, shares)), True)[1]
+    e._submit_entry = lambda why, shares=None, **kw: (e.calls.append((why, shares)), True)[1]
     check("fill booked: the rest goes", e._maybe_reverse_entry(), True)
     check("all three sent in the end", len(e.calls), 3)
     check("record cleared", e.ledger.unwind.get("reverse_to"), None)
@@ -136,7 +136,7 @@ def main() -> int:
     print("\n9. ...a refused submission puts the lot back at the head of the queue, nothing is lost")
     e = flat(**R)
     e.trend = {"bias": "short", "M": -1}
-    e._submit_entry = lambda why, shares=None: (e.calls.append((why, shares)), False)[1]
+    e._submit_entry = lambda why, shares=None, **kw: (e.calls.append((why, shares)), False)[1]
     e.ledger.unwind = {"reverse_to": "short", "reverse_lots": [100, 200],
                        "reverse_until": time.time() + 3600}
     check("nothing sent counts as not fired", e._maybe_reverse_entry(), False)
@@ -152,7 +152,7 @@ def main() -> int:
     e.pending_entry = None
     e.block_reason = lambda **kw: ""
     e.calls = []
-    e._submit_entry = lambda why, shares=None: (e.calls.append((why, shares)), True)[1]
+    e._submit_entry = lambda why, shares=None, **kw: (e.calls.append((why, shares)), True)[1]
     e.trend = {"bias": "short", "M": -1}
     e.ledger.unwind = {"reverse_to": "short", "reverse_lots": [100], "reverse_until": time.time() + 3600}
     check("old-side lot still open: no", e._maybe_reverse_entry(), False)
@@ -364,7 +364,7 @@ def main() -> int:
     e.pending_entry = None
     e.block_reason = lambda **kw: ""
     e.calls = []
-    e._submit_entry = lambda why, shares=None: (e.calls.append((why, shares)), True)[1]
+    e._submit_entry = lambda why, shares=None, **kw: (e.calls.append((why, shares)), True)[1]
     e.broker.asset = lambda sym: {"symbol": sym, "shortable": True, "borrow_status": "easy_to_borrow"}
     e.quote = {"bp": 9.50, "ap": 9.52}
     e.trend = {"bias": "long", "M": 1, "R": 1, "atr1h": 0.2}       # ...and the 1h turned up again
