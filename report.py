@@ -79,9 +79,9 @@ def build_report(fleet: Any, kind: str = "daily", days: int = 1,
 
     ov = fleet.overview()
     p = ov["portfolio"]
-    rows = journal.load(days=days if kind != "full" else None)
+    rows = journal.load(path=getattr(fleet, 'journal_path', None), days=days if kind != "full" else None)
     stats = journal.stats(rows)
-    inv = journal.open_inventory(journal.load())
+    inv = journal.open_inventory(journal.load(path=getattr(fleet, 'journal_path', None)))
 
     def tbl(head, body, widths):
         t = Table([head] + body, colWidths=widths, repeatRows=1)

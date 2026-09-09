@@ -207,8 +207,11 @@ class Fleet:
         self._htf_due: float = 0.0
 
         # normalise config.json on disk right away, so a v1 file is migrated
-        # exactly once instead of being re-migrated on every boot
-        self.save()
+        # exactly once instead of being re-migrated on every boot. Only the
+        # dashboard (autostart) writes: an inert fleet built by a script or a
+        # test must never touch a live install's config.
+        if self._autostart:
+            self.save()
 
         self._connect()
         self._build_engines()
@@ -250,7 +253,8 @@ class Fleet:
 
     def is_paper(self) -> bool:
         if self.acct is not None and getattr(self.acct, "base_url", ""):
-            return "paper" in str(self.acct.base_url).lower()
+            import accounts as _accounts
+            return _accounts.is_paper_url(str(self.acct.base_url))
         return "paper" in os.environ.get("APCA_API_BASE_URL", "paper").lower()
 
     # ------------------------------------------------------ account facts
@@ -265,7 +269,8 @@ class Fleet:
         return {"id": self.account_id, "label": self.label,
                 "account_number": self.account.get("account_number", ""),
                 "paper": self.is_paper(),
-                "feed": str(getattr(self.acct, "feed", "sip") or "sip"),
+                "feed": self._feed_for_now(),
+                "probed_feed": str(getattr(self.acct, "feed", "sip") or "sip"),
                 "key_last4": (self.acct.key_last4() if self.acct is not None else ""),
                 "is_default": self.account_id == "default",
                 "connected": self.broker is not None and bool(self.account),
@@ -450,7 +455,10 @@ class Fleet:
         f = self.gcfg.get("feed", "auto")
         if f != "auto":
             return f
-        return "boats" if session_now() == "overnight" else "sip"
+        if session_now() == "overnight":
+            return "boats"
+        # an account whose keys probed without SIP entitlement is polled on iex
+        return "iex" if str(getattr(self.acct, "feed", "") or "") == "iex" else "sip"
 
     def symbols(self) -> list[str]:
         return sorted(self.engines)

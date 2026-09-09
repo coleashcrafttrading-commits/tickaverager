@@ -135,6 +135,15 @@ def _summaries() -> list[dict]:
             rows.append({**acc.public(), "connected": False, "equity": 0.0,
                          "running": 0, "armed": 0, "lots": 0, "frozen": ""})
             continue
+        # the default account's number is learned from the broker; write it
+        # back as soon as it is known so the one-fleet-per-account guard holds
+        num = str(f.account.get("account_number") or "")
+        if num and acc.account_number != num:
+            acc.account_number = num
+            try:
+                REG.save()
+            except Exception:
+                pass
         rows.append(f.summary_row(frozen(f.state_dir)))
     return rows
 
@@ -168,16 +177,22 @@ def accounts_list():
 def accounts_add(body: dict = Body(...)):
     """Drop a key pair, get a clean fleet for it. Keys are validated with
     Alpaca first, stored only on this server, never echoed back."""
+    # v1 is paper-only and the endpoints are not a client choice: whatever the
+    # body says, the account is validated and connected at Alpaca's paper host
+    taken = {str(x.account.get("account_number") or "") for x in _all_fleets()} - {""}
     try:
         acc = REG.add(str(body.get("label") or ""), str(body.get("key_id") or ""),
-                      str(body.get("secret") or ""),
-                      base_url=str(body.get("base_url") or accounts.PAPER_URL),
-                      data_url=str(body.get("data_url") or accounts.DATA_URL))
+                      str(body.get("secret") or ""), also_taken=taken)
     except ValueError as e:
         raise HTTPException(400, str(e))
     try:
         f = _start_fleet(acc)
+        _boot_fleet(f)
     except Exception as e:
+        try:
+            scheduler.drop(acc.id)
+        except Exception:
+            pass
         REG.remove(acc.id)
         raise HTTPException(500, f"the account was validated but its fleet failed to start: {e}")
     logging.getLogger("app").info("account added: %s (%s)", acc.id, acc.account_number)
@@ -225,12 +240,19 @@ def accounts_delete(acct_id: str):
         if busy:
             raise HTTPException(409, f"{acc.label} still has running, armed or invested tickers "
                                      f"({', '.join(sorted(busy))}). Stop and disarm them, close the lots, then remove.")
+    sch = scheduler.SCHEDULERS.get(acct_id)
+    if sch is not None and getattr(sch, "running_job", ""):
+        raise HTTPException(409, f"{acc.label} has an agent run in progress ({sch.running_job}); "
+                                 f"wait for it to finish, then remove.")
+    scheduler.drop(acct_id)                  # never leave a scheduler on a dead fleet
+    if f is not None:
         try:
             f.shutdown()
         except Exception:
             pass
     REG.remove(acct_id)
-    return {"ok": True, "removed": acct_id, "note": "files kept under state/accounts/"}
+    return {"ok": True, "removed": acct_id,
+            "note": "keys deleted; config, ledgers and journal kept under state/accounts/"}
 
 
 @app.get("/")
@@ -269,8 +291,10 @@ def _engine(f: Fleet, sym: str):
 @app.get("/api/a/{acct}/overview")
 @app.get("/api/overview")
 def overview(f: Fleet = Depends(cur)):
-    return {**f.overview(), "frozen": frozen(f.state_dir),
-            "account": f.account_info(), "accounts": _summaries()}
+    ov = f.overview()
+    return {**ov, "frozen": frozen(f.state_dir),
+            "account": {**(ov.get("account") or {}), **f.account_info()},
+            "accounts": _summaries()}
 
 
 @app.get("/api/a/{acct}/settings")

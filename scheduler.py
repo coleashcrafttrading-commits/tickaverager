@@ -756,3 +756,19 @@ def stop_all() -> None:
                 sch.stop()
             except Exception:
                 pass
+
+
+def drop(aid: str) -> None:
+    """Stop and forget one account's scheduler -- a removed account must not
+    keep spawning agents against a fleet that no longer exists."""
+    global SCHEDULER
+    with _SCHED_LOCK:
+        sch = SCHEDULERS.pop(aid, None)
+        if sch is None:
+            return
+        try:
+            sch.stop()
+        except Exception:
+            pass
+        if SCHEDULER is sch:
+            SCHEDULER = None

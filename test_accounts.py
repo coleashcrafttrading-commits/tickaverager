@@ -36,11 +36,14 @@ def check(name, got, want) -> None:
 
 
 def main() -> int:
-    # everything under a scratch state dir
+    # everything under a scratch tree -- ROOT too, so the default account's
+    # legacy config path is SCRATCH/config.json and the live one is never touched
+    accounts.ROOT = SCRATCH
     accounts.STATE_DIR = SCRATCH / "state"
     accounts.ACCOUNTS_DIR = accounts.STATE_DIR / "accounts"
     accounts.REGISTRY_PATH = accounts.STATE_DIR / "accounts.json"
-    reg = accounts.Registry(path=accounts.REGISTRY_PATH)
+    reg = accounts.Registry()
+    check("Registry() reads REGISTRY_PATH at call time", reg.path, accounts.REGISTRY_PATH)
 
     print("\n1. the registry validates keys with Alpaca before it stores anything")
     calls = []
@@ -109,7 +112,7 @@ def main() -> int:
         check("default cannot be removed", True, True)
     reg.remove(acc2.id)
     check("removed account is gone from active()", [a.id for a in reg.active()], ["glenn-momentum", "default"])
-    check("...but its files remain", acc2.keys_path.exists(), True)
+    check("...its keys are deleted", acc2.keys_path.exists(), False)
     check("...and its number is free to be added again", reg.by_number("PA0001"), None)
 
     print("\n6. two fleets on the same symbol: separate ledgers, journals, freezes")
@@ -127,7 +130,7 @@ def main() -> int:
     check("default fleet: journal path honours TICKAVERAGER_JOURNAL", fd.journal_path, journal.JOURNAL_PATH)
     check("default fleet: legacy state dir", fd.state_dir, accounts.STATE_DIR)
     check("no broker without keys, no crash", (fa.broker, fd.broker), (None, None))
-    check("config written per account", acc.config_path.exists(), True)
+    check("an inert fleet writes no config", acc.config_path.exists(), False)
     la = engine.Ledger.load("RAM", fa.state_dir)
     ld = engine.Ledger.load("RAM", fd.state_dir)
     la.open_lots.append(engine.Lot(id="RAM-1", shares=100, entry_price=10.0,
@@ -156,7 +159,7 @@ def main() -> int:
     ra = journal.load(path=fa.journal_path)
     rd = journal.load()
     check("account row in the account journal", (len(ra), ra[0].get("account")), (1, "glenn-momentum"))
-    check("default row in the default journal, no account stamp", (len(rd), rd[0].get("account")), (1, None))
+    check("default row in the default journal, stamped default", (len(rd), rd[0].get("account")), (1, "default"))
     with journal.target(fa.journal_path, "glenn-momentum"):
         journal.append({"event": "note", "symbol": "RAM"})
     check("target() routes a block of writes", len(journal.load(path=fa.journal_path)), 2)
@@ -183,6 +186,46 @@ def main() -> int:
     check("already scoped stays", agentctl._scoped("/api/a/x/overview"), "/api/a/x/overview")
     agentctl.ACCOUNT = "default"
     check("default is scoped too (the server aliases it)", agentctl._scoped("/api/overview"), "/api/a/default/overview")
+
+    print("\n10. the review's findings stay fixed")
+    # paper-only is a structural check, not a substring
+    for bad in ("https://paper@api.alpaca.markets", "https://api.alpaca.markets/?paper",
+                "http://paper-api.alpaca.markets", "https://paper-api.alpaca.markets:443/x",
+                "https://paper-api.alpaca.markets.evil.com"):
+        check(f"not paper: {bad}", accounts.is_paper_url(bad), False)
+    check("the real paper host is paper", accounts.is_paper_url("https://paper-api.alpaca.markets/"), True)
+    check("Account.is_paper uses the same rule",
+          accounts.Account(id="x", label="x", base_url="https://paper@api.alpaca.markets").is_paper, False)
+    try:
+        accounts.Account(id="../../etc", label="x")
+        check("a traversing id is refused", False, True)
+    except ValueError:
+        check("a traversing id is refused", True, True)
+    # keys are deleted on remove; config/ledgers kept
+    acc3 = reg.add("Temp", "PKTEMP00009999", "s3")
+    kp3, cp3 = acc3.keys_path, acc3.config_path
+    cp3.parent.mkdir(parents=True, exist_ok=True); cp3.write_text("{}")
+    reg.remove(acc3.id)
+    check("remove deletes the key pair", kp3.exists(), False)
+    check("...and keeps the config", cp3.exists(), True)
+    # the public view is an allowlist
+    pub = reg.get("glenn-momentum").public()
+    check("public() carries no paths or key mode", any(k in pub for k in ("state_dir", "keys", "removed", "base_url")), False)
+    # an unknown non-default account fails, never falls back to the default's files
+    agentctl.ACCOUNT = "no-such-account"
+    try:
+        agentctl._state_dir()
+        check("agentctl refuses an unknown account", False, True)
+    except SystemExit:
+        check("agentctl refuses an unknown account", True, True)
+    agentctl.ACCOUNT = "default"
+    check("...and the default still resolves to its legacy state dir", agentctl._state_dir(), accounts.STATE_DIR)
+    # every journal row has an account, old rows count as default
+    check("account_of on an old row", journal.account_of({"event": "open"}), "default")
+    check("default rows are stamped 'default' now", journal.load()[0].get("account"), "default")
+    # inert fleets never write a config on construction
+    cp_default = d.config_path
+    check("inert default fleet did not create SCRATCH/config.json", cp_default.exists(), False)
 
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
     return 1 if FAIL else 0

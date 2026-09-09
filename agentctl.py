@@ -66,13 +66,23 @@ def _acct():
     """The account record for ACCOUNT (None for a plain default install)."""
     try:
         import accounts
-        return accounts.Registry().get(ACCOUNT)
-    except Exception:
+    except ImportError:
         return None
+    return accounts.Registry().get(ACCOUNT)
+
+
+def _require_account():
+    """A non-default account id that does not exist must FAIL, never fall
+    back to the default account's files (a typo or a removed account would
+    otherwise read, freeze or backfill the wrong account)."""
+    a = _acct()
+    if ACCOUNT != "default" and a is None:
+        raise SystemExit(_fail(f"no such account: {ACCOUNT!r} (see /api/accounts)"))
+    return a
 
 
 def _state_dir() -> Path:
-    a = _acct()
+    a = _require_account()
     return Path(a.state_dir) if a is not None else STATE_DIR
 
 
@@ -572,16 +582,18 @@ def _sweep(pairs: list) -> dict:
 def cmd_journal_backfill(a) -> int:
     """Rebuild journal history for a symbol from Alpaca's order record."""
     sys.path.insert(0, str(ROOT))
-    from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env")
     import journal
     from broker import Alpaca
-    acc = _acct()
+    acc = _require_account()
     if acc is not None and getattr(acc, "keys", "env") != "env":
         key, sec = acc.credentials()
         base, data = acc.base_url, acc.data_url
         cfg_path, sdir = Path(acc.config_path), Path(acc.state_dir)
     else:
+        # only the default account's keys live in .env; never load them into
+        # a process that is acting for another account
+        from dotenv import load_dotenv
+        load_dotenv(ROOT / ".env")
         key, sec = os.environ["APCA_API_KEY_ID"], os.environ["APCA_API_SECRET_KEY"]
         base = os.environ.get("APCA_API_BASE_URL", "https://paper-api.alpaca.markets")
         data = os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets")
@@ -753,6 +765,10 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(a, 'account', None):
 
         ACCOUNT = str(a.account).strip() or ACCOUNT
+
+    if ACCOUNT != "default" and _acct() is None:
+
+        return _fail(f"no such account: {ACCOUNT!r} (see /api/accounts)")
     if not getattr(a, "actor", None):
         a.actor = os.environ.get("AGENT_NAME", "human")
     return a.fn(a)

@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 LOG = logging.getLogger("accounts")
 
@@ -30,6 +31,29 @@ PAPER_URL = "https://paper-api.alpaca.markets"
 DATA_URL = "https://data.alpaca.markets"
 
 _SLUG = re.compile(r"[^a-z0-9]+")
+ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+PAPER_HOST = "paper-api.alpaca.markets"
+DATA_HOST = "data.alpaca.markets"
+
+
+def _exact_https_host(url: str, host: str) -> bool:
+    """True only for https://<host> with nothing else: no userinfo, no port,
+    no path, no query. A substring test let 'https://paper@api.alpaca.markets'
+    (the LIVE host with a decorative userinfo) pass as paper."""
+    try:
+        u = urlsplit(str(url or ""))
+    except Exception:
+        return False
+    return (u.scheme == "https" and u.netloc == host and u.hostname == host
+            and not u.path.strip("/") and not u.query and not u.fragment)
+
+
+def is_paper_url(url: str) -> bool:
+    return _exact_https_host(url, PAPER_HOST)
+
+
+def is_data_url(url: str) -> bool:
+    return _exact_https_host(url, DATA_HOST)
 
 
 def slugify(label: str) -> str:
@@ -60,6 +84,13 @@ class Account:
     created: str = field(default_factory=_utc)
     removed: bool = False
 
+    def __post_init__(self) -> None:
+        # an id is a filesystem path segment: enforce the invariant here,
+        # not only at the API that slugifies labels
+        if not ID_RE.fullmatch(str(self.id or "")):
+            raise ValueError(f"invalid account id {self.id!r}")
+        self._last4 = ""
+
     # ---- paths ------------------------------------------------------
     @property
     def is_default(self) -> bool:
@@ -67,7 +98,7 @@ class Account:
 
     @property
     def is_paper(self) -> bool:
-        return "paper" in (self.base_url or "").lower()
+        return is_paper_url(self.base_url)
 
     @property
     def state_dir(self) -> Path:
@@ -98,16 +129,17 @@ class Account:
         return (vals.get("APCA_API_KEY_ID", ""), vals.get("APCA_API_SECRET_KEY", ""))
 
     def key_last4(self) -> str:
-        k, _ = self.credentials()
-        return k[-4:] if k else ""
+        """Cached: the rail asks for this every poll; the secret file is read once."""
+        if not getattr(self, "_last4", ""):
+            k, _ = self.credentials()
+            self._last4 = k[-4:] if k else ""
+        return self._last4
 
     def public(self) -> dict:
-        d = asdict(self)
-        d["paper"] = self.is_paper
-        d["is_default"] = self.is_default
-        d["key_last4"] = self.key_last4()
-        d["state_dir"] = str(self.state_dir)
-        return d
+        """What a browser may know about an account -- and nothing else."""
+        return {"id": self.id, "label": self.label, "account_number": self.account_number,
+                "paper": self.is_paper, "feed": self.feed, "key_last4": self.key_last4(),
+                "is_default": self.is_default, "created": self.created}
 
 
 class Registry:
@@ -118,8 +150,10 @@ class Registry:
     CLI without starting anything.
     """
 
-    def __init__(self, path: Path = REGISTRY_PATH):
-        self.path = Path(path)
+    def __init__(self, path: Optional[Path] = None):
+        # read the module attribute at CALL time, so tests that redirect
+        # accounts.REGISTRY_PATH redirect every Registry() built afterwards
+        self.path = Path(path or REGISTRY_PATH)
         self.accounts: dict[str, Account] = {}
         self.fleets: dict[str, object] = {}
         self._lock = threading.RLock()
@@ -133,7 +167,12 @@ class Registry:
                 try:
                     raw = json.loads(self.path.read_text(encoding="utf-8"))
                     for a in raw.get("accounts", []):
-                        acc = Account(**{k: v for k, v in a.items() if k in Account.__dataclass_fields__})
+                        try:
+                            acc = Account(**{k: v for k, v in a.items()
+                                             if k in Account.__dataclass_fields__})
+                        except (TypeError, ValueError) as e:
+                            LOG.error("accounts.json: skipping a bad row (%s)", e)
+                            continue
                         self.accounts[acc.id] = acc
                 except Exception as e:
                     LOG.error("accounts.json unreadable (%s) -- starting empty", e)
@@ -207,8 +246,10 @@ class Registry:
         import broker as _broker
         if not key_id or not secret:
             raise ValueError("both the key id and the secret are required")
-        if "paper" not in (base_url or "").lower():
-            raise ValueError("only Alpaca PAPER endpoints are accepted here")
+        if not is_paper_url(base_url):
+            raise ValueError(f"only the Alpaca PAPER endpoint https://{PAPER_HOST} is accepted here")
+        if not is_data_url(data_url):
+            raise ValueError(f"only the Alpaca data endpoint https://{DATA_HOST} is accepted here")
         try:
             b = _broker.Alpaca(key_id, secret, base_url, data_url, feed="sip")
             acct = b.account()
@@ -231,28 +272,40 @@ class Registry:
 
     # ---- lifecycle --------------------------------------------------
     def add(self, label: str, key_id: str, secret: str,
-            base_url: str = PAPER_URL, data_url: str = DATA_URL) -> Account:
+            base_url: str = PAPER_URL, data_url: str = DATA_URL,
+            also_taken: Optional[set] = None) -> Account:
         """Validate, refuse duplicates, write the files, register. The caller
-        (the app) builds and attaches the Fleet."""
+        (the app) builds and attaches the Fleet. `also_taken` is the set of
+        account numbers the app sees on LIVE fleets, so a default account
+        whose number was not yet written back cannot be registered twice."""
         label = (label or "").strip()
         if not label:
             raise ValueError("give the account a label")
         info = self.validate_keys(key_id.strip(), secret.strip(), base_url, data_url)
         with self._lock:
             dup = self.by_number(info["account_number"])
-            if dup:
+            if dup or info["account_number"] in (also_taken or set()):
+                who = f" as '{dup.label}' ({dup.id})" if dup else " (it is the account a running fleet is on)"
                 raise ValueError(f"those keys belong to Alpaca account {info['account_number']}, "
-                                 f"which is already registered as '{dup.label}' ({dup.id}). "
+                                 f"which is already registered{who}. "
                                  f"One Alpaca account runs one fleet, never two.")
             acc = Account(id=self.unique_id(label), label=label,
                           account_number=info["account_number"],
                           base_url=base_url, data_url=data_url, feed=info["feed"], keys="file")
             d = acc.state_dir
             d.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(d, 0o700)
+            except Exception:
+                pass
             kp = acc.keys_path
-            kp.write_text(f"APCA_API_KEY_ID={key_id.strip()}\nAPCA_API_SECRET_KEY={secret.strip()}\n",
-                          encoding="utf-8")
+            # created private from the first byte: never a readable file that
+            # is chmod'd afterwards
+            fd = os.open(str(kp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(f"APCA_API_KEY_ID={key_id.strip()}\nAPCA_API_SECRET_KEY={secret.strip()}\n")
             _chmod_private(kp)
+            acc._last4 = key_id.strip()[-4:]
             self.accounts[acc.id] = acc
             self.save()
             LOG.info("accounts: added %s (%s, %s, feed %s)", acc.id, acc.label,
@@ -272,7 +325,8 @@ class Registry:
             return acc
 
     def remove(self, acct_id: str) -> Account:
-        """Mark removed. Files are kept -- a journal is history. The default
+        """Mark removed and DELETE the key pair. Config, ledgers and journal
+        are kept -- history is history, a key pair is not. The default
         account cannot be removed. The caller must have stopped its fleet."""
         with self._lock:
             acc = self.get(acct_id)
@@ -282,5 +336,11 @@ class Registry:
                 raise ValueError("the default account cannot be removed")
             acc.removed = True
             self.fleets.pop(acct_id, None)
+            try:
+                acc.keys_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                LOG.error("accounts: could not delete %s (%s)", acc.keys_path, e)
             self.save()
             return acc

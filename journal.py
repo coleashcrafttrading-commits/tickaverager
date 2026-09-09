@@ -63,8 +63,14 @@ def target(path: Optional[Path], account: str = ""):
 
 def _resolve(path: Optional[Path], account: str) -> tuple[Path, str]:
     p = Path(path) if path else (getattr(_CTX, "path", None) or JOURNAL_PATH)
-    a = account or getattr(_CTX, "account", "") or ""
+    a = account or getattr(_CTX, "account", "") or "default"
     return p, a
+
+
+def account_of(row: dict) -> str:
+    """The account a row belongs to. Rows written before accounts existed
+    carry no field and are the default account's."""
+    return str(row.get("account") or "default")
 
 
 def _where(engine: Any) -> tuple[Optional[Path], str]:

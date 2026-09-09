@@ -305,9 +305,9 @@ def build_operational(fleet: Any, kind: str = "daily", days: int = 1,
 
     ov = fleet.overview()
     p = ov["portfolio"]
-    rows = journal.load(days=None if kind == "full" else days)
+    rows = journal.load(path=getattr(fleet, 'journal_path', None), days=None if kind == "full" else days)
     stats = journal.stats(rows)
-    inv = journal.open_inventory(journal.load())
+    inv = journal.open_inventory(journal.load(path=getattr(fleet, 'journal_path', None)))
 
     titles = {"daily": "Daily report", "weekly": "Weekly report",
               "inventory": "Open inventory", "full": "Full history"}

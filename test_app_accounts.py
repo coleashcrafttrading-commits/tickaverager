@@ -139,6 +139,7 @@ def main() -> int:
         ov = r.json()
         check("overview.account", (ov["account"]["id"], ov["account"]["label"]), ("glenn-momentum", "Glenn - momentum"))
         check("overview.accounts lists it", [x["id"] for x in ov["accounts"]], ["glenn-momentum"])
+        check("overview.account keeps the fleet's number and equity", (ov["account"].get("number"), ov["account"].get("equity")), ("PA7R2K", 12345.5))
         check("no tickers yet", ov.get("tickers"), [])
         r = c.get("/api/a/glenn-momentum/settings")
         check("settings 200 with account_info", (r.status_code, r.json()["account_info"]["id"]), (200, "glenn-momentum"))
@@ -159,9 +160,6 @@ def main() -> int:
         r = c.post("/api/accounts", json={"label": "again", "key_id": "PKGLENN7R2K", "secret": "supersecret"})
         check("duplicate -> 400", r.status_code, 400)
         check("...naming the existing account", "Glenn - momentum" in r.json()["detail"], True)
-        r = c.post("/api/accounts", json={"label": "live", "key_id": "PKLIVE0001", "secret": "s",
-                                          "base_url": "https://api.alpaca.markets"})
-        check("live endpoint -> 400", (r.status_code, "PAPER" in r.json()["detail"]), (400, True))
         r = c.post("/api/accounts", json={"label": "", "key_id": "PKX", "secret": "s"})
         check("blank label -> 400", r.status_code, 400)
 
@@ -176,7 +174,15 @@ def main() -> int:
         r = c.delete("/api/accounts/glenn-momentum")
         check("removed", r.status_code, 200)
         check("gone from the list", c.get("/api/accounts").json()["accounts"], [])
-        check("...but the files remain", acc.keys_path.exists(), True)
+        check("...its keys are deleted", acc.keys_path.exists(), False)
+        check("...its config is kept", acc.config_path.exists(), True)
+        check("...and its scheduler is gone", "glenn-momentum" in __import__("scheduler").SCHEDULERS, False)
+
+        print("\n7. the endpoints are not a client choice")
+        r = c.post("/api/accounts", json={"label": "Sneaky", "key_id": "PKSNEAKY0001", "secret": "s",
+                                          "base_url": "https://paper@api.alpaca.markets"})
+        check("a body base_url is ignored and the account is paper", (r.status_code, r.json()["account"]["paper"]), (200, True))
+        check("registry path was redirected for the app too", app_mod.REG.path, accounts.REGISTRY_PATH)
         r = c.delete("/api/accounts/default")
         check("default cannot be removed", r.status_code, 404)   # no default exists in this scratch boot
 
