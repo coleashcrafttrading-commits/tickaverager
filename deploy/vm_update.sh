@@ -44,7 +44,7 @@ if [ "$before" != "$after" ] && as_owner "git diff --name-only $before $after | 
 fi
 
 echo "-- tests (never restart on red) --"
-for t in test_rules.py test_reverse.py; do
+for t in test_rules.py test_reverse.py test_accounts.py; do
   if ! as_owner "TICKAVERAGER_JOURNAL=/tmp/ta_test_journal.jsonl venv/bin/python $t | tail -1"; then
     echo "TESTS FAILED in $t -- the fleet keeps running the previous code; nothing restarted"
     exit 1
