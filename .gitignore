@@ -15,3 +15,7 @@ research/ross/
 research/float/
 research/news/
 research/scanner/
+
+# per-machine, written by the app at runtime -- template is config.example.json
+config.json
+.env.bak*

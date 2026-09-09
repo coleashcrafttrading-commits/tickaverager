@@ -62,6 +62,26 @@ deepest-underwater-first with a `why`; they never use `flatten_all`.
 the rest only if the 4h regime agrees 4h later). Replays in
 `research/ladder_v2/`; ranked by P/L per $ of drawdown, never by profit.
 
+## Production is the VM (from 9 Sep 2026)
+
+The fleet runs 24/7 on Google Cloud, not on the desktop: project
+`cole-and-glenn-trader`, VM `tickavenger` (us-east4-a), systemd
+`tickaverager.service`, checkout `/home/coleashcraft_trading/tickaverager`
+(venv at `venv/`), dashboard behind Caddy at
+https://dash.8-234-163-225.sslip.io -- token-gated, the token lives only in the
+VM's `state/dash_token.txt`. GitHub `coleashcrafttrading-commits/tickaverager`
+(`master`) is the source of truth. **The desktop must not run the fleet
+against the same account** -- the VM is the one live server.
+
+The change loop, which Glenn has asked Claude to run end to end: edit here ->
+full test suite (`TICKAVERAGER_JOURNAL` isolated) -> commit -> `bash
+deploy/deploy.sh` (pushes master, then runs `deploy/vm_update.sh` on the VM:
+fast-forward pull, tests on the VM's Python, systemd restart, health check).
+Never deploy red tests. `config.json` and `.env` are per-machine and
+untracked; `config.example.json` is the template. Reach the VM with
+`gcloud compute ssh tickavenger --zone us-east4-a --command '...'` (gcloud
+needs `CLOUDSDK_PYTHON` pointed at a real Python; see deploy/deploy.sh).
+
 ## Ground truth, in order
 
 1. **Alpaca** is the truth about positions, orders and money. Never re-derive a
