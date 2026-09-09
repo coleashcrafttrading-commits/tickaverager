@@ -28,6 +28,7 @@ VIEWS.tester = {
   sub: () => "run a strategy on any symbol and see it on the chart",
 
   async mount() {
+    report = null;          // a run is per account (the backtest queue is scoped)
     el("view").innerHTML = `
       <div class="grid main">
         <div>

@@ -72,13 +72,34 @@ export const tableHTML = (heads, rows, emptyMsg = "Nothing here.") => `
    deadline and a hang is turned into an ordinary failure the caller retries. */
 const TIMEOUT_MS = { GET: 12000, POST: 240000, DELETE: 30000 };
 
+/* Every account-scoped route lives under /api/a/{acct}/...; the old unprefixed
+   path is only a compatibility alias for the default account. Views keep
+   passing the plain '/api/...' path and this is the ONE place the prefix is
+   put on. Anything under a shared prefix is a library shared by every account
+   and is left alone. /api/risk is exposure (per account) while /api/risk/
+   profiles and /api/risk/bank are shared, which is why the match is on whole
+   path segments and not a bare startsWith. */
+export const SHARED_API = [
+  "/api/accounts", "/api/strategies", "/api/code", "/api/indicators",
+  "/api/scanner", "/api/pine", "/api/research", "/api/risk/profiles",
+  "/api/risk/bank", "/api/health", "/api/restart",
+];
+export function api(path) {
+  if (!path.startsWith("/api/") || path.startsWith("/api/a/")) return path;
+  const bare = path.split("?")[0];
+  if (SHARED_API.some((p) => bare === p || bare.startsWith(p + "/"))) return path;
+  if (!S.account) return path;         // no account known: the default alias
+  return "/api/a/" + encodeURIComponent(S.account) + path.slice(4);
+}
+
 async function req(method, path, body) {
+  const url = api(path);
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(),
                        TIMEOUT_MS[method] || 30000);
   let r;
   try {
-    r = await fetch(path, {
+    r = await fetch(url, {
       method,
       headers: body !== undefined ? { "content-type": "application/json" } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -87,7 +108,7 @@ async function req(method, path, body) {
     });
   } catch (e) {
     throw new Error(e.name === "AbortError"
-      ? `${method} ${path} did not answer in time`
+      ? `${method} ${url} did not answer in time`
       : (e.message || String(e)));
   } finally {
     clearTimeout(t);
@@ -96,7 +117,11 @@ async function req(method, path, body) {
   if (!r.ok) {
     let m = txt;
     try { m = JSON.parse(txt).detail || txt; } catch (e) { /* plain text */ }
-    throw new Error(m || r.statusText);
+    // the status travels with the message so a caller can tell "this account
+    // is gone" (404) from "the server is down"
+    const err = new Error(m || r.statusText);
+    err.status = r.status;
+    throw err;
   }
   return txt ? JSON.parse(txt) : {};
 }
@@ -107,12 +132,74 @@ export const DEL  = (p) => req("DELETE", p);
 /* --------------------------------------------------------------- state */
 export const S = {
   view: { kind: "overview" },
-  ov: null,          // /api/overview
-  ticker: null,      // /api/ticker/<sym>
+  ov: null,          // /api/a/<acct>/overview
+  ticker: null,      // /api/a/<acct>/ticker/<sym>
   cache: {},         // per-view scratch
   timer: null,
   mounted: "",
   touched: false,    // a form is being typed in; do not repaint over it
+
+  account: "",       // id of the account every scoped request goes to
+  accounts: [],      // summaries from GET /api/accounts (refreshed by the poll)
+  defaultAccount: "",
+  accountsKnown: false,  // false until GET /api/accounts has answered once
+};
+
+/* ------------------------------------------------------------ accounts */
+const LS_ACCT = "ta-account";
+export const savedAccount = () => {
+  try { return localStorage.getItem(LS_ACCT) || ""; } catch (e) { return ""; }
+};
+
+/* Switching account throws away everything that belonged to the old one.
+   Views keep their own module-scope caches and reset them in mount(), which
+   render() calls because sig() carries the account. */
+export function rememberAccount() {
+  if (!S.account) return;
+  try { localStorage.setItem(LS_ACCT, S.account); } catch (e) { /* private mode */ }
+}
+export function setAccount(id) {
+  id = id || "";
+  if (id === S.account) return;
+  S.account = id;
+  S.ov = null;
+  S.ticker = null;
+  S.touched = false;
+  // remembered only once it is known to exist: an id typed into the hash that
+  // turns out to be gone must not overwrite the last account actually used
+  if (id && (!S.accountsKnown || S.accounts.some((a) => a.id === id))) rememberAccount();
+}
+
+export async function loadAccounts() {
+  const r = await GET("/api/accounts");
+  S.accounts = r.accounts || [];
+  S.defaultAccount = r.default
+    || (S.accounts.find((a) => a.is_default) || S.accounts[0] || {}).id || "";
+  S.accountsKnown = true;
+  return S.accounts;
+}
+
+/* The account a hash without one should land on: the last one used, else the
+   default. An id that is not in the list is never returned. */
+export function pickAccount(wanted = "") {
+  const ids = S.accounts.map((a) => a.id);
+  if (wanted && ids.includes(wanted)) return wanted;
+  const saved = savedAccount();
+  if (saved && ids.includes(saved)) return saved;
+  if (S.defaultAccount && ids.includes(S.defaultAccount)) return S.defaultAccount;
+  return ids[0] || "";
+}
+
+export const curAccount = () =>
+  S.accounts.find((a) => a.id === S.account)
+  || ((S.ov && S.ov.account && (S.ov.account.id || "") === S.account) ? S.ov.account : null);
+export const acctLabel = () => {
+  const a = curAccount();
+  return a ? (a.label || a.id || S.account) : (S.account || "this account");
+};
+export const acctNumber = () => {
+  const a = curAccount() || (S.ov && S.ov.account) || {};
+  return a.account_number || a.number || "";
 };
 
 /* --------------------------------------------------------------- toast */
@@ -186,28 +273,55 @@ export async function act(fn) {
 /* -------------------------------------------------------------- router */
 export const VIEWS = {};        // kind -> { title, sub, mount, paint, tabs? }
 
+/* Hashes carry the account:  #/a/<id>/            overview
+                              #/a/<id>/t/SYM/tab   ticker
+                              #/a/<id>/kind/tab    any registered view
+   A view without an account (none configured yet) drops the 'a/<id>' pair. */
+export function hashFor(view) {
+  const a = view.account !== undefined ? view.account : S.account;
+  const base = a ? `#/a/${encodeURIComponent(a)}/` : "#/";
+  if (view.kind === "ticker") return base + `t/${view.sym}/${view.tab || "live"}`;
+  if (!view.kind || view.kind === "overview") return base;
+  return base + view.kind + (view.tab ? "/" + view.tab : "");
+}
+
 export function go(view) {
+  const account = view.account !== undefined ? view.account : S.account;
+  view = { ...view, account };
+  const switched = account !== S.account;
+  if (switched) setAccount(account);
   S.view = view;
   S.ticker = null;
   S.touched = false;
-  const h = view.kind === "ticker"
-    ? `#/t/${view.sym}/${view.tab || "live"}`
-    : view.kind === "overview" ? "#/" : `#/${view.kind}${view.tab ? "/" + view.tab : ""}`;
+  const h = hashFor(view);
   if (location.hash !== h) location.hash = h;
-  else window.__render(true);
+  // render now rather than at the next poll; the hashchange that follows sees
+  // the same signature and does nothing
+  window.__render(true);
+  if (switched && window.__tick) window.__tick();
 }
 
 export function readHash() {
   const h = (location.hash || "#/").slice(2).split("/").filter(Boolean);
-  if (h[0] === "t" && h[1]) {
-    return { kind: "ticker", sym: h[1].toUpperCase(), tab: h[2] || "live" };
+  let account;
+  if (h[0] === "a" && h[1]) {
+    try { account = decodeURIComponent(h[1]); } catch (e) { account = h[1]; }
+    h.splice(0, 2);
   }
-  if (h[0] && VIEWS[h[0]]) return { kind: h[0], tab: h[1] || "" };
-  return { kind: "overview" };
+  let v;
+  if (h[0] === "t" && h[1]) {
+    v = { kind: "ticker", sym: h[1].toUpperCase(), tab: h[2] || "live" };
+  } else if (h[0] && VIEWS[h[0]]) v = { kind: h[0], tab: h[1] || "" };
+  else v = { kind: "overview" };
+  if (account !== undefined) v.account = account;
+  return v;
 }
 
-export const sig = (v) => v.kind === "ticker"
-  ? `ticker:${v.sym}:${v.tab || "live"}` : `${v.kind}:${v.tab || ""}`;
+/* the account is part of the signature, so the same view on another account
+   is a different mount */
+export const sig = (v) => `${v.account !== undefined ? v.account : S.account}|`
+  + (v.kind === "ticker"
+     ? `ticker:${v.sym}:${v.tab || "live"}` : `${v.kind}:${v.tab || ""}`);
 
 /* ------------------------------------------------------------- theme */
 export function initTheme() {

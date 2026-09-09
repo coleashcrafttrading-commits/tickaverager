@@ -15,12 +15,17 @@ import {
 let perf = null;
 let reports = [];
 let scope = { symbol: "", days: 7 };
+let forAcct = "";       // the journal, reports and symbol filter are per account
 
 VIEWS.performance = {
   title: () => "Performance",
   sub: () => "from the append-only trade journal",
 
   mount() {
+    if (forAcct !== S.account) {
+      perf = null; reports = []; scope = { symbol: "", days: 7 };
+      forAcct = S.account;
+    }
     el("view").innerHTML = `
       <div class="grid main">
         <div>

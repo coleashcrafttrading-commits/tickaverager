@@ -9,12 +9,14 @@ import {
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let data = null;
 let testOut = "";   // survives the poll re-render
+let forAcct = "";   // schedules and the audit log are per account
 
 VIEWS.agents = {
   title: () => "Agents",
   sub: () => "scheduled work, and every action taken",
 
   mount() {
+    if (forAcct !== S.account) { data = null; testOut = ""; forAcct = S.account; }
     el("view").innerHTML = `
       <div id="agNote"></div>
       <div class="grid main">

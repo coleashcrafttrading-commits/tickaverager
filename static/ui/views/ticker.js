@@ -4,6 +4,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, money0, sgn, pct, px, dur, go,
+  acctLabel, acctNumber,
 } from "../core.js";
 import { ChartPanel } from "../chartpanel.js";
 import { STRATEGY_FIELDS, formHTML, formPatch } from "../fields.js";
@@ -103,11 +104,15 @@ function mountLive(sym) {
     const s = S.ticker; if (!s) return;
     const c = s.config;
     const per = (c.shares_per_lot || 0) * (s.last_price || 0);
+    // the account is named by label AND number: two accounts may run the
+    // same symbol, and the wrong one armed is real money in the wrong place
+    const who = acctLabel();
+    const num = (s.account && (s.account.account_number || s.account.number)) || acctNumber();
     if (!await ask({
-      title: `Arm ${sym}?`, danger: true, ok: "Arm", requireWord: "ARM",
+      title: `Arm ${sym} on ${esc(who)}?`, danger: true, ok: "Arm", requireWord: "ARM",
       body: `<table style="width:100%"><tbody>
         <tr><td style="border:0;padding:3px 0">Account</td>
-            <td style="border:0;padding:3px 0;text-align:right">${esc(s.account.number)}
+            <td style="border:0;padding:3px 0;text-align:right"><b>${esc(who)}</b> · ${esc(num || "—")}
             ${s.paper ? "(paper)" : "<b class='down'>LIVE MONEY</b>"}</td></tr>
         <tr><td style="border:0;padding:3px 0">Each lot</td>
             <td style="border:0;padding:3px 0;text-align:right">${c.shares_per_lot} sh ≈ ${money(per)}</td></tr>
@@ -115,18 +120,19 @@ function mountLive(sym) {
             <td style="border:0;padding:3px 0;text-align:right">${c.max_lots} lots ≈ ${money(s.max_exposure)}</td></tr>
         <tr><td style="border:0;padding:3px 0">Take profit</td>
             <td style="border:0;padding:3px 0;text-align:right">$${c.take_profit}/share</td></tr>
-        </tbody></table><br><b class="down">There is no stop loss.</b> Only ${sym} is affected.`,
+        </tbody></table><br><b class="down">There is no stop loss.</b> Only ${sym} in
+        <b>${esc(who)}</b> is affected — every other ticker and every other account is untouched.`,
     })) return;
     await POST(`/api/ticker/${sym}/arm`, { live: true, confirm: "ARM" });
-    toast(`${sym} is ARMED — orders now transmit.`, "err", 8000);
+    toast(`${sym} on ${esc(who)} is ARMED — orders now transmit.`, "err", 8000);
   });
   el("bFlatten").onclick = A(async () => {
     const s = S.ticker;
     if (!await ask({
-      title: `Flatten ${sym}?`, danger: true, ok: "Flatten", requireWord: "FLATTEN",
-      body: `Cancels every resting take-profit on ${sym} and <b>market-sells all
-        ${s ? s.alpaca.qty : "?"} shares</b> at whatever the book gives.<br><br>
-        Other tickers are untouched.`,
+      title: `Flatten ${sym} on ${esc(acctLabel())}?`, danger: true, ok: "Flatten", requireWord: "FLATTEN",
+      body: `In <b>${esc(acctLabel())}</b>: cancels every resting take-profit on ${sym} and
+        <b>market-sells all ${s ? s.alpaca.qty : "?"} shares</b> at whatever the book gives.<br><br>
+        Other tickers and other accounts are untouched.`,
     })) return;
     const r = await POST(`/api/ticker/${sym}/flatten`, { confirm: "FLATTEN" });
     toast(`${sym} flattened: cancelled ${r.cancelled}, sold ${r.sold} sh.`, "ok");
