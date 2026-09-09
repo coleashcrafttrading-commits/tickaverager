@@ -70,6 +70,44 @@ RECONCILE_STREAK_RESET = 900      # quiet for this long and the backoff resets
 ENTRY_REJECT_BACKOFF = 60         # after a broker rejection, wait before retrying
 ENTRY_REJECT_MAX_BACKOFF = 900
 
+# LADDER V2 -- the refined ladder as a PROFILE, applied per ticker, not as new
+# defaults. Existing tickers keep running byte-identically until someone sets
+# this on them; the tests that prove the old behaviour keep proving it. Apply
+# with agentctl:  set RAM $(python -c "import engine;print(engine.v2_args())")
+# or from the dashboard's settings. The design (research/ladder_v2_research.md)
+# says: backtest first (its section 7), then paper on RAM and MSTX.
+LADDER_V2: dict[str, Any] = {
+    "side_mode": "both",
+    "bias_source": "1h",
+    "first_entry": "with_trend",
+    "entry_ma": "ema",
+    "entry_ma_period": 20,
+    "reversal_mode": "reverse",
+    "reverse_ttl_h": 24.0,
+    "reverse_cooldown_h": 0.0,
+    "add_mode":       "atr",          # rung = add_k x ATR15, floored at 2x spread
+    "add_k":          1.0,
+    "add_floor":      0.05,
+    "size_mode":      "dollars",      # a lot means the same dollars on every name
+    "f_ladder":       0.20,           # at most 20% of equity in one ladder
+    "n_target":       8,              # spread over eight rungs...
+    "max_lots":       8,              # ...and the circuit breaker agrees
+    "session_mode":   "times",        # new lots 09:35-15:30 only; the 8.8-day
+    "allow_extended_hours": True,     # strandings came from 21:43Z / 00:12Z entries
+    "regime_band_atr": 0.25,
+    "vwap_hysteresis": 5,
+    "dmi_minutes":    15,
+    "dmi_period":     14,
+    "depth_by_strength": False,
+    "trend_filter":   True,
+}
+
+
+def v2_args() -> str:
+    """The profile as `key=value ...` for agentctl set."""
+    return " ".join(f"{k}={v}" for k, v in LADDER_V2.items())
+
+
 # Everything below belongs to ONE ladder. Account-wide settings (the poll
 # cadence, the data feed, the portfolio caps) live in fleet.GLOBAL_DEFAULTS.
 TICKER_DEFAULTS: dict[str, Any] = {
@@ -78,7 +116,7 @@ TICKER_DEFAULTS: dict[str, Any] = {
     "shares_per_lot":    100,
 
     # --- ladder ---
-    "add_mode":          "points",     # points | percent | beyond_average
+    "add_mode":          "points",     # atr | points | percent | beyond_average
     "add_distance":      0.10,         # $/share adverse from last fill  (points)
     "add_percent":       0.50,         # % adverse from last fill        (percent)
     "take_profit":       0.10,         # $/share above EACH lot's own fill
@@ -94,15 +132,74 @@ TICKER_DEFAULTS: dict[str, Any] = {
     "trail_amount":      0.05,        # $/share pullback from the peak
     "trail_exit_offset": 0.02,        # how far through the bid to sell
     "trail_use_broker_stop": True,    # rest Alpaca trailing_stop when a lot arms
-    "trend_filter":      True,        # SuperTrend+EMA stack gates new lots
+    "trend_filter":      True,        # the three-layer stack gates new lots
     "trend_flat_blocks_entries": True,
+    # --- ladder v2: the three-layer filter (trend_v2.py) ---
+    # R regime: 4h close vs EMA50 with an ATR band so it does not chatter.
+    # D day bias: session VWAP side (5-bar hysteresis) AND 15m DMI direction.
+    # M trend-change: 1h SuperTrend on closed bars -- drives the unwind only.
+    # The 1m SuperTrend leg is gone: 64 flips a day and no information.
+    "regime_band_atr":   0.25,        # 0 reproduces the raw close-vs-EMA sign
+    "vwap_hysteresis":   5,           # agreeing 1m closes before the VWAP side flips
+    "dmi_minutes":       15,
+    "dmi_period":        14,
+    "depth_by_strength": False,       # halve depth when the 15m slope opposes us
+    # --- ladder v2: calculated adds ---
+    # add_mode "atr": the next rung sits one 15-minute ATR beyond the last
+    # fill, floored at twice the spread. The fixed $0.10 rung was 3x the
+    # one-minute range -- inside the noise -- and 60% of lots that eventually
+    # won first fell through the NEXT rung, which is how depth 29 was built.
+    # Arithmetic spacing: geometric widening cut MSTX efficiency to a third.
+    "add_k":             1.0,         # rung distance = add_k * ATR15
+    "add_floor":         0.05,        # ...never tighter than this, or 2x spread
+    # --- ladder v2: exposure cap ---
+    # Finite by construction: at most f_ladder of live equity in cost basis,
+    # spread over n_target rungs. The LAST lot is truncated, never skipped.
+    # Martingale sizing produced $97k of peak capital in one week and lost.
+    "f_ladder":          0.0,         # 0 = off. share of equity one ladder may hold
+    "n_target":          8,           # rungs the cap is spread over (= max_lots)
+    "min_shares":        1,
+    # --- ladder v2: the staged unwind (design section 3) ---
+    # The reversal question was researched and the answer is blunt: at 15-60
+    # minutes NOTHING predicts continuation better than ~55% -- 1h flips,
+    # 4h crosses, CUSUM, volume z-scores, gaps all included -- and always-in
+    # stop-and-reverse lost on every leg tested. What survived is an unwind
+    # STAGED BY EVIDENCE: half the ladder (the deepest-underwater half) when
+    # the 1h trend-change leg flips, the rest only if the 4h regime agrees
+    # four hours later. Requiring the regime for the FIRST close was the
+    # worst variant measured (-$4,328 on RAM) because the slow leg confirms
+    # at the bottom; requiring it for the SECOND is what keeps the ladder in
+    # a correction and out of a real reversal.
+    "reversal_mode":     "off",       # off | flatten | reverse (flip the whole ladder on the 1h turn)
+    "reverse_ttl_h":     24.0,        # reverse: hours the re-opening queue stays valid
+    "reverse_cooldown_h": 0.0,        # reverse: hours between flips (0 = SuperTrend's own hysteresis only)
+    "basket_chase_s":    15.0,        # a basket close still resting after this many seconds is re-priced
+    "reverse_max_spread_pct": 0.5,    # reverse: hold the flip while the book is wider than this (% of mid)
+    "unwind_min_lots":   4,           # stage 1 only at this depth or deeper (= ceil(n_target/2))
+    "unwind_stage_hours": 4.0,        # one 4h bar between stage 1 and stage 2
+    "unwind_cooldown_h": 24.0,        # at most one stage 1 per day, by construction
+    "unwind_on_gap":     False,       # optional 2nd trigger: an opening gap against the ladder
+    "gap_atr":           2.0,         # ...of this many 1h ATRs, AND M against
+    # --- ladder v2: basket exits from the AVERAGE price (design section 4) ---
+    # All measured as inert or net-negative in normal months; they exist
+    # because the owner asked for them and because their rare firings are the
+    # ones that matter in the tail. OFF by default; turning one on is a bet
+    # that the next quarter contains the tail this summer did not.
+    "basket_tp_enabled": False,
+    "basket_tp_atr_mult": 0.5,        # X = max(take_profit, 0.5 x ATR1h); fires at avg + X
+    "basket_stop_enabled": False,
+    "basket_stop_atr":   0.5,         # buffer beyond d*(N-1)/2, the ladder's own geometry
+    "ladder_max_bars":   0,           # session bars since the first lot; 0 = off; trial 240
     "side_mode":         "auto",      # auto | long | short
     "ema_4h_period":     50,
     "st_1h_atr":         10,
     "st_1h_mult":        3.0,
     "st_1m_atr":         10,
     "st_1m_mult":        2.0,
-    "first_entry":       "red_bar",    # red_bar | immediate
+    "first_entry":       "red_bar",    # red_bar | immediate | with_trend
+    "entry_ma":          "vwap",       # with_trend: the MA the first candle must clear (vwap | ema)
+    "entry_ma_period":   20,           # with_trend + ema: 1-minute EMA length
+    "bias_source":       "rd",         # rd = R AND D (the design) | 1h = sign of the 1h SuperTrend
     "bar_size":          "1Min",
 
     # --- safety ---
@@ -283,6 +380,9 @@ class Ledger:
     realized_all: float = 0.0
     closed_count: int = 0
     open_lots: list[Lot] = field(default_factory=list)
+    # ladder v2: the staged unwind and any basket close in flight. Persisted so
+    # a restart in the middle of stage 1 does not forget it is in stage 1.
+    unwind: dict = field(default_factory=dict)
 
     # ---- persistence ----
     @staticmethod
@@ -538,10 +638,18 @@ class Engine:
 
         self._roll_session()
         self._refresh_market()
+        self._book_basket_progress()   # a basket close in flight books its fills HERE,
+                                       # before reconcile can mistake them for a gap
         self._reconcile()          # fills, TPs, sync guard
         self._trail_lots()         # trail mode: arm, track the peak, exit
 
         if self.halted:
+            return
+        # ladder v2: the staged unwind and basket exits. One closing action per
+        # tick, pessimistic precedence: stop -> unwind -> time stop -> basket TP.
+        if self._maybe_basket_exit():
+            return
+        if self._maybe_reverse_entry():
             return
         self._maybe_decide()       # entries / adds on a completed bar
 
@@ -551,6 +659,7 @@ class Engine:
         if self.ledger.session_date != today:
             self.ledger.session_date = today
             self.ledger.realized_today = 0.0
+            self._asset_info = None          # the borrow list moves daily
             self.done_for_day = False
             self.ledger.save()
             self.ev("INFO", f"New session {today}. Carrying {len(self.ledger.open_lots)} open lot(s).")
@@ -732,7 +841,7 @@ class Engine:
         settled = [c for c in orphans
                    if now - self._orphan_since.get(c, now) >= ORPHAN_GRACE_SECONDS]
         ours = [c for c in settled if c.startswith("tp-")]
-        foreign = [c for c in settled if not c.startswith("tp-")]
+        foreign = [c for c in settled if not c.startswith(("tp-", "xs-"))]
 
         if ours and self.cfg.get("auto_reconcile", True):
             for c in ours:
@@ -764,7 +873,7 @@ class Engine:
         # Alpaca is the truth. A disagreement that survives the grace period is
         # corrected here rather than halting the bot -- a halt at 09:40 used to
         # cost the whole session.
-        if not self.pending_entry:
+        if not self.pending_entry and not (self.ledger.unwind or {}).get("basket"):
             mismatch = self.broker_qty != self.ledger.signed_shares
             if not mismatch:
                 self.mismatch_strikes = 0
@@ -1245,6 +1354,12 @@ class Engine:
             else:
                 self.ev("WARN", f"Entry {pe['client_order_id']} {status}.")
             self.pending_entry = None
+            if pe.get("mirror"):
+                filled = int(float(o.get("filled_qty") or 0))
+                if filled > 0:
+                    self._open_lot(pe["lot_id"], filled, float(o.get("filled_avg_price") or 0),
+                                   pe.get("why", ""), side=pe.get("side", "long"))
+                self._requeue_mirror(int(pe.get("shares") or 0) - filled, status)
         else:
             age = time.time() - pe["sent_at"]
             if age > float(self.cfg.get("entry_fill_timeout", 45)):
@@ -1256,6 +1371,14 @@ class Engine:
                                 f"after {age:.0f}s -- cancelling the rest.")
                 b.cancel(o["id"])
                 self.pending_entry = None
+                if pe.get("mirror"):
+                    # a flip's re-entry: bank what filled, put the rest back at the
+                    # head of the queue, and let the next tick re-send it at the quote
+                    if filled > 0:
+                        self._open_lot(pe["lot_id"], filled, float(o.get("filled_avg_price") or 0),
+                                       pe.get("why", ""), side=eside)
+                    self._requeue_mirror(unfilled, f"timeout after {age:.0f}s")
+                    return
 
                 if unfilled > 0 and self.cfg.get("entry_on_timeout") == "market" \
                         and self.is_extended():
@@ -1289,6 +1412,25 @@ class Engine:
                     # partial: keep what filled, cover it with its own TP
                     self._open_lot(pe["lot_id"], filled,
                                    float(o.get("filled_avg_price") or 0), side=eside)
+
+    def _requeue_mirror(self, shares: int, why: str) -> None:
+        """A reversal's re-entry that ended unfilled goes back to the head of
+        the queue -- bounded, so a name that will not fill cannot loop."""
+        uw = dict(self.ledger.unwind or {})
+        if shares <= 0 or not uw.get("reverse_to"):
+            return
+        tries = int(uw.get("reverse_retries") or 0)
+        if tries >= 3:
+            self.ev("WARN", f"REVERSAL: {shares} sh not re-opened after {tries} tries ({why}) -- "
+                            f"giving up on that lot; {len(uw.get('reverse_lots') or [])} still queued")
+            self.flag("reverse", f"{self.symbol}: {shares} sh of the flip never re-opened after "
+                                 f"{tries} tries ({why}); the ladder is smaller than the rule says")
+            return
+        uw["reverse_lots"] = [int(shares)] + [int(x) for x in (uw.get("reverse_lots") or [])]
+        uw["reverse_retries"] = tries + 1
+        self.ledger.unwind = uw
+        self.ledger.save()
+        self.ev("WARN", f"REVERSAL: {shares} sh back at the head of the queue ({why}, try {tries + 1})")
 
     def _open_lot(self, lot_id: str, shares: int, price: float, why: str = "",
                   side: str = "") -> None:
@@ -1622,53 +1764,63 @@ class Engine:
         return h, l, c
 
     def _refresh_trend(self) -> dict:
+        """The three-layer filter: R may-exist, D may-add-now, M trend-change.
+
+        Reads the DEEP 1-minute history (fleet.hist_of), not the five-row
+        snapshot. The old stack read the snapshot, SuperTrend needed eleven
+        bars, the line came back None, the bias read "flat", and no lot
+        opened for a week. That failure is now impossible by construction:
+        with too little history D is 0 and the stack SAYS so in the UI.
+        """
+        import trend_v2
         cfg = self.cfg
-        stack = []
-        bars_4h = self.fleet.bars_of(self.symbol, "4Hour")
-        bars_1h = self.fleet.bars_of(self.symbol, "1Hour")
-        bars_1m = self.fleet.bars_of(self.symbol, cfg.get("bar_size", "1Min"))
+        fl = getattr(self, "fleet", None)
+        m1 = fl.hist_of(self.symbol) if fl else []
+        bars_1h = fl.bars_of(self.symbol, "1Hour") if fl else []
+        bars_4h = fl.bars_of(self.symbol, "4Hour") if fl else []
+        prev_R = int((self.trend or {}).get("R") or 0)
+        snap = trend_v2.snapshot(m1, bars_1h, bars_4h, cfg, prev_R)
+        R, D, M = snap["R"], snap["D"], snap["M"]
         ema_n = int(cfg.get("ema_4h_period", 50) or 50)
-        h4h, l4h, c4h = self._ohlc(bars_4h)
-        h1h, l1h, c1h = self._ohlc(bars_1h)
-        h1m, l1m, c1m = self._ohlc(bars_1m)
-        ema_v = trend.ema(c4h, ema_n) if c4h else None
-        side_4h = 0
-        if ema_v is not None and c4h:
-            side_4h = 1 if c4h[-1] >= ema_v else -1
-        st1h_p = int(cfg.get("st_1h_atr", 10) or 10)
-        st1h_m = float(cfg.get("st_1h_mult", 3.0) or 3.0)
-        st1m_p = int(cfg.get("st_1m_atr", 10) or 10)
-        st1m_m = float(cfg.get("st_1m_mult", 2.0) or 2.0)
-        d1h, line1h = trend.supertrend(h1h, l1h, c1h, st1h_p, st1h_m)
-        d1m, line1m = trend.supertrend(h1m, l1m, c1m, st1m_p, st1m_m)
-        if not c4h or ema_v is None or line1h is None or line1m is None:
-            bias = "flat"
-        else:
-            bias = trend.combine_bias(side_4h, d1h, d1m)
-        stack.append({"name": "EMA", "timeframe": "4Hour",
-                      "params": f"period={ema_n}",
-                      "last": None if ema_v is None else round(ema_v, 4),
-                      "bias": "long" if side_4h > 0 else ("short" if side_4h < 0 else "n/a"),
-                      "note": "regime: 4h close vs EMA (in-engine port, not LuxAlgo API)"})
-        stack.append({"name": "SuperTrend", "timeframe": "1Hour",
-                      "params": f"ATR{st1h_p} x {st1h_m:g}",
-                      "last": None if line1h is None else round(line1h, 4),
-                      "bias": "long" if d1h > 0 else "short",
-                      "note": "daily bias (public ATR SuperTrend)"})
-        stack.append({"name": "SuperTrend", "timeframe": cfg.get("bar_size", "1Min"),
-                      "params": f"ATR{st1m_p} x {st1m_m:g}",
-                      "last": None if line1m is None else round(line1m, 4),
-                      "bias": "long" if d1m > 0 else "short",
-                      "note": "must agree with HTF to allow adds (do not fade)"})
-        stack.append({"name": "Combined bias", "timeframe": "4h+1h+1m",
-                      "params": "4h regime AND 1h ST; 1m must agree",
-                      "last": bias, "bias": bias,
-                      "note": "flat => no new lots; existing lots still trail"})
-        snap = {"bias": bias, "4h_side": side_4h, "1h_st": d1h, "1m_st": d1m,
-                "ema_4h": ema_v, "st_1h_line": line1h, "st_1m_line": line1m,
-                "stack": stack}
-        self.trend = snap
-        return snap
+        by_1h = str(cfg.get("bias_source") or "rd").lower() == "1h"
+        if by_1h:
+            # the owner's rule: the 1-hour trend IS the trend. Its sign picks
+            # the side, and its flip is the reversal. R and D stay visible.
+            snap = dict(snap, bias="long" if M > 0 else ("short" if M < 0 else "flat"))
+        stack = [
+            {"name": "Regime R", "timeframe": "4Hour",
+             "params": "EMA%d +/- %g ATR" % (ema_n, float(cfg.get("regime_band_atr", 0.25) or 0)),
+             "last": snap.get("bars_4h"),
+             "bias": "long" if R > 0 else ("short" if R < 0 else "n/a"),
+             "note": "may a ladder EXIST on this side (crash insurance)"},
+            {"name": "Day bias D", "timeframe": "1Min + 15Min",
+             "params": "VWAP side x%d AND DMI(%d)" % (int(cfg.get("vwap_hysteresis", 5) or 5),
+                                                      int(cfg.get("dmi_period", 14) or 14)),
+             "last": None if snap.get("vwap") is None else round(float(snap["vwap"]), 4),
+             "bias": "long" if D > 0 else ("short" if D < 0 else "n/a"),
+             "note": "may it ADD now (V=%s, DMI=%s, %s bars)" % (snap.get("V"), snap.get("M15"),
+                                                                 snap.get("bars_1m"))},
+            {"name": "Trend-change M", "timeframe": "1Hour",
+             "params": "SuperTrend ATR%d x %g" % (int(cfg.get("st_1h_atr", 10) or 10),
+                                                  float(cfg.get("st_1h_mult", 3.0) or 3.0)),
+             "last": None if snap.get("st_1h_line") is None else round(float(snap["st_1h_line"]), 4),
+             "bias": "long" if M > 0 else ("short" if M < 0 else "n/a"),
+             "note": ("THE trend: its sign picks the side, its flip reverses the ladder -- "
+                      "known at the close of the 1h bar (~1 min after the hour)"
+                      if by_1h else "drives the staged unwind, NOT the entry gate")},
+            {"name": "Strength t15", "timeframe": "15Min",
+             "params": "LLT Kalman slope t-stat", "last": snap.get("t15"), "bias": "n/a",
+             "note": "S=%s; hump-shaped, caps depth only if depth_by_strength" % snap.get("S")},
+            {"name": "Combined bias", "timeframe": "1Hour" if by_1h else "R AND D",
+             "params": "sign of the 1h SuperTrend" if by_1h else "same side on both",
+             "last": snap["bias"], "bias": snap["bias"],
+             "note": "flat => no new lots; existing lots keep their exits"},
+        ]
+        out = dict(snap, stack=stack)
+        # keys the rest of the engine and the UI already read
+        out.update({"4h_side": R, "1h_st": M, "1m_st": 0, "ema_4h": None, "st_1m_line": None})
+        self.trend = out
+        return out
 
     def _trend_entry_block(self) -> str:
         if not self.cfg.get("trend_filter", True):
@@ -1694,6 +1846,10 @@ class Engine:
         if mode == "both":
             if bias not in ("long", "short"):
                 return f"trend bias is {bias} -- no new lots"
+            if bias == "short" and not (self.ledger.open_lots or self.broker_qty) \
+                    and not self._short_allowed():
+                return (f"trend bias is short but {self.symbol} cannot be sold short at Alpaca "
+                        f"today (no borrow) -- waiting flat")
             have = self.pos_side() if (self.ledger.open_lots or self.broker_qty) else ""
             if have and have != bias:
                 return (f"trend bias is {bias} but the ladder is {have} -- "
@@ -1703,6 +1859,8 @@ class Engine:
             return f"trend bias is {bias}, side_mode=long -- no new longs"
         if mode == "short" and bias != "short":
             return f"trend bias is {bias}, side_mode=short -- no new shorts"
+        if mode == "short" and not (self.ledger.open_lots or self.broker_qty) and not self._short_allowed():
+            return f"{self.symbol} cannot be sold short at Alpaca today (no borrow) -- waiting flat"
         if mode == "auto" and bias != "long":
             if bias == "short":
                 if long_inv:
@@ -1825,8 +1983,13 @@ class Engine:
             return f
         return "boats" if self._session_now() == "overnight" else "sip"
 
-    def block_reason(self) -> str:
-        """Why an entry can't fire right now -- '' means clear to trade."""
+    def block_reason(self, ignore_reverse: bool = False, ignore_session: bool = False) -> str:
+        """Why an entry can't fire right now -- '' means clear to trade.
+        ignore_reverse is for the reversal's own re-opening entries, which
+        must not be blocked by the very flip they are completing;
+        ignore_session lets those same entries run outside the new-lot window
+        (they are not new risk -- the same shares the ladder held a minute
+        ago -- and the close that preceded them had no window either)."""
         fz = frozen()
         if fz:                                       return f"FROZEN: {fz}"
         if self.halted:                              return f"HALTED: {self.halt_reason}"
@@ -1845,13 +2008,21 @@ class Engine:
             return f"{sess} session is switched off"
         if mode == "times" and sess != "regular" and not self.cfg.get("allow_extended_hours"):
             return f"{sess} session -- extended hours not enabled"
-        if mode == "times" and not self._in_session():
+        if mode == "times" and not ignore_session and not self._in_session():
             return "outside session window"
-        if mode == "times" and self.cfg.get("use_wind_down") and self._in_wind_down():
+        if mode == "times" and not ignore_session and self.cfg.get("use_wind_down") \
+                and self._in_wind_down():
             return "wind-down: no new lots"
         tb = self._trend_entry_block()
         if tb:                                       return tb
         if self.pending_entry:                       return "entry order working"
+        uw = self.ledger.unwind or {}
+        if uw.get("basket"):                         return "basket close working -- no new lots"
+        if uw.get("stage"):                          return f"unwind stage {uw['stage']} pending -- no new lots"
+        if uw.get("reverse_to") and not ignore_reverse:
+            left = len(uw.get("reverse_lots") or [])
+            return (f"reversal to {uw['reverse_to']} in progress ({left} lot(s) to re-open) "
+                    f"-- no ordinary lots until it is done")
         if len(self.ledger.open_lots) >= int(self.cfg["max_lots"]):
             return f"max_lots cap reached ({self.cfg['max_lots']})"
         # portfolio caps: only the fleet can see what the OTHER ladders are
@@ -1890,12 +2061,677 @@ class Engine:
             return
 
         if not self.ledger.open_lots:
-            if self.cfg["first_entry"] == "immediate" or red:
-                self._submit_entry(f"open on {'red bar' if red else 'immediate mode'} close ${c:.2f}")
+            ok, why = self._first_entry_ok(bar)
+            if ok:
+                self._submit_entry(why)
             return
 
         if self._add_trigger_met(c):
             self._submit_entry(self._add_reason(c))
+
+    def _entry_ma(self) -> Optional[float]:
+        """The MA the first candle must clear under first_entry=with_trend:
+        the session VWAP the day-bias layer already computes, or a 1-minute
+        EMA over the deep history. None when neither is available yet."""
+        kind = str(self.cfg.get("entry_ma") or "vwap").lower()
+        if kind == "ema":
+            fl = getattr(self, "fleet", None)
+            closes = [float(b["c"]) for b in (fl.hist_of(self.symbol) if fl else []) if b.get("c")]
+            n = int(self.cfg.get("entry_ma_period", 20) or 20)
+            if len(closes) < n:
+                return None
+            import trend as _trend
+            return _trend.ema(closes, n)
+        v = (self.trend or {}).get("vwap")
+        return None if v is None else float(v)
+
+    def _first_entry_ok(self, bar: dict) -> tuple:
+        """Whether THIS closed bar opens a fresh ladder, and why.
+
+          red_bar     -- a red close, whichever side (the original ladder)
+          immediate   -- any close
+          with_trend  -- the owner's rule: a long trend's candles are mostly
+                         green, so catch the move on the first GREEN close
+                         above the MA; a short trend on the first RED close
+                         below it. Counter-trend candles are never the trigger.
+        """
+        o, c = float(bar["o"]), float(bar["c"])
+        mode = str(self.cfg.get("first_entry") or "red_bar").lower()
+        if mode == "immediate":
+            return True, f"open on immediate mode close ${c:.2f}"
+        if mode != "with_trend":
+            return (c < o), f"open on red bar close ${c:.2f}"
+        side = self.next_side()
+        ma = self._entry_ma()
+        name = "EMA%d" % int(self.cfg.get("entry_ma_period", 20) or 20) \
+            if str(self.cfg.get("entry_ma") or "vwap").lower() == "ema" else "VWAP"
+        if ma is None:
+            self.flag("entry_ma", f"{name} not available yet -- the first {side} lot waits for it")
+            return False, ""
+        self.unflag("entry_ma")
+        if side == "short":
+            ok = c < o and c < ma
+            return ok, f"open SHORT on first red close ${c:.2f} below {name} ${ma:.4f}"
+        ok = c > o and c > ma
+        return ok, f"open on first green close ${c:.2f} above {name} ${ma:.4f}"
+
+    # ======================================================================
+    # ladder v2: the staged unwind, the basket exits, and close_lots
+    # ======================================================================
+    def _s(self) -> int:
+        """+1 for a long ladder, -1 for a short one, 0 when flat."""
+        if not self.ledger.open_lots:
+            return 0
+        return 1 if self.ledger.side == "long" else -1
+
+    def _deepest_first(self) -> list:
+        """Open lots, worst-underwater first: highest entries on a long
+        ladder, lowest on a short. These are the ones stage 1 closes -- the
+        lots left behind are the ones nearest their own take-profits."""
+        s = self._s()
+        return sorted(self.ledger.open_lots, key=lambda l: -s * float(l.entry_price))
+
+    def close_lots(self, lots: list, why: str) -> bool:
+        """The one basket-closing path. Everything that closes more than one
+        lot at once -- both unwind stages, the basket stop, the time stop, the
+        basket TP -- goes through here, and NEVER through flatten_all.
+
+        flatten_all is a market order (rejected outside 09:30-16:00, and these
+        names trade 24/5) and it clears the ledger WITHOUT journaling. That is
+        how 45 lots became "P/L unknown". This path:
+
+          1. refuses if the ledger disagrees with the broker -- it will not
+             send a sell for shares it may not hold; the per-lot TPs remain
+          2. cancels each lot's resting TP and WAITS until none is live, because
+             Alpaca rejects a sell for shares still held by a cancelling order
+          3. sends ONE marketable limit for the aggregate, priced exactly as a
+             trail exit (through the bid for a long, through the ask for a
+             short), extended-hours-eligible
+          4. records the basket so _book_basket_progress books its fills against
+             the deepest-underwater lots first, at the real fill price, into
+             the journal with a `why` -- before reconcile can see a gap and
+             write the lots off
+          5. on rejection: re-places the per-lot TPs immediately and flags
+        """
+        b = self.broker
+        if not b or not lots:
+            return False
+        if self.cfg["dry_run"]:
+            self.ev("DRY", f"[dry] would close {len(lots)} lot(s) as a basket ({why})")
+            return False
+        if (self.ledger.unwind or {}).get("basket"):
+            return False                       # one basket at a time
+        if self.ledger.signed_shares != (self.broker_qty or 0):
+            self.flag("basket", f"{self.symbol}: ledger {self.ledger.signed_shares} sh vs broker "
+                                f"{self.broker_qty} -- refusing to send a basket sell on a "
+                                f"ledger that disagrees with Alpaca. Per-lot TPs remain the exit.")
+            return False
+        self.unflag("basket")
+
+        # 2. cancel the resting exits and wait for the shares to be free
+        ids = []
+        for lot in lots:
+            if lot.tp_client_id:
+                o = next((x for x in self.open_orders
+                          if x.get("client_order_id") == lot.tp_client_id), None)
+                if o:
+                    try:
+                        b.cancel(o["id"])
+                        ids.append(lot.tp_client_id)
+                    except AlpacaError as e:
+                        self.flag("basket", f"cancel of {lot.tp_client_id} rejected: {str(e)[:100]}")
+                        return False
+        deadline = time.time() + 8.0
+        while ids and time.time() < deadline:
+            live = {x.get("client_order_id") for x in (b.orders(status="open", symbols=self.symbol) or [])}
+            if not any(c in live for c in ids):
+                break
+            time.sleep(0.4)
+        for lot in lots:
+            lot.tp_client_id = ""
+            lot.tp_order_id = ""
+
+        # 3. one marketable limit for the whole basket
+        qty = sum(int(l.shares) for l in lots)
+        short = self.ledger.side == "short"
+        off = float(self.cfg.get("trail_exit_offset", 0.02))
+        if short:
+            ref = float(self.quote.get("ap") or 0) or self.last_price
+            px = _round_cent(max(0.01, ref + off))
+        else:
+            ref = float(self.quote.get("bp") or 0) or self.last_price
+            px = _round_cent(max(0.01, ref - off))
+        coid = f"xs-{lots[0].id}-{int(time.time()) % 100000}"
+        try:
+            place = b.buy_limit_gtc if short else b.sell_limit_gtc
+            o = place(self.symbol, qty, px, coid, extended_hours=self.wants_extended())
+        except AlpacaError as e:
+            self.flag("basket", f"basket {'buy' if short else 'sell'} of {qty} sh rejected: "
+                                f"{str(e)[:120]}. Re-placing per-lot TPs.")
+            self.ensure_tps()
+            return False
+        if o.get("status") not in self.LIVE_STATUSES and o.get("status") != "filled":
+            self.flag("basket", f"basket order came back {o.get('status')}. Re-placing per-lot TPs.")
+            self.ensure_tps()
+            return False
+
+        # 4. remember it so the fills are booked by us, not adopted by reconcile
+        uw = dict(self.ledger.unwind or {})
+        uw["basket"] = {"order_id": o.get("id", ""), "coid": coid, "why": why,
+                        "lot_ids": [l.id for l in lots], "booked": 0, "sent": time.time()}
+        self.ledger.unwind = uw
+        self.ledger.save()
+        self.ev("TP", f"BASKET {'BUY' if short else 'SELL'} {qty} sh @ ${px:.2f} for "
+                      f"{len(lots)} lot(s): {why}")
+        try:
+            journal.record_event(self.symbol, "basket_close_sent", why=why, shares=qty,
+                                 lots=[l.id for l in lots], order=o.get("id", ""))
+        except Exception:
+            pass
+        return True
+
+    def _book_basket_progress(self) -> None:
+        """Book a basket close's fills against its lots, deepest-underwater first.
+
+        Runs every tick before the trail and decision steps. Reads filled_qty
+        and filled_avg_price from the order Alpaca is holding -- never from a
+        local guess -- and journals each lot's share with the basket's `why`.
+        """
+        uw = self.ledger.unwind or {}
+        bk = uw.get("basket")
+        if not bk or not self.broker:
+            return
+        b = self.broker
+        o = next((x for x in self.open_orders if x.get("client_order_id") == bk["coid"]), None)
+        if o is None:
+            try:
+                o = b.order_by_client_id(bk["coid"])
+            except Exception:
+                o = None
+        if not o:
+            # nothing at Alpaca under that id: it was cancelled or never landed.
+            # Re-cover everything and forget the basket.
+            uw.pop("basket", None)
+            self.ledger.unwind = uw
+            self.ledger.save()
+            self.flag("basket", "basket order vanished at Alpaca -- re-placing per-lot TPs")
+            self.ensure_tps()
+            return
+        filled = int(float(o.get("filled_qty") or 0))
+        newly = filled - int(bk.get("booked") or 0)
+        if newly > 0:
+            px = float(o.get("filled_avg_price") or self.last_price)
+            s = self._s()
+            by_id = {l.id: l for l in self.ledger.open_lots}
+            order = [by_id[i] for i in bk["lot_ids"] if i in by_id]
+            order.sort(key=lambda l: -s * float(l.entry_price))      # deepest first
+            left = newly
+            for lot in order:
+                if left <= 0:
+                    break
+                take = min(left, int(lot.shares))
+                if take <= 0:
+                    continue
+                pnl = (px - float(lot.entry_price)) * take * s
+                lot.shares -= take
+                left -= take
+                self.ledger.realized_today += pnl
+                self.ledger.realized_all += pnl
+                partial = lot.shares > 0
+                try:
+                    journal.record_close(self, lot, take, px, pnl, partial, why=bk["why"])
+                except Exception as e:
+                    LOG.warning("journal basket close %s: %s", lot.id, e)
+                self.ev("TP", f"BASKET {'partial' if partial else 'closed'} lot {lot.id}: "
+                              f"{take} @ ${px:.4f} (in ${float(lot.entry_price):.4f}) = ${pnl:+,.2f} "
+                              f"[{bk['why']}]")
+                if not partial:
+                    self.ledger.open_lots = [l for l in self.ledger.open_lots if l.id != lot.id]
+                    self.ledger.closed_count += 1
+            bk["booked"] = filled
+            self.ledger.save()
+        status = o.get("status")
+        # ---- the chase: a marketable limit the book moved through rests forever ----
+        chase_s = float(self.cfg.get("basket_chase_s", 15.0) or 0)
+        if status in self.LIVE_STATUSES and chase_s > 0 and \
+                time.time() - float(bk.get("sent") or 0) > chase_s:
+            self._chase_basket(o, bk)
+            return
+        done = status in ("filled", "canceled", "expired", "rejected") or \
+            (filled >= sum(1 for _ in bk["lot_ids"]) and status == "filled")
+        if status == "filled" or (status in ("canceled", "expired", "rejected")):
+            uw.pop("basket", None)
+            self.ledger.unwind = uw
+            self.ledger.save()
+            if status != "filled":
+                self.flag("basket", f"basket order ended {status} with {filled} filled -- "
+                                    f"re-placing per-lot TPs on what remains")
+            else:
+                self.unflag("basket")
+            self.ensure_tps()
+
+    def _chase_basket(self, o: dict, bk: dict) -> None:
+        """Cancel the resting basket order, wait until it is off the book, and
+        resend the UNFILLED remainder at a fresh marketable price with a new
+        client id. Three chases at most; after that the per-lot take-profits
+        are re-placed and any reversal is dropped -- a name that will not
+        print three times in a row is not one to keep hammering."""
+        b = self.broker
+        if not b:
+            return
+        chases = int(bk.get("chases") or 0)
+        by_id = {l.id: l for l in self.ledger.open_lots}
+        left = sum(int(by_id[i].shares) for i in bk["lot_ids"] if i in by_id)
+        try:
+            b.cancel(o["id"])
+        except AlpacaError as e:
+            self.flag("basket", f"basket chase: cancel rejected ({str(e)[:100]})")
+            return
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
+            live = {x.get("client_order_id") for x in (b.orders(status="open", symbols=self.symbol) or [])}
+            if bk["coid"] not in live:
+                break
+            time.sleep(0.4)
+        uw = dict(self.ledger.unwind or {})
+        if left <= 0 or chases >= 3:
+            uw.pop("basket", None)
+            for k in ("reverse_to", "reverse_lots", "reverse_until", "reverse_retries"):
+                uw.pop(k, None)
+            self.ledger.unwind = uw
+            self.ledger.save()
+            if left > 0:
+                self.flag("basket", f"basket close did not print after {chases} chase(s) -- "
+                                    f"{left} sh re-covered with per-lot take-profits; reversal dropped")
+            self.ensure_tps()
+            return
+        short = self.ledger.side == "short"
+        off = float(self.cfg.get("trail_exit_offset", 0.02))
+        if short:
+            ref = float(self.quote.get("ap") or 0) or self.last_price
+            px = _round_cent(max(0.01, ref + off))
+        else:
+            ref = float(self.quote.get("bp") or 0) or self.last_price
+            px = _round_cent(max(0.01, ref - off))
+        coid = f"xs-{bk['lot_ids'][0]}-{int(time.time()) % 100000}c{chases + 1}"
+        try:
+            place = b.buy_limit_gtc if short else b.sell_limit_gtc
+            o2 = place(self.symbol, left, px, coid, extended_hours=self.wants_extended())
+        except AlpacaError as e:
+            self.flag("basket", f"basket chase: resend rejected ({str(e)[:100]}) -- re-placing per-lot TPs")
+            uw.pop("basket", None)
+            self.ledger.unwind = uw
+            self.ledger.save()
+            self.ensure_tps()
+            return
+        bk = dict(bk, order_id=o2.get("id", ""), coid=coid, booked=0, sent=time.time(),
+                  chases=chases + 1)
+        uw["basket"] = bk
+        self.ledger.unwind = uw
+        self.ledger.save()
+        self.ev("TP", f"BASKET chase {chases + 1}: {'BUY' if short else 'SELL'} {left} sh re-priced to ${px:.2f}")
+
+    def _maybe_basket_exit(self) -> bool:
+        """One closing action per tick, in the design's pessimistic order:
+        basket stop -> unwind stage 1/2 -> time stop -> basket TP.
+        Returns True if something was sent, so entries wait a tick."""
+        if not self.ledger.open_lots or (self.ledger.unwind or {}).get("basket"):
+            return False
+        if self.cfg["dry_run"]:
+            return False
+        bar = self._completed_bar()
+        if not bar:
+            return False
+        s = self._s()
+        A = float(self.ledger.avg_price or 0)
+        last = float(self.last_price or 0)
+        if A <= 0 or last <= 0:
+            return False
+        tr = self.trend or {}
+        atr1h = float(tr.get("atr1h") or 0)
+        n_t = max(1, int(self.cfg.get("n_target", 8) or 8))
+
+        # --- basket stop (toggle) ---
+        if self.cfg.get("basket_stop_enabled"):
+            d = self._atr_rung_distance() if self.cfg.get("add_mode") == "atr" \
+                else float(self.cfg.get("add_distance", 0.10) or 0.10)
+            # after N equal lots at spacing d the last fill sits d(N-1)/2 below
+            # the average, so any closer stop is hit by the ladder's own next
+            # rung -- a "% from average" stop is a depth cap in disguise
+            s_stop = d * (n_t - 1) / 2.0 + float(self.cfg.get("basket_stop_atr", 0.5)) * atr1h
+            level = _round_cent(A - s * s_stop)
+            if (last - level) * s <= 0:
+                return self.close_lots(list(self.ledger.open_lots),
+                                       f"basket stop ${level:.2f} from avg ${A:.4f}")
+
+        # --- the staged unwind ---
+        if self._maybe_unwind():
+            return True
+
+        # --- time stop (toggle) ---
+        mx = int(self.cfg.get("ladder_max_bars", 0) or 0)
+        if mx > 0 and self.ledger.open_lots:
+            first = min(self.ledger.open_lots, key=lambda l: l.entry_time)
+            bars = [b for b in (self.fleet.hist_of(self.symbol) if getattr(self, "fleet", None) else [])
+                    if str(b.get("t")) >= str(first.entry_time) and float(b.get("v") or 0) > 0]
+            if len(bars) >= mx and (self.quote.get("bp") and self.quote.get("ap")):
+                return self.close_lots(list(self.ledger.open_lots),
+                                       f"time stop: {len(bars)} session bars since first lot")
+
+        # --- basket TP from the average (toggle) ---
+        if self.cfg.get("basket_tp_enabled"):
+            X = max(float(self.cfg.get("take_profit", 0.10)),
+                    float(self.cfg.get("basket_tp_atr_mult", 0.5)) * atr1h)
+            level = _round_cent(A + s * X)
+            if (last - level) * s >= 0:
+                return self.close_lots(list(self.ledger.open_lots),
+                                       f"basket TP ${level:.2f} from avg ${A:.4f}")
+        return False
+
+    def _asset_flags(self) -> dict:
+        """What Alpaca says about this name today: can it be sold short (a
+        borrow exists), can it trade overnight. Asked once per session -- the
+        easy-to-borrow list moves daily -- and cached. Unknown (lookup failed)
+        is reported as None and treated as allowed, so a transient API error
+        never silently turns a two-sided ladder long-only."""
+        af = getattr(self, "_asset_info", None)
+        if af is not None:
+            return af
+        af = {"shortable": None, "overnight": None, "borrow": ""}
+        b = self.broker
+        if b is not None:
+            try:
+                a = b.asset(self.symbol) or {}
+                borrow = str(a.get("borrow_status") or ("easy_to_borrow" if a.get("easy_to_borrow") else ""))
+                af = {"shortable": bool(a.get("shortable")) and borrow == "easy_to_borrow",
+                      "overnight": (bool(a.get("overnight_tradable")) and not a.get("overnight_halted"))
+                      if "overnight_tradable" in a else None,
+                      "borrow": borrow}
+                self.unflag("asset")
+            except Exception as e:
+                self.flag("asset", f"asset lookup for {self.symbol} failed ({str(e)[:80]}); "
+                                   f"shortability unknown -- shorts are not blocked")
+        self._asset_info = af
+        return af
+
+    def _short_allowed(self) -> bool:
+        return self._asset_flags().get("shortable") is not False
+
+    def _reverse_side(self, s: int) -> str:
+        """The side a reversal of an s-sided ladder would open, or '' when
+        side_mode forbids it OR Alpaca has no borrow for the name -- then the
+        flip is a flatten and says so, rather than a sell-short the broker
+        would reject a tick later."""
+        new = "short" if s > 0 else "long"
+        mode = str(self.cfg.get("side_mode") or "auto").lower()
+        allowed = {"both": ("long", "short"), "long": ("long",), "auto": ("long",),
+                   "short": ("short",)}.get(mode, ("long",))
+        if new not in allowed:
+            return ""
+        if new == "short" and not self._short_allowed():
+            return ""
+        return new
+
+    def _maybe_unwind(self) -> bool:
+        """Design 3.1-3.3. Stage 1 on the 1h trend-change leg; stage 2 only if
+        the 4h regime agrees four hours later. Cancels if the flip was a
+        shakeout, extends if it is a correction.
+
+        reversal_mode=reverse adds the owner's rule on top: the moment BOTH
+        legs read against the ladder -- a confirmed reversal, not a lone 1h
+        flip -- the whole basket closes at any depth and the ledger remembers
+        which side to open once the account is flat (_maybe_reverse_entry).
+        It does not wait for the stage-2 timer: that timer exists to give the
+        4h regime time to confirm, and here it already has.
+        """
+        mode = str(self.cfg.get("reversal_mode", "off") or "off").lower()
+        if mode == "off" or not self.ledger.open_lots:
+            return False
+        s = self._s()
+        tr = self.trend or {}
+        M = int(tr.get("M") or 0)
+        R = int(tr.get("R") or 0)
+        now = time.time()
+        uw = dict(self.ledger.unwind or {})
+        n = len(self.ledger.open_lots)
+        hours = float(self.cfg.get("unwind_stage_hours", 4.0))
+        cool = float(self.cfg.get("unwind_cooldown_h", 24)) * 3600
+        flipped = (M == -s and M != 0)
+
+        # ---- reverse: the 1h trend went the other way -> flip the whole position ----
+        # The owner's rule. No depth minimum, no second timeframe, no cooldown
+        # beyond SuperTrend's own hysteresis: the flip IS the signal. Alpaca
+        # will not cross a position through zero in one order, so it is
+        # mechanically close-then-open -- but the SIZE is the whole ladder,
+        # lot for lot, share for share (_maybe_reverse_entry), never one lot.
+        rcool = float(self.cfg.get("reverse_cooldown_h", 0.0) or 0.0) * 3600
+        if mode == "reverse" and flipped and self._session_now() == "overnight" \
+                and self._asset_flags().get("overnight") is False:
+            self.flag("overnight", f"{self.symbol}: 1h trend flipped overnight but the name is not "
+                                   f"overnight-tradable -- the flip waits for 04:00 ET")
+            return False
+        if mode == "reverse" and flipped and not self._book_sane():
+            return False                       # flagged inside; the flip waits for a real price
+        if mode == "reverse" and flipped and now - float(uw.get("t_reverse") or 0) >= rcool:
+            self.unflag("overnight")
+            new = self._reverse_side(s)
+            lots = list(self.ledger.open_lots)
+            if s > 0 and not new and not self._short_allowed():
+                cause = f"{self.symbol} cannot be sold short at Alpaca today (no borrow)"
+            else:
+                cause = f"side_mode={self.cfg.get('side_mode')} forbids the other side"
+            why = "reversal: 1h trend flipped against the ladder" + (
+                f" -> {new}, same size" if new else f" ({cause}: flattening)")
+            ok = self.close_lots(lots, why)
+            if ok:
+                uw = dict(self.ledger.unwind or {})        # close_lots stored the basket; mutate THAT
+                uw.pop("stage", None); uw.pop("t_stage2", None)
+                uw["t_reverse"] = now
+                if new:
+                    uw["reverse_to"] = new
+                    uw["reverse_lots"] = [int(l.shares) for l in lots]
+                    uw["reverse_retries"] = 0
+                    uw["reverse_until"] = now + float(self.cfg.get("reverse_ttl_h", 24.0) or 24.0) * 3600
+                else:
+                    for k in ("reverse_to", "reverse_lots", "reverse_until", "reverse_retries"):
+                        uw.pop(k, None)
+                self.ledger.unwind = uw
+                self.ledger.save()
+                have = "long" if s > 0 else "short"
+                tot = sum(int(l.shares) for l in lots)
+                if new:
+                    self.ev("WARN", f"REVERSAL: 1h trend flipped -- closing the {n}-lot {have} ladder "
+                                    f"({tot} sh) at the market and re-opening it {new}, {n} lot(s) of "
+                                    f"the same size, as soon as Alpaca is flat.")
+                else:
+                    self.ev("WARN", f"REVERSAL: 1h trend flipped against the {n}-lot {have} ladder, "
+                                    f"but {cause} -- flattening only.")
+            return ok
+
+        # ---- stage 2, if pending ----
+        if uw.get("stage") == 1:
+            if now < float(uw.get("t_stage2") or 0):
+                return False
+            if M == s:
+                self.ev("INFO", "unwind stage 2: the 1h flip was a shakeout -- ladder resumes under the gate")
+                uw.pop("stage", None); uw.pop("t_stage2", None)
+                self.ledger.unwind = uw; self.ledger.save()
+                return False
+            if M == -s and R == s:
+                uw["t_stage2"] = now + hours * 3600
+                self.ledger.unwind = uw; self.ledger.save()
+                self.ev("INFO", "unwind stage 2: correction (1h against, 4h still with) -- holding the remainder")
+                return False
+            # both legs agree the thesis failed (reverse mode only lands here
+            # inside its reversal cooldown -- then it flattens like the rest)
+            ok = self.close_lots(list(self.ledger.open_lots), "stage2 regime-change")
+            if ok:
+                # close_lots just stored the basket record on the ledger; mutate
+                # THAT, not the copy taken before the call, or the record is
+                # lost and the fills are never booked
+                uw = dict(self.ledger.unwind or {})
+                uw.pop("stage", None); uw.pop("t_stage2", None)
+                self.ledger.unwind = uw; self.ledger.save()
+            return ok
+
+        # ---- stage 1 ----
+        if n < int(self.cfg.get("unwind_min_lots", 4) or 4):
+            return False
+        if now - float(uw.get("t_last_stage1") or 0) < cool:
+            return False
+        trigger = (M == -s and M != 0)
+        if not trigger and self.cfg.get("unwind_on_gap"):
+            gap = float(tr.get("gap_atr_against") or 0)
+            trigger = gap >= float(self.cfg.get("gap_atr", 2.0)) and M == -s
+        if not trigger:
+            return False
+        half = self._deepest_first()[: (n + 1) // 2]
+        ok = self.close_lots(half, "stage1 trend-change")
+        if ok:
+            uw = dict(self.ledger.unwind or {})        # keep the basket close_lots stored
+            uw.update({"stage": 1,
+                       "t_stage2": now + hours * 3600,
+                       "t_last_stage1": now})
+            self.ledger.unwind = uw
+            self.ledger.save()
+            self.ev("WARN", f"UNWIND STAGE 1: 1h trend flipped against a {n}-lot ladder; "
+                            f"closing the deepest {len(half)}. Stage 2 in "
+                            f"{hours:g}h if the 4h regime agrees.")
+        return ok
+
+    def _book_sane(self) -> bool:
+        """'At the current price' needs a current price. A 2x ETF's overnight
+        book can be 11.80 x 12.50 -- a 5.8% spread -- and a flip that crosses
+        it twice pays that spread twice for nothing. Hold the flip while the
+        spread is wider than reverse_max_spread_pct of mid; it clears itself
+        the moment the book tightens (usually 04:00 or 09:30)."""
+        lim = float(self.cfg.get("reverse_max_spread_pct", 0.5) or 0)
+        if lim <= 0:
+            return True
+        bid = float(self.quote.get("bp") or 0)
+        ask = float(self.quote.get("ap") or 0)
+        if bid <= 0 or ask <= 0 or ask < bid:
+            self.flag("book", f"{self.symbol}: no two-sided quote -- the flip waits for a real book")
+            return False
+        pct = 100.0 * (ask - bid) / ((ask + bid) / 2)
+        if pct > lim:
+            self.flag("book", f"{self.symbol}: book {bid:.2f} x {ask:.2f} is {pct:.1f}% wide "
+                              f"(limit {lim:g}%) -- the flip waits for a sane book")
+            return False
+        self.unflag("book")
+        return True
+
+    def _mirror_room(self, want: int, price: float) -> int:
+        """How many of `want` shares the exposure cap still allows at `price`:
+        f_ladder x equity, less what the ladder already holds. The per-rung
+        dollar rule is NOT applied -- the lots being mirrored were rung-sized
+        when they opened. With the cap off (f_ladder 0) or no equity figure,
+        the answer is `want`."""
+        f = float(self.cfg.get("f_ladder", 0) or 0)
+        fl = getattr(self, "fleet", None)
+        equity = float(((getattr(fl, "account", None) or {}).get("equity") or 0)) if fl else 0.0
+        if f <= 0 or equity <= 0 or price <= 0:
+            return int(want)
+        e_max = f * equity
+        deployed = float(sum(l.cost for l in self.ledger.open_lots))
+        room = int((e_max - deployed) / price)
+        return max(0, min(int(want), room))
+
+    def _maybe_reverse_entry(self) -> bool:
+        """The other half of reversal_mode=reverse: once the reversed ladder is
+        flat at Alpaca, re-open it on the new side at the SAME size -- one
+        entry per closed lot, share for share, sent back to back, each with
+        its own take-profit -- while the 1h trend still reads that side. If
+        the trend has already flipped back, whatever is left of the queue is
+        dropped and the ordinary rules resume. Every entry guard in
+        block_reason (session window, caps, FROZEN, backoff) still applies; a
+        flip outside the window re-opens on the next session's first tick.
+        The queue lives on the ledger, so a restart mid-flip carries on."""
+        uw = dict(self.ledger.unwind or {})
+        new = uw.get("reverse_to")
+        if not new:
+            return False
+        now = time.time()
+        queue = [int(x) for x in (uw.get("reverse_lots") or []) if int(x) > 0]
+
+        def _drop(msg: str, left: int = 0) -> None:
+            u = dict(self.ledger.unwind or {})
+            for k in ("reverse_to", "reverse_lots", "reverse_until", "reverse_retries"):
+                u.pop(k, None)
+            self.ledger.unwind = u
+            self.ledger.save()
+            if left > 0:
+                # the position no longer matches the rule: say so where it stays visible
+                self.flag("reverse", f"{self.symbol}: {msg} -- {left} lot(s) of the flip never "
+                                     f"re-opened; the ladder is smaller than the rule says")
+                self.ev("WARN", msg)
+            else:
+                self.unflag("reverse")
+                self.ev("INFO", msg)
+
+        if not queue:
+            _drop(f"reversal to {new} complete")
+            return False
+        if now > float(uw.get("reverse_until") or 0):
+            _drop(f"reversal to {new} expired", left=len(queue))
+            return False
+        if uw.get("basket") or self.pending_entry:
+            return False                       # the close is still filling, or an entry is
+        if self.ledger.open_lots and self.ledger.side != new:
+            return False                       # old-side lots still booking
+        if (self.broker_qty or 0) != self.ledger.signed_shares:
+            return False                       # Alpaca has not caught up with the ledger yet
+        old_exit = "sell" if new == "short" else "buy"
+        if any(str(o.get("side") or "") == old_exit for o in (self.open_orders or [])):
+            return False                       # an old-side exit still rests (stale snapshot or a chase)
+        if self._session_now() == "overnight" and self._asset_flags().get("overnight") is False:
+            return False                       # not overnight-tradable: the re-entry waits for 04:00
+        bias = (self.trend or {}).get("bias") or "flat"
+        if bias != new:
+            if bias in ("long", "short"):
+                # the trend turned back before the flip completed: the lots already
+                # re-opened are now against it and flip again on the next tick;
+                # nothing is stranded, so this is information, not a fault
+                _drop(f"reversal to {new} dropped with {len(queue)} lot(s) to go: "
+                      f"the trend now reads {bias}")
+            return False                       # flat: keep waiting inside the TTL
+        if self.block_reason(ignore_reverse=True, ignore_session=True):
+            return False
+        sent = 0
+        while queue and not self.pending_entry:
+            sh = queue.pop(0)
+            # the 20%-of-equity promise holds on the way back in too; a mirror
+            # that no longer fits is truncated and says so, never sent blind
+            cap = self._mirror_room(sh, float(self.last_price or 0))
+            if cap <= 0:
+                _drop(f"reversal to {new}: the exposure cap (f_ladder) leaves no room",
+                      left=len(queue) + 1)
+                break
+            if cap < sh:
+                self.ev("WARN", f"REVERSAL: lot of {sh} sh truncated to {cap} by the exposure cap")
+                sh = cap
+            u = dict(self.ledger.unwind or {})
+            u["reverse_lots"] = list(queue)
+            self.ledger.unwind = u
+            self.ledger.save()
+            ok = self._submit_entry(f"REVERSAL: re-opening {sh} sh {new} "
+                                    f"({len(queue)} lot(s) to go)", shares=sh)
+            if not ok:
+                # refused (buying power, portfolio cap, FROZEN, rejection):
+                # nothing was sent, so the lot goes back to the head of the
+                # queue and we try again next tick
+                queue.insert(0, sh)
+                u = dict(self.ledger.unwind or {})
+                u["reverse_lots"] = list(queue)
+                self.ledger.unwind = u
+                self.ledger.save()
+                break
+            sent += 1
+            if self.block_reason(ignore_reverse=True, ignore_session=True):
+                break                          # a working entry, backoff or a cap: resume next tick
+        if not queue and not self.pending_entry:
+            _drop(f"reversal to {new} complete: {sent} lot(s) re-opened this tick")
+        return sent > 0
 
     def _close_lot_now(self, lot: "Lot", why: str) -> bool:
         """Cancel a lot's resting exit and close it at the market instead.
@@ -1976,7 +2812,42 @@ class Engine:
                 n = int(float(self.cfg.get("risk_dollars", 100)) / stop)
         else:
             n = int(self.cfg["shares_per_lot"])
-        return max(lo, min(hi, max(1, n)))
+        n = max(lo, min(hi, max(1, n)))
+        return self._cap_to_ladder(n, price)
+
+    def _cap_to_ladder(self, n: int, price: float) -> int:
+        """Truncate the next lot so the ladder never exceeds f_ladder of equity.
+
+        E_max = f_ladder * live equity, in COST BASIS. The last lot is cut down
+        to whatever room is left, never skipped; below min_shares the add is
+        blocked and the reason is visible. Under a working gate this binds
+        almost never (0 cap-blocks vs thousands of gate-blocks in replay); it
+        is the backstop for the day the gate is wrong.
+        """
+        f = float(self.cfg.get("f_ladder", 0) or 0)
+        if f <= 0 or price <= 0 or getattr(self, "fleet", None) is None:
+            return n
+        try:
+            equity = float((self.fleet.account or {}).get("equity") or 0)
+        except Exception:
+            equity = 0.0
+        if equity <= 0:
+            return n
+        e_max = f * equity
+        # in dollars mode the per-lot target follows from the cap directly
+        if self.cfg.get("size_mode") == "dollars" and int(self.cfg.get("n_target", 0) or 0) > 0:
+            lot_dollars = e_max / int(self.cfg["n_target"])
+            n = min(n, max(1, int(lot_dollars / price)))
+        deployed = sum(l.cost for l in self.ledger.open_lots)
+        room = e_max - deployed
+        q_cap = int(room / price) if room > 0 else 0
+        lo = max(1, int(self.cfg.get("min_shares", 1)))
+        if q_cap < lo:
+            self.flag("cap", "%s: ladder cap reached (E_max $%.0f = %.0f%% of equity, "
+                             "$%.0f deployed)" % (self.symbol, e_max, 100 * f, deployed))
+            return 0
+        self.unflag("cap")
+        return min(n, q_cap)
 
     def _atr_now(self) -> float:
         """ATR over a real bar window, cached. The fleet snapshot is too short."""
@@ -2097,6 +2968,8 @@ class Engine:
         # 13.05 - 13.15 lands on -0.09999999999999964, which would silently skip
         # an add that is exactly on its rung
         move = round((close - anchor) * d, 6)    # negative = against us
+        if mode == "atr":
+            return anchor > 0 and move <= -self._atr_rung_distance()
         if mode == "points":
             return anchor > 0 and move <= -float(self.cfg["add_distance"])
         if mode == "percent":
@@ -2105,6 +2978,26 @@ class Engine:
             return (close - self.ledger.avg_price) * d < 0
         return False
 
+    def _atr_rung_distance(self) -> float:
+        """One 15-minute ATR beyond the last fill, floored at twice the spread.
+
+        Recomputed every bar so the rung breathes with the session. With no
+        ATR yet (history still filling) it falls back to add_distance and
+        says so, rather than placing a rung at zero.
+        """
+        cfg = self.cfg
+        atr15 = (self.trend or {}).get("atr15")
+        bid = float(self.quote.get("bp") or 0)
+        ask = float(self.quote.get("ap") or 0)
+        spread = (ask - bid) if (ask and bid and ask > bid) else 0.01
+        floor = max(float(cfg.get("add_floor", 0.05) or 0.05), 2.0 * spread)
+        if not atr15:
+            self.flag("rung", "%s: no 15m ATR yet; rung uses add_distance $%.2f until "
+                              "the history fills" % (self.symbol, float(cfg.get("add_distance", 0.10) or 0.10)))
+            return max(floor, float(cfg.get("add_distance", 0.10) or 0.10))
+        self.unflag("rung")
+        return _round_cent(max(floor, float(cfg.get("add_k", 1.0) or 1.0) * float(atr15)))
+
     def _rung_price(self) -> Optional[float]:
         """The exact level that triggers the next add -- the price the strategy
         says we should be paying. None when flat (no anchor yet)."""
@@ -2112,6 +3005,8 @@ class Engine:
             return None
         mode, anchor = self.cfg["add_mode"], self.ledger.last_fill_price
         d = self._dir(self.ledger.side)
+        if mode == "atr":
+            return _round_cent(anchor - d * self._atr_rung_distance())
         if mode == "points":
             return _round_cent(anchor - d * float(self.cfg["add_distance"]))
         if mode == "percent":
@@ -2153,12 +3048,20 @@ class Engine:
         if mode == "beyond_average":
             return f"close ${close:.2f} {way} avg ${self.ledger.avg_price:.4f}"
         anchor = self.ledger.last_fill_price
-        trig = (f"${float(self.cfg['add_distance']):.2f}" if mode == "points"
-                else f"{self.cfg['add_percent']}%")
+        if mode == "atr":
+            trig = "$%.2f (ATR15 x %g)" % (self._atr_rung_distance(),
+                                           float(self.cfg.get("add_k", 1.0) or 1.0))
+        elif mode == "points":
+            trig = "$%.2f" % float(self.cfg["add_distance"])
+        else:
+            trig = "%s%%" % self.cfg["add_percent"]
         return (f"close ${close:.2f} is ${abs(anchor - close):.2f} {way} last fill "
                 f"${anchor:.4f} (trigger {trig})")
 
-    def _submit_entry(self, why: str) -> None:
+    def _submit_entry(self, why: str, shares: Optional[int] = None) -> bool:
+        """Open one lot. `shares` overrides the sizing rule -- a reversal
+        mirrors the closed lots share for share, so it must not be re-sized
+        by the cap or the dollar rule on the way back in."""
         side = self.next_side()
         mode = str(self.cfg.get("side_mode") or "auto").lower()
         # A ledger never mixes sides, and neither does the account. These guards
@@ -2173,22 +3076,25 @@ class Engine:
         if mode == "short" and side == "long":
             self.ev("WARN", "side_mode=short but the position is long -- no more "
                             "long adds. Existing lots keep their exits.")
-            return
+            return False
         if mode in ("long", "auto") and side == "short":
             self.ev("WARN", f"side_mode={mode} but the position is short -- no more "
                             f"short adds. Existing lots keep their exits.")
-            return
+            return False
         if self.ledger.open_lots and side != self.ledger.side:
             self.ev("WARN", f"{side} entry skipped -- the ladder is already "
                             f"{self.ledger.side} and a ladder never mixes sides.")
-            return
+            return False
         if side == "short" and (self.broker_qty or 0) > 0:
             self.ev("WARN", "short bias, waiting until flat -- will not short over longs")
-            return
+            return False
         if side == "long" and (self.broker_qty or 0) < 0:
             self.ev("WARN", "long entry skipped -- Alpaca still holds a short position.")
-            return
-        shares = self._lot_shares()
+            return False
+        shares = int(shares) if shares else self._lot_shares()
+        if shares <= 0:
+            return False
+        shares_sent = shares
         lot_id = self.ledger.next_lot_id()
         self.ledger.save()
         coid = f"en-{lot_id}"
@@ -2200,29 +3106,31 @@ class Engine:
             # again in a minute, so this waits instead of stopping the day
             self.flag("bp", f"Not enough buying power for the next {self.symbol} lot: "
                             f"need ~${cost:,.0f}, have ${bp:,.0f}. Waiting, not halting.")
-            return
+            return False
         self.unflag("bp")
         # re-checked at submission, not just at decision time: another ladder
         # may have spent the account's room since this bar closed
         blocked = self.fleet.entry_block(self.symbol, cost)
         if blocked:
             self.ev("WARN", f"Add skipped -- {blocked}.")
-            return
+            return False
 
         fz = frozen()
         if fz:
             self.ev("WARN", f"Entry blocked -- trading is FROZEN ({fz}). "
                             f"Delete state/FROZEN to resume.")
-            return
+            return False
 
         if self.cfg["dry_run"]:
             self.ev("DRY", f"[dry] would {self.entry_side(side).upper()} {shares} "
                            f"{self.symbol} -- {why}")
-            return
+            return True
 
         b = self.broker
         assert b
-        rung = self._rung_price()
+        # a mirror entry (shares given) must fill NOW: peg it to the live quote
+        # and never cap it at the rung, which sits an ATR away from the market
+        rung = None if shares else self._rung_price()
         xh = self.wants_extended() and self.is_extended()
         # Alpaca rejects market orders outside 09:30-16:00. Rather than eat a
         # rejection (which halts), fall back to a limit and say so.
@@ -2251,14 +3159,40 @@ class Engine:
                     o = b.buy_market(self.symbol, shares, coid)
                 why += " | MARKET"
         except AlpacaError as e:
+            msg = str(e).lower()
+            if side == "short" and "cannot be sold short" in msg:
+                af = dict(self._asset_flags())
+                af["shortable"] = False
+                self._asset_info = af
+                uw = dict(self.ledger.unwind or {})
+                left = len(uw.get("reverse_lots") or []) + 1
+                if uw.get("reverse_to"):
+                    for k in ("reverse_to", "reverse_lots", "reverse_until", "reverse_retries"):
+                        uw.pop(k, None)
+                    self.ledger.unwind = uw
+                    self.ledger.save()
+                    self.flag("reverse", f"{self.symbol}: Alpaca refused the short ({str(e)[:80]}) -- "
+                                         f"reversal dropped with {left} lot(s) never re-opened; the "
+                                         f"ladder is FLAT, not reversed")
+                else:
+                    self.flag("short", f"{self.symbol}: Alpaca refused the short ({str(e)[:80]}) -- "
+                                       f"no shorts until the borrow returns")
+                return False
+            if shares and (self.ledger.unwind or {}).get("reverse_to") and any(
+                    k in msg for k in ("insufficient qty", "held_for_orders", "wash trade")):
+                # the close has not fully settled at Alpaca yet: not a fault, just early
+                self.ev("WARN", f"REVERSAL: re-entry not accepted yet ({str(e)[:100]}) -- retrying next tick")
+                return False
             self._back_off_entries(f"Entry order rejected: {str(e)[:140]}")
-            return
+            return False
         self.pending_entry = {"lot_id": lot_id, "client_order_id": coid,
                               "order_id": o.get("id", ""), "sent_at": time.time(),
-                              "why": why, "side": side}
+                              "why": why, "side": side, "mirror": bool(shares),
+                              "shares": int(shares_sent)}
         self.ev("ORDER", f"{self.entry_side(side).upper()} {shares} {self.symbol} sent "
                          f"({self.cfg.get('entry_order_type')}) -- {why}")
         self._watch_entry_fill()      # get the take-profit resting ASAP
+        return True
 
     def _back_off_entries(self, why: str) -> None:
         """A broker rejection pauses ENTRIES for a while. It never halts.
@@ -2299,7 +3233,8 @@ class Engine:
                 self.unflag("entry")
                 self.pending_entry = None
                 self._open_lot(pe["lot_id"], int(float(o.get("filled_qty") or 0)),
-                               float(o.get("filled_avg_price") or 0), pe.get("why", ""))
+                               float(o.get("filled_avg_price") or 0), pe.get("why", ""),
+                               side=pe.get("side", "long"))
                 self.ev("INFO", f"Entry -> take-profit resting in {gap:.2f}s.")
                 return
             if status in ("canceled", "cancelled", "expired", "rejected"):
@@ -2427,7 +3362,11 @@ class Engine:
     # ==================================================================
     # CONFIG
     # ==================================================================
-    NUMERIC = {"shares_per_lot": int, "max_lots": int, "entry_fill_timeout": int,
+    NUMERIC = {
+        "reverse_max_spread_pct": float,
+        "basket_chase_s": float,
+        "reverse_ttl_h": float, "reverse_cooldown_h": float,
+        "entry_ma_period": int,"shares_per_lot": int, "max_lots": int, "entry_fill_timeout": int,
                "add_distance": float, "add_percent": float, "take_profit": float,
                "daily_loss_limit": float, "poll_seconds": float,
                "entry_limit_offset": float, "trail_amount": float,
@@ -2469,6 +3408,15 @@ class Engine:
                     rejected.append(k)
                     continue
                 if k == "exit_mode" and str(v).strip().lower() not in ("limit", "trail"):
+                    rejected.append(k)
+                    continue
+                if k == "first_entry" and str(v).strip().lower() not in ("red_bar", "immediate", "with_trend"):
+                    rejected.append(k)
+                    continue
+                if k == "bias_source" and str(v).strip().lower() not in ("rd", "1h"):
+                    rejected.append(k)
+                    continue
+                if k == "entry_ma" and str(v).strip().lower() not in ("vwap", "ema"):
                     rejected.append(k)
                     continue
                 if k in self.NUMERIC:
@@ -2714,6 +3662,13 @@ class Engine:
             "last_fill": round(led.last_fill_price, 4),
             "next_add_at": next_add,
             "cost_basis": round(sum(l.cost for l in led.open_lots), 2),
+            # the three-layer filter, so the dashboard can SEE what the gate is
+            # doing. For a week it read "flat" on five bars and nothing showed it.
+            "trend": {k: self.trend.get(k) for k in
+                      ("bias", "R", "D", "M", "t15", "S", "atr15", "atr1h", "vwap",
+                       "bars_1m", "bars_1h", "bars_4h", "stack")},
+            "unwind": dict(led.unwind or {}),
+            "shortable": self._asset_flags().get("shortable") if self.broker else None,
             # Alpaca's own unrealized whenever there is a position; the local
             # figure is only a fallback for when the position endpoint is empty
             "unrealized": alpaca["unrealized_pl"] if p else round(upnl, 2),
@@ -2804,6 +3759,13 @@ class Engine:
             "add_percent": float(self.cfg["add_percent"]),
             "shares_per_lot": int(self.cfg["shares_per_lot"]),
             "cost_basis": round(sum(l.cost for l in led.open_lots), 2),
+            # the three-layer filter, so the dashboard can SEE what the gate is
+            # doing. For a week it read "flat" on five bars and nothing showed it.
+            "trend": {k: self.trend.get(k) for k in
+                      ("bias", "R", "D", "M", "t15", "S", "atr15", "atr1h", "vwap",
+                       "bars_1m", "bars_1h", "bars_4h", "stack")},
+            "unwind": dict(led.unwind or {}),
+            "shortable": self._asset_flags().get("shortable") if self.broker else None,
             "market_value": float(p["market_value"]) if p else 0.0,
             "unrealized": round(upnl, 2),
             "realized_today": round(led.realized_today, 2),

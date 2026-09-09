@@ -9,23 +9,58 @@ A multi-ticker DCA ladder trading real orders on an Alpaca **paper** account
 (PA3ILNUY5E4F). One `Engine` per symbol, all supervised by `fleet.py`. Owner:
 Glenn.
 
-Long or short, never both at once. Buys dips (or sells rips) when the in-engine
-SuperTrend+EMA stack agrees (4h close vs EMA50 regime, 1h
-SuperTrend daily bias, 1m SuperTrend must agree — LuxAlgo-style stack, not a
-LuxAlgo API). `exit_mode=trail` arms at take-profit then trails; with
+Long or short, never both at once. Buys dips (or sells rips) when the three-
+layer gate in `trend_v2.py` agrees: R, the 4h close vs EMA50 with a 0.25-ATR
+band (may a ladder exist on this side); D, the session VWAP side with 5-bar
+hysteresis AND the 15-minute DMI direction (may it add now); M, the 1h
+SuperTrend, which drives the unwind and never the entry. Bias is long only
+when R and D agree -- that is the default (`bias_source=rd`); the v2 profile
+below takes the side from the 1h trend alone. The gate only ever blocks a
+NEW lot. `exit_mode=trail` arms at take-profit then trails; with
 `trail_use_broker_stop` a GTC Alpaca `trailing_stop` is rested at arm so a
 process death still exits. In-process trail is backup if that order is missing.
 **There is no stop loss on unarmed lots.** A sustained downtrend still strands
 capital.
 
-`side_mode` decides direction: `auto` (default, and what every live ticker
-runs) is long-only and waits out a short bias; `long`/`short` force one side;
+`side_mode` decides direction: `auto` (the default) is long-only and waits
+out a short bias; `long`/`short` force one side;
 `both` follows the stack either way. A short ladder is the long one mirrored --
 rungs above the last fill, targets below entry, exits that BUY back. A ledger
 never mixes sides and never flips while a position is open, and `Ledger.shares`
 is a MAGNITUDE: only `Ledger.signed_shares` may be compared against
 `broker_qty`. Shorting needs margin and a borrow, and a short ladder with no
 stop has unbounded risk where a long one does not.
+
+**Ladder v2** (`engine.LADDER_V2`, applied through `apply_v2.sh`) is what RAM
+and MSTX run since 7 Sep 2026, on the owner's rules: `bias_source=1h` -- the
+1-hour SuperTrend IS the trend, its sign picks the side (`side_mode=both`; R
+and D stay on the Trend filter card but do not gate); `first_entry=with_trend`
+-- the first lot opens on the first 1-minute candle in the trend's own colour
+on the trend's side of a 1-minute EMA20 (`entry_ma=ema`; VWAP is the option
+-- measured: flat at the open, VWAP waits 16-23 min and can lock a session
+out, EMA20 waits 6-9 and never does; after a flip both fire within a minute),
+never on a counter-trend candle; rungs of one 15-minute ATR, every lot the
+same dollar size, at most 20% of equity over 8 rungs; and
+`reversal_mode=reverse` -- the moment the 1h trend goes the other way (known
+at the close of the 1h bar, ~1 min after the hour), at any depth with no
+cooldown, every lot closes at the market through `close_lots` (chased if it
+does not print) and the ladder re-opens on the new side at the SAME size, one
+quote-pegged entry per closed lot (share for share, each with its own
+take-profit; the queue lives on the ledger, so a restart mid-flip carries on;
+any lot that never re-opens raises a flag that stays). The flip waits for a
+sane book (`reverse_max_spread_pct`, 0.5% of mid) and needs a borrow: the
+engine asks Alpaca each session whether the name can be sold short (shown as
+`shortable`), and a long ladder on a name with no borrow flattens instead of
+going short and says so. Alpaca cannot cross a position through zero in one
+order, which is why it is close-then-open; the size is the whole ladder,
+never one lot. A positioned ladder flips at any hour; a FLAT ladder's first
+lot still waits for the 09:35-15:30 window (Glenn's call to widen it).
+Trend bars (1h / 4h / seeded 1m history) are pulled split-adjusted: they feed
+indicators, never order prices. Basket closes book their fills
+deepest-underwater-first with a `why`; they never use `flatten_all`.
+`flatten` is the researched staged unwind (half on the 1h flip at depth >=4,
+the rest only if the 4h regime agrees 4h later). Replays in
+`research/ladder_v2/`; ranked by P/L per $ of drawdown, never by profit.
 
 ## Ground truth, in order
 
@@ -181,6 +216,15 @@ open inventory and its age alongside it, because that is where the risk is.
 - Market data for live trading uses `adjustment="raw"`. Anything **historical**
   (screener, backtest) must use `adjustment="split"` or reverse-split ETFs read
   as enormous fake trends.
+- **Bars and ticks are on different price scales.** Bars can be split-adjusted;
+  the `trades` and `quotes` endpoints take no adjustment parameter and always
+  serve what actually printed. On a name that later reverse-split, an adjusted
+  $11.68 bar and a raw $1.25 bid are the same instant, and differencing them
+  invents losses far larger than the account could take. Micro-caps reverse-split
+  constantly, so this is the normal case, not an edge case. Convert with
+  `tape.split_ratio()`, which measures the factor from the data rather than
+  looking it up. The same trap silently corrupts any spread or slippage figure
+  expressed as a PERCENT of price.
 - Alpaca caps `activities` page size at 100. It is paginated in `broker.py`.
 - `client_order_id` encodes the lot: `en-<lot>` and `tp-<lot>[-<seq>]`. Early
   orders have no `-seq`. Parse with `journal.lot_from_coid`, never by splitting

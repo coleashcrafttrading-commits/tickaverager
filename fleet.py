@@ -159,6 +159,15 @@ class Fleet:
         self.quotes: dict[str, dict] = {}
         self.trades: dict[str, dict] = {}
         self.bars: dict[str, dict[str, list]] = {}  # timeframe -> symbol -> bars
+        # Completed 1-minute bars, per symbol, a few days deep. The snapshot in
+        # self.bars is five rows -- enough for "did a bar just close", and
+        # nothing else. SuperTrend needs eleven, a 15-minute DMI(14) needs ~45
+        # blocks (700 bars), the slope estimator wants 100 blocks. For a week
+        # the trend stack was reading five bars, computing "flat", and blocking
+        # every new lot. Seeded once from a range pull; extended from the same
+        # five-row snapshot on every refresh, so steady state costs nothing.
+        self.hist: dict[str, deque] = {}
+        self._hist_seen: dict[str, str] = {}      # symbol -> last bar ts appended
         self.fills: dict[str, list] = {}            # symbol -> today's FILL rows
         self.snap_at = 0.0
         self.snap_error = ""
@@ -261,6 +270,16 @@ class Fleet:
                 self.engines[sym] = Engine(sym, self)
             except Exception as e:
                 self.ev("ERR", f"Could not build the {sym} ladder: {e!r}", sym)
+                continue
+            # the trend stack needs days of 1-minute history from the first
+            # tick; the poller only ever hands over five rows
+            try:
+                n = self.seed_hist(sym)
+                if n < 700:
+                    self.ev("WARN", f"{sym}: only {n} bars of 1-minute history seeded; "
+                                    f"the day bias needs ~700 to be trustworthy", sym)
+            except Exception as e:
+                LOG.warning("%s seed_hist at build: %s", sym, e)
         # anything flagged autostart comes up running -- still in whatever
         # dry/armed state it was left in, which the UI shouts about
         for sym, e in self.engines.items():
@@ -474,6 +493,8 @@ class Fleet:
                 LOG.warning("%s %s bars: %s", sym, tf, e)
                 continue
             self.bars.setdefault(tf, {})[sym] = rows
+            if tf == "1Min":
+                self._extend_hist(sym, rows)
             if not rows:
                 self._bars_due[key] = now + min(dur, 20)
                 continue
@@ -486,11 +507,51 @@ class Fleet:
             else:
                 self._bars_due[key] = ts + dur + 3.5
 
+    def _extend_hist(self, sym: str, rows: list) -> None:
+        """Append only the bars not yet seen; the last row is still forming."""
+        h = self.hist.get(sym)
+        if h is None:
+            h = self.hist[sym] = deque(maxlen=4000)
+        last = self._hist_seen.get(sym, "")
+        for r in rows[:-1]:                       # rows[-1] is still forming
+            t = str(r.get("t") or "")
+            if t and t > last:
+                h.append(r)
+                last = t
+        self._hist_seen[sym] = last
+
+    def seed_hist(self, sym: str, days: int = 5) -> int:
+        """One range pull so the stack has history from the first tick.
+
+        Raw adjustment, same scale as the live snapshot -- these names
+        reverse-split and a mixed series is garbage.
+        """
+        b = self.broker
+        if not b:
+            return 0
+        from datetime import datetime, timedelta, timezone
+        start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            rows = b.bars_range(sym, "1Min", start, adjustment="split")
+        except Exception as e:
+            LOG.warning("%s seed_hist: %s", sym, e)
+            return 0
+        h = self.hist[sym] = deque(maxlen=4000)
+        for r in rows:
+            h.append(r)
+        self._hist_seen[sym] = str(rows[-1].get("t")) if rows else ""
+        return len(h)
+
+    def hist_of(self, symbol: str) -> list:
+        return list(self.hist.get(symbol) or [])
+
     def _refresh_htf_bars(self, syms: list[str]) -> None:
         """1Hour and 4Hour bars for the trend stack, ~once a minute.
 
         One range pull per timeframe for the whole fleet (paged by time, not a
-        shared row limit). Live data stays adjustment=raw, same as 1-minute.
+        shared row limit). Split-adjusted: these bars feed indicators, never
+        order prices -- a reverse split inside the window would otherwise
+        print as a 3xATR move and flip a full-size ladder on nothing.
         """
         b = self.broker
         if not b or not syms:
@@ -501,13 +562,18 @@ class Fleet:
         self._htf_due = now + 60.0
         from datetime import datetime, timedelta, timezone
         utc = datetime.now(timezone.utc)
-        windows = (
+        windows = [
             ("1Hour", (utc - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ")),
             ("4Hour", (utc - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")),
-        )
+        ]
+        # daily bars only feed the once-a-session design check and the optional
+        # gap trigger, so hourly is plenty
+        if now >= getattr(self, "_day_due", 0.0):
+            self._day_due = now + 3600.0
+            windows.append(("1Day", (utc - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")))
         for tf, start in windows:
             try:
-                data = b.bars_multi_range(syms, tf, start)
+                data = b.bars_multi_range(syms, tf, start, adjustment="split")
             except Exception as e:
                 LOG.warning("HTF %s bars: %s", tf, e)
                 continue
@@ -759,7 +825,10 @@ class Fleet:
                 "exchange": a.get("exchange", ""), "price": px, "bid": bid, "ask": ask,
                 "fractionable": bool(a.get("fractionable")),
                 "shortable": bool(a.get("shortable")),
-                "easy_to_borrow": bool(a.get("easy_to_borrow")),
+                # easy_to_borrow is deprecated by Alpaca (sunset 2026-09-22); borrow_status replaces it
+                "easy_to_borrow": bool(a.get("easy_to_borrow") or a.get("borrow_status") == "easy_to_borrow"),
+                "borrow_status": a.get("borrow_status") or ("easy_to_borrow" if a.get("easy_to_borrow") else ""),
+                "overnight_tradable": a.get("overnight_tradable"),
                 "in_fleet": a["symbol"] in self.engines}
 
     # -------------------------------------------------------- aggregation

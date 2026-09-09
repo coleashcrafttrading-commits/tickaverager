@@ -96,6 +96,10 @@ class ShortBroker:
 
 def build(side="long", lots=(), broker_qty=0, bias="", **over):
     cfg = dict(engine.TICKER_DEFAULTS)
+    # this test proves the SHORT side mirrors the long one. It is not a test
+    # of sizing, so pin the size mode rather than inherit whatever the
+    # ladder default is this month.
+    cfg["size_mode"] = "fixed"
     cfg.update({"symbol": "TEST", "dry_run": False, "shares_per_lot": 100,
                 "take_profit": 0.10, "add_distance": 0.10,
                 "auto_reconcile": True, "trend_filter": False})

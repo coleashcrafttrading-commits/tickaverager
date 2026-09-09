@@ -3,8 +3,7 @@
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, dur, go,
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, money0, sgn, pct, px, dur, go,
 } from "../core.js";
 import { ChartPanel } from "../chartpanel.js";
 import { STRATEGY_FIELDS, formHTML, formPatch } from "../fields.js";
@@ -77,6 +76,9 @@ function mountLive(sym) {
       </div>
       <div>
         ${card("Money", `<div class="stats" id="tkMoney"></div>`)}
+        ${card("Trend filter", `<div class="stats" id="tkTrendStats"></div>
+          <div style="margin-top:12px" id="tkTrend"></div>`,
+          `<span class="faint">R may exist · D may add · M drives the unwind</span>`)}
         ${card("Activity", `<div class="log" id="tkLog"></div>`, "", { flush: true })}
       </div>
     </div>`;
@@ -184,6 +186,40 @@ function paintLive() {
         <td class="num">${sgn(pl)}</td>
         <td style="text-align:right">${sell}</td></tr>`;
     }), `Flat — no open lots on ${s.symbol}.`);
+
+  // the three-layer filter. For a week it read "flat" on five bars and
+
+  // nothing on this page showed it; now the stack, the bar counts and the
+
+  // block reason are all here.
+
+  const tr = s.trend || {};
+
+  const tone = (b) => (b === "long" ? "up" : b === "short" ? "down" : "faint");
+
+  if (el("tkTrendStats")) el("tkTrendStats").innerHTML =
+
+    stat("Bias", `<span class="${tone(tr.bias)}">${esc(tr.bias || "—")}</span>`,
+
+         s.block_reason ? esc(s.block_reason) : "clear to trade")
+
+    + stat("R · D · M", `${tr.R ?? "—"} · ${tr.D ?? "—"} · ${tr.M ?? "—"}`, "regime · day bias · trend-change")
+
+    + stat("15m slope t", tr.t15 == null ? "—" : Number(tr.t15).toFixed(2), tr.S == null ? "" : `S=${Number(tr.S).toFixed(2)}`)
+
+    + stat("15m ATR", tr.atr15 == null ? "—" : "$" + Number(tr.atr15).toFixed(3), `${tr.bars_1m ?? 0} bars of history`);
+
+  if (el("tkTrend")) el("tkTrend").innerHTML = tableHTML(
+
+    ["Layer", "Timeframe", "Params", "Last", "Bias", ""],
+
+    (tr.stack || []).map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="faint">${esc(x.timeframe)}</td>
+
+      <td class="faint">${esc(x.params)}</td><td class="num">${x.last == null ? "—" : esc(String(x.last))}</td>
+
+      <td class="${tone(x.bias)}">${esc(x.bias)}</td><td class="faint">${esc(x.note || "")}</td></tr>`),
+
+    "No trend data yet — the engine has not refreshed.");
 
   el("tkMoney").innerHTML =
     stat("Position", money(A.market_value), `${A.qty} sh`)

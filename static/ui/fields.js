@@ -48,7 +48,19 @@ export const STRATEGY_FIELDS = [
 
   { legend: "Entry", fields: [
     { k: "first_entry", t: "sel", label: "First entry",
-      opts: [["red_bar", "on a red bar close"], ["immediate", "immediately"]] },
+      opts: [["with_trend", "first candle in the trend's colour, on the trend's side of the MA"],
+             ["red_bar", "on a red bar close"], ["immediate", "immediately"]],
+      hint: "<b>with_trend</b>: a long trend's candles are mostly green, so the ladder "
+          + "catches the move on the first green close above the MA; a short trend on the "
+          + "first red close below it. Adds are unchanged: one rung against the last fill." },
+    { k: "entry_ma", t: "sel", label: "The MA that candle must clear",
+      opts: [["vwap", "session VWAP (from 04:00 ET)"], ["ema", "1-minute EMA"]] },
+    { k: "entry_ma_period", t: "num", label: "EMA length (1-minute bars)", step: 1, min: 2 },
+    { k: "bias_source", t: "sel", label: "What decides the side",
+      opts: [["1h", "the 1-hour SuperTrend: its sign is the side, its flip is the reversal"],
+             ["rd", "R AND D: 4h regime and day bias must agree"]],
+      hint: "<b>1h</b> is the owner's rule and what the v2 profile applies. R and D stay "
+          + "on the Trend filter card either way." },
     { k: "bar_size", t: "sel", label: "Bar size",
       opts: ["1Min", "2Min", "3Min", "5Min", "10Min", "15Min", "30Min", "1Hour"]
         .map((x) => [x, x]) },
@@ -77,11 +89,61 @@ export const STRATEGY_FIELDS = [
           + "this process dying. Strongly recommended if you use trail mode." },
   ]},
 
+  { legend: "Ladder v2 — calculated adds and the cap", fields: [
+    { k: "add_k", t: "num", label: "Rung distance (x 15m ATR)", step: 0.05, min: 0.1,
+      hint: "With add_mode = atr, the next rung sits this many 15-minute ATRs beyond "
+          + "the last fill, never tighter than 2x the spread. The fixed $0.10 rung was "
+          + "3x the one-minute range — inside the noise — and built depth 29." },
+    { k: "add_floor", t: "num", label: "Rung floor ($)", step: 0.01, min: 0.01 },
+    { k: "f_ladder", t: "num", label: "Max share of equity in one ladder", step: 0.01, min: 0,
+      hint: "0 = off. 0.20 means this ladder may hold at most 20% of live equity in "
+          + "cost basis; the last lot is truncated to fit, never skipped." },
+    { k: "n_target", t: "num", label: "Rungs the cap is spread over", step: 1, min: 1 },
+    { k: "regime_band_atr", t: "num", label: "Regime band (x 4h ATR)", step: 0.05, min: 0,
+      hint: "The 4h regime only flips when the close clears the EMA by this many ATRs. "
+          + "0 reproduces the raw sign, which flipped 16 times in two weeks on RAM." },
+    { k: "vwap_hysteresis", t: "num", label: "VWAP side hysteresis (bars)", step: 1, min: 1 },
+    { k: "depth_by_strength", t: "bool", label: "Halve depth when the 15m slope opposes",
+      hint: "Helped MSTX, hurt RAM in replay. Per ticker; validate before enabling." },
+  ]},
+
+  { legend: "Ladder v2 — the staged unwind", fields: [
+    { k: "reversal_mode", t: "sel", label: "When the trend turns against the ladder",
+      opts: [["off", "hold — per-lot take-profits only"],
+             ["flatten", "stage 1: close the deepest half on the 1h flip; stage 2: close the rest if the 4h regime agrees 4h later"],
+             ["reverse", "flip: the moment the 1h trend goes the other way, close the whole ladder at the market and re-open it on the new side at the same size, lot for lot"]],
+      hint: "<b>reverse</b> is the owner's rule: no depth minimum, no second timeframe — "
+          + "the 1h flip is the signal, the loss is taken, and the ladder is banking on "
+          + "the other direction. The re-entry is one market order per closed lot, each "
+          + "with its own take-profit; adds continue afterwards. <b>flatten</b> is the "
+          + "researched staged unwind (half on the 1h flip at depth ≥4, the rest only if "
+          + "the 4h regime agrees 4h later)." },
+    { k: "unwind_min_lots", t: "num", label: "Stage 1 only at this depth (flatten)", step: 1, min: 1 },
+    { k: "unwind_stage_hours", t: "num", label: "Hours between stage 1 and 2", step: 0.5, min: 0.5 },
+    { k: "unwind_cooldown_h", t: "num", label: "Cooldown after stage 1 (h)", step: 1, min: 1 },
+  ]},
+
+  { legend: "Ladder v2 — basket exits from the average", fields: [
+    { k: "basket_tp_enabled", t: "bool", label: "Basket take-profit from the average",
+      hint: "Fires at avg + max(take_profit, 0.5 x 1h ATR). Measured inert: by the time "
+          + "price is there the lower lots have left through their own TPs." },
+    { k: "basket_stop_enabled", t: "bool", label: "Basket stop from the average",
+      hint: "Sits one buffer below the rung that would fill lot n_target, so it fires "
+          + "only after the cap has bound and price keeps going. Net negative in every "
+          + "recovering window measured; it exists to bound the tail with a hard number." },
+    { k: "basket_stop_atr", t: "num", label: "Stop buffer (x 1h ATR)", step: 0.1, min: 0 },
+    { k: "ladder_max_bars", t: "num", label: "Time stop (session bars, 0 = off)", step: 10, min: 0,
+      hint: "Removes the multi-day tail (the 8.8-day holds) at the cost of most of the "
+          + "recovering-window profit. Buys capital velocity, not P/L." },
+  ]},
+
   { legend: "Trend filter", fields: [
     { k: "trend_filter", t: "bool", label: "Require trend agreement",
-      hint: "A SuperTrend + EMA stack across 4h / 1h / 1m must agree before an entry "
-          + "is allowed. <b>Not yet validated by any backtest</b> — the backtester "
-          + "does not model it." },
+      hint: "Three layers: <b>R</b> the 4h regime (may a ladder exist on this side), "
+          + "<b>D</b> the day bias — session VWAP side and 15m DMI (may it add now), "
+          + "<b>M</b> the 1h trend-change (drives the unwind, not the gate). "
+          + "Replayed over the June and July crashes: R AND D held the worst open "
+          + "drawdown to about $2k where the ungated ladder lost $74k." },
     { k: "trend_flat_blocks_entries", t: "bool", label: "Block entries when flat" },
     { k: "side_mode", t: "sel", label: "Direction",
       opts: [["auto", "long only (follows a long bias)"],

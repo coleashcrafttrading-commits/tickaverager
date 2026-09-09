@@ -648,6 +648,84 @@ def pine_for(rank: int):
     return {"ok": True, **r}
 
 
+# =========================================================== momentum scanner
+@app.get("/api/scanner")
+def scanner_day(date: str = "", refresh: int = 0):
+    """The 09:30 watchlist for one session, exactly as it was knowable then.
+
+    Five criteria: price band, gap, relative volume, the intraday move, and
+    float. Float comes from SEC filings keyed on the date they were FILED, so
+    a share count cannot be used before it was public.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    import scanner as _sc
+    import ross as _ross
+    f = _P(__file__).resolve().parent / "research" / "scanner" / "daily_table.json"
+    if not f.exists():
+        raise HTTPException(404, "no daily table yet -- run scanner.py")
+    table = _json.loads(f.read_text(encoding="utf-8"))
+    dates = sorted({r["d"] for recs in table.values() for r in recs})
+    # Default to the most recent session that actually produced survivors. The
+    # newest day is often a partial one with nothing through the float gate, and
+    # landing on an empty table reads as a broken page rather than a quiet
+    # market. An explicit ?date= is always honoured, empty or not.
+    d = date or (dates[-1] if dates else "")
+    if d not in dates:
+        raise HTTPException(404, "no session data for %s" % d)
+    if not date:
+        for cand in reversed(dates[-15:]):
+            probe = _scan_one(table, cand, _ross_cfg())
+            if probe["survived"]:
+                d = cand
+                break
+    cfg = _ross_cfg()
+    res_all = _scan_one(table, d, cfg)
+    return {"ok": True, "date": d, "dates": dates[-120:], **res_all}
+
+
+def _ross_cfg():
+    import ross as _ross
+    return _ross.scanner_cfg()
+
+
+def _scan_one(table: dict, d: str, cfg: dict) -> dict:
+    import scanner as _sc
+    cands = _sc.premarket_candidates(table, d, cfg)
+    cands = [r for r in cands
+             if r.get("open_raw") is not None
+             and cfg["min_price"] <= r["open_raw"] <= cfg["max_price"]
+             and r["gap_pct"] >= cfg["min_gap_pct"]]
+    before = len(cands)
+    cands = _sc.attach_float(cands, d, cfg)
+    res = _sc.float_filter(cands, d, table, cfg)
+    return {"gapped": before, "survived": res["after"],
+            "regime": res["regime"], "float_max": res["float_max"],
+            "dropped": res["dropped"], "criteria": cfg,
+            "candidates": res["candidates"][:40]}
+
+
+@app.get("/api/scanner/backtest")
+def scanner_backtest():
+    """The most recent replication run, if one has been produced."""
+    import json as _json
+    from pathlib import Path as _P
+    d = _P(__file__).resolve().parent / "research" / "ross"
+    runs = sorted(d.glob("run_*.json"), key=lambda x: x.stat().st_mtime)
+    if not runs:
+        return {"ok": True, "run": None}
+    r = _json.loads(runs[-1].read_text(encoding="utf-8"))
+    days = r.get("days") or []
+    trades = [t for x in days for t in (x.get("trades") or [])]
+    return {"ok": True, "file": runs[-1].name, "capital": r.get("capital"),
+            "final": r.get("final"), "curve": r.get("curve"),
+            "baseline_r": r.get("baseline_r"), "params": r.get("params"),
+            "days": [{"date": x["date"], "pl": x["pl"], "equity": x["equity_end"],
+                      "n": len(x.get("trades") or []),
+                      "watchlist": x.get("watchlist")} for x in days],
+            "trades": trades[-300:]}
+
+
 # =========================================================== AI indicators
 @app.get("/api/indicators/custom")
 def indicators_custom():

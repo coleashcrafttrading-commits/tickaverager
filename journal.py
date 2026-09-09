@@ -101,7 +101,7 @@ def record_open(engine: Any, lot: Any, why: str = "") -> None:
 
 
 def record_close(engine: Any, lot: Any, shares: int, price: float,
-                 realized: float, partial: bool) -> None:
+                 realized: float, partial: bool, why: str = "") -> None:
     cfg = engine.cfg
     held = _hold_seconds(lot.entry_time)
     append({
@@ -113,6 +113,7 @@ def record_close(engine: Any, lot: Any, shares: int, price: float,
         "exit_price":  round(float(price), 4),
         "tp_price":    round(float(lot.tp_price), 4),
         "realized":    round(float(realized), 4),
+        "why":         why,
         "hold_seconds": held,
         "entry_time":  lot.entry_time,
         "ladder_lots": len(engine.ledger.open_lots),

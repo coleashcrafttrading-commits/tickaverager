@@ -9,3 +9,9 @@ _jscheck.js
 ops/
 reports/
 _backup_*/
+
+# research data caches: tick/tape/float/news snapshots and daily tables (GBs) -- never in git
+research/ross/
+research/float/
+research/news/
+research/scanner/

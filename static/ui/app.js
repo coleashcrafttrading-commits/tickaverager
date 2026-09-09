@@ -13,6 +13,7 @@ import "./views/backtest.js";
 import "./views/performance.js";
 import "./views/tester.js";
 import "./views/research.js";
+import "./views/scanner.js";
 import "./views/strategies.js";
 import "./views/risk.js";
 import "./views/agents.js";
@@ -61,6 +62,7 @@ function paintRail() {
     + item("performance", "Performance", "◧")
     + item("strategies", "Strategies", "◇")
     + item("research", "Research", "◭")
+    + item("scanner", "Scanner", "◉")
     + item("risk", "Risk", "◎")
     + `<div class="nav-label">System</div>`
     + item("agents", "Agents", "◈")

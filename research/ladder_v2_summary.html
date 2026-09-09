@@ -1,0 +1,262 @@
+<title>The Finite Ladder</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F3F5F7;
+    --paper: #FFFFFF;
+    --ink: #1B2733;
+    --muted: #5C6B7A;
+    --rule: #D6DCE2;
+    --long: #0F766E;
+    --long-soft: #D7F0EC;
+    --stage: #B45309;
+    --stage-soft: #FBE9D3;
+    --loss: #B91C1C;
+    --loss-soft: #F9DEDE;
+    --code: #EEF1F4;
+    --display: "Fraunces", Georgia, "Times New Roman", serif;
+    --body: "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0F1418; --paper: #161C22; --ink: #E6EBEF; --muted: #8B98A5; --rule: #2A343E;
+      --long: #2DD4BF; --long-soft: #123B37; --stage: #F59E0B; --stage-soft: #3D2A0A;
+      --loss: #F87171; --loss-soft: #3F1616; --code: #1C242C;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0F1418; --paper: #161C22; --ink: #E6EBEF; --muted: #8B98A5; --rule: #2A343E;
+    --long: #2DD4BF; --long-soft: #123B37; --stage: #F59E0B; --stage-soft: #3D2A0A;
+    --loss: #F87171; --loss-soft: #3F1616; --code: #1C242C;
+  }
+
+  body { background: var(--ground); color: var(--ink); font-family: var(--body); font-size: 16px;
+         line-height: 1.55; margin: 0; }
+  main { max-width: 72ch; margin: 0 auto; padding: 40px 24px 72px; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: 2.6rem; line-height: 1.1; letter-spacing: -0.01em; }
+  h2 { font-size: 1.5rem; line-height: 1.2; margin-top: 44px; margin-bottom: 12px; }
+  h3 { font-size: 1.1rem; margin-top: 22px; margin-bottom: 6px; }
+  p { margin: 0 0 14px; max-width: 66ch; }
+  .lede { font-size: 1.15rem; color: var(--muted); margin-top: 10px; max-width: 60ch; }
+  .eyebrow { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+             color: var(--muted); margin-bottom: 10px; }
+  .status { display: flex; gap: 10px; flex-wrap: wrap; margin: 22px 0 0; }
+  .pill { font-family: var(--mono); font-size: 0.78rem; padding: 5px 10px; border-radius: 999px;
+          border: 1px solid var(--rule); background: var(--paper); }
+  .pill.long { color: var(--long); border-color: var(--long); background: var(--long-soft); }
+  .pill.stage { color: var(--stage); border-color: var(--stage); background: var(--stage-soft); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+  .tw { overflow-x: auto; margin: 10px 0 6px; }
+  th { text-align: left; font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em;
+       text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 8px 10px 8px 0;
+       border-bottom: 1px solid var(--rule); }
+  td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td.k { font-family: var(--mono); white-space: nowrap; }
+  .good { color: var(--long); } .bad { color: var(--loss); } .warn { color: var(--stage); }
+  .muted { color: var(--muted); }
+
+  figure { margin: 18px 0 8px; }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 8px; max-width: 66ch; }
+  svg text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+  svg .lbl { fill: var(--ink); }
+
+  ol.stages { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+  ol.stages li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; }
+  ol.stages .n { font-family: var(--mono); font-size: 0.8rem; color: var(--long); border: 1px solid var(--long);
+                 border-radius: 6px; text-align: center; padding: 3px 0; }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { font-family: var(--mono); font-size: 0.85rem; background: var(--code); padding: 12px 14px;
+        border-radius: 6px; overflow-x: auto; margin: 8px 0 14px; }
+  .note { border-left: 3px solid var(--stage); padding: 8px 14px; background: var(--paper);
+          border-radius: 0 6px 6px 0; margin: 14px 0; max-width: 66ch; }
+  .note.loss { border-left-color: var(--loss); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 640px) { .split { grid-template-columns: 1fr; } h1 { font-size: 2rem; } }
+  .foot { margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--muted); }
+  a { color: var(--long); }
+  a:focus-visible, .pill:focus-visible { outline: 2px solid var(--long); outline-offset: 2px; }
+</style>
+
+<main>
+  <div class="eyebrow">TickAverager · Alpaca paper PA3ILNUY5E4F · rules as of 7 Sep 2026, 23:30 ET</div>
+  <h1>The Finite Ladder</h1>
+  <p class="lede">A DCA ladder that trades <em>with</em> the 1-hour trend on either side, enters on the trend's own
+    candle, spaces its rungs by volatility, never holds more than a fifth of the account, and flips the whole
+    position the moment that trend turns.</p>
+  <div class="status">
+    <span class="pill long">RAM · 1h trend · flip</span>
+    <span class="pill long">MSTX · 1h trend · flip</span>
+    <span class="pill stage">shorts: no borrow on either name today</span>
+    <span class="pill">cap 20% of equity · 8 rungs</span>
+  </div>
+
+  <h2>What it does, in one pass</h2>
+  <p>The <b>1-hour SuperTrend is the trend</b>. Long trend: the first lot opens on the first green one-minute close
+    above the 1-minute EMA20, with a take-profit <code>$0.10</code> above the fill. Short trend: the first red close
+    below it, sold short, with a buy-back <code>$0.10</code> below. If price moves one 15-minute ATR <em>against</em>
+    the last fill, add another lot, up to eight rungs or <code>20%</code> of equity. Each lot leaves through its own
+    take-profit. <b>The moment the 1-hour trend goes the other way, every lot closes at the market and the ladder
+    re-opens on the new side at the same size, lot for lot</b> — the loss is taken; the bet is the other direction.</p>
+
+  <h2>The trend card — three layers, one in charge</h2>
+  <div class="tw"><table>
+    <tr><th>Layer</th><th>Reads</th><th>Role in this profile</th><th>Setting</th></tr>
+    <tr><td class="k">M · the trend</td><td>1-hour SuperTrend, closed bars</td>
+        <td><b>Picks the side and fires the flip.</b> Known at the close of the 1h bar, about a minute after the hour.</td>
+        <td class="k">ATR10 × 3</td></tr>
+    <tr><td class="k">R · regime</td><td>4-hour close vs EMA50 ± 0.25 ATR</td>
+        <td>Shown for context; does not gate.</td>
+        <td class="k">band 0.25 × ATR</td></tr>
+    <tr><td class="k">D · day bias</td><td>Session VWAP side (5 closes) and 15-minute DMI</td>
+        <td>Shown for context. VWAP is the alternative line for the first candle.</td>
+        <td class="k">VWAP from 04:00 ET · DMI(14)</td></tr>
+  </table></div>
+  <p class="muted">Why the EMA20 and not VWAP for the entry line: after a flip both fire within a minute, but when the
+    ladder is flat at the open a green close above VWAP waits 16–23 minutes on average and never comes in some
+    sessions, while the EMA20 waits 6–9 and never locks a session out. The 4h EMA50 was ruled out — it would be the
+    regime filter by another name. Existing lots always keep their exits; the trend only ever decides <em>new</em> lots
+    and the flip. The card shows the bar count it is reading from, whether the name can be shorted today, and the
+    exact reason a lot is blocked.</p>
+
+  <h2>The ladder</h2>
+  <figure>
+    <svg viewBox="0 0 640 300" width="100%" role="img" aria-label="Eight rungs spaced one ATR apart below the first fill, each with its own take-profit, capped at 20 percent of equity">
+      <line x1="60" y1="20" x2="60" y2="280" stroke="var(--rule)" stroke-width="1"/>
+      <text x="8" y="24" class="lbl">price</text>
+      <g font-family="IBM Plex Mono" >
+        <line x1="60" y1="60" x2="420" y2="60" stroke="var(--long)" stroke-width="2"/>
+        <text x="428" y="64" class="lbl">lot 1 · first green close above EMA20</text>
+        <line x1="60" y1="46" x2="180" y2="46" stroke="var(--long)" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="186" y="50">TP +$0.10</text>
+        <line x1="60" y1="96" x2="420" y2="96" stroke="var(--long)" stroke-width="2"/>
+        <text x="428" y="100" class="lbl">lot 2 · −1 ATR15</text>
+        <line x1="60" y1="82" x2="180" y2="82" stroke="var(--long)" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="60" y1="132" x2="420" y2="132" stroke="var(--long)" stroke-width="2"/>
+        <text x="428" y="136" class="lbl">lot 3 · −1 ATR15</text>
+        <line x1="60" y1="118" x2="180" y2="118" stroke="var(--long)" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="60" y1="168" x2="420" y2="168" stroke="var(--long)" stroke-width="2"/>
+        <text x="428" y="172" class="lbl">lot 4</text>
+        <line x1="60" y1="204" x2="420" y2="204" stroke="var(--long)" stroke-width="1.2" stroke-opacity="0.6"/>
+        <line x1="60" y1="240" x2="420" y2="240" stroke="var(--long)" stroke-width="1.2" stroke-opacity="0.6"/>
+        <text x="428" y="244" class="lbl">… lot 8 · last rung</text>
+        <line x1="60" y1="262" x2="600" y2="262" stroke="var(--loss)" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <text x="66" y="278" fill="var(--loss)">cap: 20% of equity in cost basis — the last lot is truncated, never skipped</text>
+        <line x1="40" y1="60" x2="40" y2="96" stroke="var(--muted)" stroke-width="1"/>
+        <text x="8" y="82" transform="rotate(-90 8 82)" font-size="10">1 × ATR15</text>
+      </g>
+    </svg>
+    <figcaption>The long ladder; a short one is its mirror — first red close below the EMA20, rungs one ATR
+      <em>above</em> each fill, buy-backs below. Rung spacing is one 15-minute ATR, floored at twice the spread,
+      recomputed every bar: about $0.14 on RAM and $0.25 on MSTX today. Every lot is the same dollar size:
+      <code>lot_dollars = 0.20 × equity ÷ 8 ≈ $1,260</code>.</figcaption>
+  </figure>
+
+  <h2>The flip</h2>
+  <ol class="stages">
+    <li><span class="n">1</span><div><b>The 1-hour trend turns against the ladder</b> — at any depth, with no
+      cooldown beyond SuperTrend's own hysteresis (it can turn at most once per closed hour). As soon as the book is
+      a real price (spread no wider than 0.5% of mid — RAM's overnight book has been 5.8% wide), every lot's
+      take-profit is cancelled and one marketable order closes the whole basket through the bid (the ask for a
+      short). If the book moves through it before it prints, it is re-priced and resent, three times at most.</div></li>
+    <li><span class="n">2</span><div><b>The moment Alpaca is flat</b>, the ladder re-opens on the new side at the
+      same size: one entry per closed lot, share for share, priced at the quote so it fills now, each with its own
+      take-profit. The 20% cap still binds on the way back in. The re-entry runs outside the 09:35–15:30 new-lot
+      window too — it is the same risk the ladder held a minute earlier — and waits for 04:00 only if the name cannot
+      trade overnight. Alpaca will not cross a position through zero in one order, which is why it is close-then-open;
+      the size is the whole ladder, never one lot.</div></li>
+    <li><span class="n">3</span><div><b>If the trend turns back</b> before the re-opening is complete, what is left of
+      the queue is dropped and the lots already re-opened flip again on the next tick — nothing is stranded. A re-entry
+      that dies unfilled goes back to the head of the queue, three tries at most; anything that never re-opens raises a
+      flag that stays on the dashboard. Adds continue afterwards under the normal rules.</div></li>
+  </ol>
+  <div class="note">One asymmetry to decide: a ladder that is <em>positioned</em> flips at any hour, but a ladder
+    that is <em>flat</em> still waits for the 09:35–15:30 window to open its first lot. 65% of RAM's trend turns and
+    40% of MSTX's print outside regular hours, most of RAM's into the 05:00 book. The literal reading — enter whenever
+    the 1-hour turns, pre-market included — is a one-line change to <code>session_start</code> /
+    <code>session_end</code>.</div>
+  <div class="note loss"><b>Neither RAM nor MSTX can be sold short on this paper account today.</b> Alpaca reports
+    <code>shortable = false</code> and no borrow for both (the engine asks every session and shows the answer on the
+    ticker page). Until a borrow exists, the short leg cannot execute: a long ladder still closes the moment the
+    1-hour trend turns down, and re-enters long on the first green close above the EMA20 when it turns up again — but
+    nothing is sold short in between, and a short trend at the open is reported as “cannot be sold short at Alpaca
+    today — waiting flat”. Two ways to get the short side: a name Alpaca lends (the engine refuses shorts on one it
+    does not), or the paired inverse ETF as the short leg (MSTZ for MSTX) — the latter is not built.</div>
+
+  <h2>What the replays said</h2>
+  <h3>The rungs and the cap</h3>
+  <div class="tw"><table>
+    <tr><th>Window</th><th>Rules</th><th class="num">Total P/L</th><th class="num">Worst open DD</th><th class="num">DD / equity</th><th class="num">Peak $</th></tr>
+    <tr><td>MSTX Feb → Sep<br><span class="muted">the window every filter lost</span></td><td>old, unfiltered</td>
+        <td class="num bad">−48,247</td><td class="num bad">−125,553</td><td class="num bad">251%</td><td class="num">152,274</td></tr>
+    <tr><td></td><td>old rules, regime filter</td><td class="num bad">−17,371</td><td class="num bad">−50,443</td><td class="num bad">101%</td><td class="num">101,723</td></tr>
+    <tr><td></td><td><b>ATR rungs + cap</b></td><td class="num good">+1,164</td><td class="num">−5,400</td><td class="num good">11%</td><td class="num">9,890</td></tr>
+    <tr><td>RAM Jun 24 → Sep<br><span class="muted">the July crash</span></td><td>old, unfiltered</td>
+        <td class="num bad">−43,050</td><td class="num bad">−74,323</td><td class="num bad">149%</td><td class="num">107,996</td></tr>
+    <tr><td></td><td><b>ATR rungs + cap</b></td><td class="num good">+431</td><td class="num">−1,480</td><td class="num good">3%</td><td class="num">9,949</td></tr>
+  </table></div>
+
+  <h3>The owner's rule: the 1-hour trend, both sides, the flip</h3>
+  <div class="tw"><table>
+    <tr><th>Window</th><th>Rules</th><th class="num">Total P/L</th><th class="num">Worst open DD</th><th class="num">P/L per $ DD</th><th class="num">Flips</th><th class="num">Flip P/L</th></tr>
+    <tr><td>RAM Jun 24 → Sep<br><span class="muted">52 sessions, stock −50%, trend turned 26×</span></td><td>long only, no flip</td>
+        <td class="num good">+431</td><td class="num">−1,480</td><td class="num">0.29</td><td class="num">—</td><td class="num">—</td></tr>
+    <tr><td></td><td>1h trend, both sides, no flip</td><td class="num bad">−284</td><td class="num bad">−7,697</td><td class="num bad">−0.04</td><td class="num">—</td><td class="num">—</td></tr>
+    <tr><td></td><td>1h trend, both sides, flip, red-bar entry</td><td class="num bad">−218</td><td class="num">−2,120</td><td class="num bad">−0.10</td><td class="num">26</td><td class="num bad">−15,583</td></tr>
+    <tr><td></td><td><b>1h trend, both sides, flip, trend entry</b> (live)</td><td class="num bad">−597</td><td class="num">−2,120</td><td class="num bad">−0.28</td><td class="num">25</td><td class="num bad">−15,488</td></tr>
+    <tr><td>MSTX Jun 1 → Sep<br><span class="muted">68 sessions, stock −38%, trend turned 33×</span></td><td>long only, no flip</td>
+        <td class="num good">+2,588</td><td class="num">−1,927</td><td class="num good">1.34</td><td class="num">—</td><td class="num">—</td></tr>
+    <tr><td></td><td>1h trend, both sides, no flip</td><td class="num bad">−6,726</td><td class="num bad">−14,139</td><td class="num bad">−0.48</td><td class="num">—</td><td class="num">—</td></tr>
+    <tr><td></td><td>1h trend, both sides, flip, red-bar entry</td><td class="num good">+2,909</td><td class="num good">−1,477</td><td class="num good">1.97</td><td class="num">33</td><td class="num bad">−19,728</td></tr>
+    <tr><td></td><td><b>1h trend, both sides, flip, trend entry</b> (live)</td><td class="num good">+3,317</td><td class="num good">−1,477</td><td class="num good">2.25</td><td class="num">32</td><td class="num bad">−20,050</td></tr>
+  </table></div>
+  <p class="muted">The flip is what makes two sides survivable: without it a short ladder gets squeezed (MSTX
+    −$14k underwater). With it, on MSTX the live rule beats long-only — +$3,317 against +$2,588 at a <em>smaller</em>
+    worst hole, 2.25 per dollar of drawdown against 1.34: 2,373 closes earned $23.4k of $0.10 wins and 32 flips gave
+    back $20.0k. On RAM it loses — −$597 against +$431: 25 flips cost $15.5k and the ladders earned $14.9k. The
+    trend-coloured entry beat a red-bar entry on MSTX and lost on RAM. The 1-hour trend turns about 2.4–2.5 times a
+    week per name; after a turn the new direction continues 47–58% of the time. Ranked by P/L per dollar of drawdown,
+    never by profit. The replay fills at the touch, knows nothing of halts, partials or borrow, and assumes the short
+    side exists — on this account today it does not. These numbers rank rules. They do not forecast dollars.</p>
+
+  <h2>More profit, or less?</h2>
+  <div class="split">
+    <div>
+      <h3 class="good">MSTX: more, with a smaller hole</h3>
+      <p>+$3.3k against +$2.6k long-only, worst open drawdown −$1.5k against −$1.9k. The two-sided ladder closes nine
+        times as many $0.10 lots; the flips eat most of that, not all of it.</p>
+    </div>
+    <div>
+      <h3 class="bad">RAM: less</h3>
+      <p>−$0.6k against +$0.4k. Same mechanism, thinner name: each flip pays the spread both ways and the ladder's
+        open loss, and RAM's turns cluster in the thinnest book of the day.</p>
+    </div>
+  </div>
+  <p>Everything above assumes a borrow. The dial for more absolute profit is <code>f_ladder</code> (0.30 gave about
+    50% more P/L at the same efficiency). A ticker can go back to the researched staged unwind
+    (<code>./apply_v2.sh SYM flatten</code>) or to long-only (<code>side_mode=auto</code>) with one command.</p>
+
+  <h2>Where to look</h2>
+  <pre>.venv/Scripts/python agentctl.py health          # every ladder, the trend, block reasons
+.venv/Scripts/python agentctl.py stats --days 7   # realized from the journal (Alpaca is truth)
+./apply_v2.sh RAM                                 # the live profile: 1h trend, both sides, flip
+./apply_v2.sh RAM flatten                         # the researched staged unwind instead of the flip
+.venv/Scripts/python agentctl.py set RAM side_mode=auto --actor glenn   # long-only again
+.venv/Scripts/python agentctl.py set RAM entry_ma=vwap --actor glenn    # VWAP as the entry line</pre>
+  <p>On the dashboard, each ticker page has a <b>Trend filter</b> card: M · R · D, the entry line, the 15-minute ATR,
+    how many bars of history the stack is reading, whether the name can be shorted today, and the exact reason a lot
+    is blocked — including “reversal to short in progress (3 lots to re-open)”.</p>
+
+  <h3>What the first ten sessions have to show</h3>
+  <p>Lots actually open on the trend's first candle. Depth ≤ 8, peak cost ≤ $10k. Every flip logged with the basket's
+    fill, the re-opened lots' fills, and the price 24 hours later; flip cost per week against ladder wins per week.
+    Whether Alpaca ever lends either name. Journal realized within $50 of Alpaca's.</p>
+
+  <div class="foot">Design and research: <code>research/ladder_v2_research.md</code> · replays:
+    <code>research/ladder_v2/</code> (<code>reverse3.json</code> for the owner's rule) · code: <code>trend_v2.py</code>,
+    <code>engine.py</code>, <code>bt_gate.py</code>, <code>bt_reverse3.py</code> · tests: <code>test_reverse.py</code>,
+    <code>test_entry_rule.py</code>, <code>test_unwind.py</code></div>
+</main>
