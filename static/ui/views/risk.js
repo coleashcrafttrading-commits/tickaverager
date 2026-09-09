@@ -8,12 +8,13 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, go,
+  money, money0, sgn, pct, px, go, hashFor,
 } from "../core.js";
 
-let data = null;
-let PROF = null;        // {profiles, fields, groups, defaults}
-let BANK = null;
+let data = null;        // /api/risk -- this account's exposure
+let dataFor = "";       // which account it belongs to
+let PROF = null;        // {profiles, fields, groups, defaults} -- shared library
+let BANK = null;        // shared library
 let editing = null;     // the profile open in the editor
 
 VIEWS.risk = {
@@ -27,6 +28,7 @@ VIEWS.risk = {
   tabs: [["live", "Live exposure"], ["profiles", "Profiles"], ["bank", "Bank"]],
 
   mount(v) {
+    if (dataFor !== S.account) { data = null; dataFor = S.account; }
     const tab = v.tab || "live";
     if (tab === "profiles") return mountProfiles();
     if (tab === "bank") return mountBank();
@@ -300,7 +302,7 @@ function render() {
     n.push(`<div class="note warn"><b>No portfolio guardrails are set.</b>
       Nothing caps total exposure, protects a cash reserve, or halts the fleet on an
       account-level loss. Each ladder is limited only by its own max lots —
-      <a href="#/settings">set them</a>.</div>`);
+      <a href="${hashFor({ kind: "settings" })}">set them</a>.</div>`);
   }
   if (data.worst_case > a.equity) {
     n.push(`<div class="note bad"><b>Worst case exceeds the account.</b> Every ladder

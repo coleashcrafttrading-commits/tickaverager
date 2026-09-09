@@ -4,17 +4,23 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat,
-  money, money0, px, go,
+  money, money0, px, go, hashFor,
 } from "../core.js";
 import { formHTML, formPatch } from "../fields.js";
 
 const st = { q: "", picked: null, info: null, copyFrom: "" };
+let forAcct = "";     // whose fleet the candidate above was checked against
 
 VIEWS.add = {
   title: () => "Add a ticker",
   sub: () => "look one up, size it, connect it",
 
   mount() {
+    if (forAcct !== S.account) {
+      // "in fleet" and the copy-from template are facts about ONE account
+      Object.assign(st, { q: "", picked: null, info: null, copyFrom: "" });
+      forAcct = S.account;
+    }
     el("view").innerHTML = `
       <div class="grid main">
         <div>
@@ -116,7 +122,7 @@ async function pick(sym) {
         ${stat("Fractionable", r.fractionable ? "yes" : "no")}
       </div>
       ${r.in_fleet ? `<div class="note warn" style="margin-top:14px">${r.symbol} is
-        already in the fleet — <a href="#/t/${r.symbol}/settings">open its settings</a>.
+        already in the fleet — <a href="${hashFor({ kind: "ticker", sym: r.symbol, tab: "settings" })}">open its settings</a>.
         </div>` : ""}`;
     if (r.in_fleet) {
       el("aTpl").style.display = el("aCfgCard").style.display = "none";

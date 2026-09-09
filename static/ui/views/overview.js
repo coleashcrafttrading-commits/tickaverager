@@ -9,7 +9,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, go,
+  money, money0, sgn, pct, px, go, acctLabel, acctNumber,
 } from "../core.js";
 
 function banners(ov) {
@@ -100,35 +100,40 @@ VIEWS.overview = {
         ${card("Activity", `<div class="log" id="ovLog"></div>`, "", { flush: true })}
       </div>`;
 
+    // every "everything" action names the account, so nobody arms the wrong one
     el("bAllStart").onclick = () => act(async () => {
+      const who = acctLabel();
       if (!await ask({
-        title: "Start every engine?",
-        body: "Each ladder begins deciding on its own settings. Any ladder that is "
-            + "<b>armed</b> will transmit real orders immediately.",
+        title: `Start every engine in ${esc(who)}?`,
+        body: `Each ladder in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) begins `
+            + `deciding on its own settings. Any ladder that is <b>armed</b> will transmit `
+            + `real orders immediately. Other accounts are untouched.`,
         ok: "Start all",
       })) return;
       const r = await POST("/api/fleet/start_all");
-      toast(`Started ${r.started} engine(s).`, "ok");
+      toast(`${esc(who)}: started ${r.started} engine(s).`, "ok");
     });
     el("bAllStop").onclick = () => act(async () => {
       const r = await POST("/api/fleet/stop_all");
-      toast(`Stopped ${r.stopped}. Resting take-profits stay live at Alpaca.`, "ok");
+      toast(`${esc(acctLabel())}: stopped ${r.stopped}. Resting take-profits stay live at Alpaca.`, "ok");
     });
     el("bAllDisarm").onclick = () => act(async () => {
       const r = await POST("/api/fleet/disarm_all");
-      toast(`${r.disarmed} ladder(s) back to dry run.`, "ok");
+      toast(`${esc(acctLabel())}: ${r.disarmed} ladder(s) back to dry run.`, "ok");
     });
     el("bPanic").onclick = () => act(async () => {
+      const who = acctLabel();
       if (!await ask({
-        title: "Stop and disarm everything?", danger: true, ok: "Panic",
+        title: `Stop and disarm everything in ${esc(who)}?`, danger: true, ok: "Panic",
         requireWord: "PANIC",
-        body: "Every engine stops and every ladder returns to dry run.<br><br>"
-            + "<b>Nothing is sold.</b> Open positions and the take-profits resting "
-            + "against them are left exactly as they are — flattening stays a "
-            + "per-ticker decision.",
+        body: `Every engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) stops and `
+            + `every ladder returns to dry run. Other accounts are untouched.<br><br>`
+            + `<b>Nothing is sold.</b> Open positions and the take-profits resting `
+            + `against them are left exactly as they are — flattening stays a `
+            + `per-ticker decision.`,
       })) return;
       await POST("/api/fleet/panic", { confirm: "PANIC" });
-      toast("Everything stopped and disarmed.", "ok");
+      toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
     });
   },
 

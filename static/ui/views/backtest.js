@@ -29,6 +29,7 @@ let detail = null;       // the full report for the selected row
 let selRow = 0;
 let eq = null;           // EqChart instance
 let resTab = "summary";
+let forAcct = "";        // jobs and results are per account; strategies and code are shared
 
 const PRESETS = {
   "Take profit": { take_profit: "0.05,0.10,0.20,0.30,0.40,0.50" },
@@ -64,6 +65,11 @@ VIEWS.backtest = {
   sub: () => "replay any strategy over real Alpaca history",
 
   mount() {
+    if (forAcct !== S.account) {
+      clearInterval(poll);
+      lastJob = null; detail = null; selRow = 0;
+      forAcct = S.account;
+    }
     const syms = (S.ov?.tickers || []).map((t) => t.symbol);
     el("view").innerHTML = `
       <div class="grid main">
