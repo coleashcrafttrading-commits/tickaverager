@@ -458,6 +458,15 @@ canvas.chart { display: block; width: 100%; }
    input, but a white box around a chart on every click is just noise. */
 canvas.chart, canvas.chart:focus, canvas.chart:focus-visible,
 canvas:focus, canvas:focus-visible { outline: none !important; box-shadow: none !important; }
+
+/* ---- historical trades under the ticker chart: toggles, legend, count ---- */
+.chart-trades { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.chart-trades label { display: inline-flex; gap: 6px; align-items: center;
+                      cursor: pointer; color: var(--text); white-space: nowrap; }
+.chart-trades input[type="checkbox"] { width: auto; margin: 0; padding: 0; }
+/* the fills tooltip: one line per fill, a faint "why" under it */
+.chart-tt > div + div { margin-top: 4px; }
+.chart-tt .faint { font-size: 10.5px; margin-top: 1px; }
 .chart-readout .ro-t { color: var(--faint); margin-right: 5px; }
 .chart-readout .ro-k { color: var(--faint); }
 .chart-readout .ro-v { color: var(--text); }

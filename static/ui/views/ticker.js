@@ -6,10 +6,121 @@ import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, money0, sgn, pct, px, dur, go,
   acctLabel, acctNumber,
 } from "../core.js";
-import { ChartPanel } from "../chartpanel.js";
+import { ChartPanel, matchToBars } from "../chartpanel.js";
 import { STRATEGY_FIELDS, formHTML, formPatch } from "../fields.js";
 
 let panel = null;
+
+/* ---------------------------------------------------- historical trades */
+/* Past fills drawn on the chart so a ticker can be QC'd by eye: an entry and
+   an exit arrow on the candle that contains each fill, and a dashed line
+   joining the two ends of every closed trade. The rows come from
+   /api/ticker/<sym>/trades and are re-matched to the bars every time the
+   chart reloads, so they land on the right candle at any timeframe. The
+   fetch itself is throttled -- the live chart refreshes every 20 s on 1Min
+   and the fills do not change that often -- unless the bars themselves
+   changed, in which case a new fill may have landed. */
+const LS_TRADES = "ta-chart-trades";
+let TR = { data: null, at: 0, key: "" };
+
+const tradesOn = () => {
+  try { return localStorage.getItem(LS_TRADES) !== "0"; } catch (e) { return true; }
+};
+const rememberTradesOn = (on) => {
+  try { localStorage.setItem(LS_TRADES, on ? "1" : "0"); } catch (e) { /* private mode */ }
+};
+const tradesCount = (html) => { const n = el("tkTradesCount"); if (n) n.innerHTML = html; };
+
+/* The panel calls this after every bar load: the first paint, a timeframe or
+   days change, and each quiet live refresh. */
+async function onBars(bars) {
+  const show = el("tkShowTrades");
+  if (!panel || !show) return;
+  if (!show.checked) {
+    panel.setTrades([]); panel.setLinks([]);
+    tradesCount(`<span class="faint">trades hidden</span>`);
+    return;
+  }
+  const key = `${panel.symbol}|${panel.tf}|${panel.days}|${bars.length}`;
+  const fresh = TR.data && TR.key === key && Date.now() - TR.at < 30000;
+  if (!fresh && !TR.busy) {
+    const me = TR;                       // a remount replaces TR; a late answer must not land on it
+    me.busy = true;
+    try {
+      const r = await GET(`/api/ticker/${panel.symbol}/trades?days=${panel.days}`);
+      if (me !== TR) return;
+      TR.data = r; TR.at = Date.now(); TR.key = key;
+    } catch (e) {
+      if (me !== TR) return;
+      tradesCount(`<span class="down">trades unavailable — ${esc(e.message)}</span>`);
+      if (!TR.data) return;              // nothing older to fall back on
+    } finally { me.busy = false; }
+  }
+  applyTrades();
+}
+
+function applyTrades() {
+  const show = el("tkShowTrades");
+  if (!panel || !TR.data || !show || !show.checked) return;
+  const inc = !!(el("tkShowInferred") && el("tkShowInferred").checked);
+  const r = convertTrades(TR.data, panel.bars || [], inc);
+  panel.setTrades(r.marks);
+  panel.setLinks(r.links);
+  tradesCount(`<b>${r.closed}</b> closed · <b>${r.open}</b> open`
+    + (r.off ? ` · <span class="faint">${r.off} fill${r.off > 1 ? "s" : ""} outside the loaded bars</span>` : "")
+    + (r.dropped && !inc ? ` · <span class="faint">${r.dropped} bookkeeping row${r.dropped > 1 ? "s" : ""} hidden</span>` : ""));
+}
+
+/* API rows -> chart markers and links. A marker's side is the ORDER that was
+   sent (a short opens with a sell and closes with a buy), which is what the
+   chart places by; it also carries what the hover tooltip reads. A row that
+   lands on no loaded bar -- older than the window, or a fill after the newest
+   candle -- is counted, not drawn. Rows flagged `inferred` are ledger
+   bookkeeping rather than real fills and stay hidden unless asked for; a pair
+   whose exit was hidden goes with it. */
+function convertTrades(d, bars, inc) {
+  const marks = [], links = [];
+  let off = 0, dropped = 0;
+  const opens = (s) => (s === "short" ? "sell" : "buy");
+  const keep = (r) => { if (inc || !r.inferred) return true; dropped++; return false; };
+  const place = (iso) => { const t = matchToBars(bars, iso); if (!t) off++; return t; };
+  const drawn = new Set();                    // lot ids that have an entry marker
+  for (const e of d.entries || []) {
+    if (!keep(e)) continue;
+    drawn.add(e.lot_id);
+    const t = place(e.t); if (!t) continue;
+    marks.push({ t, price: e.price, kind: "entry", side: opens(e.side),
+                 lot: e.lot_id, shares: e.shares, note: e.why, inferred: !!e.inferred });
+  }
+  const hidden = new Set();                   // exits filtered out
+  for (const x of d.exits || []) {
+    if (!keep(x)) { hidden.add(x.lot_id + "|" + Date.parse(x.t)); continue; }
+    const t = place(x.t); if (!t) continue;
+    const pl = x.realized == null ? NaN : Number(x.realized);
+    marks.push({ t, price: x.price, kind: "exit",
+                 side: x.side === "short" ? "buy" : "sell",
+                 win: isFinite(pl) ? pl >= 0 : undefined, pl: isFinite(pl) ? pl : null,
+                 lot: x.lot_id, shares: x.shares, note: x.why,
+                 partial: !!x.partial, inferred: !!x.inferred });
+  }
+  let closed = 0;
+  for (const p of d.pairs || []) {
+    if ((p.inferred && !inc) || hidden.has(p.lot_id + "|" + Date.parse(p.exit_t))) continue;
+    closed++;
+    const t0 = matchToBars(bars, p.entry_t), t1 = matchToBars(bars, p.exit_t);
+    if (!t0 || !t1) continue;
+    links.push({ t0, p0: p.entry_price, t1, p1: p.exit_price, win: !!p.win, label: p.lot_id });
+  }
+  const open = d.open_lots || [];
+  for (const o of open) {
+    if (drawn.has(o.lot_id)) continue;        // its entry fill is already on the chart
+    const t = place(o.t); if (!t) continue;
+    marks.push({ t, price: o.price, kind: "entry", side: opens(o.side),
+                 lot: o.lot_id, shares: o.shares,
+                 note: o.tp_price ? `still open · target $${Number(o.tp_price).toFixed(2)}` : "still open" });
+  }
+  return { marks, links, closed, open: open.length, off, dropped };
+}
 
 /* ------------------------------------------------------------------ live */
 function liveNotes(s) {
@@ -89,7 +200,18 @@ function mountLive(sym) {
         <span style="color:var(--up)">━━</span> resting sells ·
         <span style="color:var(--warn)">━━</span> targets with no order ·
         <span style="color:var(--faint)">━━</span> ladder average ·
-        <span style="color:var(--down)">━━</span> next add</div>`)}
+        <span style="color:var(--down)">━━</span> next add</div>
+      <div class="tip chart-trades">
+        <label><input type="checkbox" id="tkShowTrades" checked> Show trades</label>
+        <label title="Rows the ledger wrote to stay in step with Alpaca — a rebuilt ladder, a lot closed outside the bot. Bookkeeping, not real fills.">
+          <input type="checkbox" id="tkShowInferred"> include bookkeeping rows</label>
+        <span>▲ entry (<span style="color:var(--up)">green</span> long ·
+          <span style="color:var(--warn)">orange</span> short) ·
+          ▼ exit (<span style="color:var(--up)">green</span> profit ·
+          <span style="color:var(--down)">red</span> loss) ·
+          dashed line = closed trade</span>
+        <span id="tkTradesCount" style="margin-left:auto">—</span>
+      </div>`)}
     <div class="grid main">
       <div>
         ${card("Ladder", `<div class="stats" id="tkStats"></div>
@@ -183,7 +305,12 @@ function mountLive(sym) {
     toast(`${sym} is now on ${esc(p.label)}.`, "ok");
   });
 
-  panel = new ChartPanel(el("chartHost"), { key: "ticker", symbol: sym });
+  panel = new ChartPanel(el("chartHost"), { key: "ticker", symbol: sym, onBars });
+  TR = { data: null, at: 0, key: "" };
+  const show = el("tkShowTrades");
+  show.checked = tradesOn();
+  show.onchange = () => { rememberTradesOn(show.checked); onBars(panel.bars || []); };
+  el("tkShowInferred").onchange = applyTrades;
   panel.load();
 }
 
