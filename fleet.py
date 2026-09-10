@@ -22,6 +22,7 @@ What lives HERE rather than in the engine:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -186,9 +187,17 @@ class Fleet:
         # live price samples, one per snapshot, for the dashboard's forming
         # candle: the same mid the engines trade on, at the same cadence
         self.ticks: dict[str, deque] = {}
-        # live account-value samples (one per account refresh, ~6 s) for the
-        # portfolio chart between Alpaca's own history points
+        # live account-value samples (one per CHANGE of the account value; the
+        # fleet reads it every ~6 s) for the portfolio chart between Alpaca's
+        # own history points. equity_sampled_at is when it was last READ --
+        # flat equity takes no new point, but the LIVE pill still needs to
+        # know the fleet is sampling.
         self.equity_ticks: deque = deque(maxlen=20000)
+        self.equity_sampled_at = 0.0
+        # symbols a fresh resume file names: their engines are about to be
+        # started by consume_resume(), so the boot refresh's idle push must
+        # not cancel their rungs first (they re-diff them on their own tick)
+        self._resume_pending: set = set()
         self.bars: dict[str, dict[str, list]] = {}  # timeframe -> symbol -> bars
         # Completed 1-minute bars, per symbol, a few days deep. The snapshot in
         # self.bars is five rows -- enough for "did a bar just close", and
@@ -222,6 +231,7 @@ class Fleet:
 
         self._connect()
         self._build_engines()
+        self._resume_pending = self._peek_resume()
         self.refresh(force=True)
         self.consume_resume()
         self.start_poller()
@@ -546,17 +556,30 @@ class Fleet:
         for e in list(self.engines.values()):
             if not e.running:
                 try:
-                    e._refresh_market()
-                    e.open_orders = self.orders_of(e.symbol)
-                    # touch mode: a rung that filled while the engine was
-                    # stopped (or the process down) gets its lot and its
-                    # take-profit, and nothing new may fill unbooked. ONLY the
-                    # dashboard fleet: an inert fleet (a research script, a
-                    # test) never places or cancels -- never two servers on
-                    # one account.
-                    if self._autostart and e.ledger.resting_adds:
-                        e._book_resting_adds(e.open_orders)
-                        e._retire_resting_adds("engine not running")
+                    # under the engine's own lock: a just-stopped engine's
+                    # thread may still be inside its last tick, and two
+                    # threads booking the same records raced the ledger file
+                    with (getattr(e, "lock", None) or contextlib.nullcontext()):
+                        e._refresh_market()
+                        e.open_orders = self.orders_of(e.symbol)
+                        # touch mode: a rung that filled while the engine was
+                        # stopped (or the process down) gets its lot and its
+                        # take-profit, and nothing new may fill unbooked. ONLY the
+                        # dashboard fleet: an inert fleet (a research script, a
+                        # test) never places or cancels -- never two servers on
+                        # one account. An engine a fresh resume file is about to
+                        # start keeps its rungs: its own first tick re-diffs them.
+                        if (self._autostart and e.ledger.resting_adds
+                                and e.symbol not in self._resume_pending):
+                            e._book_resting_adds(e.open_orders)
+                            e._retire_resting_adds("engine not running")
+                        # exits are sacred: a lot booked here whose take-profit did
+                        # not stick (its old order was still cancelling) has no
+                        # step 2 to retry it on a stopped engine -- retry it here
+                        if self._autostart and not e.cfg.get("dry_run") and not e.trailing():
+                            for l in list(e.ledger.open_lots):
+                                if not l.tp_client_id and l.shares > 0:
+                                    e._place_tp(l)
                 except Exception as ex:
                     LOG.warning("%s idle refresh: %s", e.symbol, ex)
 
@@ -712,13 +735,26 @@ class Fleet:
         row = {"t": now, "equity": round(eq, 2),
                "cash": round(float(self.account.get("cash") or 0), 2),
                "buying_power": round(float(self.account.get("buying_power") or 0), 2)}
+        self.equity_sampled_at = now
         if d and d[-1]["equity"] == row["equity"] and d[-1]["cash"] == row["cash"]:
-            d[-1]["t"] = now                     # unchanged: bump the time only
+            # unchanged: NO new point, and the last row keeps its time. Bumping
+            # its t re-served the same row to the chart as a new sample on
+            # every refresh (~600 phantom points an hour of flat equity).
             return
         d.append(row)
 
+    @property
+    def last_sample_at(self) -> float:
+        """When the account value was last READ (not last changed): what the
+        LIVE pill wants. 0.0 before the first sample."""
+        d = self.equity_ticks
+        return max(float(self.equity_sampled_at or 0.0), float(d[-1]["t"]) if d else 0.0)
+
     def equity_ticks_of(self, since: float = 0.0) -> list:
-        return [dict(x) for x in self.equity_ticks if x["t"] > since]
+        # list() first: the deque is appended by the fleet thread while the API
+        # thread reads, and iterating a deque under an append raises
+        rows = list(self.equity_ticks)
+        return [dict(x) for x in rows if x["t"] > since]
 
     def _record_ticks(self, syms: list[str]) -> None:
         """One price sample per symbol per snapshot: the quote mid when both
@@ -749,7 +785,8 @@ class Fleet:
         d = self.ticks.get(symbol)
         if not d:
             return []
-        return [dict(t) for t in d if t["t"] > since]
+        rows = list(d)                            # snapshot: see equity_ticks_of
+        return [dict(t) for t in rows if t["t"] > since]
 
     def quote_of(self, symbol: str) -> dict:
         return self.quotes.get(symbol) or {}
@@ -802,6 +839,22 @@ class Fleet:
         except OSError:
             pass
 
+    RESUME_MAX_AGE = 300
+
+    def _peek_resume(self) -> set:
+        """The symbols a FRESH resume file names, without consuming it: the
+        boot refresh exempts those engines from the idle settle so their own
+        first tick re-diffs the rungs instead of the poller cancelling them."""
+        try:
+            if not self.resume_path.exists():
+                return set()
+            d = json.loads(self.resume_path.read_text())
+            if time.time() - float(d.get("at") or 0) > self.RESUME_MAX_AGE:
+                return set()
+            return {str(s).upper() for s in (d.get("symbols") or [])}
+        except Exception:
+            return set()
+
     def consume_resume(self) -> None:
         """Start again whatever was running when the restart button was pressed.
 
@@ -811,6 +864,12 @@ class Fleet:
         live order flow because of a decision made hours ago is not something
         this should ever do quietly.
         """
+        try:
+            self._consume_resume()
+        finally:
+            self._resume_pending = set()      # the exemption ends here, started or not
+
+    def _consume_resume(self) -> None:
         if not self.resume_path.exists():
             return
         try:
@@ -823,7 +882,7 @@ class Fleet:
         syms = [s for s in (d.get("symbols") or []) if s in self.engines]
         if not syms:
             return
-        if age > 300:
+        if age > self.RESUME_MAX_AGE:
             self.ev("WARN", f"Ignoring a {age/60:.0f}-minute-old resume file "
                             f"({', '.join(syms)}) -- too old to act on. "
                             f"Start those ladders yourself if you still want them.")

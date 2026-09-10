@@ -18,9 +18,17 @@
    viewer's local time, the way every serious chart does it.
 
    PERIOD x INTERVAL. Alpaca refuses fine intervals over long periods. ALLOWED
-   below is the sensible table; a pair Alpaca still refuses (the server relays
-   the refusal as a 502) is remembered for the session, greyed out, and the
-   chart falls back to the coarsest interval the period allows.
+   below is the sensible table; a pair Alpaca itself refuses (the server
+   relays ONLY that refusal as a 400 -- a rate limit, a timeout or an outage
+   is a 503 and marks nothing) is remembered for the session, greyed out, and
+   the chart falls back to the next allowed interval for the period. That
+   fallback is never written to the remembered choice: the next page load
+   asks for what the operator picked.
+
+   LIVE SAMPLES. The fleet records a sample only when the account value
+   changes and reports `last_sample_at`, when it last READ the value; the
+   LIVE pill ages against that, and a sample equal to the tail's last value
+   is dropped here too, so flat equity never grows the tail.
 
    Interaction: drag to pan, wheel to zoom about the cursor, double-click or
    Fit to see the whole period, hover for the crosshair; touch drag and pinch
@@ -68,6 +76,17 @@ export function allowedIntervals(period, rejected) {
 export function fallbackInterval(period, rejected) {
   const ok = allowedIntervals(period, rejected);
   return ok.length ? ok[ok.length - 1] : "1D";
+}
+/* the interval to fall back to when Alpaca refuses `tf` for the period: the
+   nearest allowed interval coarser than it (5Min for a refused 1Min), else
+   the nearest finer one; null when the period has nothing else to offer */
+export function nextInterval(period, tf, rejected) {
+  const ok = allowedIntervals(period, rejected).filter((x) => x !== tf);
+  if (!ok.length) return null;
+  const s = tfSeconds(tf);
+  const coarser = ok.filter((x) => tfSeconds(x) > s);
+  if (coarser.length) return coarser[0];
+  return ok[ok.length - 1];
 }
 /* the interval to ask for: what was wanted if it is allowed, else the
    period's default, else the fallback */
@@ -118,15 +137,30 @@ export function inRegularSession(t) {
    Alpaca point is history Alpaca already covers and is dropped. Never
    mutates its inputs. */
 export function mergeTail(tail, incoming, lastT) {
-  const m = new Map();
-  const put = (k) => {
-    if (!k || typeof k !== "object") return;
+  const norm = (k) => {
+    if (!k || typeof k !== "object") return null;
     const t = Number(k.t), e = Number(k.equity);
-    if (!isFinite(t) || !(e > 0) || t <= lastT) return;
-    m.set(t, { t, equity: e, cash: k.cash, buying_power: k.buying_power });
+    if (!isFinite(t) || !(e > 0) || t <= lastT) return null;
+    return { t, equity: e, cash: k.cash, buying_power: k.buying_power };
   };
-  for (const k of (tail || [])) put(k);
-  for (const k of (incoming || [])) put(k);
+  const m = new Map();
+  let newest = null;
+  for (const k of (tail || [])) {
+    const s = norm(k);
+    if (!s) continue;
+    m.set(s.t, s);
+    if (!newest || s.t > newest.t) newest = s;
+  }
+  // incoming, oldest first. A newer sample at the equity the tail already
+  // ends on is the same flat value read again, not a new point: dropped,
+  // so flat equity never marches the line to the right.
+  const inc = (incoming || []).map(norm).filter(Boolean).sort((a, b) => a.t - b.t);
+  for (const s of inc) {
+    if (m.has(s.t)) { m.set(s.t, s); continue; }
+    if (newest && s.t > newest.t && s.equity === newest.equity) continue;
+    m.set(s.t, s);
+    if (!newest || s.t > newest.t) newest = s;
+  }
   return [...m.values()].sort((a, b) => a.t - b.t);
 }
 
@@ -320,6 +354,7 @@ export class PortfolioChart {
     this.tfBy = (p.tf && typeof p.tf === "object" && !Array.isArray(p.tf)) ? { ...p.tf } : {};
     this.ext = p.ext !== false;              // the fleet trades extended hours
     this.rejected = new Set();               // pairs Alpaca refused this session
+    this.tfSession = {};                     // period -> interval fallen back to this session (never persisted)
 
     this.points = [];          // Alpaca's own points [{t, equity, pl, pl_pct}]
     this.tail = [];            // fleet samples newer than the last point
@@ -348,7 +383,9 @@ export class PortfolioChart {
     this._build();
   }
 
-  get tf() { return pickInterval(this.period, this.tfBy[this.period], this.rejected); }
+  get tf() {
+    return pickInterval(this.period, this.tfSession[this.period] || this.tfBy[this.period], this.rejected);
+  }
 
   /* ------------------------------------------------------------- markup */
   _build() {
@@ -445,6 +482,7 @@ export class PortfolioChart {
   setInterval(tf) {
     if (!allowedIntervals(this.period, this.rejected).includes(tf) || tf === this.tf) return;
     this.tfBy[this.period] = tf;
+    delete this.tfSession[this.period];      // an explicit pick replaces a fallback
     this.note = "";
     this._persist();
     this._syncPills();
@@ -510,18 +548,17 @@ export class PortfolioChart {
                     + `&timeframe=${encodeURIComponent(tf)}&extended=${ext ? "true" : "false"}`);
     } catch (e) {
       if (this._dead || gen !== this._gen) return;
-      if (e.status === 502 && fallbackInterval(period, this.rejected) !== tf) {
-        // Alpaca refused the pair: remember it for the session, grey the
-        // pill and fall back to the coarsest interval the period allows.
-        // The fallback becomes the remembered choice, so the next page load
-        // does not ask for the refused pair again. A 502 on the coarsest
-        // interval itself is Alpaca being down, not a bad pair, and falls
-        // through to the error line with nothing marked refused.
+      const fb = e.status === 400 ? nextInterval(period, tf, this.rejected) : null;
+      if (fb) {
+        // Alpaca itself refused the pair (the server relays only that as a
+        // 400; a rate limit, a timeout or an outage is a 503 and lands on
+        // the error line with nothing marked): remember it for the SESSION,
+        // grey the pill and fall back to the next allowed interval. The
+        // fallback is not written to the remembered choice -- the next page
+        // load asks for what the operator picked.
         this.rejected.add(pairKey(period, tf));
-        const fb = fallbackInterval(period, this.rejected);
-        this.tfBy[period] = fb;
+        this.tfSession[period] = fb;
         this.note = `Alpaca has no ${tfName(tf)} history over the ${periodLabel(period)} period · showing ${tfName(fb)} points`;
-        this._persist();
         this._syncPills();
         this.load({ quiet });
         return;
@@ -552,6 +589,7 @@ export class PortfolioChart {
     const en = Number(r.equity_now);
     this.equityNow = isFinite(en) && en > 0 ? en : null;
     this.asOf = Number(r.as_of) || Date.now() / 1000;
+    this._noteSample(r);
     const newest = this.tail.length ? this.tail[this.tail.length - 1].t : lastT;
     if (this._tickSince == null || fresh || newest > this._tickSince) this._tickSince = newest;
     if (fresh) { this.view = null; this.userMoved = false; this.hover = null; }
@@ -575,14 +613,10 @@ export class PortfolioChart {
         const t = Number(k && k.t);
         if (isFinite(t) && t > newest) newest = t;
       }
-      if (r.last && isFinite(Number(r.last.t)) && Number(r.last.equity) > 0) {
-        this._tickLast = { t: Number(r.last.t), equity: Number(r.last.equity) };
-        newest = Math.max(newest, this._tickLast.t);
-      } else if (!this._tickLast && this.tail.length) {
-        this._tickLast = this.tail[this.tail.length - 1];
-      }
-      if (isFinite(newest)) this._tickSince = newest;
       this.tail = mergeTail(this.tail, r.ticks, lastT);
+      const seen = this._noteSample(r);
+      if (seen) newest = Math.max(newest, seen);
+      if (isFinite(newest)) this._tickSince = newest;
       this._rebuild(false);
     } catch (e) {
       if (this._dead) return;
@@ -590,6 +624,26 @@ export class PortfolioChart {
       this._tickRetryAt = Date.now() + 10000;
       this._paintPill();
     } finally { this._tickBusy = false; }
+  }
+
+  /* The newest sample the SERVER has, for the LIVE pill: `last_sample_at` is
+     when the fleet last read the account value (a flat value takes no new
+     row, so the tail's last t would age while the fleet is perfectly alive);
+     the value shown is the newest equity known. Returns that time, or 0. */
+  _noteSample(r) {
+    const lsa = Number(r && r.last_sample_at);
+    const last = r && r.last && isFinite(Number(r.last.t)) && Number(r.last.equity) > 0
+      ? { t: Number(r.last.t), equity: Number(r.last.equity) } : null;
+    const tailLast = this.tail.length ? this.tail[this.tail.length - 1] : null;
+    if (isFinite(lsa) && lsa > 0) {
+      const eq = last ? last.equity : tailLast ? tailLast.equity
+        : this._tickLast ? this._tickLast.equity : 0;
+      this._tickLast = { t: Math.max(lsa, last ? last.t : 0), equity: eq };
+      return this._tickLast.t;
+    }
+    if (last) { this._tickLast = last; return last.t; }
+    if (!this._tickLast && tailLast) this._tickLast = tailLast;
+    return 0;
   }
 
   /* the series from the points and the tail; the canvas is only touched

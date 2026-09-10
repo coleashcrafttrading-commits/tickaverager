@@ -1069,12 +1069,17 @@ export function orderLines(status) {
       label: `next add`,
     });
   }
-  // solid, like the resting exit: solid means an order is really there
+  // solid, like the resting exit: solid means an order is really there. A
+  // STOPPED ladder's records are on their way out (state 'cancelling', or
+  // already off the book): they are not drawn, and neither are the rungs it
+  // wanted before it stopped -- it will not place them until it is started.
+  const running = !!status.running;
   const restingAdds = new Set();
   const word = status.side === "short" ? "SELL" : "BUY";
   for (const a of (Array.isArray(status.resting_adds) ? status.resting_adds : [])) {
     const p = Number(a && a.price);
     if (!(p > 0)) continue;
+    if (!running && (a.state !== "working" || a.resting === false)) continue;
     restingAdds.add(Math.round(p * 100));
     out.push({
       kind: "resting_add", price: p, dash: null, width: 1.4,
@@ -1083,7 +1088,7 @@ export function orderLines(status) {
   }
   // touch mode: a rung the ladder wants but has no order at yet -- dashed,
   // like a target with no resting order
-  if (touch) {
+  if (touch && running) {
     for (const r of (Array.isArray(status.rungs) ? status.rungs : [])) {
       const p = Number(r && r.price);
       if (!(p > 0) || restingAdds.has(Math.round(p * 100))) continue;

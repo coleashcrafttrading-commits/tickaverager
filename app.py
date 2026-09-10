@@ -72,6 +72,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 import accounts                                           # noqa: E402
 import journal                                            # noqa: E402
 import scheduler                                          # noqa: E402
+from broker import AlpacaError                            # noqa: E402
 from engine import TICKER_DEFAULTS, frozen                # noqa: E402
 from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
                    Fleet, get_fleet, supervised)
@@ -1256,8 +1257,16 @@ def portfolio_history(period: str = "1D", timeframe: str = "1Min", extended: boo
     else:
         try:
             raw = f.broker.portfolio_history(period, timeframe, extended=extended) or {}
+        except AlpacaError as e:
+            # Only Alpaca's own refusal of the pair is a 400: the client greys
+            # that pair for the session. A rate limit, a timeout or a 5xx is
+            # a 503 -- transient, and never a reason to drop an interval.
+            if e.status in (400, 422):
+                raise HTTPException(400, f"Alpaca refused period={period} timeframe={timeframe}: "
+                                         f"{(e.body or '')[:300]}")
+            raise HTTPException(503, f"portfolio history: {e}")
         except Exception as e:
-            raise HTTPException(502, f"portfolio history: {e}")
+            raise HTTPException(503, f"portfolio history: {e}")
         with _PH_LOCK:
             _PH_CACHE[key] = (now, raw)
     ts = raw.get("timestamp") or []
@@ -1280,17 +1289,22 @@ def portfolio_history(period: str = "1D", timeframe: str = "1Min", extended: boo
             "extended": bool(extended), "base_value": raw.get("base_value"),
             "as_of": round(now, 3), "count": len(points), "points": points,
             "live": f.equity_ticks_of(last_t),
+            # when the fleet last READ the account value (flat equity takes no
+            # new sample, so this is what the LIVE pill must age against)
+            "last_sample_at": round(float(getattr(f, "last_sample_at", 0.0) or 0.0), 3) or None,
             "equity_now": float((f.account or {}).get("equity") or 0) or None}
 
 
 @app.get("/api/a/{acct}/equity_ticks")
 @app.get("/api/equity_ticks")
 def equity_ticks(since: float = 0.0, limit: int = 5000, f: Fleet = Depends(cur)):
-    """The fleet's own account-value samples (one per account refresh)."""
+    """The fleet's own account-value samples (one per change of the account
+    value). `last_sample_at` is when the value was last read, changed or not."""
     import time as _time
     rows = f.equity_ticks_of(since)[-max(1, limit):]
     return {"ok": True, "account": f.account_id, "now": round(_time.time(), 3),
-            "last": rows[-1] if rows else None, "ticks": rows}
+            "last": rows[-1] if rows else None, "ticks": rows,
+            "last_sample_at": round(float(getattr(f, "last_sample_at", 0.0) or 0.0), 3) or None}
 
 
 # ===================================================================== lookup
