@@ -47,6 +47,11 @@ class FakeAlpaca:
     def clock(self):
         return {"is_open": False}
 
+    def portfolio_history(self, period="1D", timeframe="1Min", extended=True, date_end=""):
+        return {"timestamp": [1000, 1060, 1120], "equity": [12300.0, None, 12345.5],
+                "profit_loss": [0.0, None, 45.5], "profit_loss_pct": [0.0, None, 0.0037],
+                "base_value": 12300.0, "timeframe": timeframe}
+
     def positions(self):
         return []
 
@@ -206,6 +211,26 @@ def main() -> int:
             fl.engines.pop("RAM", None)
             fl.engines.pop("ZZZ", None)
             fl.clear_resume()
+
+        print("\n3e. the portfolio chart reads Alpaca's own equity history plus live samples")
+        r = c.get("/api/a/glenn-momentum/portfolio/history?period=1D&timeframe=1Min")
+        check("history 200", r.status_code, 200)
+        ph = r.json()
+        check("null samples are dropped, the rest kept in order", [pt["equity"] for pt in ph["points"]], [12300.0, 12345.5])
+        check("percent is a percent", ph["points"][-1]["pl_pct"], 0.37)
+        check("base value and count", (ph["base_value"], ph["count"]), (12300.0, 2))
+        r = c.get("/api/a/glenn-momentum/portfolio/history?period=2Y&timeframe=1Min")
+        check("an unknown period is a 400, not a broker call", r.status_code, 400)
+        fl.account = {"equity": "12350.25", "cash": "100", "buying_power": "400"}
+        fl._record_equity()
+        n = len(fl.equity_ticks)
+        fl._record_equity()
+        check("an unchanged equity does not grow the buffer", len(fl.equity_ticks), n)
+        r = c.get("/api/a/glenn-momentum/equity_ticks")
+        check("equity ticks served", (r.status_code, r.json()["last"]["equity"]), (200, 12350.25))
+        r = c.get("/api/a/glenn-momentum/portfolio/history?period=1D&timeframe=1Min")
+        check("live samples newer than the last Alpaca point ride along", r.json()["live"][-1]["equity"], 12350.25)
+        fl.equity_ticks.clear()
 
         print("\n4. the account gets its own files")
         acc = app_mod.REG.get("glenn-momentum")
