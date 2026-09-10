@@ -11,6 +11,10 @@ import {
   S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat, tableHTML,
   money, money0, sgn, pct, px, go, acctLabel, acctNumber,
 } from "../core.js";
+import { PortfolioChart } from "../portfolio.js";
+
+/* the account-value chart; one per mount, thrown away with the page */
+let pf = null;
 
 function banners(ov) {
   const b = [];
@@ -80,9 +84,11 @@ VIEWS.overview = {
     + `${ov.totals.running} running · ${ov.totals.armed} armed` : "",
 
   mount() {
+    if (pf) { pf.destroy(); pf = null; }
     el("view").innerHTML = `
       <div id="ovNotes"></div>
       ${card("", `<div class="stats" id="ovStats"></div>`)}
+      ${card("", `<div id="ovChart"></div>`)}
       ${card("Ladders", `<div id="ovTickers"></div>`,
         `<span class="row-btns">
            <button class="btn sm" id="bAllStart">Start all</button>
@@ -135,6 +141,11 @@ VIEWS.overview = {
       await POST("/api/fleet/panic", { confirm: "PANIC" });
       toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
     });
+
+    // the account-value chart polls on its own: Alpaca's history on a cadence
+    // matched to the period, the fleet's equity samples every 2 s
+    pf = new PortfolioChart(el("ovChart"));
+    pf.start();
   },
 
   paint() {

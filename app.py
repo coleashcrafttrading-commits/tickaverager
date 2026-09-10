@@ -1220,6 +1220,79 @@ def ticks(symbol: str, since: float = 0.0, limit: int = 2000, f: Fleet = Depends
             "last": rows[-1] if rows else None, "ticks": rows}
 
 
+
+# ========================================================== portfolio history
+_PH_CACHE: dict = {}
+_PH_LOCK = threading.Lock()
+PH_PERIODS = ("1D", "1W", "1M", "3M", "6M", "1A", "all")
+PH_TIMEFRAMES = ("1Min", "5Min", "15Min", "1H", "1D")
+
+
+@app.get("/api/a/{acct}/portfolio/history")
+@app.get("/api/portfolio/history")
+def portfolio_history(period: str = "1D", timeframe: str = "1Min", extended: bool = True,
+                      f: Fleet = Depends(cur)):
+    """The account's value over time, straight from Alpaca's portfolio history.
+
+    Every point is what the account was worth at that moment by Alpaca's own
+    reckoning, so the line is the account, not a reconstruction. Cached for a
+    few seconds per (account, period, timeframe) because the dashboard polls it
+    at chart speed. `live` carries the fleet's own equity samples newer than
+    the last Alpaca point so the line keeps moving between minutes.
+    """
+    import time as _time
+    if period not in PH_PERIODS:
+        raise HTTPException(400, f"period must be one of {', '.join(PH_PERIODS)}")
+    if timeframe not in PH_TIMEFRAMES:
+        raise HTTPException(400, f"timeframe must be one of {', '.join(PH_TIMEFRAMES)}")
+    if not f.broker:
+        raise HTTPException(503, "Broker not connected.")
+    key = (f.account_id, period, timeframe, bool(extended))
+    now = _time.time()
+    with _PH_LOCK:
+        hit = _PH_CACHE.get(key)
+    if hit and now - hit[0] < 5.0:
+        raw = hit[1]
+    else:
+        try:
+            raw = f.broker.portfolio_history(period, timeframe, extended=extended) or {}
+        except Exception as e:
+            raise HTTPException(502, f"portfolio history: {e}")
+        with _PH_LOCK:
+            _PH_CACHE[key] = (now, raw)
+    ts = raw.get("timestamp") or []
+    eq = raw.get("equity") or []
+    pl = raw.get("profit_loss") or []
+    plp = raw.get("profit_loss_pct") or []
+    points = []
+    for i, t in enumerate(ts):
+        try:
+            e = eq[i]
+        except IndexError:
+            break
+        if e is None:
+            continue
+        points.append({"t": float(t), "equity": round(float(e), 2),
+                       "pl": round(float(pl[i]), 2) if i < len(pl) and pl[i] is not None else None,
+                       "pl_pct": round(float(plp[i]) * 100.0, 4) if i < len(plp) and plp[i] is not None else None})
+    last_t = points[-1]["t"] if points else 0.0
+    return {"ok": True, "account": f.account_id, "period": period, "timeframe": timeframe,
+            "extended": bool(extended), "base_value": raw.get("base_value"),
+            "as_of": round(now, 3), "count": len(points), "points": points,
+            "live": f.equity_ticks_of(last_t),
+            "equity_now": float((f.account or {}).get("equity") or 0) or None}
+
+
+@app.get("/api/a/{acct}/equity_ticks")
+@app.get("/api/equity_ticks")
+def equity_ticks(since: float = 0.0, limit: int = 5000, f: Fleet = Depends(cur)):
+    """The fleet's own account-value samples (one per account refresh)."""
+    import time as _time
+    rows = f.equity_ticks_of(since)[-max(1, limit):]
+    return {"ok": True, "account": f.account_id, "now": round(_time.time(), 3),
+            "last": rows[-1] if rows else None, "ticks": rows}
+
+
 # ===================================================================== lookup
 @app.get("/api/a/{acct}/search")
 @app.get("/api/search")

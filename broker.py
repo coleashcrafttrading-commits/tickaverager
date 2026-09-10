@@ -69,6 +69,18 @@ class Alpaca:
     def account(self) -> dict:
         return self._trade("GET", "/account")
 
+    def portfolio_history(self, period: str = "1D", timeframe: str = "1Min",
+                          extended: bool = True, date_end: str = "") -> dict:
+        """Alpaca's own equity series for the account: timestamps (epoch s),
+        equity, profit_loss, profit_loss_pct, base_value. Intraday timeframes
+        (1Min/5Min/15Min/1H) are accepted for periods up to about a month;
+        longer periods want 1D. The dashboard picks the pairing."""
+        params = {"period": period, "timeframe": timeframe,
+                  "intraday_reporting": "extended_hours" if extended else "market_hours"}
+        if date_end:
+            params["date_end"] = date_end
+        return self._trade("GET", "/account/portfolio/history", params=params) or {}
+
     def clock(self) -> dict:
         return self._trade("GET", "/clock")
 

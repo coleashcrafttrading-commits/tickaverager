@@ -186,6 +186,9 @@ class Fleet:
         # live price samples, one per snapshot, for the dashboard's forming
         # candle: the same mid the engines trade on, at the same cadence
         self.ticks: dict[str, deque] = {}
+        # live account-value samples (one per account refresh, ~6 s) for the
+        # portfolio chart between Alpaca's own history points
+        self.equity_ticks: deque = deque(maxlen=20000)
         self.bars: dict[str, dict[str, list]] = {}  # timeframe -> symbol -> bars
         # Completed 1-minute bars, per symbol, a few days deep. The snapshot in
         # self.bars is five rows -- enough for "did a bar just close", and
@@ -490,6 +493,7 @@ class Fleet:
             if force or c % 3 == 1:
                 self.account = b.account() or {}
                 self.account_as_of = _now_ny_str()
+                self._record_equity()
             # the clock is re-read on every SESSION change too, not only every
             # 15 cycles: at 09:30:00 a read from 09:29:40 says "closed" for up
             # to 30 s, and every ladder would cancel its resting rungs over a
@@ -692,6 +696,29 @@ class Fleet:
 
     def orders_of(self, symbol: str) -> list:
         return self.open_orders.get(symbol) or []
+
+    def _record_equity(self) -> None:
+        """One account-value sample per account refresh. The equity Alpaca
+        reports is the truth; this only remembers it so the portfolio chart can
+        draw the last few hours at the refresh cadence."""
+        try:
+            eq = float(self.account.get("equity") or 0)
+        except (TypeError, ValueError):
+            return
+        if eq <= 0:
+            return
+        now = round(time.time(), 3)
+        d = self.equity_ticks
+        row = {"t": now, "equity": round(eq, 2),
+               "cash": round(float(self.account.get("cash") or 0), 2),
+               "buying_power": round(float(self.account.get("buying_power") or 0), 2)}
+        if d and d[-1]["equity"] == row["equity"] and d[-1]["cash"] == row["cash"]:
+            d[-1]["t"] = now                     # unchanged: bump the time only
+            return
+        d.append(row)
+
+    def equity_ticks_of(self, since: float = 0.0) -> list:
+        return [dict(x) for x in self.equity_ticks if x["t"] > since]
 
     def _record_ticks(self, syms: list[str]) -> None:
         """One price sample per symbol per snapshot: the quote mid when both
