@@ -32,18 +32,22 @@ still fill.
 | | |
 |---|---|
 | **Flat** | a red bar close opens lot 1 (`first_entry: immediate` skips the color rule) |
-| **In a position** | the ladder adds one lot per `add_mode`, measured from the **last fill** |
+| **In a position** | the ladder adds one lot per `add_mode`, measured from the **last fill** (any fill, entry or exit); in touch mode the next rungs rest at Alpaca as GTC limits |
 | **Exit** | each lot leaves on its own GTC limit at `its own entry + take_profit` |
 | **Circuit breaker** | `max_lots` stops **adds**. It does not stop losses. |
 | **Wind-down** | after `wind_down_start` no new lots open; resting TPs stay live |
 | **Long only** | this buys shares and can hold them. **There is no stop loss.** |
 
-Add modes: `points` ($ from last fill), `percent` (% from last fill),
+Add modes: `points` ($ from the last fill), `percent` (% from the last fill),
 `beyond_average` (the original NinjaTrader rule — any close below the average).
+"Last fill" means any fill, entry or exit: after a take-profit at $13.70 the
+next rung is $13.60. `add_trigger` (`touch` | `close`) decides whether the
+rungs rest at Alpaca as limits or are judged on bar closes; `add_depth` is
+how many rungs rest at once.
 
 ### Current defaults
 
-`RAM` · 100 shares/lot · add every **$0.10** down from the last fill · TP
+`RAM` · 100 shares/lot · add every **$0.10** down from the last fill (any fill, entry or exit) · TP
 **$0.10** above each lot · 1-minute bars · max 20 lots · session 09:35–15:55 ET,
 wind-down 15:30 ET.
 

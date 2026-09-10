@@ -143,6 +143,10 @@ function liveNotes(s) {
     b.push(`<div class="note info">Not looking for entries:
       <b>${esc(s.block_reason)}</b>.</div>`);
   }
+  if (s.running && !s.halted && s.add_trigger === "touch" && s.lot_count
+      && !(s.resting_adds || []).length && s.adds_hold) {
+    b.push(`<div class="note info">Not resting adds: <b>${esc(s.adds_hold)}</b>.</div>`);
+  }
   if (s.reconciles_this_hour) {
     b.push(`<div class="note warn">Position auto-corrected
       <b>${s.reconciles_this_hour}×</b> in the last hour. It keeps trading and keeps
@@ -209,7 +213,8 @@ function mountLive(sym) {
     <div class="grid main">
       <div>
         ${card("Ladder", `<div class="stats" id="tkStats"></div>
-          <div style="margin-top:18px" id="tkLots"></div>`, "", {})}
+          <div style="margin-top:18px" id="tkLots"></div>
+          <div style="margin-top:12px" id="tkAdds"></div>`, "", {})}
       </div>
       <div>
         ${card("Money", `<div class="stats" id="tkMoney"></div>`)}
@@ -372,7 +377,10 @@ function paintLive() {
     stat("Lots", `${s.lot_count}<span class="faint" style="font-size:15px">/${c.max_lots}</span>`,
          `${s.shares} shares`)
     + stat("Ladder avg", px(s.avg_price, 4), s.in_sync ? "in sync" : `Alpaca: ${s.broker_qty}`)
-    + stat("Next add", px(s.next_add_at))
+    + stat("Next add", px(s.next_add_at),
+           s.anchor && s.anchor.price
+             ? `from ${s.anchor.kind === "last_open" ? "last open" : esc(s.anchor.kind)} ${px(s.anchor.price)}`
+             : "")
     + stat("Open P/L", sgn(s.unrealized))
     + stat("Closed", s.closed_count, `today ${money0(s.realized_today)}`)
     + stat("Last bar", bar
@@ -401,6 +409,31 @@ function paintLive() {
         <td class="num faint" title="strategy trigger → entry accepted by Alpaca; take-profit accepted in ${l.tp_latency_ms ? l.tp_latency_ms.toFixed(0) + " ms" : "—"}">${l.entry_latency_ms ? l.entry_latency_ms.toFixed(0) + " ms" : "—"}</td>
         <td style="text-align:right">${sell}</td></tr>`;
     }), `Flat — no open lots on ${s.symbol}.`);
+
+  // touch mode: the rungs resting at Alpaca as entry limits, each a lot in
+  // waiting. "resting" means the order is in the current snapshot.
+  const adds = s.resting_adds || [];
+  if (el("tkAdds")) el("tkAdds").innerHTML =
+    `<div class="faint" style="margin-bottom:4px">Resting adds${
+      s.add_trigger === "touch" ? ` (touch mode, ${s.add_depth} deep)` : ""}</div>`
+    + tableHTML(["Rung", s.side === "short" ? "Sell" : "Buy", "At", "To go", "Placed in", "Age", "State"],
+      adds.map((a) => {
+        const to = (s.last_price - a.price) * (a.side === "short" ? -1 : 1);
+        const state = a.state === "cancelling" ? `<span class="warn">cancelling</span>`
+          : a.resting ? `<span class="up">resting</span>`
+          : `<span class="warn">not in snapshot</span>`;
+        return `<tr><td class="num">${a.k}</td>
+          <td class="num">${a.shares}${a.booked ? ` (${a.booked} filled)` : ""}</td>
+          <td class="num">${px(a.price)}</td>
+          <td class="num ${to <= 0 ? "up" : "faint"}">${to <= 0 ? "touched" : "$" + to.toFixed(2)}</td>
+          <td class="num faint">${a.placed_ms ? a.placed_ms.toFixed(0) + " ms" : "—"}</td>
+          <td class="num faint">${Math.round(a.age_s)}s</td>
+          <td style="text-align:right" title="${esc(a.coid)}">${state}</td></tr>`;
+      }),
+      s.add_trigger === "touch"
+        ? (s.adds_hold ? `No rungs resting — ${esc(s.adds_hold)}.`
+           : (s.lot_count ? "No rungs resting." : "Flat — the first lot waits for its candle rule."))
+        : "Close mode — adds are judged on bar closes.");
 
   // the three-layer filter. For a week it read "flat" on five bars and
 
@@ -585,7 +618,11 @@ function paintSettings() {
   el("tsNote").innerHTML =
     `Adds ${c.add_mode === "points" ? `every <b>$${Number(c.add_distance).toFixed(2)}</b> below the last fill`
       : c.add_mode === "percent" ? `every <b>${c.add_percent}%</b> below the last fill`
-      : "on <b>any close below the ladder average</b>"}, on ${c.bar_size} closes, up to
+      : "on <b>any close below the ladder average</b>"}, ${
+      c.add_trigger === "touch"
+        ? `as resting limits (${c.add_depth} rung${c.add_depth > 1 ? "s" : ""} at a time), measured from the ${
+            c.add_anchor === "last_fill" ? "last fill of any kind" : "newest open lot"}`
+        : `on ${c.bar_size} closes`}, up to
      <b>${c.max_lots}</b> lots. Exit mode: <b>${esc(c.exit_mode || "limit")}</b>${
        c.exit_mode === "trail" ? ` (arms at target, trails $${c.trail_amount})` : ""}.
      The cap stops <i>adds</i>, not losses — there is no stop loss.`;

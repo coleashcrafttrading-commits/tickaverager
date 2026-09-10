@@ -401,8 +401,12 @@ class Fleet:
         with self.lock:
             e = self.engine(sym)
             open_lots = len(e.ledger.open_lots)
+            # anything of ours (a take-profit, a resting add, a basket exit)
+            # or anything on the exit side -- a short ladder's exits are BUYs
+            xside = e.exit_side()
             resting = len([o for o in self.open_orders.get(sym, [])
-                           if o.get("side") == "sell"])
+                           if str(o.get("client_order_id") or "").startswith(("en-", "tp-", "xs-"))
+                           or o.get("side") == xside])
             if not force and (e.running or open_lots or resting):
                 raise ValueError(
                     f"{sym} still has {open_lots} open lot(s) and {resting} resting "
@@ -540,6 +544,15 @@ class Fleet:
                 try:
                     e._refresh_market()
                     e.open_orders = self.orders_of(e.symbol)
+                    # touch mode: a rung that filled while the engine was
+                    # stopped (or the process down) gets its lot and its
+                    # take-profit, and nothing new may fill unbooked. ONLY the
+                    # dashboard fleet: an inert fleet (a research script, a
+                    # test) never places or cancels -- never two servers on
+                    # one account.
+                    if self._autostart and e.ledger.resting_adds:
+                        e._book_resting_adds(e.open_orders)
+                        e._retire_resting_adds("engine not running")
                 except Exception as ex:
                     LOG.warning("%s idle refresh: %s", e.symbol, ex)
 

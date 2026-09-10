@@ -4212,8 +4212,16 @@ class Engine:
                     # must not pretend the lot is naked
                     cancelling += 1
                     continue
+                if int(float(o.get("filled_qty") or 0)) > lot.tp_filled:
+                    # it left the book by FILLING (fully, or partly before it
+                    # died): book that first. Re-covering a lot that already
+                    # sold is what over-covers the account and, a guard later,
+                    # releases the shares ESTIMATED.
+                    if self._book_tp_progress(lot, o):
+                        continue                   # fully sold: removed, nothing to cover
                 lot.tp_client_id = ""              # dead order -- lot is exposed
                 lot.tp_order_id = ""
+                lot.tp_filled = 0                  # fresh order, fresh counter
             if self._place_tp(lot):
                 placed += 1
             else:

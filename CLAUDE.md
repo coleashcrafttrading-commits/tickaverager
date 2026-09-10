@@ -87,6 +87,16 @@ limit, any hour -- the DEFAULT for new tickers), `ladder_v3`, and
 one; `agentctl preset SYM basic` does the same from the CLI. Editing any
 setting by hand stamps the ticker `custom`.
 
+**Touch-mode adds** (from 10 Sep 2026, the default for every ticker):
+the ADDS are GTC limit entries resting at Alpaca at the next `add_depth`
+rungs (`basic` rests three), exactly the way the take-profits rest, so an
+intracandle touch fills them; the anchor the rungs are measured from is the
+**last fill of any kind** -- an add or a take-profit (`add_anchor=last_fill`;
+`last_open` is the old newest-open-lot rule). `add_trigger=close` is the
+legacy bar-close rule. The FIRST lot when flat is still the candle rule.
+Stop, halt, FROZEN, a session switching off and `max_lots` cancel the
+resting adds on the next tick; nothing in that path ever touches an exit.
+
 ## Production is the VM (from 9 Sep 2026)
 
 The fleet runs 24/7 on Google Cloud, not on the desktop: project

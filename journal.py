@@ -84,6 +84,9 @@ CFG_KEYS = (
     "first_entry", "bar_size", "max_lots", "entry_order_type", "entry_limit_ref",
     "entry_limit_offset", "cap_at_rung", "entry_on_timeout", "session_mode",
     "allow_extended_hours",
+    # touch-mode adds: the strategy genuinely changed when these landed, so
+    # every ticker's cfg_hash history splits at that deploy
+    "add_trigger", "add_anchor", "add_depth",
 )
 
 

@@ -906,10 +906,10 @@ export class Chart {
      entry        an open lot's entry price
      tp_pending   a lot's target that has no resting order behind it
      avg          the ladder average
-     next_add     where the next rung would fill
+     next_add     close mode: where the next rung would fill; touch mode: a
+                  rung the ladder wants (status.rungs) that has no order yet
      resting_add  a buy (or short sell) resting at a rung, from
-                  status.resting_adds = [{price, shares, ...}] -- an engine
-                  feature that is on its way; absent today and simply skipped */
+                  status.resting_adds = [{k, price, shares, ...}] */
 export function orderLines(status) {
   if (!status) return [];
   const out = [];
@@ -943,20 +943,36 @@ export function orderLines(status) {
       label: `avg ${status.avg_price.toFixed(2)}`,
     });
   }
-  if (status.next_add_at) {
+  const touch = status.add_trigger === "touch";
+  if (status.next_add_at && !touch) {
     out.push({
       kind: "next_add", price: status.next_add_at, dash: [2, 3], width: 1,
       label: `next add`,
     });
   }
   // solid, like the resting exit: solid means an order is really there
+  const restingAdds = new Set();
+  const word = status.side === "short" ? "SELL" : "BUY";
   for (const a of (Array.isArray(status.resting_adds) ? status.resting_adds : [])) {
     const p = Number(a && a.price);
     if (!(p > 0)) continue;
+    restingAdds.add(Math.round(p * 100));
     out.push({
-      kind: "resting_add", price: p, dash: null, width: 1.2,
-      label: `ADD ${a.shares != null ? a.shares + " " : ""}@ ${p.toFixed(2)}`,
+      kind: "resting_add", price: p, dash: null, width: 1.4,
+      label: `add ${a.k != null ? a.k + " · " : ""}${word} ${a.shares != null ? a.shares + " " : ""}@ ${p.toFixed(2)}`,
     });
+  }
+  // touch mode: a rung the ladder wants but has no order at yet -- dashed,
+  // like a target with no resting order
+  if (touch) {
+    for (const r of (Array.isArray(status.rungs) ? status.rungs : [])) {
+      const p = Number(r && r.price);
+      if (!(p > 0) || restingAdds.has(Math.round(p * 100))) continue;
+      out.push({
+        kind: "next_add", price: p, dash: [2, 3], width: 1,
+        label: `rung ${r.k} (not resting)`,
+      });
+    }
   }
   return out;
 }

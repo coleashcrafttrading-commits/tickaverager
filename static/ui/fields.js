@@ -43,7 +43,8 @@ export const STRATEGY_FIELDS = [
     { k: "strategy_exits", t: "bool", label: "Strategy decides exits",
       hint: "An indicator exit <b>overrides the take-profit</b>: the resting order "
           + "is cancelled and the lot is sold now. A target is a guess about where "
-          + "to leave; an indicator is a reason to." },
+          + "to leave; an indicator is a reason to. A strategy exit's fill moves the "
+          + "add anchor like a take-profit." },
   ]},
 
   { legend: "Entry", fields: [
@@ -64,11 +65,23 @@ export const STRATEGY_FIELDS = [
     { k: "bar_size", t: "sel", label: "Bar size",
       opts: ["1Min", "2Min", "3Min", "5Min", "10Min", "15Min", "30Min", "1Hour"]
         .map((x) => [x, x]) },
-    { k: "add_mode", t: "sel", label: "Add trigger",
+    { k: "add_mode", t: "sel", label: "Add distance measured as",
       opts: [["points", "$ below the last fill"], ["percent", "% below the last fill"],
              ["beyond_average", "any close below the average"]] },
     { k: "add_distance", t: "num", label: "Add distance ($)", step: 0.01, min: 0 },
     { k: "add_percent", t: "num", label: "Add distance (%)", step: 0.01, min: 0 },
+    { k: "add_trigger", t: "sel", label: "Adds fire when",
+      opts: [["touch", "price touches the rung — a limit order rests at Alpaca and fills intracandle"],
+             ["close", "a bar closes past the rung (the old rule)"]],
+      hint: "<b>Touch</b> keeps an entry order resting at each rung, exactly like the take-profits, so a wick "
+          + "through the level fills it. The FIRST lot still waits for its candle rule above." },
+    { k: "add_anchor", t: "sel", label: "Rungs are measured from",
+      opts: [["last_fill", "the last fill of any kind — an add or a take-profit"],
+             ["last_open", "the newest open lot's entry (the old rule)"]],
+      hint: "<b>Last fill</b> is the pullback rule: after a take-profit at $13.70 the next rung is $13.60." },
+    { k: "add_depth", t: "num", label: "Rungs kept resting", step: 1, min: 1, max: 10,
+      hint: "Touch only. 3 means the next three rungs rest at once so a fast dump fills them all. "
+          + "Each resting rung reserves one lot of buying power at Alpaca." },
   ]},
 
   { legend: "Exit", fields: [
@@ -225,7 +238,8 @@ function inputHTML(f, v) {
   if (f.t === "num") {
     return `<input name="${f.k}" type="number" value="${esc(v)}"`
       + (f.step !== undefined ? ` step="${f.step}"` : "")
-      + (f.min !== undefined ? ` min="${f.min}"` : "") + `>`;
+      + (f.min !== undefined ? ` min="${f.min}"` : "")
+      + (f.max !== undefined ? ` max="${f.max}"` : "") + `>`;
   }
   if (f.t === "area") return `<textarea name="${f.k}" rows="3">${esc(v)}</textarea>`;
   return `<input name="${f.k}" value="${esc(v)}">`;
