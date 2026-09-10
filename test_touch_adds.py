@@ -77,6 +77,7 @@ class TouchBroker:
         self.cancel_raise_next = None      # HTTP status of the next failure from cancel()
         self.linger_cancel = False         # cancel() -> pending_cancel instead of canceled
         self.fill_entries_on_place = False  # en- orders come back filled at once
+        self.wash_rule = False             # Alpaca's wash-trade table: see _o
         self.seq = 0
         self.log: list[tuple] = []         # ("place", coid) / ("cancel", order_id), in order
 
@@ -84,6 +85,20 @@ class TouchBroker:
         if self.reject_next:
             msg, self.reject_next = self.reject_next, None
             raise engine.AlpacaError(403, msg, "/v2/orders")
+        if self.wash_rule:
+            # docs.alpaca.markets/docs/user-protection: an opposite-side order
+            # still on the book (pending_cancel included) makes a market order
+            # a wash trade always, and a limit one when buy limit >= sell limit
+            opp = "buy" if side == "sell" else "sell"
+            for o in self.placed:
+                if o["side"] != opp or o["status"] not in OPEN:
+                    continue
+                lim = float(o["limit_price"] or 0)
+                if typ == "market" or o["type"] == "market" or not px or not lim:
+                    raise engine.AlpacaError(403, '{"message":"potential wash trade detected"}', "/v2/orders")
+                buy, sell = (float(px), lim) if side == "buy" else (lim, float(px))
+                if buy >= sell:
+                    raise engine.AlpacaError(403, '{"message":"potential wash trade detected"}', "/v2/orders")
         self.seq += 1
         o = {"id": f"o{self.seq}", "client_order_id": coid, "symbol": "TEST", "side": side,
              "qty": str(qty), "filled_qty": "0", "filled_avg_price": None, "filled_at": None,
@@ -190,7 +205,7 @@ def make(lots=(), broker_qty=0, broker=None, **cfg):
         e.ledger.open_lots.append(Lot(
             id=f"TEST-t-{i:04d}", shares=sh, entry_price=px,
             entry_time="2026-08-24T09:45:00-04:00", tp_price=tp, side=side,
-            tp_client_id=coid, tp_order_id=o["id"]))
+            tp_client_id=coid, tp_order_id=o["id"], tp_seq=1))   # seq 1 = the '-1' id, as a real lot carries
     e.ledger.lot_counter = len(lots)
     e.running = True
     e.last_price = 10.0
@@ -500,12 +515,14 @@ def main() -> int:
     step(e, f)
     check("tick N+1: 9.75 / 9.65 / 9.55", live_entry_prices(f), ["9.55", "9.65", "9.75"])
 
-    print("\n9. A partial fill is booked at once; the remainder is cancelled; a late delta is lot <id>a")
+    print("\n9. A partial fill is booked at once; the remainder is cancelled; late deltas are lot <id>a")
     e, f = make(lots=[(10, 10.0)], broker_qty=10)
     step(e, f)
     r = adds(e)[0]
     f.broker.linger_cancel = True
-    fill(e, f, r["coid"], 4, 9.90)                              # 4/10 shows in the snapshot
+    # the ORDER shows 4/10 but the position read LAGS (Alpaca still says 10):
+    # the guards below have a real ledger-vs-Alpaca gap to act on
+    f.broker.fill(r["coid"], 4, 9.90)
     step(e, f)
     lot = next((l for l in e.ledger.open_lots if l.id == r["lot_id"]), None)
     check("one lot of 4 @ 9.90", (lot.shares, lot.entry_price) if lot else None, (4, 9.90))
@@ -514,16 +531,45 @@ def main() -> int:
     check("remainder cancelled", r["order_id"] in f.broker.cancelled, True)
     check("record cancelling", r["state"], "cancelling")
     check("settling", e._adds_settling(), True)
+    check("ledger 14 vs Alpaca 10: a real gap for the sync guard", (e.ledger.shares, e.broker_qty), (14, 10))
     f.bump_snapshot(); e._reconcile()
     f.bump_snapshot(); e._reconcile()
     check("no sync-guard strike while settling", e.mismatch_strikes, 0)
+    # now the position read runs AHEAD (18 held, 14 booked): adopt would go
+    # looking for the fill in the order record -- suspended while settling
+    f.set_position(18); e.broker_qty = 18; e.position = f.position_of("TEST")
+    reads = []
+    real_orders = f.broker.orders
+    f.broker.orders = lambda status="open", **kw: reads.append(status) or real_orders(status=status, **kw)  # type: ignore[method-assign]
+    f.bump_snapshot(); e._reconcile()
+    check("adopt did not consult the order record while settling", reads.count("all"), 0)
     check("adopt did not fire", len(e.ledger.open_lots), 2)
-    fill(e, f, r["coid"], 6, 9.90)                              # two more raced in...
-    f.broker.settle(r["coid"], "canceled")                      # ...then the cancel confirmed
-    step(e, f)
+    r["cancel_at"] -= engine.ADD_CANCEL_WARN_SECONDS + 1        # the cancel has gone unconfirmed for over a minute
+    f.bump_snapshot(); e._reconcile()
+    check("past ADD_CANCEL_WARN_SECONDS the sync guard resumes: one strike", e.mismatch_strikes, 1)
+    check("...and adopt looks at the order record again", reads.count("all") >= 1, True)
+    f.broker.orders = real_orders                                # type: ignore[method-assign]
+    f.set_position(14); e.broker_qty = 14; e.position = f.position_of("TEST")
+    f.bump_snapshot(); e._reconcile()
+    check("position back in step: strikes reset", e.mismatch_strikes, 0)
+    fill(e, f, r["coid"], 6, 9.90)                              # two more raced in (the position follows)...
+    step(e, f)                                                  # ...while the cancel still lingers
     lot_a = next((l for l in e.ledger.open_lots if l.id == r["lot_id"] + "a"), None)
     check("lot <id>a of 2 with its own TP", (lot_a.shares, bool(lot_a.tp_client_id)) if lot_a else None,
           (2, True))
+    tp_a = f.broker.by_coid.get(lot_a.tp_client_id, {}) if lot_a else {}
+    check("its TP is for 2", tp_a.get("qty"), "2")
+    fill(e, f, r["coid"], 8, 9.90)                              # a THIRD delta on the same order
+    step(e, f)
+    lot_a = next((l for l in e.ledger.open_lots if l.id == r["lot_id"] + "a"), None)
+    check("third delta: lot <id>a grows by the DELTA only (2 -> 4)", lot_a.shares if lot_a else None, 4)
+    check("ledger shares == Alpaca's", (e.ledger.shares, e.broker_qty), (18, 18))
+    tp_a2 = f.broker.by_coid.get(lot_a.tp_client_id, {}) if lot_a else {}
+    check("<id>a's TP is for 4 and the 2-share one was cancelled",
+          (tp_a2.get("qty"), tp_a.get("id") in f.broker.cancelled), ("4", True))
+    check("no sync-guard strike", e.mismatch_strikes, 0)
+    f.broker.settle(r["coid"], "canceled")                      # ...then the cancel confirmed
+    step(e, f)
     check("the old record is gone", [x for x in adds(e) if x["lot_id"] == r["lot_id"]], [])
     check("anchor at the fill", _anchor_of(e), 9.90)
     check("fresh rung from the new anchor", live_entry_prices(f), ["9.80"])
@@ -549,9 +595,19 @@ def main() -> int:
     check("streak reset after a success", e._adds_reject_streak, 0)
     e, f = make(lots=[(10, 10.0)], broker_qty=10)
     f.broker.reject_next = "potential wash trade"
+    n0 = e.ledger.lot_counter
     step(e, f)
     check("wash trade: skipped with a flag", "crosses" in e.attention.get("adds", ""), True)
     check("wash trade: NO backoff", e._adds_backoff_until, 0.0)
+    check("wash trade: that rung is on a short hold", e._adds_wash_hold.get(990, 0.0) > time.time(), True)
+    step(e, f)
+    step(e, f)
+    check("no fresh POST and no burnt id while the hold lasts",
+          (len(entries(f)), e.ledger.lot_counter - n0), (0, 1))
+    check("the hold names the reason", "wash" in e._adds_hold, True)
+    e._adds_wash_hold[990] = time.time() - 1
+    step(e, f)
+    check("hold over: the rung is re-tried", len(entries(f)), 1)
 
     print("\n11. A restart re-adopts the records from the persisted ledger")
     sd = SCRATCH / "state"
@@ -766,6 +822,24 @@ def main() -> int:
     check("no new TP placed for the lot that already sold",
           len([o for o in f.broker.placed if o["client_order_id"].startswith("tp-TEST-t-0001")]), 1)
     check("the surviving lot is re-covered", bool(e.ledger.open_lots[0].tp_client_id), True)
+    # a LIVE, partially filled TP: still 'open' at Alpaca, so it is in the cancel
+    # set -- its partial must be booked from the re-read, not lost with the id
+    e, f = make(lots=[(100, 10.0), (100, 9.90)], broker_qty=200, shares_per_lot=100, add_trigger="close")
+    fill(e, f, "tp-TEST-t-0001-1", 40, 10.10)                   # 40 of 100 sold since the last snapshot
+    sync_orders(e, f)
+    check("the partial is still on the open book", f.broker.by_coid["tp-TEST-t-0001-1"]["status"], "partially_filled")
+    e.cancel_all_tps()
+    lot1 = e.ledger.open_lots[0]
+    check("cancel_all_tps books the LIVE partial: lot 1 is 60 sh, +4.00 realized",
+          (lot1.shares, round(e.ledger.realized_all, 2)), (60, 4.0))
+    check("...and the anchor is that partial",
+          (e.ledger.last_fill.get("price"), e.ledger.last_fill.get("kind")), (10.10, "tp_partial"))
+    check("...ids blanked", (lot1.tp_client_id, lot1.tp_filled), ("", 0))
+    e.ensure_tps()
+    tp1 = [o for o in f.broker.placed if o["client_order_id"].startswith("tp-TEST-t-0001") and o["status"] == "new"]
+    check("re-covered at 60, not 100", [o["qty"] for o in tp1], ["60"])
+    check("resting sells == held (160)",
+          sum(int(o["qty"]) for o in f.broker.placed if o["side"] == "sell" and o["status"] == "new"), 160)
 
     print("\n17. A rung that would cross our own resting exit is skipped; an extended-hours flip re-places")
     e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
@@ -774,6 +848,15 @@ def main() -> int:
     check("9.90 would cross the 9.85 sell: skipped; 9.80 / 9.70 rest",
           [r["price"] for r in adds(e)], [9.80, 9.70])
     check("the hold names the skip", "cross" in e._adds_hold, True)
+    # a cancelling exit is still live at Alpaca (and its wash check counts it)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    pc = f.broker._o("sell", 5, 9.85, "tp-TEST-t-0001-2", True)
+    pc["status"] = "pending_cancel"
+    step(e, f)
+    check("a pending_cancel exit below the rung still blocks it", (entries(f), "cross" in e._adds_hold), ([], True))
+    pc["status"] = "canceled"
+    step(e, f)
+    check("once it is gone the rung rests", live_entry_prices(f), ["9.90"])
     e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=2)
     step(e, f)
     ids = [r["order_id"] for r in adds(e)]
@@ -1046,16 +1129,34 @@ def main() -> int:
     check("nothing of the rungs cancelled", any(i in f.broker.cancelled for i in en_ids), False)
     check("the lot's TP was re-priced to 10.20", e.ledger.open_lots[0].tp_price, 10.20)
 
-    print("\n30. A lot size of 0 (the ladder cap) stops the burst without churn")
-    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
+    print("\n30. The REAL f_ladder cap: a resting rung is never counted against its own room (no churn)")
+    # seven 10-share lots at $10 ($700 open); f_ladder 0.2 of $4,000 equity is
+    # $800, so exactly one more rung fits although depth 3 asks for three
+    e, f = make(lots=[(10, 10.0)] * 7, broker_qty=70, add_depth=3, f_ladder=0.2)
+    f.account["equity"] = "4000"
     n0 = e.ledger.lot_counter
-    e._cap_to_ladder = lambda n, price, extra_deployed=0.0: n if extra_deployed == 0 else 0  # type: ignore[method-assign]
     for _ in range(5):
         step(e, f)
     check("only rung 1 rests", [r["price"] for r in adds(e)], [9.90])
     check("no cancels across five ticks", f.broker.cancelled, [])
     check("lot counter advanced by exactly 1", e.ledger.lot_counter - n0, 1)
-    check("hold empty or the cap flag set", e._adds_hold == "" or "cap" in e.attention, True)
+    check("the cap flag names the reason", "cap" in e.attention, True)
+    # the live tickers' shape: dollars mode, n_target 8 = max_lots 8, five
+    # lots open, depth 3 -- every rung fits, and none may churn
+    e, f = make(lots=[(10, 10.0)] * 5, broker_qty=50, add_depth=3, f_ladder=0.2, size_mode="dollars",
+                n_target=8, max_lots=8, lot_dollars=100)
+    f.account["equity"] = "4000"                                # E_max $800 = 8 x $100; $500 open
+    n0 = e.ledger.lot_counter
+    step(e, f)
+    check("three rungs of 10 rest", [(r["price"], r["shares"]) for r in adds(e)],
+          [(9.90, 10), (9.80, 10), (9.70, 10)])
+    for _ in range(5):
+        step(e, f)
+    check("six ticks: zero cancels", f.broker.cancelled, [])
+    check("six ticks: the lot counter advanced by exactly 3", e.ledger.lot_counter - n0, 3)
+    check("all three still working", [r["state"] for r in adds(e)], ["working"] * 3)
+    check("the first-entry / status sizing still counts the resting notional (cap reached)",
+          e._lot_shares(price=9.60), 0)
 
     print("\n31. A rebuilt lot is never booked a second time from its resting-add record")
     e, f = make(lots=[(10, 10.0)], broker_qty=10)
@@ -1141,6 +1242,209 @@ def main() -> int:
           len([o for o in f.broker.placed if str(o["client_order_id"]).startswith("xs-")]), 1)
     check("no new TP placed for it either",
           len([o for o in f.broker.placed if str(o["client_order_id"]).startswith("tp-")]), 2)
+
+    print("\n33. A strategy exit retires the rungs FIRST and never leaves the lot naked")
+    engine.EXIT_WAIT_SECONDS = 0.0                              # the fake confirms cancels at once: never wait 8 s
+    real_sleep = engine.time.sleep
+    engine.time.sleep = lambda s: None                          # type: ignore[assignment]
+    try:
+        # (a) touch mode: a BUY rung rests; Alpaca's rule makes a sell over it a wash trade
+        e, f = make(lots=[(10, 10.0)], broker_qty=10, strategy_exits=True)
+        step(e, f)
+        r = adds(e)[0]
+        lot = e.ledger.open_lots[0]
+        old_tp = lot.tp_client_id
+        f.broker.wash_rule = True
+        e._strategy_says_exit = lambda l: True                  # type: ignore[method-assign]
+        step(e, f)
+        log = f.broker.log
+        xs = next((c for k, c in log if k == "place" and str(c).startswith("xs-")), None)
+        check("(a) the rung was cancelled before the exit went out",
+              (r["order_id"] in f.broker.cancelled,
+               log.index(("cancel", r["order_id"])) < log.index(("place", xs)) if xs else None), (True, True))
+        check("(a) the TP was cancelled after the rung, before the exit",
+              (log.index(("cancel", r["order_id"])) < log.index(("cancel", f.broker.by_coid[old_tp]["id"]))
+               < log.index(("place", xs))) if xs else None, True)
+        xo = f.broker.by_coid.get(lot.tp_client_id, {})
+        check("(a) the exit is a marketable limit through the bid, tracked on the lot",
+              (str(lot.tp_client_id).startswith("xs-"), xo.get("limit_price"), xo.get("type"), xo.get("status")),
+              (True, "9.97", "limit", "new"))
+        check("(a) no wash rejection, no flag", f"xs-{lot.id}" in e.attention, False)
+        check("(a) lot.tp_price is still the target", lot.tp_price, 10.10)
+        check("(a) status carries the exit limit separately",
+              next(l["exit_limit"] for l in e.status()["lots"] if l["id"] == lot.id), 9.97)
+        # (b) extended hours: the exit limit never overwrites the target, so a dead exit re-covers at 10.00
+        e, f = make(lots=[(10, 10.0), (10, 9.90)], broker_qty=20, add_trigger="close", strategy_exits=True)
+        e.is_extended = lambda: True                            # type: ignore[method-assign]
+        e.quote = {"bp": 9.50, "ap": 9.52}
+        lot = e.ledger.open_lots[1]
+        e._strategy_says_exit = lambda l: l.id == lot.id        # type: ignore[method-assign]
+        step(e, f)
+        xo = f.broker.by_coid.get(lot.tp_client_id, {})
+        check("(b) premarket exit rests at bid - 0.02, extended hours",
+              (xo.get("limit_price"), xo.get("extended_hours")), ("9.48", True))
+        check("(b) tp_price untouched", lot.tp_price, 10.00)
+        e._strategy_says_exit = lambda l: False                 # type: ignore[method-assign]
+        f.broker.settle(lot.tp_client_id, "canceled")           # the exit died unfilled
+        step(e, f)
+        to = f.broker.by_coid.get(lot.tp_client_id, {})
+        check("(b) the dead exit is re-covered at the ORIGINAL target",
+              (str(lot.tp_client_id).startswith("tp-"), to.get("limit_price"), to.get("status")), (True, "10.00", "new"))
+        check("(b) the exit limit is forgotten", next(l["exit_limit"] for l in e.status()["lots"] if l["id"] == lot.id), 0.0)
+        # (c) the exit itself is refused: the take-profit goes straight back
+        e, f = make(lots=[(10, 10.0)], broker_qty=10, strategy_exits=True)
+        step(e, f)
+        lot = e.ledger.open_lots[0]
+        f.broker.reject_next = "potential wash trade detected"
+        e._strategy_says_exit = lambda l: True                  # type: ignore[method-assign]
+        step(e, f)
+        to = f.broker.by_coid.get(lot.tp_client_id, {})
+        check("(c) rejected exit: the lot is re-covered at once, never naked",
+              (str(lot.tp_client_id).startswith("tp-"), to.get("status"), to.get("limit_price")), (True, "new", "10.10"))
+        check("(c) ...and flagged", "Re-placing" in e.attention.get(f"xs-{lot.id}", ""), True)
+        # (d) the rung's cancel lingers: the exit waits and the take-profit is not touched
+        e, f = make(lots=[(10, 10.0)], broker_qty=10, strategy_exits=True)
+        step(e, f)
+        r = adds(e)[0]
+        lot = e.ledger.open_lots[0]
+        tp = lot.tp_client_id
+        f.broker.linger_cancel = True
+        e._strategy_says_exit = lambda l: True                  # type: ignore[method-assign]
+        step(e, f)
+        check("(d) rung cancel lingers: exit held, TP untouched",
+              (r["state"], f.broker.by_coid[tp]["status"], lot.tp_client_id), ("cancelling", "new", tp))
+        check("(d) no exit sent", [o for o in f.broker.placed if o["client_order_id"].startswith("xs-")], [])
+        f.broker.linger_cancel = False
+        f.broker.settle(r["coid"], "canceled")
+        step(e, f)
+        check("(d) once the rung is gone the exit goes out", str(lot.tp_client_id).startswith("xs-"), True)
+    finally:
+        engine.EXIT_WAIT_SECONDS = 8.0
+        engine.time.sleep = real_sleep                          # type: ignore[assignment]
+
+    print("\n34. An order Alpaca reports as replaced is terminal for the id we hold")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    r = adds(e)[0]
+    f.broker.settle(r["coid"], "replaced")
+    f.broker.by_coid[r["coid"]]["replaced_by"] = "oNEW"
+    step(e, f)
+    check("the record is dropped", [x for x in adds(e) if x["lot_id"] == r["lot_id"]], [])
+    check("...with a WARN naming the replacing order", len(evs(e, "WARN", "oNEW")) >= 1, True)
+    r2 = adds(e)
+    check("a fresh rung rests under a new lot id",
+          (len(r2), r2[0]["lot_id"] != r["lot_id"] if r2 else None, r2[0]["state"] if r2 else None), (1, True, "working"))
+    lot = e.ledger.open_lots[0]
+    old = lot.tp_client_id
+    f.broker.settle(old, "replaced")
+    e.ensure_tps()
+    check("a replaced take-profit is re-covered under a fresh id",
+          (lot.tp_client_id != old, (f.broker.by_coid.get(lot.tp_client_id) or {}).get("status")), (True, "new"))
+
+    print("\n35. An ESTIMATED release is stamped with broker time, so a real fill read back later still wins")
+    e, f = make(lots=[(10, 10.0), (10, 9.90)], broker_qty=20)
+    step(e, f)
+    r = adds(e)[0]                                              # the 9.80 rung
+    f.broker.by_coid["tp-TEST-t-0002-1"]["updated_at"] = "2026-08-24T13:59:50Z"
+    f.set_position(10); e.broker_qty = 10; e.position = f.position_of("TEST")   # 10 sh sold by hand
+    for _ in range(3):
+        f.bump_snapshot(); e._reconcile()
+    e._mismatch_since -= engine.MISMATCH_GRACE_SECONDS + 1
+    e._reconcile()
+    check("lot 2 released ESTIMATED", (len(e.ledger.open_lots), e.ledger.last_fill.get("kind")), (1, "inferred"))
+    check("...stamped with its exit order's broker time, not the local clock",
+          e.ledger.last_fill.get("ts"), engine._order_ts({"updated_at": "2026-08-24T13:59:50Z"}))
+    f.broker.fill(r["coid"], 10, 9.80, at="2026-08-24T13:59:55Z")      # the rung filled 5 s later at Alpaca...
+    f.set_position(20); e.broker_qty = 20; e.position = f.position_of("TEST")
+    step(e, f)                                                  # ...and is read back on the next tick
+    check("the rung fill is booked", len(e.ledger.open_lots), 2)
+    check("the REAL fill is the anchor", (e.ledger.last_fill.get("price"), e.ledger.last_fill.get("kind")), (9.80, "entry"))
+    check("the next rung sits below the lot just bought", e._rung_price(), 9.70)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    f.set_position(0); e.broker_qty = 0; e.position = f.position_of("TEST")
+    for _ in range(3):
+        f.bump_snapshot(); e._reconcile()
+    e._mismatch_since -= engine.MISMATCH_GRACE_SECONDS + 1
+    e._reconcile()
+    check("released to flat: the anchor is cleared", (e.ledger.open_lots, e.ledger.last_fill), ([], {}))
+
+    print("\n36. Threads: the tick holds the engine lock, saves never collide, a lot found without an exit gets one")
+    import threading
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    seen = []
+    for name in ("_roll_session", "_refresh_market", "_book_basket_progress", "_trail_lots",
+                 "_sync_resting_adds", "_maybe_decide"):
+        setattr(e, name, lambda *a, **k: None)
+    e._maybe_basket_exit = lambda: False                        # type: ignore[method-assign]
+    e._maybe_reverse_entry = lambda: False                      # type: ignore[method-assign]
+    e._reconcile = lambda: seen.append(e.lock._is_owned())      # type: ignore[method-assign]
+    e.tick()
+    check("tick() runs its body under the engine lock", seen, [True])
+    sd2 = SCRATCH / "state_save"
+    led = Ledger(symbol="TEST", session_date="t")
+    led._dir = sd2
+    errs: list = []
+
+    def hammer():
+        for _ in range(300):
+            try:
+                led.save()
+            except Exception as ex:
+                errs.append(repr(ex))
+    ths = [threading.Thread(target=hammer) for _ in range(4)]
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join()
+    check("1,200 concurrent saves of one ledger: zero errors", errs[:3], [])
+    check("no temp file left behind", [p.name for p in sd2.glob("*.tmp")], [])
+    check("the file is intact", Ledger.load("TEST", sd2).session_date, "t")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    r = adds(e)[0]
+    f.broker.fill(r["coid"], 10, 9.90)
+    f.set_position(20); e.broker_qty = 20; e.position = f.position_of("TEST")
+    lot = Lot(id=r["lot_id"], shares=10, entry_price=9.90, entry_time="x", tp_price=10.00)   # booked, never covered
+    e.ledger.open_lots.append(lot)
+    e.running = False
+    sync_orders(e, f)
+    e._book_resting_adds(e.open_orders)                         # the dashboard fleet's idle push
+    check("a lot found without an exit gets its take-profit",
+          (f.broker.by_coid.get(lot.tp_client_id) or {}).get("qty"), "10")
+    check("...and the record is forgotten", [x for x in adds(e) if x["lot_id"] == r["lot_id"]], [])
+
+    print("\n37. A rung that fills while the ladder is being disarmed gets a REAL exit; disarming waits for the rungs")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    e.ensure_tps = lambda: {"ok": True}                         # type: ignore[method-assign]
+    step(e, f)
+    r = adds(e)[0]
+    cfg = e.update_config({"dry_run": True})
+    check("disarm refused while a rung is WORKING", cfg["dry_run"], False)
+    check("...with a readable reason", len(evs(e, "WARN", "NOT disarmed")) >= 1, True)
+    check("...and the rung untouched", (r["state"], f.broker.cancelled), ("working", []))
+    e.stop()                                                    # cancels the rung: the record is cancelling
+    check("stop() cancelled it", r["state"], "cancelling")
+    cfg = e.update_config({"dry_run": True})
+    check("disarm accepted once the cancel is in flight", cfg["dry_run"], True)
+    fill(e, f, r["coid"], 10, 9.90)                             # ...but the fill raced the cancel
+    sync_orders(e, f)
+    e._book_resting_adds(e.open_orders)                         # the dashboard fleet's idle push
+    lot = next((l for l in e.ledger.open_lots if l.id == r["lot_id"]), None)
+    check("the fill is booked", lot.shares if lot else None, 10)
+    check("...with a REAL take-profit despite dry run",
+          (f.broker.by_coid.get(lot.tp_client_id) or {}).get("status") if lot else None, "new")
+    check("...and a WARN says so", len(evs(e, "WARN", "REAL fill")) >= 1, True)
+    check("no [dry] line for it", len(evs(e, "DRY", "would rest GTC")), 0)
+
+    print("\n38. summary() and status() agree on ADDS RESTING; a stopped ladder wants no rung")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    check("summary state", e.summary()["state"], "ADDS RESTING")
+    check("status state", e.status()["state"], "ADDS RESTING")
+    e.stop()
+    check("after stop: status wants no rungs", e.status()["rungs"], [])
+    check("summary says STOPPED", e.summary()["state"], "STOPPED")
 
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
     return 1 if FAIL else 0

@@ -318,6 +318,23 @@ def main() -> int:
               for o in e.open_orders if o["side"] == e.exit_side()) > e.held,
           True)
 
+    print("\n14b. A short's cover books its realized P/L with the SHORT sign")
+    e, f = build(side="short", lots=[(100, 10.00)], broker_qty=-100)
+    lot = e.ledger.open_lots[0]
+    closed = e._book_tp_progress(lot, {"qty": "100", "filled_qty": "100", "filled_avg_price": "9.90",
+                                       "filled_at": "2026-09-01T15:00:00Z"})
+    check("cover below entry closes the lot", closed, True)
+    check("short 10.00 -> cover 9.90 is +$10, not -$10", round(e.ledger.realized_all, 2), 10.0)
+    e, f = build(side="short", lots=[(100, 10.00)], broker_qty=-100)
+    lot = e.ledger.open_lots[0]
+    e._book_tp_progress(lot, {"qty": "100", "filled_qty": "40", "filled_avg_price": "10.05"})
+    check("a partial cover ABOVE entry is the loss", round(e.ledger.realized_all, 2), -2.0)
+    check("...and the lot shrinks to the unfilled remainder", lot.shares, 60)
+    e, f = build(side="long", lots=[(100, 10.00)], broker_qty=100)
+    lot = e.ledger.open_lots[0]
+    e._book_tp_progress(lot, {"qty": "100", "filled_qty": "100", "filled_avg_price": "10.10"})
+    check("the long side is unchanged: 10.00 -> 10.10 = +$10", round(e.ledger.realized_all, 2), 10.0)
+
     print("\n15. side_mode is validated")
     e, _ = build()
     for m in ("auto", "long", "short", "both"):
