@@ -1841,9 +1841,12 @@ class Engine:
         import trend_v2
         cfg = self.cfg
         fl = getattr(self, "fleet", None)
-        m1 = fl.hist_of(self.symbol) if fl else []
-        bars_1h = fl.bars_of(self.symbol, "1Hour") if fl else []
-        bars_4h = fl.bars_of(self.symbol, "4Hour") if fl else []
+        # a fleet without history (offline fixtures) reads as no history, not a crash
+        hist = getattr(fl, "hist_of", None)
+        bars_of = getattr(fl, "bars_of", None)
+        m1 = hist(self.symbol) if callable(hist) else []
+        bars_1h = bars_of(self.symbol, "1Hour") if callable(bars_of) else []
+        bars_4h = bars_of(self.symbol, "4Hour") if callable(bars_of) else []
         prev_R = int((self.trend or {}).get("R") or 0)
         snap = trend_v2.snapshot(m1, bars_1h, bars_4h, cfg, prev_R)
         R, D, M = snap["R"], snap["D"], snap["M"]

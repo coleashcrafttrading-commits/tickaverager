@@ -152,10 +152,10 @@ function paintTop() {
   if (!ov) { el("kpis").innerHTML = ""; return; }
   const p = ov.portfolio;
   el("kpis").innerHTML = `
-    <div><div class="kpi-k">Account</div><div class="kpi-v num">${money(p.account_value)}</div></div>
-    <div><div class="kpi-k">Today</div><div class="kpi-v num">${sgn(p.made_today)}</div></div>
-    <div><div class="kpi-k">Open P/L</div><div class="kpi-v num">${sgn(p.open_pl)}</div></div>
-    <div><div class="kpi-k">Deployed</div><div class="kpi-v num">${money0(p.deployed)}</div></div>`;
+    <div><div class="kpi-k">Realized today</div><div class="kpi-v num">${sgn(p.realized_today)}</div></div>
+    <div><div class="kpi-k">Realized total</div><div class="kpi-v num">${sgn(p.realized_total)}</div></div>
+    <div><div class="kpi-k">Unrealized today</div><div class="kpi-v num">${sgn(p.unrealized_today != null ? p.unrealized_today : p.open_today)}</div></div>
+    <div><div class="kpi-k">Unrealized total</div><div class="kpi-v num">${sgn(p.unrealized_total != null ? p.unrealized_total : p.open_pl)}</div></div>`;
 }
 
 /* ---------------------------------------------------------------- render */

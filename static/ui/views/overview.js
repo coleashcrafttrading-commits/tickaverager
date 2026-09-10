@@ -146,10 +146,11 @@ VIEWS.overview = {
 
     el("ovStats").innerHTML =
       stat("Account value", money(p.account_value),
-           `started at ${money0(p.start_of_day)}`)
-      + stat("Made today", sgn(p.made_today),
-             `realized ${money0(p.realized_today)} · open ${money0(p.open_today)}`)
-      + stat("Open P/L", sgn(p.open_pl), `${t.shares} shares in ${t.lots} lots`)
+           `started at ${money0(p.start_of_day)} · made today ${money0(p.made_today)}`)
+      + stat("Realized P/L", sgn(p.realized_today),
+             `today · all time ${money0(p.realized_total)}`)
+      + stat("Unrealized P/L", sgn(p.unrealized_today != null ? p.unrealized_today : p.open_today),
+             `today · total ${money0(p.unrealized_total != null ? p.unrealized_total : p.open_pl)} on ${t.shares} shares in ${t.lots} lots`)
       + stat("Deployed", money0(p.deployed),
              `${money0(p.cash)} cash · ${money0(p.buying_power)} buying power`);
 

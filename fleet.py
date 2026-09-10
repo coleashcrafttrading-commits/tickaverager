@@ -901,6 +901,24 @@ class Fleet:
                 "in_fleet": a["symbol"] in self.engines}
 
     # -------------------------------------------------------- aggregation
+    def realized_total(self, max_age: float = 10.0) -> float:
+        """All-time realized P/L for THIS account, from its journal (the truth
+        for history), cached so the dashboard poll does not re-read the file
+        every two seconds."""
+        import time as _time
+        now = _time.time()
+        cache = getattr(self, "_rt_cache", None)
+        if cache and now - cache[0] < max_age:
+            return cache[1]
+        try:
+            import journal as _journal
+            rows = _journal.load(path=getattr(self, "journal_path", None))
+            val = round(float(_journal.stats(rows).get("realized") or 0), 2)
+        except Exception:
+            val = cache[1] if cache else 0.0
+        self._rt_cache = (now, val)
+        return val
+
     def portfolio(self) -> dict:
         """Account-wide view -- INCLUDING anything held that no ladder owns."""
         acct = self.account
@@ -948,9 +966,14 @@ class Fleet:
             "account_value": eq,
             "start_of_day": last_eq,
             "made_today": made,
+            # today: Alpaca's own numbers (equity vs last_equity, intraday marks)
             "realized_today": round(made - intraday, 2),
             "open_today": intraday,
+            "unrealized_today": intraday,
+            # all time: what this account's ladders have actually booked (the journal)
+            "realized_total": self.realized_total(),
             "open_pl": open_pl,
+            "unrealized_total": open_pl,
             "cash": float(acct.get("cash") or 0),
             "buying_power": float(acct.get("buying_power") or 0),
             "deployed": self.deployed(),
