@@ -1,0 +1,510 @@
+{
+ "calls": "[('buy_limit', ('TEST', 100, 10.02, 'en-TEST-t-0001'), {'extended_hours': False}), ('order_by_client_id', ('en-TEST-t-0001',), {}), ('sell_limit_gtc', ('TEST', 100, 10.12, 'tp-TEST-t-0001-1'), {'extended_hours': True}), ('order_by_client_id', ('tp-TEST-t-0001-1',), {}), ('buy_limit_gtc', ('TEST', 100, 9.92, 'en-TEST-t-0002'), {'extended_hours': True}), ('cancel', ('o3',), {}), ('order_by_client_id', ('en-TEST-t-0002',), {}), ('buy_limit_gtc', ('TEST', 100, 10.02, 'en-TEST-t-0003'), {'extended_hours': True}), ('order_by_client_id', ('en-TEST-t-0003',), {}), ('order_by_client_id', ('tp-TEST-t-0001-1',), {}), ('cancel', ('o4',), {}), ('order_by_client_id', ('en-TEST-t-0003',), {}), ('buy_limit', ('TEST', 100, 10.02, 'en-TEST-t-0004'), {'extended_hours': False}), ('order_by_client_id', ('en-TEST-t-0004',), {}), ('sell_limit_gtc', ('TEST', 100, 10.12, 'tp-TEST-t-0004-1'), {'extended_hours': True}), ('order_by_client_id', ('tp-TEST-t-0004-1',), {}), ('buy_limit_gtc', ('TEST', 100, 9.92, 'en-TEST-t-0005'), {'extended_hours': True}), ('order_by_client_id', ('en-TEST-t-0005',), {}), ('sell_limit_gtc', ('TEST', 100, 10.02, 'tp-TEST-t-0005-1'), {'extended_hours': True}), ('order_by_client_id', ('tp-TEST-t-0005-1',), {}), ('buy_limit_gtc', ('TEST', 100, 9.82, 'en-TEST-t-0006'), {'extended_hours': True}), ('cancel', ('o9',), {}), ('cancel', ('o6',), {}), ('orders', (), {'status': 'open', 'symbols': 'TEST'}), ('sell_limit_gtc', ('TEST', 200, 9.97, 'xs-TEST-t-0004-0'), {'extended_hours': True}), ('order_by_client_id', ('xs-TEST-t-0004-0',), {}), ('order_by_client_id', ('en-TEST-t-0006',), {}), ('buy_limit', ('TEST', 100, 10.02, 'en-TEST-t-0007'), {'extended_hours': False}), ('order_by_client_id', ('en-TEST-t-0007',), {}), ('sell_limit_gtc', ('TEST', 100, 10.12, 'tp-TEST-t-0007-1'), {'extended_hours': True}), ('order_by_client_id', ('tp-TEST-t-0007-1',), {}), ('buy_limit_gtc', ('TEST', 100, 9.92, 'en-TEST-t-0008'), {'extended_hours': True}), ('cancel', ('o12',), {}), ('sell_limit_gtc', ('TEST', 75, 10.12, 'tp-TEST-t-0007-2'), {'extended_hours': True}), ('cancel', ('o13',), {}), ('order_by_client_id', ('en-TEST-t-0008',), {}), ('orders', (), {'status': 'all', 'symbols': 'TEST', 'limit': 500}), ('orders', (), {'status': 'open', 'symbols': 'TEST'}), ('cancel', ('o8',), {}), ('cancel', ('o14',), {}), ('sell_limit_gtc', ('TEST', 75, 10.12, 'tp-TEST-t-0007-1'), {'extended_hours': True}), ('buy_limit_gtc', ('TEST', 100, 9.92, 'en-TEST-t-0009'), {'extended_hours': True}), ('orders', (), {'status': 'open', 'symbols': 'TEST'}), ('cancel', ('o15',), {}), ('sell_limit_gtc', ('TEST', 75, 9.97, 'tp-TEST-t-0007-2'), {'extended_hours': True}), ('order_by_client_id', ('tp-TEST-t-0007-2',), {}), ('cancel', ('o16',), {}), ('order_by_client_id', ('en-TEST-t-0009',), {}), ('buy_limit', ('TEST', 100, 10.02, 'en-TEST-t-0010'), {'extended_hours': False}), ('order_by_client_id', ('en-TEST-t-0010',), {}), ('buy_limit_gtc', ('TEST', 100, 9.92, 'en-TEST-t-0011'), {'extended_hours': True}), ('trailing_stop_gtc', ('TEST', 100, 0.05, 'tp-TEST-t-0010-1'), {'side': 'sell', 'extended_hours': True}), ('orders', (), {'status': 'open', 'symbols': 'TEST'}), ('cancel', ('o19',), {}), ('cancel', ('o20',), {}), ('close_position', ('TEST',), {}), ('asset', ('TEST',), {})]",
+ "ledgers": [
+  {
+   "step": "start",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 0,\n  \"session_date\": \"t\",\n  \"realized_today\": 0.0,\n  \"realized_all\": 0.0,\n  \"closed_count\": 0,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "lot1+rung",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 2,\n  \"session_date\": \"t\",\n  \"realized_today\": 0.0,\n  \"realized_all\": 0.0,\n  \"closed_count\": 0,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0001\",\n      \"shares\": 100,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0001-1\",\n      \"tp_order_id\": \"o2\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0002\",\n      \"coid\": \"en-TEST-t-0002\",\n      \"order_id\": \"o3\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"working\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 10.02,\n    \"side\": \"buy\",\n    \"kind\": \"entry\",\n    \"lot_id\": \"TEST-t-0001\",\n    \"ts\": 1787580000.0,\n    \"at\": \"2026-08-24T10:00:00-04:00\"\n  }\n}"
+  },
+  {
+   "step": "partial75",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 2,\n  \"session_date\": \"t\",\n  \"realized_today\": 7.499999999999973,\n  \"realized_all\": 7.499999999999973,\n  \"closed_count\": 0,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0001\",\n      \"shares\": 25,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0001-1\",\n      \"tp_order_id\": \"o2\",\n      \"tp_filled\": 75,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0002\",\n      \"coid\": \"en-TEST-t-0002\",\n      \"order_id\": \"o3\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"cancelling\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0,\n      \"cancel_at\": 1800000000.0,\n      \"why\": \"rung moved: wanted [10.02]\"\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 10.12,\n    \"side\": \"sell\",\n    \"kind\": \"tp_partial\",\n    \"lot_id\": \"TEST-t-0001\",\n    \"ts\": 1787580000.0,\n    \"at\": \"2026-08-24T10:00:00-04:00\"\n  }\n}"
+  },
+  {
+   "step": "rung-moved",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 3,\n  \"session_date\": \"t\",\n  \"realized_today\": 7.499999999999973,\n  \"realized_all\": 7.499999999999973,\n  \"closed_count\": 0,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0001\",\n      \"shares\": 25,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0001-1\",\n      \"tp_order_id\": \"o2\",\n      \"tp_filled\": 75,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0003\",\n      \"coid\": \"en-TEST-t-0003\",\n      \"order_id\": \"o4\",\n      \"k\": 1,\n      \"price\": 10.02,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"working\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.12,\n      \"booked\": 0,\n      \"hot_at\": 0.0\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 10.12,\n    \"side\": \"sell\",\n    \"kind\": \"tp_partial\",\n    \"lot_id\": \"TEST-t-0001\",\n    \"ts\": 1787580000.0,\n    \"at\": \"2026-08-24T10:00:00-04:00\"\n  }\n}"
+  },
+  {
+   "step": "closed100",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 3,\n  \"session_date\": \"t\",\n  \"realized_today\": 9.999999999999964,\n  \"realized_all\": 9.999999999999964,\n  \"closed_count\": 1,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0003\",\n      \"coid\": \"en-TEST-t-0003\",\n      \"order_id\": \"o4\",\n      \"k\": 1,\n      \"price\": 10.02,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"cancelling\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.12,\n      \"booked\": 0,\n      \"hot_at\": 1800000000.0,\n      \"cancel_at\": 1800000000.0,\n      \"why\": \"cancel: flat -- the first entry is the bar rule\"\n    }\n  ],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "flat",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 3,\n  \"session_date\": \"t\",\n  \"realized_today\": 9.999999999999964,\n  \"realized_all\": 9.999999999999964,\n  \"closed_count\": 1,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "two-lots",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 6,\n  \"session_date\": \"t\",\n  \"realized_today\": 9.999999999999964,\n  \"realized_all\": 9.999999999999964,\n  \"closed_count\": 1,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0004\",\n      \"shares\": 100,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0004-1\",\n      \"tp_order_id\": \"o6\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    },\n    {\n      \"id\": \"TEST-t-0005\",\n      \"shares\": 100,\n      \"entry_price\": 9.92,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.02,\n      \"tp_client_id\": \"tp-TEST-t-0005-1\",\n      \"tp_order_id\": \"o8\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0006\",\n      \"coid\": \"en-TEST-t-0006\",\n      \"order_id\": \"o9\",\n      \"k\": 1,\n      \"price\": 9.82,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"working\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 9.92,\n      \"booked\": 0,\n      \"hot_at\": 0.0\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 9.92,\n    \"side\": \"buy\",\n    \"kind\": \"entry\",\n    \"lot_id\": \"TEST-t-0005\",\n    \"ts\": 1787580000.0,\n    \"at\": \"2026-08-24T10:00:00-04:00\"\n  }\n}"
+  },
+  {
+   "step": "basket-sent",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 6,\n  \"session_date\": \"t\",\n  \"realized_today\": 9.999999999999964,\n  \"realized_all\": 9.999999999999964,\n  \"closed_count\": 1,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0004\",\n      \"shares\": 100,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"\",\n      \"tp_order_id\": \"\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    },\n    {\n      \"id\": \"TEST-t-0005\",\n      \"shares\": 100,\n      \"entry_price\": 9.92,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.02,\n      \"tp_client_id\": \"\",\n      \"tp_order_id\": \"\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {\n    \"basket\": {\n      \"order_id\": \"o10\",\n      \"coid\": \"xs-TEST-t-0004-0\",\n      \"why\": \"golden basket\",\n      \"lot_ids\": [\n        \"TEST-t-0004\",\n        \"TEST-t-0005\"\n      ],\n      \"booked\": 0,\n      \"sent\": 1800000000.0\n    }\n  },\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0006\",\n      \"coid\": \"en-TEST-t-0006\",\n      \"order_id\": \"o9\",\n      \"k\": 1,\n      \"price\": 9.82,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"cancelling\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 9.92,\n      \"booked\": 0,\n      \"hot_at\": 0.0,\n      \"cancel_at\": 1800000000.0,\n      \"why\": \"basket close: golden basket\"\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 9.92,\n    \"side\": \"buy\",\n    \"kind\": \"entry\",\n    \"lot_id\": \"TEST-t-0005\",\n    \"ts\": 1787580000.0,\n    \"at\": \"2026-08-24T10:00:00-04:00\"\n  }\n}"
+  },
+  {
+   "step": "basket-booked",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 6,\n  \"session_date\": \"t\",\n  \"realized_today\": 10.000000000000142,\n  \"realized_all\": 10.000000000000142,\n  \"closed_count\": 3,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "trimmed75",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 8,\n  \"session_date\": \"t\",\n  \"realized_today\": 12.500000000000133,\n  \"realized_all\": 12.500000000000133,\n  \"closed_count\": 3,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0007\",\n      \"shares\": 75,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0007-2\",\n      \"tp_order_id\": \"o14\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 2,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0008\",\n      \"coid\": \"en-TEST-t-0008\",\n      \"order_id\": \"o13\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"cancelling\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0,\n      \"cancel_at\": 1800000000.0,\n      \"why\": \"rung moved: wanted []\"\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 10.12,\n    \"side\": \"sell\",\n    \"kind\": \"inferred\",\n    \"lot_id\": \"TEST-t-0007\",\n    \"ts\": 1800000000.0,\n    \"at\": \"2027-01-15T03:00:00-05:00\"\n  }\n}"
+  },
+  {
+   "step": "trim-rung",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 8,\n  \"session_date\": \"t\",\n  \"realized_today\": 12.500000000000133,\n  \"realized_all\": 12.500000000000133,\n  \"closed_count\": 3,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0007\",\n      \"shares\": 75,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0007-2\",\n      \"tp_order_id\": \"o14\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 2,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [],\n  \"last_fill\": {\n    \"price\": 10.12,\n    \"side\": \"sell\",\n    \"kind\": \"inferred\",\n    \"lot_id\": \"TEST-t-0007\",\n    \"ts\": 1800000000.0,\n    \"at\": \"2027-01-15T03:00:00-05:00\"\n  }\n}"
+  },
+  {
+   "step": "adopted",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 9,\n  \"session_date\": \"t\",\n  \"realized_today\": 12.500000000000133,\n  \"realized_all\": 12.500000000000133,\n  \"closed_count\": 3,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0007\",\n      \"shares\": 75,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T14:00:00Z\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0007-1\",\n      \"tp_order_id\": \"o15\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": false,\n      \"peak\": 0.0,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0009\",\n      \"coid\": \"en-TEST-t-0009\",\n      \"order_id\": \"o16\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"working\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0\n    }\n  ],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "trail-tripped",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 9,\n  \"session_date\": \"t\",\n  \"realized_today\": 12.500000000000133,\n  \"realized_all\": 12.500000000000133,\n  \"closed_count\": 3,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0007\",\n      \"shares\": 75,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T14:00:00Z\",\n      \"tp_price\": 9.97,\n      \"tp_client_id\": \"tp-TEST-t-0007-2\",\n      \"tp_order_id\": \"o17\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 2,\n      \"armed\": true,\n      \"peak\": 10.2,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0009\",\n      \"coid\": \"en-TEST-t-0009\",\n      \"order_id\": \"o16\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"working\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0\n    }\n  ],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "trail-filled",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 9,\n  \"session_date\": \"t\",\n  \"realized_today\": 8.750000000000213,\n  \"realized_all\": 8.750000000000213,\n  \"closed_count\": 4,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0009\",\n      \"coid\": \"en-TEST-t-0009\",\n      \"order_id\": \"o16\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"cancelling\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0,\n      \"cancel_at\": 1800000000.0,\n      \"why\": \"cancel: flat -- the first entry is the bar rule\"\n    }\n  ],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "trail-flat",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 9,\n  \"session_date\": \"t\",\n  \"realized_today\": 8.750000000000213,\n  \"realized_all\": 8.750000000000213,\n  \"closed_count\": 4,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [],\n  \"last_fill\": {}\n}"
+  },
+  {
+   "step": "broker-trail",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 11,\n  \"session_date\": \"t\",\n  \"realized_today\": 8.750000000000213,\n  \"realized_all\": 8.750000000000213,\n  \"closed_count\": 4,\n  \"open_lots\": [\n    {\n      \"id\": \"TEST-t-0010\",\n      \"shares\": 100,\n      \"entry_price\": 10.02,\n      \"entry_time\": \"2026-08-24T10:00:00-04:00\",\n      \"tp_price\": 10.12,\n      \"tp_client_id\": \"tp-TEST-t-0010-1\",\n      \"tp_order_id\": \"o20\",\n      \"tp_filled\": 0,\n      \"tp_seq\": 1,\n      \"armed\": true,\n      \"peak\": 10.15,\n      \"side\": \"long\",\n      \"entry_latency_ms\": 0.0,\n      \"tp_latency_ms\": 0.0\n    }\n  ],\n  \"unwind\": {},\n  \"resting_adds\": [\n    {\n      \"lot_id\": \"TEST-t-0011\",\n      \"coid\": \"en-TEST-t-0011\",\n      \"order_id\": \"o19\",\n      \"k\": 1,\n      \"price\": 9.92,\n      \"shares\": 100,\n      \"side\": \"long\",\n      \"xh\": true,\n      \"state\": \"working\",\n      \"placed_at\": 1800000000.0,\n      \"placed_ms\": 0.0,\n      \"anchor\": 10.02,\n      \"booked\": 0,\n      \"hot_at\": 0.0\n    }\n  ],\n  \"last_fill\": {\n    \"price\": 10.02,\n    \"side\": \"buy\",\n    \"kind\": \"entry\",\n    \"lot_id\": \"TEST-t-0010\",\n    \"ts\": 1787580000.0,\n    \"at\": \"2026-08-24T10:00:00-04:00\"\n  }\n}"
+  },
+  {
+   "step": "flattened",
+   "ledger": "{\n  \"symbol\": \"TEST\",\n  \"lot_counter\": 11,\n  \"session_date\": \"t\",\n  \"realized_today\": 8.750000000000213,\n  \"realized_all\": 8.750000000000213,\n  \"closed_count\": 4,\n  \"open_lots\": [],\n  \"unwind\": {},\n  \"resting_adds\": [],\n  \"last_fill\": {}\n}"
+  }
+ ],
+ "journal": [
+  {
+   "event": "open",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0001",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 10.02,
+   "tp_price": 10.12,
+   "cost": 1002.0,
+   "rung": 1,
+   "ladder_lots": 1,
+   "ladder_avg": 10.02,
+   "ladder_shares": 100,
+   "last_price": 10.0,
+   "session": "regular",
+   "dry_run": false,
+   "entry_latency_ms": 0.0,
+   "why": "golden entry | LIMIT $10.02 (peg ask +0.01)",
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0002",
+   "coid": "en-TEST-t-0002",
+   "price": 9.92,
+   "shares": 100,
+   "k": 1,
+   "anchor": 10.02,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  },
+  {
+   "event": "partial",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0001",
+   "side": "long",
+   "shares": 75,
+   "entry_price": 10.02,
+   "exit_price": 10.12,
+   "tp_price": 10.12,
+   "realized": 7.5,
+   "why": "",
+   "entry_time": "2026-08-24T10:00:00-04:00",
+   "ladder_lots": 1,
+   "session": "regular",
+   "dry_run": false,
+   "account": "default"
+  },
+  {
+   "event": "add_cancelled",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0002",
+   "coid": "en-TEST-t-0002",
+   "k": 1,
+   "price": 9.92,
+   "shares": 100,
+   "filled": 0,
+   "why": "canceled",
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0003",
+   "coid": "en-TEST-t-0003",
+   "price": 10.02,
+   "shares": 100,
+   "k": 1,
+   "anchor": 10.12,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  },
+  {
+   "event": "close",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0001",
+   "side": "long",
+   "shares": 25,
+   "entry_price": 10.02,
+   "exit_price": 10.12,
+   "tp_price": 10.12,
+   "realized": 2.5,
+   "why": "",
+   "entry_time": "2026-08-24T10:00:00-04:00",
+   "ladder_lots": 1,
+   "session": "regular",
+   "dry_run": false,
+   "account": "default"
+  },
+  {
+   "event": "add_cancelled",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0003",
+   "coid": "en-TEST-t-0003",
+   "k": 1,
+   "price": 10.02,
+   "shares": 100,
+   "filled": 0,
+   "why": "canceled",
+   "account": "default"
+  },
+  {
+   "event": "open",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0004",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 10.02,
+   "tp_price": 10.12,
+   "cost": 1002.0,
+   "rung": 1,
+   "ladder_lots": 1,
+   "ladder_avg": 10.02,
+   "ladder_shares": 100,
+   "last_price": 10.0,
+   "session": "regular",
+   "dry_run": false,
+   "entry_latency_ms": 0.0,
+   "why": "golden entry | LIMIT $10.02 (peg ask +0.01)",
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0005",
+   "coid": "en-TEST-t-0005",
+   "price": 9.92,
+   "shares": 100,
+   "k": 1,
+   "anchor": 10.02,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  },
+  {
+   "event": "open",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0005",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 9.92,
+   "tp_price": 10.02,
+   "cost": 992.0,
+   "rung": 2,
+   "ladder_lots": 2,
+   "ladder_avg": 9.97,
+   "ladder_shares": 200,
+   "last_price": 10.0,
+   "session": "regular",
+   "dry_run": false,
+   "entry_latency_ms": 0.0,
+   "why": "touch add: rung 1 $9.92 filled 100/100 -- measured from $10.0200",
+   "account": "default"
+  },
+  {
+   "event": "add_filled",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0005",
+   "coid": "en-TEST-t-0005",
+   "k": 1,
+   "price": 9.92,
+   "shares": 100,
+   "filled": 100,
+   "why": "filled",
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0006",
+   "coid": "en-TEST-t-0006",
+   "price": 9.82,
+   "shares": 100,
+   "k": 1,
+   "anchor": 9.92,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  },
+  {
+   "event": "basket_close_sent",
+   "symbol": "TEST",
+   "why": "golden basket",
+   "shares": 200,
+   "latency_ms": 0.0,
+   "lots": [
+    "TEST-t-0004",
+    "TEST-t-0005"
+   ],
+   "order": "o10",
+   "account": "default"
+  },
+  {
+   "event": "close",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0004",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 10.02,
+   "exit_price": 9.97,
+   "tp_price": 10.12,
+   "realized": -5.0,
+   "why": "golden basket",
+   "entry_time": "2026-08-24T10:00:00-04:00",
+   "ladder_lots": 2,
+   "session": "regular",
+   "dry_run": false,
+   "account": "default"
+  },
+  {
+   "event": "close",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0005",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 9.92,
+   "exit_price": 9.97,
+   "tp_price": 10.02,
+   "realized": 5.0,
+   "why": "golden basket",
+   "entry_time": "2026-08-24T10:00:00-04:00",
+   "ladder_lots": 1,
+   "session": "regular",
+   "dry_run": false,
+   "account": "default"
+  },
+  {
+   "event": "add_cancelled",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0006",
+   "coid": "en-TEST-t-0006",
+   "k": 1,
+   "price": 9.82,
+   "shares": 100,
+   "filled": 0,
+   "why": "canceled",
+   "account": "default"
+  },
+  {
+   "event": "open",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0007",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 10.02,
+   "tp_price": 10.12,
+   "cost": 1002.0,
+   "rung": 1,
+   "ladder_lots": 1,
+   "ladder_avg": 10.02,
+   "ladder_shares": 100,
+   "last_price": 10.0,
+   "session": "regular",
+   "dry_run": false,
+   "entry_latency_ms": 0.0,
+   "why": "golden entry | LIMIT $10.02 (peg ask +0.01)",
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0008",
+   "coid": "en-TEST-t-0008",
+   "price": 9.92,
+   "shares": 100,
+   "k": 1,
+   "anchor": 10.02,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  },
+  {
+   "event": "partial",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0007",
+   "side": "long",
+   "shares": 25,
+   "entry_price": 10.02,
+   "exit_price": 10.12,
+   "tp_price": 10.12,
+   "realized": 2.5,
+   "why": "",
+   "entry_time": "2026-08-24T10:00:00-04:00",
+   "ladder_lots": 1,
+   "session": "regular",
+   "dry_run": false,
+   "account": "default"
+  },
+  {
+   "event": "auto_reconcile",
+   "symbol": "TEST",
+   "broker_qty": 75,
+   "ledger_before": 100,
+   "ledger_after": 75,
+   "gap": -25,
+   "account": "default"
+  },
+  {
+   "event": "add_cancelled",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0008",
+   "coid": "en-TEST-t-0008",
+   "k": 1,
+   "price": 9.92,
+   "shares": 100,
+   "filled": 0,
+   "why": "canceled",
+   "account": "default"
+  },
+  {
+   "event": "ladder_rebuilt",
+   "symbol": "TEST",
+   "why": "operator pressed Adopt",
+   "lots": 1,
+   "shares": 75,
+   "dropped": 0,
+   "created": 0,
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0009",
+   "coid": "en-TEST-t-0009",
+   "price": 9.92,
+   "shares": 100,
+   "k": 1,
+   "anchor": 10.02,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  },
+  {
+   "event": "close",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0007",
+   "side": "long",
+   "shares": 75,
+   "entry_price": 10.02,
+   "exit_price": 9.97,
+   "tp_price": 9.97,
+   "realized": -3.75,
+   "why": "",
+   "entry_time": "2026-08-24T14:00:00Z",
+   "ladder_lots": 1,
+   "session": "regular",
+   "dry_run": false,
+   "account": "default"
+  },
+  {
+   "event": "add_cancelled",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0009",
+   "coid": "en-TEST-t-0009",
+   "k": 1,
+   "price": 9.92,
+   "shares": 100,
+   "filled": 0,
+   "why": "canceled",
+   "account": "default"
+  },
+  {
+   "event": "open",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0010",
+   "side": "long",
+   "shares": 100,
+   "entry_price": 10.02,
+   "tp_price": 10.12,
+   "cost": 1002.0,
+   "rung": 1,
+   "ladder_lots": 1,
+   "ladder_avg": 10.02,
+   "ladder_shares": 100,
+   "last_price": 10.14,
+   "session": "regular",
+   "dry_run": false,
+   "entry_latency_ms": 0.0,
+   "why": "golden entry | LIMIT $10.02 (peg ask +0.01)",
+   "account": "default"
+  },
+  {
+   "event": "add_rested",
+   "symbol": "TEST",
+   "lot_id": "TEST-t-0011",
+   "coid": "en-TEST-t-0011",
+   "price": 9.92,
+   "shares": 100,
+   "k": 1,
+   "anchor": 10.02,
+   "side": "long",
+   "placed_ms": 0.0,
+   "account": "default"
+  }
+ ],
+ "status": {
+  "shares": 0,
+  "lot_count": 0,
+  "next_lot_shares": 100,
+  "max_exposure": 20000.0,
+  "resting_sell_shares": 0,
+  "oversized_lots": 0,
+  "in_sync": false,
+  "reconcile": {
+   "alpaca_shares": 100,
+   "ledger_shares": 0,
+   "in_sync": false,
+   "covered_shares": 100,
+   "uncovered": 0,
+   "alpaca_avg": 10.0,
+   "ladder_avg": 0.0,
+   "avg_differs": true,
+   "avg_note": "Alpaca uses average-cost (a sell leaves the average unchanged); the ladder tracks the specific lots still open. Both are correct \u2014 Alpaca's is your account."
+  },
+  "lots": [],
+  "broker_qty": 100,
+  "alpaca_qty": 100,
+  "alpaca_orders": []
+ },
+ "summary": {
+  "shares": 0,
+  "held": 100,
+  "in_sync": false,
+  "uncovered": 100,
+  "shares_per_lot": 100,
+  "max_exposure": 20000.0,
+  "cost_basis": 0
+ },
+ "types": {
+  "status_shares": "int",
+  "summary_shares": "int",
+  "next_lot": "int"
+ }
+}
