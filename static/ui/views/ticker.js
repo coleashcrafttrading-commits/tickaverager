@@ -3,7 +3,7 @@
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, money0, sgn, pct, px, dur, go,
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, money0, sgn, pct, px, qty, dur, go,
   acctLabel, acctNumber,
 } from "../core.js";
 import { ChartPanel, matchToBars } from "../chartpanel.js";
@@ -130,11 +130,18 @@ function liveNotes(s) {
   if (s.halted) b.push(`<div class="note bad"><b>Halted</b> — ${esc(s.halt_reason)}.
     ${s.symbol} will not trade until this is cleared.</div>`);
   if (!s.in_sync && !s.dry_run) b.push(`<div class="note warn"><b>Out of sync</b> —
-    Alpaca holds <b>${s.broker_qty}</b> shares, the ladder tracks <b>${s.shares}</b>.
+    Alpaca holds <b>${qty(s.broker_qty)}</b> shares, the ladder tracks <b>${qty(s.shares)}</b>.
     Auto-correction handles this within 25 seconds.</div>`);
   if (s.reconcile && s.reconcile.uncovered > 0) {
-    b.push(`<div class="note bad"><b>${s.reconcile.uncovered} shares have no resting
-      sell.</b> They will not exit on their own.</div>`);
+    if (s.reconcile.uncovered <= (s.offbook_shares || 0) + 1e-6) {
+      // a fractional lot's DAY exit inside its retry timer (or dust): the engine
+      // re-places it itself, so this is information, not the naked-share alarm
+      b.push(`<div class="note info"><b>Fractional exit off the book:</b> ${qty(s.offbook_shares)} sh —
+        re-placed by the engine at the next eligible session or retry (fractional lots rest DAY orders).</div>`);
+    } else {
+      b.push(`<div class="note bad"><b>${qty(s.reconcile.uncovered)} shares have no resting
+        sell.</b> They will not exit on their own.</div>`);
+    }
   }
   for (const a of (s.attention || [])) {
     b.push(`<div class="note warn">${esc(a)}</div>`);
@@ -155,7 +162,7 @@ function liveNotes(s) {
   if (!s.dry_run && !s.halted) {
     b.push(`<div class="note bad"><b>Armed</b> — orders transmit to
       ${s.paper ? "the paper" : "the LIVE"} account. Max exposure
-      <b>${money(s.max_exposure)}</b> (${s.config.max_lots} × ${s.config.shares_per_lot}
+      <b>${money(s.max_exposure)}</b> (${s.config.max_lots} × ${qty(s.config.shares_per_lot)}
       sh). There is <b>no stop loss</b>.</div>`);
   }
   return b.join("");
@@ -256,7 +263,7 @@ function mountLive(sym) {
             <td style="border:0;padding:3px 0;text-align:right"><b>${esc(who)}</b> · ${esc(num || "—")}
             ${s.paper ? "(paper)" : "<b class='down'>LIVE MONEY</b>"}</td></tr>
         <tr><td style="border:0;padding:3px 0">Each lot</td>
-            <td style="border:0;padding:3px 0;text-align:right">${c.shares_per_lot} sh ≈ ${money(per)}</td></tr>
+            <td style="border:0;padding:3px 0;text-align:right">${qty(c.shares_per_lot)} sh ≈ ${money(per)}</td></tr>
         <tr><td style="border:0;padding:3px 0">Cap</td>
             <td style="border:0;padding:3px 0;text-align:right">${c.max_lots} lots ≈ ${money(s.max_exposure)}</td></tr>
         <tr><td style="border:0;padding:3px 0">Take profit</td>
@@ -272,7 +279,7 @@ function mountLive(sym) {
     if (!await ask({
       title: `Flatten ${sym} on ${esc(acctLabel())}?`, danger: true, ok: "Flatten", requireWord: "FLATTEN",
       body: `In <b>${esc(acctLabel())}</b>: cancels every resting take-profit on ${sym} and
-        <b>market-sells all ${s ? s.alpaca.qty : "?"} shares</b> at whatever the book gives.<br><br>
+        <b>market-sells all ${s ? qty(s.alpaca.qty) : "?"} shares</b> at whatever the book gives.<br><br>
         Other tickers and other accounts are untouched.`,
     })) return;
     const r = await POST(`/api/ticker/${sym}/flatten`, { confirm: "FLATTEN" });
@@ -375,8 +382,8 @@ function paintLive() {
   const bar = s.last_bar;
   el("tkStats").innerHTML =
     stat("Lots", `${s.lot_count}<span class="faint" style="font-size:15px">/${c.max_lots}</span>`,
-         `${s.shares} shares`)
-    + stat("Ladder avg", px(s.avg_price, 4), s.in_sync ? "in sync" : `Alpaca: ${s.broker_qty}`)
+         `${qty(s.shares)} shares`)
+    + stat("Ladder avg", px(s.avg_price, 4), s.in_sync ? "in sync" : `Alpaca: ${qty(s.broker_qty)}`)
     + stat("Next add", px(s.next_add_at),
            s.anchor && s.anchor.price
              ? `from ${s.anchor.kind === "last_open" ? "last open" : esc(s.anchor.kind)} ${px(s.anchor.price)}`
@@ -395,13 +402,15 @@ function paintLive() {
       const to = l.tp_price - s.last_price;
       const o = byCoid[l.tp_client_id];
       const sell = o
-        ? `<span class="up">${o.remaining} @ ${px(o.limit)}</span>`
+        ? `<span class="up">${qty(o.remaining)} @ ${px(o.limit)}</span>`
         : l.armed ? `<span class="warn">trailing from ${px(l.peak)}</span>`
         : s.dry_run ? `<span class="faint">dry run</span>`
         : `<span class="down">none</span>`;
+      // a fractional lot's exit is a DAY order (re-placed each session), never GTC
+      const frac = !Number.isInteger(Number(l.shares));
       return `<tr>
         <td class="mono faint" style="text-align:left">${esc(l.id)}</td>
-        <td class="num">${l.shares}</td>
+        <td class="num">${qty(l.shares)}${frac ? ' <span class="pill" title="a fractional lot exits with a DAY limit the engine re-places each session">DAY exit</span>' : ""}</td>
         <td class="num">${px(l.entry_price, 4)}</td>
         <td class="num">${px(l.tp_price)}</td>
         <td class="num ${to <= 0 ? "up" : "faint"}">${to <= 0 ? "at target" : "$" + to.toFixed(2)}</td>
@@ -470,7 +479,7 @@ function paintLive() {
     "No trend data yet — the engine has not refreshed.");
 
   el("tkMoney").innerHTML =
-    stat("Position", money(A.market_value), `${A.qty} sh`)
+    stat("Position", money(A.market_value), `${qty(A.qty)} sh`)
     + stat("Cost", money(A.cost_basis))
     + stat("Open P/L", sgn(A.unrealized_pl),
            A.unrealized_plpc ? `${A.unrealized_plpc.toFixed(2)}% since entry` : "")
@@ -511,8 +520,8 @@ async function loadHistory(sym) {
         <td class="mono faint" style="text-align:left">${esc(o.client_order_id || "")}</td>
         <td class="${o.side === "sell" ? "up" : ""}">${esc((o.side || "").toUpperCase())}</td>
         <td class="faint">${esc(o.type || "")}</td>
-        <td class="num">${Number(o.qty || 0)}</td>
-        <td class="num">${Number(o.filled_qty || 0)}</td>
+        <td class="num">${qty(o.qty)}</td>
+        <td class="num">${qty(o.filled_qty)}</td>
         <td class="num">${o.filled_avg_price ? "$" + Number(o.filled_avg_price).toFixed(4) : "—"}</td>
         <td class="num">${o.limit_price ? "$" + Number(o.limit_price).toFixed(2) : "—"}</td>
         <td class="${o.status === "filled" ? "up" : "faint"}">${esc(o.status || "")}</td>
@@ -527,27 +536,27 @@ function paintOrders() {
   if (!s || !el("poStats")) return;
   const A = s.alpaca, R = s.reconcile;
   el("poStats").innerHTML =
-    stat("Shares held", A.qty)
+    stat("Shares held", qty(A.qty))
     + stat("Avg entry", px(A.avg_entry_price, 4))
     + stat("Cost basis", money(A.cost_basis))
     + stat("Market value", money(A.market_value))
     + stat("Open P/L", sgn(A.unrealized_pl))
-    + stat("Covered", `${R.covered_shares}`,
-           R.uncovered ? `<span class="down">${R.uncovered} uncovered</span>` : "all covered");
+    + stat("Covered", `${qty(R.covered_shares)}`,
+           R.uncovered ? `<span class="down">${qty(R.uncovered)} uncovered</span>` : "all covered");
 
   el("poRec").innerHTML = `<div class="note ${R.in_sync ? "info" : "bad"}">
     <b>${R.in_sync ? "In sync" : "Out of sync"}</b> — Alpaca holds
-    <b>${R.alpaca_shares}</b> sh, the ladder tracks <b>${R.ledger_shares}</b> sh.
-    Covered by resting sells: <b>${R.covered_shares}</b>${R.uncovered
-      ? ` · <span class="down">uncovered ${R.uncovered}</span>` : ""}.</div>`;
+    <b>${qty(R.alpaca_shares)}</b> sh, the ladder tracks <b>${qty(R.ledger_shares)}</b> sh.
+    Covered by resting sells: <b>${qty(R.covered_shares)}</b>${R.uncovered
+      ? ` · <span class="down">uncovered ${qty(R.uncovered)}</span>` : ""}.</div>`;
 
   el("poOrders").innerHTML = tableHTML(
     ["Order", "Side", "Qty", "Filled", "Working", "Limit", "Ext", "Status"],
     (A.orders || []).map((o) => `<tr>
       <td class="mono faint" style="text-align:left">${esc(o.coid)}</td>
       <td class="${o.side === "sell" ? "up" : ""}">${o.side.toUpperCase()}</td>
-      <td class="num">${o.qty}</td><td class="num">${o.filled || 0}</td>
-      <td class="num"><b>${o.remaining}</b></td>
+      <td class="num">${qty(o.qty)}</td><td class="num">${qty(o.filled || 0)}</td>
+      <td class="num"><b>${qty(o.remaining)}</b></td>
       <td class="num">${px(o.limit)}</td>
       <td class="${o.extended_hours ? "up" : "down"}">${o.extended_hours ? "yes" : "no"}</td>
       <td class="faint">${esc(o.status)}</td></tr>`),
@@ -611,7 +620,7 @@ function paintSettings() {
   const c = s.config;
   const per = (c.shares_per_lot || 0) * (s.last_price || 0);
   el("tsSum").innerHTML =
-    stat("Per lot", money(per), `${c.shares_per_lot} sh @ ${px(s.last_price)}`)
+    stat("Per lot", money(per), `${qty(c.shares_per_lot)} sh @ ${px(s.last_price)}`)
     + stat("Max exposure", money(s.max_exposure), `${c.max_lots} lots`)
     + stat("Take profit", "$" + Number(c.take_profit).toFixed(2), "per share, per lot")
     + stat("Win per lot", money(c.take_profit * c.shares_per_lot), "before fees");
@@ -633,7 +642,7 @@ VIEWS.ticker = {
   title: (ov, v) => v.sym,
   sub: (ov, v) => {
     const t = (ov?.tickers || []).find((x) => x.symbol === v.sym);
-    return t ? `${t.state} · ${t.lot_count}/${t.max_lots} lots · ${t.shares} shares` : "";
+    return t ? `${t.state} · ${t.lot_count}/${t.max_lots} lots · ${qty(t.shares)} shares` : "";
   },
   tabs: [["live", "Live"], ["orders", "Orders & positions"], ["settings", "Settings"]],
 

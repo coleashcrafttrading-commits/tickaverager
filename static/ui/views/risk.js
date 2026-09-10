@@ -8,7 +8,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, go, hashFor,
+  money, money0, sgn, pct, px, qty, go, hashFor,
 } from "../core.js";
 
 let data = null;        // /api/risk -- this account's exposure
@@ -361,7 +361,7 @@ function render() {
         <td class="num">$${t.add_distance.toFixed(2)}</td>
         <td class="num">${t.add_in_atr == null ? "—" : t.add_in_atr.toFixed(2) + "×"}</td>
         <td class="num">${t.lots_open}<span class="faint">/${t.max_lots}</span></td>
-        <td class="num">${t.shares_held}</td>
+        <td class="num">${qty(t.shares_held)}</td>
         <td class="num">${money0(t.cost_basis)}</td>
         <td class="num faint">${money0(t.max_exposure)}</td>
         <td class="num">${sgn(t.unrealized)}</td></tr>`;
@@ -373,7 +373,7 @@ function render() {
      "Est. loss at the bottom"],
     T.map((t) => `<tr>
       <td><b>${t.symbol}</b></td>
-      <td class="num">${t.shares_held}</td>
+      <td class="num">${qty(t.shares_held)}</td>
       <td class="num">${sgn(t.loss_1atr)}</td>
       <td class="num">${t.ladder_depth
         ? `$${t.ladder_depth.toFixed(2)} <span class="faint">(${t.ladder_depth_pct}%)</span>`

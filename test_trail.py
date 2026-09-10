@@ -126,6 +126,21 @@ def main() -> int:
     check("armed persisted", revived.armed, True)
     check("peak persisted", revived.peak, 10.40)
 
+    print("\n6b. A fractional lot's trail exit is a DAY marketable limit")
+    e, f = build(shares=0.01, entry=759.00)
+    e.cfg["fractional"] = "on"
+    e._asset_info = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+                     "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    lot = e.ledger.open_lots[0]
+    tick(e, f, 759.10)
+    check("armed at the target", lot.armed, True)
+    tick(e, f, 759.40)
+    tick(e, f, 759.35)
+    check("one exit order", len(f.broker.placed), 1)
+    sold = f.broker.placed[0]
+    check("DAY, 0.01 sh, at the trailed price",
+          (sold["tif"], float(sold["qty"]), float(sold["limit_price"])), ("day", 0.01, 759.35))
+
     print("\n7. limit mode is untouched -- still rests on open")
     cfg_e, cfg_f = build()
     cfg_e.cfg["exit_mode"] = "limit"

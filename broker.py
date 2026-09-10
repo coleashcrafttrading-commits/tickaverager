@@ -13,6 +13,8 @@ from typing import Any, Optional
 
 import requests
 
+from qty import qstr
+
 LOG = logging.getLogger("broker")
 
 
@@ -125,6 +127,11 @@ class Alpaca:
                            params={"client_order_id": client_order_id})
 
     def submit(self, **body) -> dict:
+        # the ONE place a quantity is put on the wire: '100' for 100 or 100.0,
+        # '0.3' for 0.30000000000000004, never more than Alpaca's 9 decimals.
+        # `notional` is a dollar string and is left alone.
+        if "qty" in body:
+            body["qty"] = qstr(body["qty"])
         return self._trade("POST", "/orders", json=body)
 
     def cancel(self, order_id: str) -> Any:
@@ -135,40 +142,40 @@ class Alpaca:
                 return None
             raise
 
-    def buy_market(self, symbol: str, qty: int, client_order_id: str) -> dict:
-        return self.submit(symbol=symbol, qty=str(qty), side="buy", type="market",
+    def buy_market(self, symbol: str, qty: float, client_order_id: str) -> dict:
+        return self.submit(symbol=symbol, qty=qty, side="buy", type="market",
                            time_in_force="day", client_order_id=client_order_id)
 
-    def sell_market(self, symbol: str, qty: int, client_order_id: str) -> dict:
+    def sell_market(self, symbol: str, qty: float, client_order_id: str) -> dict:
         """Market SELL. Opens a short when flat; flattens a long when not."""
-        return self.submit(symbol=symbol, qty=str(qty), side="sell", type="market",
+        return self.submit(symbol=symbol, qty=qty, side="sell", type="market",
                            time_in_force="day", client_order_id=client_order_id)
 
-    def buy_limit(self, symbol: str, qty: int, limit_price: float, client_order_id: str,
+    def buy_limit(self, symbol: str, qty: float, limit_price: float, client_order_id: str,
                   extended_hours: bool = False) -> dict:
-        return self.submit(symbol=symbol, qty=str(qty), side="buy", type="limit",
+        return self.submit(symbol=symbol, qty=qty, side="buy", type="limit",
                            limit_price=f"{limit_price:.2f}", time_in_force="day",
                            extended_hours=extended_hours,
                            client_order_id=client_order_id)
 
 
-    def sell_limit(self, symbol: str, qty: int, limit_price: float, client_order_id: str,
+    def sell_limit(self, symbol: str, qty: float, limit_price: float, client_order_id: str,
                    extended_hours: bool = False) -> dict:
         """Day limit SELL -- short entries (or flattening into a level)."""
-        return self.submit(symbol=symbol, qty=str(qty), side="sell", type="limit",
+        return self.submit(symbol=symbol, qty=qty, side="sell", type="limit",
                            limit_price=f"{limit_price:.2f}", time_in_force="day",
                            extended_hours=extended_hours,
                            client_order_id=client_order_id)
 
-    def buy_limit_gtc(self, symbol: str, qty: int, limit_price: float,
+    def buy_limit_gtc(self, symbol: str, qty: float, limit_price: float,
                       client_order_id: str, extended_hours: bool = False) -> dict:
         """GTC buy limit -- cover a short lot at a fixed target."""
-        return self.submit(symbol=symbol, qty=str(qty), side="buy", type="limit",
+        return self.submit(symbol=symbol, qty=qty, side="buy", type="limit",
                            limit_price=f"{limit_price:.2f}", time_in_force="gtc",
                            extended_hours=extended_hours,
                            client_order_id=client_order_id)
 
-    def trailing_stop_gtc(self, symbol: str, qty: int, trail_price: float,
+    def trailing_stop_gtc(self, symbol: str, qty: float, trail_price: float,
                           client_order_id: str, side: str = "sell",
                           extended_hours: bool = False) -> dict:
         """Rest a GTC trailing stop at the broker (dollars, not percent).
@@ -176,13 +183,16 @@ class Alpaca:
         Longs exit with side=sell; shorts cover with side=buy. trail_price is
         the dollar offset from the high (long) or low (short). If this process
         dies the order still lives at Alpaca.
+
+        Never called with a fractional qty -- the engine refuses (Alpaca has
+        no fractional trailing stops); the in-process trail owns such a lot.
         """
-        return self.submit(symbol=symbol, qty=str(qty), side=side, type="trailing_stop",
+        return self.submit(symbol=symbol, qty=qty, side=side, type="trailing_stop",
                            time_in_force="gtc", trail_price=f"{float(trail_price):.2f}",
                            extended_hours=extended_hours,
                            client_order_id=client_order_id)
 
-    def sell_limit_gtc(self, symbol: str, qty: int, limit_price: float,
+    def sell_limit_gtc(self, symbol: str, qty: float, limit_price: float,
                        client_order_id: str, extended_hours: bool = False) -> dict:
         """The per-lot take-profit. GTC so it outlives this process.
 
@@ -190,8 +200,30 @@ class Alpaca:
         pre-market and after-hours sessions. Without it the order simply sits
         idle outside 09:30-16:00 ET, however good the price gets.
         """
-        return self.submit(symbol=symbol, qty=str(qty), side="sell", type="limit",
+        return self.submit(symbol=symbol, qty=qty, side="sell", type="limit",
                            limit_price=f"{limit_price:.2f}", time_in_force="gtc",
+                           extended_hours=extended_hours,
+                           client_order_id=client_order_id)
+
+    def buy_limit_day(self, symbol: str, qty: float, limit_price: float,
+                      client_order_id: str, extended_hours: bool = False) -> dict:
+        """DAY buy limit -- fractional exits (covering a short lot) and
+        fractional rungs: Alpaca accepts a fractional qty on DAY only. A DAY
+        order expires at the end of the session it was placed for; the
+        engine re-places it through _reconcile step 2 / _sync_resting_adds
+        when it does."""
+        return self.submit(symbol=symbol, qty=qty, side="buy", type="limit",
+                           limit_price=f"{limit_price:.2f}", time_in_force="day",
+                           extended_hours=extended_hours,
+                           client_order_id=client_order_id)
+
+    def sell_limit_day(self, symbol: str, qty: float, limit_price: float,
+                       client_order_id: str, extended_hours: bool = False) -> dict:
+        """DAY sell limit -- the per-lot take-profit of a FRACTIONAL long lot
+        (Alpaca rejects a fractional GTC). Expires with its session; the
+        engine re-places it through _reconcile step 2 when it does."""
+        return self.submit(symbol=symbol, qty=qty, side="sell", type="limit",
+                           limit_price=f"{limit_price:.2f}", time_in_force="day",
                            extended_hours=extended_hours,
                            client_order_id=client_order_id)
 

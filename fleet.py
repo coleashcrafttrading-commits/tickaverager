@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from broker import Alpaca
+from qty import qty, qnum
 
 LOG = logging.getLogger("fleet")
 
@@ -1008,6 +1009,8 @@ class Fleet:
                 "exchange": a.get("exchange", ""),
                 "tradable": bool(a.get("tradable")),
                 "fractionable": bool(a.get("fractionable")),
+                "min_trade_increment": a.get("min_trade_increment"),
+                "min_order_size": a.get("min_order_size"),
                 "shortable": bool(a.get("shortable")),
                 "in_fleet": a.get("symbol", "") in self.engines,
             } for a in results],
@@ -1040,6 +1043,9 @@ class Fleet:
         return {"ok": True, "symbol": a["symbol"], "name": a.get("name", ""),
                 "exchange": a.get("exchange", ""), "price": px, "bid": bid, "ask": ask,
                 "fractionable": bool(a.get("fractionable")),
+                # Alpaca's own fractional limits when the asset object carries them (None when absent)
+                "min_trade_increment": a.get("min_trade_increment"),
+                "min_order_size": a.get("min_order_size"),
                 "shortable": bool(a.get("shortable")),
                 # easy_to_borrow is deprecated by Alpaca (sunset 2026-09-22); borrow_status replaces it
                 "easy_to_borrow": bool(a.get("easy_to_borrow") or a.get("borrow_status") == "easy_to_borrow"),
@@ -1078,7 +1084,7 @@ class Fleet:
             positions.append({
                 "symbol": sym,
                 "managed": sym in managed,
-                "qty": int(float(p.get("qty") or 0)),
+                "qty": qnum(p.get("qty")),
                 "avg_entry_price": float(p.get("avg_entry_price") or 0),
                 "current_price": float(p.get("current_price") or 0),
                 "cost_basis": float(p.get("cost_basis") or 0),
@@ -1097,9 +1103,9 @@ class Fleet:
                     "coid": o.get("client_order_id", ""),
                     "side": o.get("side", ""),
                     "type": o.get("type", ""),
-                    "qty": int(float(o.get("qty") or 0)),
-                    "filled": int(float(o.get("filled_qty") or 0)),
-                    "remaining": int(float(o.get("qty") or 0)) - int(float(o.get("filled_qty") or 0)),
+                    "qty": qnum(o.get("qty")),
+                    "filled": qnum(o.get("filled_qty")),
+                    "remaining": qnum(max(0.0, round(qty(o.get("qty")) - qty(o.get("filled_qty")), 9))),
                     "limit": float(o.get("limit_price") or 0),
                     "status": o.get("status", ""),
                     "extended_hours": bool(o.get("extended_hours")),
@@ -1168,9 +1174,11 @@ class Fleet:
                 "armed": sum(1 for t in tickers if not t.get("dry_run")),
                 "halted": sum(1 for t in tickers if t.get("halted")),
                 "lots": sum(t.get("lot_count", 0) for t in tickers),
-                "shares": sum(t.get("shares", 0) for t in tickers),
+                "shares": qnum(round(sum(qty(t.get("shares", 0)) for t in tickers), 6)),
                 "realized_today": round(sum(t.get("realized_today", 0.0) for t in tickers), 2),
-                "uncovered": sum(t.get("uncovered", 0) for t in tickers),
+                "uncovered": qnum(round(sum(qty(t.get("uncovered", 0)) for t in tickers), 6)),
+                # fractional exits not on the book right now (retry timer / dust)
+                "offbook": qnum(round(sum(qty(t.get("offbook_shares", 0)) for t in tickers), 6)),
             },
             "events": merged[:120],
             "snap_age": round(time.time() - self.snap_at, 1) if self.snap_at else None,

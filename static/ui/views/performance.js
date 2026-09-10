@@ -9,7 +9,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, dur, go,
+  money, money0, sgn, pct, px, qty, dur, go,
 } from "../core.js";
 
 let perf = null;
@@ -184,7 +184,7 @@ function render() {
       <td class="${r.event === "open" ? "" : "up"}">${esc(r.event)}
         ${r.inferred ? `<span class="pill warn">inferred</span>` : ""}</td>
       <td class="faint mono" style="text-align:left">${esc(r.lot_id || "")}</td>
-      <td class="num">${r.shares || 0}</td>
+      <td class="num">${qty(r.shares)}</td>
       <td class="num">${px(r.entry_price, 4)}</td>
       <td class="num">${px(r.exit_price, 4)}</td>
       <td class="num">${r.event === "open" ? `<span class="faint">—</span>`
@@ -199,7 +199,7 @@ function render() {
       <td class="faint mono" style="text-align:left">${esc(x.lot_id)}</td>
       <td class="num ${x.age_days > 3 ? "down" : x.age_days > 1 ? "warn" : "faint"}">
         ${x.age_days.toFixed(1)}d</td>
-      <td class="num">${x.shares}</td>
+      <td class="num">${qty(x.shares)}</td>
       <td class="num">${px(x.entry_price)}</td>
       <td class="num">${px(x.tp_price)}</td>
       <td class="num">${money0(x.cost)}</td></tr>`),

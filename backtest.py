@@ -44,6 +44,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from qty import qty, qnum, qfloor, QTY_EPS, MIN_QTY
+
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
@@ -84,7 +86,10 @@ class SimEngine:
 for _m in ("_add_trigger_met", "_rung_price", "_entry_limit_price", "_add_reason",
            "next_side", "broker_side",
            # ladder v2 sizing in the sim: the ATR rung, dollar sizing, the cap
-           "_atr_rung_distance", "_lot_shares", "_cap_to_ladder"):
+           "_atr_rung_distance", "_lot_shares", "_cap_to_ladder",
+           # fractional shares: the sizing bounds and the config readers they use
+           "_size_bounds", "_fractional_on", "_frac_capable", "_frac_sessions",
+           "_frac_session_ok", "_next_lot_fractional", "_lot_unit", "_frac_block", "_min_qty"):
     setattr(SimEngine, _m, getattr(Engine, _m))
 SimEngine._dir = staticmethod(Engine._dir)
 SimEngine.broker_qty = 0          # the sim never holds a broker position
@@ -100,7 +105,12 @@ for _m in ("_maybe_unwind", "_deepest_first", "_s", "_reverse_side", "_maybe_rev
 SimEngine.pending_entry = None
 SimEngine.block_reason = lambda self, **kw: ""   # no session clock or FROZEN file
 SimEngine._short_allowed = lambda self: True      # the replay assumes a borrow exists
-SimEngine._asset_flags = lambda self: {"shortable": True, "overnight": True, "borrow": "easy_to_borrow"}
+# the replay assumes a borrow exists and, with fractional=on, a fractionable asset
+# (a fractional_sessions=regular ladder's real exposure is regular hours only;
+# the sim trades fractions in every bar -- whole-share configs are identical)
+SimEngine._asset_flags = lambda self: {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+                                       "fractionable": True, "qty_step": 1e-9, "min_qty": MIN_QTY,
+                                       "price_step": 0.01}
 SimEngine._session_now = lambda self: "regular"
 SimEngine._book_sane = lambda self: True          # the sim quotes the close on both sides
 
@@ -113,11 +123,12 @@ def _sim_mirror_room(self, want, price):
     f = float(self.cfg.get("f_ladder", 0) or 0)
     equity = float((self.fleet.account or {}).get("equity") or 0)
     if f <= 0 or equity <= 0 or price <= 0:
-        return int(want)
+        return qnum(want)
     deployed = float(sum(l.cost for l in self.ledger.open_lots))
-    deployed += sum(int(x["shares"]) for x in (self._pending or [])) * price
-    room = int((f * equity - deployed) / price)
-    return max(0, min(int(want), room))
+    deployed += sum(qty(x["shares"]) for x in (self._pending or [])) * price
+    step = 1e-9 if str(self.cfg.get("fractional") or "off").lower() == "on" else 1.0
+    room = qfloor((f * equity - deployed) / price, step)
+    return qnum(max(0.0, min(qty(want), room)))
 
 
 SimEngine._mirror_room = _sim_mirror_room
@@ -130,12 +141,12 @@ def _sim_submit_entry(self, why, shares=None):
     orders; run() fills them at the NEXT bar's open, like a market order."""
     side = self.next_side()
     if shares:
-        n_sh = int(shares)
+        n_sh = qnum(shares)
     else:
         sized = (self.cfg.get("size_mode", "fixed") != "fixed"
                  or float(self.cfg.get("f_ladder", 0) or 0) > 0)
-        n_sh = self._lot_shares() if sized else int(self.cfg["shares_per_lot"])
-    if n_sh <= 0:
+        n_sh = self._lot_shares() if sized else qnum(qty(self.cfg["shares_per_lot"]))
+    if n_sh <= QTY_EPS:
         return False
     self._pending.append({"limit": self._entry_limit_price(None, side), "shares": n_sh,
                           "side": side, "why": why, "market": True})
@@ -155,7 +166,7 @@ def _sim_close_lots(self, lots, why):
     off = float(self.cfg.get("trail_exit_offset", 0.02))
     px = self.last_price - s * off
     for lot in sorted(lots, key=lambda l: -s * float(l.entry_price)):
-        pnl = (px - float(lot.entry_price)) * int(lot.shares) * s
+        pnl = (px - float(lot.entry_price)) * qty(lot.shares) * s
         self._closed.append({"lot": lot, "px": px, "pnl": pnl, "why": why})
         self.ledger.open_lots = [l for l in self.ledger.open_lots if l.id != lot.id]
     self.ledger.save()
@@ -188,7 +199,7 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM",
     e = SimEngine(cfg, symbol)
     led = e.ledger
     tp_amt = float(cfg["take_profit"])
-    shares_per_lot = int(cfg["shares_per_lot"])
+    shares_per_lot = qnum(qty(cfg["shares_per_lot"]))
     max_lots = int(cfg["max_lots"])
     mode = cfg.get("exit_mode", "limit")
     trail = float(cfg.get("trail_amount", 0.05))
@@ -254,7 +265,7 @@ def run(bars: list[dict], cfg: dict, symbol: str = "SIM",
             if pending.get("market") or ((l <= lim) if pd > 0 else (h >= lim)):
                 counter += 1
                 fill = o if pending.get("market") else (min(lim, o) if pd > 0 else max(lim, o))
-                n_sh = int(pending.get("shares") or shares_per_lot)
+                n_sh = qnum(qty(pending.get("shares")) or shares_per_lot)
                 lot = Lot(id=f"{symbol}-{counter:04d}", shares=n_sh,
                           entry_price=fill, entry_time=str(ts),
                           tp_price=_round_cent(fill + pd * tp_amt), side=p_side)

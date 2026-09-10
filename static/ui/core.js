@@ -34,6 +34,12 @@ export const pct = (n, dp = 2) => {
   return `<span class="${c}">${n > 0 ? "+" : ""}${n.toFixed(dp)}%</span>`;
 };
 export const px = (v, dp = 2) => (Number(v) ? "$" + Number(v).toFixed(dp) : "—");
+/* a share count: "100" for a whole number, "0.01" / "0.3" for a fraction (0.30000000000000004
+   trims to 0.3), never "100.0" and never a raw binary float */
+export const qty = (n, dp = 6) => {
+  const v = Number(n) || 0;
+  return Number.isInteger(v) ? String(v) : v.toFixed(dp).replace(/0+$/, "").replace(/\.$/, "");
+};
 export const dur = (s) => {
   s = Number(s) || 0;
   if (!s) return "—";

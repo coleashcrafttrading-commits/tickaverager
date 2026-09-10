@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from qty import qstr
+
 ROOT = Path(__file__).resolve().parent
 REPORT_DIR = ROOT / "reports"
 
@@ -149,7 +151,7 @@ def build_report(fleet: Any, kind: str = "daily", days: int = 1,
         pf = len([r for r in sr if r.get("event") == "partial"])
         body.append([sym, t["state"], str(o), str(c), str(pf),
                      signed(t["realized_today"]), signed(t["unrealized"]),
-                     f"{t['lot_count']}/{t['max_lots']}", str(t["shares"])])
+                     f"{t['lot_count']}/{t['max_lots']}", qstr(t["shares"])])
     F.append(tbl(["Ticker", "State", "Opened", "Closed", "Partials",
                   "Realized", "Open P/L", "Lots", "Shares"], body,
                  [0.72, 1.0, 0.62, 0.6, 0.65, 0.85, 0.85, 0.6, 0.6]))
@@ -203,7 +205,7 @@ def build_report(fleet: Any, kind: str = "daily", days: int = 1,
             S["BODY"]))
         F.append(tbl(["Lot", "Symbol", "Age", "Shares", "Entry", "Target", "Cost"],
                      [[x["lot_id"], x["symbol"], f"{x['age_days']:.1f}d",
-                       str(x["shares"]), money(x["entry_price"], 4),
+                       qstr(x["shares"]), money(x["entry_price"], 4),
                        money(x["tp_price"]), money(x["cost"], 0)]
                       for x in inv[:40]],
                      [1.9, 0.7, 0.6, 0.65, 0.85, 0.8, 0.75]))

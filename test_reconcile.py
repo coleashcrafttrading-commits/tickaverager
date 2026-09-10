@@ -44,12 +44,25 @@ class FakeBroker:
     def cancel(self, order_id):
         self.cancelled.append(order_id)
 
-    def sell_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+    def _limit(self, side, qty, limit_price, coid, tif):
         self.seq += 1
         o = {"id": f"ord{self.seq}", "status": "new", "client_order_id": coid,
-             "qty": str(qty), "filled_qty": "0", "limit_price": str(limit_price)}
+             "qty": str(qty), "filled_qty": "0", "limit_price": str(limit_price),
+             "side": side, "tif": tif}
         self.placed.append(o)
         return o
+
+    def sell_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("sell", qty, limit_price, coid, "gtc")
+
+    def buy_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("buy", qty, limit_price, coid, "gtc")
+
+    def sell_limit_day(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("sell", qty, limit_price, coid, "day")
+
+    def buy_limit_day(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("buy", qty, limit_price, coid, "day")
 
     def trailing_stop_gtc(self, symbol, qty, trail_price, coid, side="sell", extended_hours=False):
         self.seq += 1
@@ -139,7 +152,7 @@ class FakeFleet:
         self.snap_at += 2.0
 
 
-def make_engine(lots: list[tuple], broker_qty: int, **cfg_over) -> tuple:
+def make_engine(lots: list[tuple], broker_qty: float, **cfg_over) -> tuple:
     """Engine with a given ledger and a given Alpaca position."""
     cfg = dict(engine.TICKER_DEFAULTS)
     cfg.update({"symbol": "TEST", "dry_run": False, "auto_reconcile": True,
@@ -302,6 +315,23 @@ def main() -> int:
     check("nine distinct exits, not one",
           len({round(l.tp_price, 2) for l in e.ledger.open_lots}), 9)
     check("did not halt", e.halted, False)
+
+    print("\n6e. A fractional position is rebuilt as 0.01-share lots with DAY exits")
+    e, f = make_engine([], broker_qty=0.03, shares_per_lot=0.01, fractional="on")
+    e._asset_info = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+                     "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    f.broker.orders = lambda **kw: [
+        {"client_order_id": "en-TEST-0001", "side": "buy", "status": "filled",
+         "filled_qty": "0.030000000", "filled_avg_price": "759.0000",
+         "filled_at": "2026-09-10T14:00:00Z"}]
+    e.broker_avg = 759.0
+    e.last_price = 759.0
+    e.adopt_broker_position()
+    lots = e.ledger.open_lots
+    check("three lots of 0.01", (len(lots), all(abs(l.shares - 0.01) < 1e-6 for l in lots)), (3, True))
+    check("ledger shares 0.03", abs(e.ledger.shares - 0.03) < 1e-6, True)
+    check("every exit rests as a DAY order for 0.01",
+          [(o["tif"], o["qty"]) for o in f.broker.placed], [("day", "0.01")] * 3)
 
     print("\n7. It NEVER halts, however long the problem persists")
     e, f = make_engine([(100, 10.0)], broker_qty=100)

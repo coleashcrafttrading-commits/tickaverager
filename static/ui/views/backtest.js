@@ -15,7 +15,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, go,
+  money, money0, sgn, pct, qty, go,
 } from "../core.js";
 import { EqChart } from "../eqchart.js";
 
@@ -551,7 +551,7 @@ function renderResBody(j, rows) {
         <td class="num">${(+t.exit).toFixed(4)}</td>
         <td><span class="pill ${t.why === "stop" ? "down" : t.why === "target" ? "up" : ""}"
           >${esc(t.why)}</span></td>
-        <td class="num">${t.shares}</td>
+        <td class="num">${qty(t.shares)}</td>
         <td class="num">${sgn(t.pnl)}</td>
         <td class="num faint">${sgn(t.cum_pnl)}</td>
       </tr>`),

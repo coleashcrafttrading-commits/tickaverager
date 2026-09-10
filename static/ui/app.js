@@ -7,7 +7,7 @@
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, el, esc, money, money0, sgn, go, readHash, sig, hashFor,
+  S, VIEWS, GET, el, esc, money, money0, sgn, qty, go, readHash, sig, hashFor,
   setAccount, rememberAccount, loadAccounts, pickAccount, savedAccount,
   curAccount, acctLabel, initTheme, toast,
 } from "./core.js";
@@ -96,7 +96,7 @@ function paintRail() {
         <div class="tick-top"><span class="dot ${dot}"></span>
           <span class="tick-sym">${t.symbol}</span>
           <span class="tick-pl">${pl ? sgn(pl, 0) : `<span class="faint">—</span>`}</span></div>
-        <div class="tick-sub">${t.lot_count}/${t.max_lots} lots · ${t.shares} sh${
+        <div class="tick-sub">${t.lot_count}/${t.max_lots} lots · ${qty(t.shares)} sh${
           t.dry_run ? "" : ` · <span class="down">armed</span>`}</div>
       </div>`;
     }).join("") || `<div class="nav-item faint" style="cursor:default">No tickers</div>`;

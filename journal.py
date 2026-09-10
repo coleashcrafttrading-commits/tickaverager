@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from qty import qty, qnum, QTY_DP, QTY_EPS
+
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = ROOT / "state"
 
@@ -87,6 +89,9 @@ CFG_KEYS = (
     # touch-mode adds: the strategy genuinely changed when these landed, so
     # every ticker's cfg_hash history splits at that deploy
     "add_trigger", "add_anchor", "add_depth",
+    # fractional shares: a 0.01-share ladder is a different trade from a
+    # 100-share one, so the history splits once more at that deploy
+    "fractional", "fractional_sessions",
 )
 
 
@@ -124,15 +129,15 @@ def record_open(engine: Any, lot: Any, why: str = "") -> None:
         "symbol":      engine.symbol,
         "lot_id":      lot.id,
         "side":        str(getattr(lot, "side", "") or "long"),
-        "shares":      lot.shares,
+        "shares":      qnum(lot.shares),
         "entry_price": round(float(lot.entry_price), 4),
         "tp_price":    round(float(lot.tp_price), 4),
-        "cost":        round(lot.shares * float(lot.entry_price), 2),
+        "cost":        round(qty(lot.shares) * float(lot.entry_price), 2),
         # rung 1 is the first lot of a ladder; the number IS the depth reached
         "rung":        len(led.open_lots),
         "ladder_lots": len(led.open_lots),
         "ladder_avg":  round(led.avg_price, 4),
-        "ladder_shares": led.shares,
+        "ladder_shares": qnum(led.shares),
         "last_price":  engine.last_price,
         "session":     engine._session_now(),
         "dry_run":     bool(cfg.get("dry_run")),
@@ -143,7 +148,7 @@ def record_open(engine: Any, lot: Any, why: str = "") -> None:
     }, jp, ja)
 
 
-def record_close(engine: Any, lot: Any, shares: int, price: float,
+def record_close(engine: Any, lot: Any, shares: float, price: float,
                  realized: float, partial: bool, why: str = "") -> None:
     cfg = engine.cfg
     held = _hold_seconds(lot.entry_time)
@@ -153,7 +158,7 @@ def record_close(engine: Any, lot: Any, shares: int, price: float,
         "symbol":      engine.symbol,
         "lot_id":      lot.id,
         "side":        str(getattr(lot, "side", "") or "long"),
-        "shares":      int(shares),
+        "shares":      qnum(shares),
         "entry_price": round(float(lot.entry_price), 4),
         "exit_price":  round(float(price), 4),
         "tp_price":    round(float(lot.tp_price), 4),
@@ -185,15 +190,15 @@ def record_lot_delta(symbol: str, gone: list, added: list, why: str,
     snap, h = cfg_snapshot(cfg), cfg_hash(cfg)
     for l in gone:
         append({"event": "close", "symbol": symbol, "lot_id": l.id,
-                "shares": int(l.shares), "entry_price": round(float(l.entry_price), 4),
+                "shares": qnum(l.shares), "entry_price": round(float(l.entry_price), 4),
                 "exit_price": 0.0, "realized": 0.0, "hold_seconds": 0,
                 "inferred": True, "dry_run": False, "why": f"ladder rebuilt: {why}",
                 "cfg_hash": h, "cfg": snap}, path, account)
     for i, l in enumerate(added, 1):
         append({"event": "open", "symbol": symbol, "lot_id": l.id,
-                "shares": int(l.shares), "entry_price": round(float(l.entry_price), 4),
+                "shares": qnum(l.shares), "entry_price": round(float(l.entry_price), 4),
                 "tp_price": round(float(l.tp_price), 4),
-                "cost": round(l.shares * float(l.entry_price), 2),
+                "cost": round(qty(l.shares) * float(l.entry_price), 2),
                 "rung": i, "inferred": True, "dry_run": False,
                 "why": f"ladder rebuilt: {why}", "cfg_hash": h, "cfg": snap}, path, account)
     return {"closed": len(gone), "opened": len(added)}
@@ -303,8 +308,8 @@ def stats(rows: list[dict]) -> dict:
         # journal were re-synced and the window is not purely trading
         "bookkeeping_rows": bookkeeping,
         "realized": round(realized, 2),
-        "shares_bought": sum(int(r.get("shares") or 0) for r in opens),
-        "shares_sold": sum(int(r.get("shares") or 0) for r in closes),
+        "shares_bought": qnum(round(sum(qty(r.get("shares")) for r in opens), 6)),
+        "shares_sold": qnum(round(sum(qty(r.get("shares")) for r in closes), 6)),
         "capital_deployed": round(deployed, 2),
         # what a dollar of deployed capital earned back over the window
         "return_on_deployed_pct": round(100 * realized / deployed, 3) if deployed else 0.0,
@@ -400,26 +405,26 @@ def open_inventory(rows: list[dict]) -> list[dict]:
     profitable on realized P/L while quietly holding lots from days ago that
     the price has left far behind.
     """
-    closed_shares: dict[str, int] = {}
+    closed_shares: dict[str, float] = {}
     for r in rows:
         if r.get("event") in ("close", "partial"):
             lid = r.get("lot_id")
-            closed_shares[lid] = closed_shares.get(lid, 0) + int(r.get("shares") or 0)
+            closed_shares[lid] = round(closed_shares.get(lid, 0.0) + qty(r.get("shares")), QTY_DP)
 
     out = []
     for r in rows:
         if r.get("event") != "open" or r.get("dry_run"):
             continue
         lid = r.get("lot_id")
-        left = int(r.get("shares") or 0) - closed_shares.get(lid, 0)
-        if left <= 0:
+        left = round(qty(r.get("shares")) - closed_shares.get(lid, 0.0), QTY_DP)
+        if left <= QTY_EPS:
             continue
         out.append({
             "lot_id": lid,
             "symbol": r.get("symbol"),
             "opened": r.get("ts"),
             "age_days": round(_age_days(r.get("ts")), 2),
-            "shares": left,
+            "shares": qnum(left),
             "entry_price": r.get("entry_price"),
             "tp_price": r.get("tp_price"),
             "rung": r.get("rung"),
@@ -500,21 +505,21 @@ def backfill_from_orders(broker: Any, symbol: str, cfg: dict,
         # was then cancelled still moved shares, and skipping it leaves lots
         # looking permanently open that actually cleared days ago. The engine
         # books the delta the same way -- filled_qty is the fact, status is not.
-        qty = int(float(o.get("filled_qty") or 0))
+        q = qty(o.get("filled_qty"))
         px = float(o.get("filled_avg_price") or 0)
-        if qty <= 0 or px <= 0:
+        if q <= QTY_EPS or px <= 0:
             continue
         lot_id = lot_from_coid(coid)
         if not lot_id:
             continue
         if coid.startswith("en-"):
             entries[lot_id] = {
-                "lot_id": lot_id, "shares": qty, "price": px,
+                "lot_id": lot_id, "shares": qnum(q), "price": px,
                 "at": o.get("filled_at") or o.get("submitted_at"),
             }
         elif coid.startswith("tp-"):
             exits.append({
-                "lot_id": lot_id, "shares": qty, "price": px,
+                "lot_id": lot_id, "shares": qnum(q), "price": px,
                 "at": o.get("filled_at") or o.get("submitted_at"),
             })
 
@@ -598,7 +603,7 @@ def reconcile_with_ledger(symbol: str, open_lot_ids: Iterable[str],
         pass
     for lid in missing:
         l = led_lots.get(lid, {})
-        sh = int(l.get("shares") or 0)
+        sh = qnum(l.get("shares") or 0)
         px = float(l.get("entry_price") or 0)
         append({"event": "open", "symbol": symbol, "lot_id": lid, "shares": sh,
                 "entry_price": round(px, 4),
@@ -645,21 +650,21 @@ def _replay_rungs(entries: dict, exits: list) -> dict:
     """Walk the fills in time order; a lot's rung is the ladder depth at entry."""
     timeline: list[tuple] = []
     for lot_id, e in entries.items():
-        timeline.append((str(e["at"]), 0, lot_id, int(e["shares"])))
+        timeline.append((str(e["at"]), 0, lot_id, qty(e["shares"])))
     for x in exits:
-        timeline.append((str(x["at"]), 1, x["lot_id"], -int(x["shares"])))
+        timeline.append((str(x["at"]), 1, x["lot_id"], -qty(x["shares"])))
     timeline.sort()
 
-    live: dict[str, int] = {}
+    live: dict[str, float] = {}
     rungs: dict[str, int] = {}
-    for _, kind, lot_id, qty in timeline:
+    for _, kind, lot_id, q in timeline:
         if kind == 0:
-            live[lot_id] = live.get(lot_id, 0) + qty
+            live[lot_id] = round(live.get(lot_id, 0.0) + q, QTY_DP)
             rungs[lot_id] = len(live)          # this lot included -- rung 1 is first
         else:
             if lot_id in live:
-                live[lot_id] += qty
-                if live[lot_id] <= 0:
+                live[lot_id] = round(live[lot_id] + q, QTY_DP)
+                if live[lot_id] <= QTY_EPS:
                     live.pop(lot_id, None)
     return rungs
 
