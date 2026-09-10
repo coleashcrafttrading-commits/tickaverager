@@ -103,6 +103,12 @@ class TouchBroker:
     def sell_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
         return self._o("sell", qty, limit_price, coid, extended_hours)
 
+    def buy_limit_day(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._o("buy", qty, limit_price, coid, extended_hours, tif="day")
+
+    def sell_limit_day(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._o("sell", qty, limit_price, coid, extended_hours, tif="day")
+
     def buy_limit(self, symbol, qty, limit_price, coid, extended_hours=False):
         return self._o("buy", qty, limit_price, coid, extended_hours, tif="day")
 
@@ -153,12 +159,12 @@ class TouchBroker:
     def fill(self, coid, qty, px, at=T_FILL):
         """Set the order's CUMULATIVE filled_qty. Returns the delta."""
         o = self.by_coid[coid]
-        prev = int(float(o["filled_qty"] or 0))
+        prev = float(o["filled_qty"] or 0)
         o["filled_qty"] = str(qty)
         o["filled_avg_price"] = f"{float(px):.4f}"
         o["filled_at"] = at
-        o["status"] = "filled" if qty >= int(float(o["qty"])) else "partially_filled"
-        return qty - prev
+        o["status"] = "filled" if qty >= float(o["qty"]) - 1e-9 else "partially_filled"
+        return round(qty - prev, 9)
 
     def settle(self, coid, status="canceled"):
         self.by_coid[coid]["status"] = status
@@ -225,12 +231,13 @@ def step(e, f, bump=True):
 def fill(e, f, coid, qty, px, at=T_FILL):
     """A fill at the broker that ALSO moves the position, as Alpaca's would:
     +delta for a buy, -delta for a sell."""
+    from qty import qnum
     o = f.broker.by_coid[coid]
     delta = f.broker.fill(coid, qty, px, at)
     signed = delta if o["side"] == "buy" else -delta
-    cur = int(float((f.positions.get("TEST") or {}).get("qty") or 0))
-    f.set_position(cur + signed)
-    e.broker_qty = cur + signed
+    cur = float((f.positions.get("TEST") or {}).get("qty") or 0)
+    f.set_position(qnum(round(cur + signed, 9)))         # an int for a whole position, as Alpaca's is read
+    e.broker_qty = qnum(round(cur + signed, 9))
     e.position = f.position_of("TEST")
 
 

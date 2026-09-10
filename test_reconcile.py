@@ -44,12 +44,25 @@ class FakeBroker:
     def cancel(self, order_id):
         self.cancelled.append(order_id)
 
-    def sell_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+    def _limit(self, side, qty, limit_price, coid, tif):
         self.seq += 1
         o = {"id": f"ord{self.seq}", "status": "new", "client_order_id": coid,
-             "qty": str(qty), "filled_qty": "0", "limit_price": str(limit_price)}
+             "qty": str(qty), "filled_qty": "0", "limit_price": str(limit_price),
+             "side": side, "tif": tif}
         self.placed.append(o)
         return o
+
+    def sell_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("sell", qty, limit_price, coid, "gtc")
+
+    def buy_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("buy", qty, limit_price, coid, "gtc")
+
+    def sell_limit_day(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("sell", qty, limit_price, coid, "day")
+
+    def buy_limit_day(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._limit("buy", qty, limit_price, coid, "day")
 
     def trailing_stop_gtc(self, symbol, qty, trail_price, coid, side="sell", extended_hours=False):
         self.seq += 1
@@ -139,7 +152,7 @@ class FakeFleet:
         self.snap_at += 2.0
 
 
-def make_engine(lots: list[tuple], broker_qty: int, **cfg_over) -> tuple:
+def make_engine(lots: list[tuple], broker_qty: float, **cfg_over) -> tuple:
     """Engine with a given ledger and a given Alpaca position."""
     cfg = dict(engine.TICKER_DEFAULTS)
     cfg.update({"symbol": "TEST", "dry_run": False, "auto_reconcile": True,

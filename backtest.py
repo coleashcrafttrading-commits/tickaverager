@@ -84,7 +84,10 @@ class SimEngine:
 for _m in ("_add_trigger_met", "_rung_price", "_entry_limit_price", "_add_reason",
            "next_side", "broker_side",
            # ladder v2 sizing in the sim: the ATR rung, dollar sizing, the cap
-           "_atr_rung_distance", "_lot_shares", "_cap_to_ladder"):
+           "_atr_rung_distance", "_lot_shares", "_cap_to_ladder",
+           # fractional shares: the sizing bounds and the config readers they use
+           "_size_bounds", "_fractional_on", "_frac_capable", "_frac_sessions",
+           "_frac_session_ok", "_next_lot_fractional", "_lot_unit", "_frac_block", "_min_qty"):
     setattr(SimEngine, _m, getattr(Engine, _m))
 SimEngine._dir = staticmethod(Engine._dir)
 SimEngine.broker_qty = 0          # the sim never holds a broker position

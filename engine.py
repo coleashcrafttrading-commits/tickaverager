@@ -283,7 +283,7 @@ TICKER_DEFAULTS: dict[str, Any] = {
     "risk_dollars":      100.0,
     "atr_stop_mult":     2.0,
     "atr_period":        14,
-    "min_shares":        1,
+    "min_shares":        1,            # fractional=on: 1 (this default) means no floor beyond Alpaca's minimum; 0.5 / 2 are honoured
     "max_shares":        100000,
 
     # --- strategy-driven decisions (both default OFF: the ladder is unchanged
@@ -1053,9 +1053,12 @@ class Engine:
                 # book whatever DID fill before it died, then re-cover the rest
                 if o:
                     self._book_tp_progress(lot, o)
-                if lot in self.ledger.open_lots and lot.shares > 0:
-                    self.ev("WARN", f"TP for lot {lot.id} is {status} -- re-placing "
-                                    f"for its remaining {lot.shares} sh.")
+                if lot in self.ledger.open_lots and lot.shares > QTY_EPS:
+                    # a FRACTIONAL exit is a DAY order: expiring at the close is
+                    # its normal life, not a fault -- INFO, and re-placed at once
+                    self.ev("INFO" if (status == "expired" and not qwhole(lot.shares)) else "WARN",
+                            f"TP for lot {lot.id} is {status} -- re-placing "
+                            f"for its remaining {qstr(lot.shares)} sh.")
                     lot.tp_client_id = ""
                     lot.tp_order_id = ""
                     lot.tp_filled = 0                    # fresh order, fresh counter
@@ -1147,7 +1150,7 @@ class Engine:
         # books it on the next tick.
         if (not self.pending_entry and not (self.ledger.unwind or {}).get("basket")
                 and not self._adds_settling()):
-            mismatch = self.broker_qty != self.ledger.signed_shares
+            mismatch = not qsame(self.broker_qty, self.ledger.signed_shares)
             if not mismatch:
                 self.mismatch_strikes = 0
                 self._mismatch_since = 0.0
@@ -1182,10 +1185,15 @@ class Engine:
         # a single touch of that price sells everything at once -- which is
         # exactly how a 9-lot ladder got emptied in 26 seconds. The counts
         # matched throughout; the STRUCTURE was wrong.
-        spl = max(1, int(self.cfg["shares_per_lot"]))
+        # (fixed sizing only: a dollars/ATR ladder's lots legitimately differ
+        # from shares_per_lot; and a hair over the unit -- a fractional dust
+        # remainder folded into its neighbour -- is not an oversized lot)
+        unit = self._lot_unit()
+        spl = unit + max(QTY_EPS, MIN_QTY)
         oversized = [l for l in self.ledger.open_lots if l.shares > spl]
         if (oversized and self.cfg.get("auto_reconcile", True)
-                and not self.cfg["dry_run"] and self.held > 0):
+                and str(self.cfg.get("size_mode") or "fixed") == "fixed"
+                and not self.cfg["dry_run"] and self.held > QTY_EPS):
             now = time.time()
             # same backoff as the position reconciler: always retries, never
             # halts, and slows down rather than churning orders if it recurs
@@ -1199,8 +1207,8 @@ class Engine:
                 self._reconcile_streak += 1
                 biggest = max(l.shares for l in oversized)
                 self._rebuild_ladder(
-                    f"{len(oversized)} lot(s) larger than the {spl}-share lot size, "
-                    f"biggest {biggest} sh -- one take-profit was covering them all")
+                    f"{len(oversized)} lot(s) larger than the {qstr(unit)}-share lot size, "
+                    f"biggest {qstr(biggest)} sh -- one take-profit was covering them all")
             return
 
         # ---- 4c. cover guard: resting sells must never exceed the position ----
@@ -1209,11 +1217,11 @@ class Engine:
         # be rejected or, worse, sell shares the ladder never bought. Counting
         # this every tick is what makes "aligned with Alpaca" mean the ORDERS
         # too, not just the share total.
-        resting = sum(max(0, int(float(o.get("qty") or 0))
-                          - int(float(o.get("filled_qty") or 0)))
-                      for o in open_orders
-                      if o.get("side") == xside and o.get("status") != "pending_cancel")
-        over = (resting > self.held
+        resting = qnum(round(sum(max(0.0, qty(o.get("qty")) - qty(o.get("filled_qty")))
+                                 for o in open_orders
+                                 if o.get("side") == xside and o.get("status") != "pending_cancel"),
+                             QTY_DP))
+        over = (resting > self.held + QTY_EPS
                 and not self.cfg["dry_run"]
                 and self.cfg.get("auto_reconcile", True))
         if over:
@@ -1232,8 +1240,8 @@ class Engine:
             if (self._overcover_strikes >= OVERCOVER_MIN_STRIKES
                     and time.time() - self._overcover_since >= OVERCOVER_GRACE_SECONDS):
                 self.flag("overcover",
-                          f"{resting} share(s) of resting {xside}s against a {self.held}"
-                          f"-share {self.pos_side()} position -- {resting - self.held} too many. "
+                          f"{qstr(resting)} share(s) of resting {xside}s against a {qstr(self.held)}"
+                          f"-share {self.pos_side()} position -- {qstr(resting - self.held)} too many. "
                           f"Re-covering at the correct size.")
                 self.cancel_all_tps()
                 self.ensure_tps()
@@ -1247,12 +1255,14 @@ class Engine:
         # A per-lot warning outlives its lot otherwise, so the dashboard keeps
         # complaining about something that closed hours ago.
         live_ids = {l.id for l in self.ledger.open_lots}
-        for key in [k for k in self.attention if k.startswith("tp-")]:
-            if key[3:] not in live_ids:
+        for key in [k for k in self.attention if k.startswith(("tp-", "frac-", "trail-", "dust-", "xs-"))]:
+            if key.split("-", 1)[1] not in live_ids:
                 self.unflag(key)
         for key in [k for k in self._warn_at if k.startswith("tpwait-")]:
             if key[7:] not in live_ids:
                 self._warn_at.pop(key, None)
+        for key in [k for k in self._frac_try_at if k != "basket" and k not in live_ids]:
+            self._frac_try_at.pop(key, None)
 
         # ---- 4e. strategy exits ----
         # An indicator-driven exit OVERRIDES the resting take-profit: the
@@ -1261,14 +1271,14 @@ class Engine:
         # where to leave, an indicator is a reason to.
         if self.cfg.get("strategy_exits") and not self.cfg["dry_run"]:
             for lot in list(self.ledger.open_lots):
-                if lot.shares <= 0:
+                if lot.shares <= QTY_EPS:
                     continue
                 if str(lot.tp_client_id or "").startswith("xs-"):
                     continue                     # its exit is already in flight (step 2 tracks it)
                 if not self._strategy_says_exit(lot):
                     continue
                 self.ev("ORDER", f"Strategy exit on lot {lot.id}: closing "
-                                 f"{lot.shares} sh now, overriding the "
+                                 f"{qstr(lot.shares)} sh now, overriding the "
                                  f"${lot.tp_price:.2f} target.")
                 self._close_lot_now(lot, f"strategy {self._strat_slug} exit")
 
@@ -1278,7 +1288,7 @@ class Engine:
             self.halt(f"Daily loss limit hit: realized ${self.ledger.realized_today:,.2f} "
                       f"<= -${dll:,.2f}.")
 
-    def _lots_from_history(self, target_shares: int,
+    def _lots_from_history(self, target_shares: float,
                            side: str = "long") -> list[Lot]:
         """Reconstruct the REAL open lots from Alpaca's own order record.
 
@@ -1297,7 +1307,10 @@ class Engine:
         assert b
         d = self._dir(side)
         tp_amt = float(self.cfg["take_profit"]) * d
-        spl = max(1, int(self.cfg["shares_per_lot"]))
+        spl = self._lot_unit()
+        # a fractional remainder below what Alpaca will take as an order is
+        # never split off on its own; it rides with the last piece
+        dust = self._min_qty() if not qwhole(spl) or spl < 1 else 0.0
 
         events: list[tuple] = []
         for o in b.orders(status="all", symbols=self.symbol, limit=500) or []:
@@ -1305,15 +1318,15 @@ class Engine:
             lot_id = journal.lot_from_coid(coid)
             if not lot_id:
                 continue
-            qty = int(float(o.get("filled_qty") or 0))
+            qty_ = qty(o.get("filled_qty"))
             px = float(o.get("filled_avg_price") or 0)
-            if qty <= 0 or px <= 0:
+            if qty_ <= QTY_EPS or px <= 0:
                 continue
             at = o.get("filled_at") or o.get("submitted_at") or ""
             if coid.startswith("en-"):
-                events.append((str(at), 0, lot_id, qty, px))
+                events.append((str(at), 0, lot_id, qty_, px))
             elif coid.startswith("tp-"):
-                events.append((str(at), 1, lot_id, qty, px))
+                events.append((str(at), 1, lot_id, qty_, px))
         events.sort()
         if not events:
             # loud on purpose: falling back to the account average is what
@@ -1323,23 +1336,23 @@ class Engine:
                             f"average, not their real fills.")
 
         open_map: dict[str, Lot] = {}
-        for at, kind, lot_id, qty, px in events:
+        for at, kind, lot_id, qty_, px in events:
             if kind == 0:
                 l = open_map.get(lot_id)
                 if l:
                     # same lot filling in pieces -- weight the entry properly
-                    tot = l.shares + qty
-                    l.entry_price = (l.entry_price * l.shares + px * qty) / tot
+                    tot = qnum(round(l.shares + qty_, QTY_DP))
+                    l.entry_price = (l.entry_price * l.shares + px * qty_) / tot
                     l.shares = tot
                 else:
-                    open_map[lot_id] = Lot(id=lot_id, shares=qty, entry_price=px,
+                    open_map[lot_id] = Lot(id=lot_id, shares=qnum(qty_), entry_price=px,
                                            entry_time=str(at), tp_price=0.0,
                                            side=side)
             else:
                 l = open_map.get(lot_id)
                 if l:
-                    l.shares -= qty
-                    if l.shares <= 0:
+                    l.shares = qnum(round(l.shares - qty_, QTY_DP))
+                    if l.shares <= QTY_EPS:
                         open_map.pop(lot_id, None)
 
         lots = sorted(open_map.values(), key=lambda l: l.entry_time)
@@ -1348,42 +1361,44 @@ class Engine:
         # those originals still look open here. Alpaca's share count is the
         # truth -- trim to it, dropping the ones nearest their target first
         # since those are the ones most likely to have actually gone.
-        total = sum(l.shares for l in lots)
-        if total > target_shares:
-            excess = total - target_shares
+        total = qnum(round(sum(qty(l.shares) for l in lots), QTY_DP))
+        if total > target_shares + QTY_EPS:
+            excess = qnum(round(total - target_shares, QTY_DP))
             for l in sorted(lots, key=lambda x: d * (x.entry_price + tp_amt)):
-                if excess <= 0:
+                if excess <= QTY_EPS:
                     break
                 take = min(excess, l.shares)
-                l.shares -= take
-                excess -= take
-            lots = [l for l in lots if l.shares > 0]
-            total = sum(l.shares for l in lots)
+                l.shares = qnum(round(l.shares - take, QTY_DP))
+                excess = qnum(round(excess - take, QTY_DP))
+            lots = [l for l in lots if l.shares > QTY_EPS]
+            total = qnum(round(sum(qty(l.shares) for l in lots), QTY_DP))
 
         # shares the order record cannot explain -- carry them at the account
         # average, in properly sized lots rather than one block
-        if total < target_shares:
-            missing = target_shares - total
+        if total < target_shares - QTY_EPS:
+            missing = qnum(round(target_shares - total, QTY_DP))
             price = self.broker_avg or self.last_price
             n = 0
-            while missing > 0 and price > 0:
+            while missing > QTY_EPS and price > 0:
                 n += 1
-                take = min(spl, missing)
+                take = qnum(min(spl, missing))
                 lots.append(Lot(id=self.ledger.next_lot_id() + "r", shares=take,
                                 entry_price=price,
                                 entry_time=_now_ny().isoformat(timespec="seconds"),
                                 tp_price=0.0, side=side))
-                missing -= take
+                missing = qnum(round(missing - take, QTY_DP))
 
         # never leave an oversized lot behind: one 800-share lot is not a ladder
         sized: list[Lot] = []
         for l in lots:
-            while l.shares > spl:
-                sized.append(Lot(id=l.id + f"-{len(sized)+1}", shares=spl,
+            while l.shares > spl + QTY_EPS:
+                if dust and l.shares - spl < dust - QTY_EPS:
+                    break                        # the remainder would be dust: keep it on this piece
+                sized.append(Lot(id=l.id + f"-{len(sized)+1}", shares=qnum(spl),
                                  entry_price=l.entry_price, entry_time=l.entry_time,
                                  tp_price=_round_cent(l.entry_price + tp_amt),
                                  side=side))
-                l.shares -= spl
+                l.shares = qnum(round(l.shares - spl, QTY_DP))
             l.side = side
             l.tp_price = _round_cent(l.entry_price + tp_amt)
             sized.append(l)
@@ -1421,7 +1436,7 @@ class Engine:
             got = next((l for l in rebuilt
                         if l.id in (rec.get("lot_id"), str(rec.get("lot_id")) + "a")), None)
             if got is not None:
-                rec["booked"] = max(int(rec.get("booked") or 0), int(got.shares))
+                rec["booked"] = qnum(max(qty(rec.get("booked")), qty(got.shares)))
         self.ledger.save()
         if gone or added:
             try:
@@ -1433,14 +1448,14 @@ class Engine:
             lo = min(l.entry_price for l in rebuilt)
             hi = max(l.entry_price for l in rebuilt)
             self.ev("WARN", f"LADDER REBUILT ({why}): {len(rebuilt)} lot(s), "
-                            f"{sum(l.shares for l in rebuilt)} sh, entries "
+                            f"{qstr(round(sum(qty(l.shares) for l in rebuilt), QTY_DP))} sh, entries "
                             f"${lo:.4f}-${hi:.4f}. Each keeps its OWN take-profit.")
         for l in rebuilt:
             self._place_tp(l)
         try:
             journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="ladder_rebuilt", why=why,
                                  lots=len(rebuilt),
-                                 shares=sum(l.shares for l in rebuilt),
+                                 shares=qnum(round(sum(qty(l.shares) for l in rebuilt), QTY_DP)),
                                  dropped=len(gone), created=len(added))
         except Exception:
             pass
@@ -1471,8 +1486,8 @@ class Engine:
             self.ledger.save()
             return self._rebuild_ladder("ladder and account were on opposite sides")
 
-        gap = self.held - self.ledger.shares
-        if gap == 0:
+        gap = qnum(round(self.held - self.ledger.shares, QTY_DP))
+        if qzero(gap):
             self.mismatch_strikes = 0
             self._mismatch_since = 0.0
             return True
@@ -1502,11 +1517,11 @@ class Engine:
 
         before = (self.broker_qty, self.ledger.signed_shares)
 
-        if gap > 0:
+        if gap > QTY_EPS:
             # ---- shares we hold but do not track ----
             self._adopt_orphan_entries()            # exact rebuild where possible
-            gap = self.held - self.ledger.shares
-            if gap > 0:
+            gap = qnum(round(self.held - self.ledger.shares, QTY_DP))
+            if gap > QTY_EPS:
                 # rebuild the whole ladder from the order record rather than
                 # bolting the difference on as one block -- a lot's exit must
                 # sit at its own fill, never at a blended average
@@ -1528,7 +1543,7 @@ class Engine:
                            key=lambda l: (l.tp_client_id in alive, d * l.tp_price))
             freed = 0
             for lot in cands:
-                if surplus <= 0:
+                if surplus <= QTY_EPS:
                     break
                 take = min(surplus, lot.shares)
                 # it would have closed at its own limit -- the best estimate we
@@ -1539,15 +1554,15 @@ class Engine:
                 self.ledger.note_fill(lot.tp_price, self.exit_side(), "inferred", lot.id)
                 self.ledger.realized_today += pnl
                 self.ledger.realized_all += pnl
-                lot.shares -= take
-                surplus -= take
-                freed += take
+                lot.shares = qnum(round(lot.shares - take, QTY_DP))
+                surplus = qnum(round(surplus - take, QTY_DP))
+                freed = qnum(round(freed + take, QTY_DP))
                 try:
                     journal.record_close(self, lot, take, lot.tp_price, pnl,
-                                         lot.shares > 0)
+                                         lot.shares > QTY_EPS)
                 except Exception:
                     pass
-                if lot.shares <= 0:
+                if lot.shares <= QTY_EPS:
                     self.ledger.open_lots = [x for x in self.ledger.open_lots
                                              if x.id != lot.id]
                     self.ledger.closed_count += 1
@@ -1569,9 +1584,13 @@ class Engine:
                     lot.tp_client_id = ""
                     lot.tp_order_id = ""
                     lot.tp_filled = 0
+            # a fractional remainder below the orderable minimum cannot rest an
+            # exit of its own: fold it into its neighbour, or flag it
+            for lot in [l for l in list(self.ledger.open_lots) if not qwhole(l.shares)]:
+                self._absorb_dust(lot)
             self.ledger.save()
             self.ev("WARN", f"AUTO-RECONCILE: Alpaca holds {self.broker_qty} share(s) but "
-                            f"the ladder tracked {before[1]}. Released {freed} share(s) "
+                            f"the ladder tracked {before[1]}. Released {qstr(freed)} share(s) "
                             f"from the ledger at their take-profit price. Realized P/L "
                             f"for those is ESTIMATED, not a booked fill.")
 
@@ -1599,8 +1618,8 @@ class Engine:
         if (self.ledger.open_lots and self.broker_qty
                 and self.broker_side() != self.ledger.side):
             return                       # side conflict: _auto_reconcile owns it
-        gap = self.held - self.ledger.shares
-        if gap <= 0 or self.pending_entry or self.cfg["dry_run"] or self._adds_settling():
+        gap = qnum(round(self.held - self.ledger.shares, QTY_DP))
+        if gap <= QTY_EPS or self.pending_entry or self.cfg["dry_run"] or self._adds_settling():
             return
         b = self.broker
         assert b
@@ -1617,7 +1636,7 @@ class Engine:
                  | {str(r.get("lot_id")) + "a" for r in self.ledger.resting_adds})
 
         for o in recent:                                  # newest first
-            if gap <= 0:
+            if gap <= QTY_EPS:
                 break
             if o.get("side") != want or o.get("status") != "filled":
                 continue
@@ -1627,17 +1646,17 @@ class Engine:
             lot_id = coid[3:]
             if lot_id in known or lot_id in covered:
                 continue
-            qty = int(float(o.get("filled_qty") or 0))
+            q = qty(o.get("filled_qty"))
             px = float(o.get("filled_avg_price") or 0)
-            if qty <= 0 or px <= 0 or qty > gap:
+            if q <= QTY_EPS or px <= 0 or q > gap + QTY_EPS:
                 continue
-            self.ev("WARN", f"Found entry {coid} filled ({qty} @ ${px:.4f}) with no lot "
+            self.ev("WARN", f"Found entry {coid} filled ({qstr(q)} @ ${px:.4f}) with no lot "
                             f"in the ledger — the process missed it. Rebuilding the lot "
                             f"and covering it.")
             # newest-first loop: the order's own filled_at decides the anchor,
             # not the booking order
-            self._open_lot(lot_id, qty, px, side=side, filled_ts=_order_ts(o))
-            gap -= qty
+            self._open_lot(lot_id, q, px, side=side, filled_ts=_order_ts(o))
+            gap = qnum(round(gap - q, QTY_DP))
             known.add(lot_id)
 
     def _check_pending_entry(self) -> None:
@@ -1653,9 +1672,9 @@ class Engine:
         status = o.get("status")
         if status == "filled":
             price = float(o.get("filled_avg_price") or 0)
-            qty = int(float(o.get("filled_qty") or 0))
+            filled_q = qty(o.get("filled_qty"))
             self.pending_entry = None
-            self._open_lot(pe["lot_id"], qty, price, pe.get("why", ""),
+            self._open_lot(pe["lot_id"], filled_q, price, pe.get("why", ""),
                            side=pe.get("side", "long"),
                            latency_ms=float(pe.get("latency_ms") or 0),
                            filled_ts=_order_ts(o))
@@ -1668,51 +1687,58 @@ class Engine:
                 self.ev("WARN", f"Entry {pe['client_order_id']} {status}.")
             self.pending_entry = None
             if pe.get("mirror"):
-                filled = int(float(o.get("filled_qty") or 0))
-                if filled > 0:
+                filled = qty(o.get("filled_qty"))
+                if filled > QTY_EPS:
                     self._open_lot(pe["lot_id"], filled, float(o.get("filled_avg_price") or 0),
                                    pe.get("why", ""), side=pe.get("side", "long"),
                                    filled_ts=_order_ts(o))
-                self._requeue_mirror(int(pe.get("shares") or 0) - filled, status)
+                self._requeue_mirror(qnum(round(qty(pe.get("shares")) - filled, QTY_DP)), status)
         else:
             age = time.time() - pe["sent_at"]
             if age > float(self.cfg.get("entry_fill_timeout", 45)):
-                filled = int(float(o.get("filled_qty") or 0))
-                want = int(float(o.get("qty") or 0))
-                unfilled = max(0, want - filled)
+                filled = qty(o.get("filled_qty"))
+                want = qty(o.get("qty"))
+                unfilled = qnum(round(max(0.0, want - filled), QTY_DP))
                 eside = pe.get("side", "long")
-                self.ev("WARN", f"Entry {pe['client_order_id']} only {filled}/{want} filled "
+                self.ev("WARN", f"Entry {pe['client_order_id']} only {qstr(filled)}/{qstr(want)} filled "
                                 f"after {age:.0f}s -- cancelling the rest.")
                 b.cancel(o["id"])
                 self.pending_entry = None
                 if pe.get("mirror"):
                     # a flip's re-entry: bank what filled, put the rest back at the
                     # head of the queue, and let the next tick re-send it at the quote
-                    if filled > 0:
+                    if filled > QTY_EPS:
                         self._open_lot(pe["lot_id"], filled, float(o.get("filled_avg_price") or 0),
                                        pe.get("why", ""), side=eside, filled_ts=_order_ts(o))
                     self._requeue_mirror(unfilled, f"timeout after {age:.0f}s")
                     return
 
-                if unfilled > 0 and self.cfg.get("entry_on_timeout") == "market" \
+                if unfilled > QTY_EPS and self.cfg.get("entry_on_timeout") == "market" \
                         and self.is_extended():
                     self.ev("WARN", "Timeout escalation skipped: market orders are not "
                                     "accepted in an extended-hours session. Keeping the "
-                                    f"partial {filled} sh lot.")
-                elif unfilled > 0 and self.cfg.get("entry_on_timeout") == "market":
+                                    f"partial {qstr(filled)} sh lot.")
+                elif unfilled > QTY_EPS and self.cfg.get("entry_on_timeout") == "market" \
+                        and not qwhole(unfilled) and (eside == "short" or not self._frac_session_ok()):
+                    # a fractional remainder: never a short sale, never outside its session
+                    self.ev("WARN", "Timeout escalation skipped: "
+                            + ("Alpaca has no fractional short sales" if eside == "short"
+                               else "fractional shares are outside their allowed session")
+                            + f" -- keeping the partial {qstr(filled)} sh lot.")
+                elif unfilled > QTY_EPS and self.cfg.get("entry_on_timeout") == "market":
                     # the operator would rather pay the spread than run a part lot
                     time.sleep(0.6)                       # let the cancel settle
                     coid = f"en-{pe['lot_id']}m"
                     try:
                         if eside == "short":
-                            b.sell_market(self.symbol, unfilled, coid)
+                            b.sell_market(self.symbol, qnum(unfilled), coid)
                         else:
-                            b.buy_market(self.symbol, unfilled, coid)
+                            b.buy_market(self.symbol, qnum(unfilled), coid)
                         self.pending_entry = {"lot_id": pe["lot_id"], "client_order_id": coid,
                                               "order_id": "", "sent_at": time.time(),
                                               "side": eside}
-                        self.ev("ORDER", f"Escalating the unfilled {unfilled} sh to MARKET.")
-                        if filled > 0:
+                        self.ev("ORDER", f"Escalating the unfilled {qstr(unfilled)} sh to MARKET.")
+                        if filled > QTY_EPS:
                             # bank the limit portion now; the market fill becomes its own lot
                             self._open_lot(pe["lot_id"] + "a", filled,
                                            float(o.get("filled_avg_price") or 0),
@@ -1722,38 +1748,40 @@ class Engine:
                     except AlpacaError as e:
                         self.ev("ERR", f"Escalation to market failed: {e}")
 
-                if filled > 0:
+                if filled > QTY_EPS:
                     # partial: keep what filled, cover it with its own TP
                     self._open_lot(pe["lot_id"], filled,
                                    float(o.get("filled_avg_price") or 0), side=eside,
                                    filled_ts=_order_ts(o))
 
-    def _requeue_mirror(self, shares: int, why: str) -> None:
+    def _requeue_mirror(self, shares: float, why: str) -> None:
         """A reversal's re-entry that ended unfilled goes back to the head of
         the queue -- bounded, so a name that will not fill cannot loop."""
         uw = dict(self.ledger.unwind or {})
-        if shares <= 0 or not uw.get("reverse_to"):
+        if shares <= QTY_EPS or not uw.get("reverse_to"):
             return
         tries = int(uw.get("reverse_retries") or 0)
         if tries >= 3:
-            self.ev("WARN", f"REVERSAL: {shares} sh not re-opened after {tries} tries ({why}) -- "
+            self.ev("WARN", f"REVERSAL: {qstr(shares)} sh not re-opened after {tries} tries ({why}) -- "
                             f"giving up on that lot; {len(uw.get('reverse_lots') or [])} still queued")
-            self.flag("reverse", f"{self.symbol}: {shares} sh of the flip never re-opened after "
+            self.flag("reverse", f"{self.symbol}: {qstr(shares)} sh of the flip never re-opened after "
                                  f"{tries} tries ({why}); the ladder is smaller than the rule says")
             return
-        uw["reverse_lots"] = [int(shares)] + [int(x) for x in (uw.get("reverse_lots") or [])]
+        uw["reverse_lots"] = [qnum(shares)] + [qnum(x) for x in (uw.get("reverse_lots") or [])
+                                               if qty(x) > QTY_EPS]
         uw["reverse_retries"] = tries + 1
         self.ledger.unwind = uw
         self.ledger.save()
-        self.ev("WARN", f"REVERSAL: {shares} sh back at the head of the queue ({why}, try {tries + 1})")
+        self.ev("WARN", f"REVERSAL: {qstr(shares)} sh back at the head of the queue ({why}, try {tries + 1})")
 
-    def _open_lot(self, lot_id: str, shares: int, price: float, why: str = "",
+    def _open_lot(self, lot_id: str, shares: float, price: float, why: str = "",
                   side: str = "", latency_ms: float = 0.0, filled_ts: float = 0.0) -> None:
         """Book an entry fill as a lot and rest its take-profit. `filled_ts` is
         the fill's epoch (Alpaca's filled_at) when the caller has the order --
         it decides whether this fill becomes the add anchor, so a fill read
         back after a restart never beats a newer one booked earlier."""
-        if shares <= 0 or price <= 0:
+        shares = qnum(shares)
+        if shares <= QTY_EPS or price <= 0:
             self.ev("ERR", f"Entry {lot_id} reported a fill of {shares} @ {price} -- ignoring.")
             return
         # an existing ladder always wins: a lot that joined the wrong side would
@@ -1773,9 +1801,9 @@ class Engine:
         except Exception as e:
             LOG.warning("journal open %s: %s", lot_id, e)
         self.ev("FILL", f"{'SOLD SHORT' if d < 0 else 'BOUGHT'} lot {lot_id}: "
-                        f"{shares} @ ${price:.4f} -> TP ${tp:.2f}"
+                        f"{qstr(shares)} @ ${price:.4f} -> TP ${tp:.2f}"
                         + (f" | order placed in {float(latency_ms):.0f} ms" if latency_ms else "") + " | "
-                        f"ladder now {len(self.ledger.open_lots)} lot(s), {self.ledger.shares} sh "
+                        f"ladder now {len(self.ledger.open_lots)} lot(s), {qstr(self.ledger.shares)} sh "
                         f"@ avg ${self.ledger.avg_price:.4f}")
         self._place_tp(lot)
 
@@ -1929,20 +1957,19 @@ class Engine:
         # Everything here is READ from the order Alpaca is actually holding.
         # lot.shares is SET to the order's unfilled remainder -- never
         # decremented from a local guess -- so the ledger cannot drift.
-        order_qty = int(float(order.get("qty") or 0))
-        filled = int(float(order.get("filled_qty") or 0))
-        remaining = max(0, order_qty - filled)
-        newly = filled - lot.tp_filled
-        if newly > 0:
+        order_qty, filled = qty(order.get("qty")), qty(order.get("filled_qty"))
+        remaining = qnum(max(0.0, round(order_qty - filled, QTY_DP)))
+        newly = round(filled - qty(lot.tp_filled), QTY_DP)
+        if newly > QTY_EPS:
             # limit sells fill at the limit or better; the order's running
             # average is the best per-share price Alpaca gives us for the delta
             px = float(order.get("filled_avg_price") or lot.tp_price)
             pnl = (px - lot.entry_price) * newly
-            lot.tp_filled = filled
+            lot.tp_filled = qnum(filled)
             lot.shares = remaining
             self.ledger.realized_today += pnl
             self.ledger.realized_all += pnl
-            partial = lot.shares > 0
+            partial = lot.shares > QTY_EPS
             # an exit fill is a fill: the next rung is measured from HERE
             # (a trail exit is a tp- order re-priced to the exit; a strategy
             # exit is the xs- order recorded on the lot)
@@ -1959,19 +1986,19 @@ class Engine:
             except Exception as e:
                 LOG.warning("journal close %s: %s", lot.id, e)
             self.ev("WIN", f"TP {'PARTIAL' if partial else 'FILLED'} lot {lot.id}: "
-                           f"sold {newly} @ ${px:.4f} (in ${lot.entry_price:.4f}) "
+                           f"sold {qstr(newly)} @ ${px:.4f} (in ${lot.entry_price:.4f}) "
                            f"= ${pnl:+,.2f}"
-                           + (f" | {lot.shares} sh of this lot still resting" if partial else "")
+                           + (f" | {qstr(lot.shares)} sh of this lot still resting" if partial else "")
                            + f" | day ${self.ledger.realized_today:+,.2f}")
-        elif lot.shares != remaining:
+        elif not qsame(lot.shares, remaining):
             # the order changed under us (replaced/modified at the broker).
             # Alpaca wins, always.
-            self.ev("WARN", f"Lot {lot.id}: ledger said {lot.shares} sh but its order at "
-                            f"Alpaca has {remaining} unfilled. Taking Alpaca's number.")
+            self.ev("WARN", f"Lot {lot.id}: ledger said {qstr(lot.shares)} sh but its order at "
+                            f"Alpaca has {qstr(remaining)} unfilled. Taking Alpaca's number.")
             lot.shares = remaining
             self.ledger.save()
 
-        if lot.shares <= 0:
+        if qzero(lot.shares):
             self.ledger.open_lots = [l for l in self.ledger.open_lots if l.id != lot.id]
             self.ledger.closed_count += 1
             if not self.ledger.open_lots:
@@ -1983,7 +2010,72 @@ class Engine:
                 self.done_for_day = True
                 self.ev("INFO", "Wind-down winner banked and flat -- DONE FOR DAY.")
             return True
+        # a fractional remainder too small to order (a 0.004 fill of a 0.01
+        # lot): fold it into its neighbour, or keep it flagged -- the lot is
+        # gone from the ledger only if it merged (its shares live on)
+        if not qwhole(lot.shares) and lot.shares < self._min_qty() - QTY_EPS:
+            return bool(self._absorb_dust(lot))
         return False
+
+    def _min_qty(self) -> float:
+        """The smallest fractional quantity Alpaca will take as an order for
+        this asset: the house floor, or the asset's min_order_size when it is
+        higher. Reads the CACHED flags only (the offline rule fixture and the
+        API thread both reach this)."""
+        af = getattr(self, "_asset_info", None) or {}
+        return max(MIN_QTY, qty(af.get("min_qty") or 0))
+
+    def _absorb_dust(self, lot: Lot) -> bool:
+        """Decision 10 -- dust: a fractional remainder below the orderable
+        minimum is merged into the newest OTHER same-side open lot (weighted
+        entry; that lot's exit is re-placed at the new size). If it is the
+        only lot it is kept, flagged dust-<id>, and NO order is attempted for
+        it -- never released ESTIMATED, which would open a ledger/broker gap.
+        Returns True when it merged."""
+        if qwhole(lot.shares) or lot.shares <= QTY_EPS:
+            return False
+        min_q = self._min_qty()
+        if lot.shares >= min_q - QTY_EPS:
+            self.unflag(f"dust-{lot.id}")
+            return False
+        others = [l for l in self.ledger.open_lots
+                  if l is not lot and l.side == lot.side and l.shares > QTY_EPS]
+        if not others:
+            self.flag(f"dust-{lot.id}", f"lot {lot.id}: {qstr(lot.shares)} sh cannot be ordered at "
+                                        f"Alpaca (minimum {qstr(min_q)}) -- absorbed by the next "
+                                        f"lot, or flatten")
+            return False
+        host = others[-1]
+        b = self.broker
+        for victim in (host, lot):
+            if victim.tp_client_id and b is not None:
+                oo = next((x for x in self.open_orders
+                           if x.get("client_order_id") == victim.tp_client_id), None)
+                if oo:
+                    try:
+                        b.cancel(oo["id"])
+                    except AlpacaError as e:
+                        self.ev("WARN", f"cancel of {victim.tp_client_id} failed ({e.status})")
+        tot = qnum(round(host.shares + lot.shares, QTY_DP))
+        host.entry_price = (host.entry_price * host.shares + lot.entry_price * lot.shares) / tot
+        host.shares = tot
+        host.tp_price = _round_cent(host.entry_price + self._dir(host.side) * float(self.cfg["take_profit"]))
+        host.tp_client_id = ""
+        host.tp_order_id = ""
+        host.tp_filled = 0
+        self.ledger.open_lots = [l for l in self.ledger.open_lots if l.id != lot.id]
+        self.unflag(f"dust-{lot.id}")
+        self.ledger.save()
+        self.ev("INFO", f"dust: {qstr(lot.shares)} sh of lot {lot.id} folded into lot {host.id} -> "
+                        f"{qstr(tot)} sh @ ${host.entry_price:.4f}; its take-profit is re-placed at the new size")
+        try:
+            journal.record_lot_delta(self.symbol, [lot], [], f"dust folded into lot {host.id}",
+                                     self.cfg, path=_jpath_of(self), account=_aid_of(self))
+        except Exception as e:
+            LOG.warning("journal dust %s: %s", lot.id, e)
+        if not self.trailing():
+            self._place_tp(host)
+        return True
 
     # ==================================================================
     # DECIDE -- entries and adds, once per completed bar
@@ -2358,6 +2450,14 @@ class Engine:
         tb = self._trend_entry_block()
         self._trend_block_text = tb                  # the resting adds treat this reason as 'sticky'
         if tb:                                       return tb
+        # fractional shares: config and the CACHED asset flag only (this runs
+        # on every overview poll). Entered only when the switch is on or a
+        # fraction sits in shares_per_lot, so a whole-share ticker never
+        # touches the helpers (the offline rule fixture borrows this method)
+        if str(self.cfg.get("fractional") or "off").lower() == "on" \
+                or not qwhole(qty(self.cfg.get("shares_per_lot") or 0)):
+            fb = self._frac_block()
+            if fb:                                   return fb
         if self.pending_entry:                       return "entry order working"
         uw = self.ledger.unwind or {}
         if uw.get("basket"):                         return "basket close working -- no new lots"
@@ -2372,7 +2472,7 @@ class Engine:
         # holding, so the account-wide limits are asked about here
         f = getattr(self, "fleet", None)
         if f is not None and not ignore_portfolio:
-            cost = int(self.cfg["shares_per_lot"]) * (self.last_price or 0)
+            cost = qty(self.cfg["shares_per_lot"]) * (self.last_price or 0)
             blocked = f.entry_block(self.symbol, cost)
             if blocked:
                 return blocked
@@ -2512,9 +2612,9 @@ class Engine:
             return False
         if (self.ledger.unwind or {}).get("basket"):
             return False                       # one basket at a time
-        if self.ledger.signed_shares != (self.broker_qty or 0):
-            self.flag("basket", f"{self.symbol}: ledger {self.ledger.signed_shares} sh vs broker "
-                                f"{self.broker_qty} -- refusing to send a basket sell on a "
+        if not qsame(self.ledger.signed_shares, self.broker_qty or 0):
+            self.flag("basket", f"{self.symbol}: ledger {qstr(self.ledger.signed_shares)} sh vs broker "
+                                f"{qstr(self.broker_qty or 0)} -- refusing to send a basket sell on a "
                                 f"ledger that disagrees with Alpaca. Per-lot TPs remain the exit.")
             return False
         self.unflag("basket")
@@ -3096,7 +3196,7 @@ class Engine:
         self.unflag("book")
         return True
 
-    def _mirror_room(self, want: int, price: float) -> int:
+    def _mirror_room(self, want, price: float):
         """How many of `want` shares the exposure cap still allows at `price`:
         f_ladder x equity, less what the ladder already holds. The per-rung
         dollar rule is NOT applied -- the lots being mirrored were rung-sized
@@ -3106,11 +3206,12 @@ class Engine:
         fl = getattr(self, "fleet", None)
         equity = float(((getattr(fl, "account", None) or {}).get("equity") or 0)) if fl else 0.0
         if f <= 0 or equity <= 0 or price <= 0:
-            return int(want)
+            return qnum(want)
         e_max = f * equity
         deployed = float(sum(l.cost for l in self.ledger.open_lots))
-        room = int((e_max - deployed) / price)
-        return max(0, min(int(want), room))
+        _frac, step, *_ = self._size_bounds()
+        room = qfloor((e_max - deployed) / price, step)
+        return qnum(max(0.0, min(qty(want), room)))
 
     def _maybe_reverse_entry(self) -> bool:
         """The other half of reversal_mode=reverse: once the reversed ladder is
@@ -3154,7 +3255,7 @@ class Engine:
             return False                       # the close is still filling, an entry is, or a rung can still fill
         if self.ledger.open_lots and self.ledger.side != new:
             return False                       # old-side lots still booking
-        if (self.broker_qty or 0) != self.ledger.signed_shares:
+        if not qsame(self.broker_qty or 0, self.ledger.signed_shares):
             return False                       # Alpaca has not caught up with the ledger yet
         old_exit = "sell" if new == "short" else "buy"
         if any(str(o.get("side") or "") == old_exit for o in (self.open_orders or [])):
@@ -3273,7 +3374,29 @@ class Engine:
                       f"Its take-profit will be re-placed on the next tick.")
             return False
 
-    def _lot_shares(self, price: float = 0.0, extra_deployed: float = 0.0) -> int:
+    def _size_bounds(self) -> tuple:
+        """(frac, step, floor_q, lo, hi) for sizing: whole-share tickers get
+        today's expressions verbatim (step 1, floor 1, int bounds); a
+        fractional-capable one rounds DOWN to the asset's min_trade_increment
+        (else 9 dp) and floors at its min_order_size (else MIN_QTY)."""
+        frac = self._fractional_on() and self._frac_capable()
+        if frac:
+            flags = self._asset_flags()
+            step = float(flags.get("qty_step") or 1e-9)
+            floor_q = max(MIN_QTY, float(flags.get("min_qty") or MIN_QTY))
+            # min_shares 1 is the whole-share default every ticker carries; on a
+            # fractional ladder it would floor a 0.01 lot to one whole share --
+            # the exact accident this feature exists to prevent. There it means
+            # "no floor beyond Alpaca's minimum"; any other value is honoured.
+            ms = qty(self.cfg.get("min_shares", 0))
+            lo = floor_q if qsame(ms, 1) else max(floor_q, qfloor(ms, step))
+            hi = max(lo, qfloor(qty(self.cfg.get("max_shares", 100000)), step))
+            return True, step, floor_q, lo, hi
+        lo = max(1, int(self.cfg.get("min_shares", 1)))
+        hi = max(lo, int(self.cfg.get("max_shares", 100000)))
+        return False, 1.0, 1, lo, hi
+
+    def _lot_shares(self, price: float = 0.0, extra_deployed: float = 0.0):
         """How many shares the next lot should be.
 
         Fixed share counts mean a $12 stock and a $500 one carry wildly
@@ -3283,16 +3406,35 @@ class Engine:
         `price` sizes the lot at a level other than the tape (a resting rung);
         `extra_deployed` is notional the caller has already committed in the
         same burst (the shallower rungs), counted against the ladder cap.
+
+        Fractional shares: with fractional=on and a fractionable asset the
+        answer may be a fraction (rounded DOWN to the asset's increment, never
+        floored to 1); with fractional=on and an asset that is unknown or not
+        fractionable NO lot is sized (0, with the reason flagged) -- it never
+        buys a whole share instead; with fractional=off a fractional
+        shares_per_lot is refused (0), never rounded up. An int for a whole
+        answer, the 9-dp float otherwise.
         """
         mode = self.cfg.get("size_mode", "fixed")
-        lo = max(1, int(self.cfg.get("min_shares", 1)))
-        hi = max(lo, int(self.cfg.get("max_shares", 100000)))
         price = price or self.last_price or 0.0
+        spl = qty(self.cfg.get("shares_per_lot") or 0)
+        on = self._fractional_on()
+        frac, step, floor_q, lo, hi = self._size_bounds()
+        if on and not frac:
+            self.flag("size", self._frac_block()
+                      or f"{self.symbol}: fractional=on but the asset is not fractional-capable")
+            return 0
+        if not on and mode == "fixed" and not qwhole(spl):
+            self.flag("size", f"shares_per_lot {qstr(spl)} is a fraction of a share but fractional "
+                              f"is off -- no lot sent; set fractional=on or a whole number")
+            return 0
 
         if mode == "fixed" or price <= 0:
-            n = int(self.cfg["shares_per_lot"])
+            n = qfloor(spl, step)
+            self.unflag("size")
         elif mode == "dollars":
-            n = int(float(self.cfg.get("lot_dollars", 1500)) / price)
+            n = qfloor(float(self.cfg.get("lot_dollars", 1500)) / price, step)
+            self.unflag("size")
         elif mode == "atr_risk":
             a = self._atr_now()
             stop = a * float(self.cfg.get("atr_stop_mult", 2.0)) if a else 0.0
@@ -3300,16 +3442,20 @@ class Engine:
                 # no ATR yet: fall back rather than guess a size
                 self.flag("size", f"{self.symbol}: ATR not available yet, sizing "
                                   f"this lot at shares_per_lot instead.")
-                n = int(self.cfg["shares_per_lot"])
+                n = qfloor(spl, step)
             else:
                 self.unflag("size")
-                n = int(float(self.cfg.get("risk_dollars", 100)) / stop)
+                n = qfloor(float(self.cfg.get("risk_dollars", 100)) / stop, step)
         else:
-            n = int(self.cfg["shares_per_lot"])
-        n = max(lo, min(hi, max(1, n)))
-        return self._cap_to_ladder(n, price, extra_deployed)
+            n = qfloor(spl, step)
+        n = max(lo, min(hi, max(floor_q, n)))
+        if frac and n * price < MIN_NOTIONAL:
+            self.flag("size", f"{self.symbol}: {qstr(n)} x ${price:.2f} is under Alpaca's $1 minimum "
+                              f"-- raise shares_per_lot/lot_dollars")
+            return 0
+        return qnum(self._cap_to_ladder(n, price, extra_deployed))
 
-    def _cap_to_ladder(self, n: int, price: float, extra_deployed: float = 0.0) -> int:
+    def _cap_to_ladder(self, n, price: float, extra_deployed: float = 0.0):
         """Truncate the next lot so the ladder never exceeds f_ladder of equity.
 
         E_max = f_ladder * live equity, in COST BASIS. The last lot is cut down
@@ -3328,22 +3474,22 @@ class Engine:
         if equity <= 0:
             return n
         e_max = f * equity
+        _frac, step, floor_q, lo, _hi = self._size_bounds()
         # in dollars mode the per-lot target follows from the cap directly
         if self.cfg.get("size_mode") == "dollars" and int(self.cfg.get("n_target", 0) or 0) > 0:
             lot_dollars = e_max / int(self.cfg["n_target"])
-            n = min(n, max(1, int(lot_dollars / price)))
+            n = min(n, max(floor_q, qfloor(lot_dollars / price, step)))
         # what the ladder holds, plus the touch-mode rungs already resting
         # (each reserves a lot of buying power), plus this burst so far
         deployed = sum(l.cost for l in self.ledger.open_lots) + _adds_notional(self.ledger) + extra_deployed
         room = e_max - deployed
-        q_cap = int(room / price) if room > 0 else 0
-        lo = max(1, int(self.cfg.get("min_shares", 1)))
-        if q_cap < lo:
+        q_cap = qfloor(room / price, step) if room > 0 else 0
+        if q_cap < lo - QTY_EPS:
             self.flag("cap", "%s: ladder cap reached (E_max $%.0f = %.0f%% of equity, "
                              "$%.0f deployed)" % (self.symbol, e_max, 100 * f, deployed))
             return 0
         self.unflag("cap")
-        return min(n, q_cap)
+        return qnum(min(n, q_cap))
 
     def _atr_now(self) -> float:
         """ATR over a real bar window, cached. The fleet snapshot is too short."""
@@ -3750,7 +3896,7 @@ class Engine:
                 self._entry_reject_streak = 0
                 self.unflag("entry")
                 self.pending_entry = None
-                self._open_lot(pe["lot_id"], int(float(o.get("filled_qty") or 0)),
+                self._open_lot(pe["lot_id"], qty(o.get("filled_qty")),
                                float(o.get("filled_avg_price") or 0), pe.get("why", ""),
                                side=pe.get("side", "long"),
                                latency_ms=float(pe.get("latency_ms") or 0),
@@ -3836,7 +3982,7 @@ class Engine:
             blocked = f.entry_block(self.symbol, 0.0, resting=self._adds_working_notional())
             if blocked:
                 return f"wait: {blocked}"
-        if self.broker_qty != self.ledger.signed_shares:
+        if not qsame(self.broker_qty, self.ledger.signed_shares):
             return "wait: ledger and Alpaca disagree"
         if (self.last_price or 0) <= 0:
             return "wait: no price yet"
@@ -3869,7 +4015,7 @@ class Engine:
                 skipped = f"rung {k} ${px:.2f} would cross a resting exit -- skipped"
                 continue
             n = self._lot_shares(price=px, extra_deployed=extra)
-            if n <= 0:
+            if n <= QTY_EPS:
                 break                              # f_ladder cap: flagged by _cap_to_ladder
             out.append((k, px, n))
             extra += px * n

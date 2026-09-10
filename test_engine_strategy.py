@@ -78,6 +78,7 @@ def main() -> int:
     e, f = build(bars, size_mode="dollars", lot_dollars=1500)
     e.last_price = 12.0
     check("1500 / 12", e._lot_shares(), 125)
+    check("...and it is an int", type(e._lot_shares()) is int, True)
     e.last_price = 500.0
     check("1500 / 500 -- a mega-cap gets a sane lot", e._lot_shares(), 3)
 
@@ -96,6 +97,33 @@ def main() -> int:
     e, f = build(bars, size_mode="dollars", lot_dollars=1, min_shares=5)
     e.last_price = 10.0
     check("min_shares floors it", e._lot_shares(), 5)
+
+    print("\n4b. Sizing: fractional shares at $759 (whole-share numbers above untouched)")
+    FLAGS = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+             "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    e, f = build(bars, size_mode="dollars", lot_dollars=1500, fractional="on")
+    e._asset_info = dict(FLAGS)
+    e.last_price = 759.0
+    check("1500 / 759 in fractions", e._lot_shares(), 1.976284584)
+    e._asset_info = {**FLAGS, "qty_step": 0.01}
+    check("...rounded DOWN to a 0.01 increment", e._lot_shares(), 1.97)
+    e, f = build(bars, fractional="on", shares_per_lot=0.01)
+    e._asset_info = dict(FLAGS)
+    e.last_price = 759.0
+    check("fixed 0.01 -> 0.01, never 1", e._lot_shares(), 0.01)
+    e, f = build(bars, fractional="off")
+    e.cfg["shares_per_lot"] = 0.01                 # a stale fraction on disk
+    e.last_price = 759.0
+    check("fractional=off + 0.01 -> 0 (refused, not rounded up)", e._lot_shares(), 0)
+    check("...and the size flag says why", "fractional is off" in e.attention.get("size", ""), True)
+    e, f = build(bars, fractional="on", shares_per_lot=0.01)
+    e._asset_info = {**FLAGS, "fractionable": False}
+    e.last_price = 759.0
+    check("not fractionable at Alpaca -> 0", e._lot_shares(), 0)
+    e, f = build(bars, size_mode="dollars", lot_dollars=1500, fractional="on")
+    e._asset_info = {**FLAGS, "fractionable": None}
+    e.last_price = 759.0
+    check("flags unknown + dollars -> 0, NOT one whole share", e._lot_shares(), 0)
 
     print("\n5. Sizing: a missing ATR falls back rather than guessing")
     e, f = build([], size_mode="atr_risk")

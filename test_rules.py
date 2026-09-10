@@ -54,6 +54,7 @@ FakeEngine.broker_qty = 0
 FakeEngine.trend = {}
 FakeEngine._add_trigger_met = Engine._add_trigger_met
 FakeEngine._book_tp_progress = Engine._book_tp_progress
+FakeEngine._min_qty = Engine._min_qty            # the fractional dust floor it reads (cached flags only)
 FakeEngine._rung_price = Engine._rung_price
 FakeEngine._entry_limit_price = Engine._entry_limit_price
 FakeEngine._in_window = staticmethod(Engine._in_window)
@@ -184,6 +185,30 @@ def main() -> int:
     check("full $10 booked", round(e4.ledger.realized_today, 2), 10.00)
     check("lot removed from ledger", len(e4.ledger.open_lots), 0)
     check("closed counter", e4.ledger.closed_count, 1)
+
+    print("\n12b. A FRACTIONAL lot books partial fills in fractions (whole-share numbers above untouched)")
+    from qty import qsame
+    e4b = FakeEngine(cfg)
+    lotf = Lot(id="SPY-0001", shares=0.01, entry_price=759.01, entry_time="", tp_price=759.11)
+    e4b.ledger.open_lots.append(lotf)
+    closed = e4b._book_tp_progress(lotf, {"qty": "0.01", "filled_qty": "0.004", "filled_avg_price": "759.11",
+                                          "status": "partially_filled"})
+    check("0.004 of 0.01 sold -> 0.006 left, not closed", (closed, qsame(lotf.shares, 0.006)), (False, True))
+    check("booked 0.004 sh x $0.10", round(e4b.ledger.realized_today, 6), 0.0004)
+    e4b._book_tp_progress(lotf, {"qty": "0.01", "filled_qty": "0.004", "filled_avg_price": "759.11",
+                                 "status": "partially_filled"})
+    check("no double-booking on re-check", round(e4b.ledger.realized_today, 6), 0.0004)
+    lot3 = Lot(id="SPY-0002", shares=0.3, entry_price=759.01, entry_time="", tp_price=759.11)
+    e4b.ledger.open_lots.append(lot3)
+    e4b._book_tp_progress(lot3, {"qty": "0.30", "filled_qty": "0.10", "filled_avg_price": "759.11",
+                                 "status": "partially_filled"})
+    check("0.10 of 0.30 -> 0.2 left", qsame(lot3.shares, 0.2), True)
+    lot0 = Lot(id="SPY-0003", shares=0.01, entry_price=759.01, entry_time="", tp_price=759.11)
+    e4b.ledger.open_lots.append(lot0)
+    closed = e4b._book_tp_progress(lot0, {"qty": "0.01", "filled_qty": "0", "filled_avg_price": None,
+                                          "status": "new"})
+    check("an unfilled 0.01 order does NOT close the lot",
+          (closed, qsame(lot0.shares, 0.01), len(e4b.ledger.open_lots)), (False, True, 3))
 
     print("\n13. A cancelled TP re-covers only the UNSOLD remainder")
     e5 = FakeEngine(cfg)

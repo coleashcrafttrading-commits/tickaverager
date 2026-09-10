@@ -229,6 +229,271 @@ def s02_config() -> None:
     check("flipping the switch with only whole lots cancels nothing", f5.broker.cancelled, [])
 
 
+# ====================================================================== 3
+def s03_sizing() -> None:
+    print("\n3. sizing at $759: fractions round DOWN, never to 1")
+    e, f = frac_engine()
+    check("fixed 0.01 -> 0.01 (a float)", (e._lot_shares(), type(e._lot_shares()).__name__), (0.01, "float"))
+    e, f = frac_engine(size_mode="dollars", lot_dollars=1500)
+    check("dollars 1500 @ 759 -> 1.976284584", e._lot_shares(), 1.976284584)
+    e._asset_info["qty_step"] = 0.01
+    check("min_trade_increment 0.01 -> 1.97", e._lot_shares(), 1.97)
+    e, f = frac_engine(min_shares=0.5)
+    check("min_shares 0.5 floors 0.01 -> 0.5", e._lot_shares(), 0.5)
+    e, f = frac_engine(max_shares=0.005)
+    check("max_shares 0.005 caps -> 0.005", e._lot_shares(), 0.005)
+    e, f = frac_engine(shares_per_lot=0.0005)
+    check("0.0005 @ 759 = $0.38 -> 0", e._lot_shares(), 0)
+    check("...flagged under the $1 minimum", "$1 minimum" in e.attention.get("size", ""), True)
+    e, f = frac_engine(size_mode="dollars", lot_dollars=1500)
+    e._asset_info = {**e._asset_info, "fractionable": None}
+    check("(a) flags unknown + dollars -> 0, NOT 1", e._lot_shares(), 0)
+    check("(a) block_reason names the lookup failure", "lookup failed" in e.block_reason(), True)
+    e._asset_info = {**e._asset_info, "fractionable": False}
+    check("(a) not fractionable + dollars -> 0", e._lot_shares(), 0)
+    check("(a) block_reason says not fractionable", "not fractionable" in e.block_reason(), True)
+    e._asset_info = None
+    check("(a) flags not loaded yet -> block_reason waits", "waiting for Alpaca's asset flags" in e.block_reason(), True)
+    check("(a) ...while _lot_shares loads them on the engine thread", e._lot_shares(), 1.976284584)
+    e, f = frac_engine(fractional="off", shares_per_lot=100)
+    e.cfg["shares_per_lot"] = 0.01                             # on disk, past update_config
+    check("(b) fractional=off + 0.01 -> 0", e._lot_shares(), 0)
+    check("(b) size flag says fractional is off", "fractional is off" in e.attention.get("size", ""), True)
+    check("(b) _submit_entry refused", e._submit_entry("x"), False)
+    check("(b) no broker call of any kind", len(f.broker.calls), 0)
+    check("(b) block_reason repeats it", "fractional is off" in e.block_reason(), True)
+    e, f = frac_engine(fractional="off", shares_per_lot=100)
+    check("control: spl 100 -> int 100", (e._lot_shares(), type(e._lot_shares()).__name__), (100, "int"))
+    e, f = frac_engine(fractional="off", shares_per_lot=100, size_mode="dollars", lot_dollars=1500)
+    e.last_price = 12.0
+    check("control: 1500 / 12 -> 125", e._lot_shares(), 125)
+    e.last_price = 500.0
+    check("control: 1500 / 500 -> 3", e._lot_shares(), 3)
+    e, f = frac_engine(fractional="off", shares_per_lot=100, size_mode="dollars", lot_dollars=1_000_000,
+                       max_shares=250)
+    e.last_price = 10.0
+    check("control: max_shares 250 caps", e._lot_shares(), 250)
+    e, f = frac_engine(fractional="off", shares_per_lot=100, size_mode="dollars", lot_dollars=1, min_shares=5)
+    e.last_price = 10.0
+    check("control: min_shares 5 floors", e._lot_shares(), 5)
+    e, f = frac_engine(shares_per_lot=1)
+    check("fractional=on with a whole spl -> int 1", (e._lot_shares(), type(e._lot_shares()).__name__), (1, "int"))
+    check("...and no gate for it", e._next_lot_fractional(), False)
+
+
+# ====================================================================== 8
+def s08_partial_tp() -> None:
+    print("\n8. partial take-profit fills on a fractional lot")
+    from qty import qsame
+    e, f = frac_engine(lots=[(0.01, 759.01)], broker_qty=0.01)
+    lot = e.ledger.open_lots[0]
+    o = {"qty": "0.01", "filled_qty": "0.004", "filled_avg_price": "759.11", "status": "partially_filled"}
+    closed = e._book_tp_progress(lot, o)
+    check("0.004 sold -> 0.006 left, not closed", (closed, qsame(lot.shares, 0.006)), (False, True))
+    check("realized 0.0004", round(e.ledger.realized_today, 6), 0.0004)
+    e._book_tp_progress(lot, o)
+    check("the same order again books nothing", round(e.ledger.realized_today, 6), 0.0004)
+    closed = e._book_tp_progress(lot, {**o, "filled_qty": "0.01", "status": "filled"})
+    check("0.01 filled -> closed, realized 0.001, closed_count 1",
+          (closed, round(e.ledger.realized_today, 6), e.ledger.closed_count, e.ledger.open_lots), (True, 0.001, 1, []))
+    e, f = frac_engine(lots=[(0.3, 759.01)], broker_qty=0.3)
+    lot = e.ledger.open_lots[0]
+    e._book_tp_progress(lot, {"qty": "0.30", "filled_qty": "0.10", "filled_avg_price": "759.11",
+                              "status": "partially_filled"})
+    check("inventory case: 0.10 of 0.30 -> 0.2", qsame(lot.shares, 0.2), True)
+    e, f = frac_engine(lots=[(0.01, 759.01)], broker_qty=0.01)
+    lot = e.ledger.open_lots[0]
+    closed = e._book_tp_progress(lot, {"qty": "0.01", "filled_qty": "0", "filled_avg_price": None, "status": "new"})
+    check("an unfilled 0.01 order does NOT close the lot (riskiest-spot 4)",
+          (closed, qsame(lot.shares, 0.01), len(e.ledger.open_lots)), (False, True, 1))
+
+
+# ====================================================================== 9
+def s09_reconcile() -> None:
+    print("\n9. reconcile: float noise, the cover guard, booked rungs, the structural guard")
+    import time
+    from qty import qsame
+    from test_touch_adds import step
+    e, f = frac_engine(lots=[(0.1, 759.0)] * 3, broker_qty=0.30000000000000004)
+    for _ in range(3):
+        step(e, f)
+    check("0.30000000000000004 vs 0.3 is not a mismatch", e.mismatch_strikes, 0)
+    ok = e.close_lots(list(e.ledger.open_lots), "noise test")
+    check("close_lots is not refused on noise", (ok, "basket" in e.attention), (True, False))
+    # the cover guard, in fractions
+    e, f = frac_engine(lots=[(0.3, 759.0)], broker_qty=0.3)
+    f.broker._o("sell", 0.2, 760.0, "manual-sell", True)        # a foreign resting sell on top of ours
+    step(e, f)
+    step(e, f)
+    e._overcover_since = time.time() - 10
+    n = len(f.broker.cancelled)
+    step(e, f)
+    check("resting 0.5 vs held 0.3 -> re-covered after the two-snapshot grace",
+          len(f.broker.cancelled) > n, True)
+    check("...the flag counts in fractions", bool(evs(e, "0.5 share(s) of resting sells against a 0.3-share")), True)
+    e, f = frac_engine(lots=[(0.005, 759.0)], broker_qty=0.01)
+    for _ in range(3):
+        step(e, f)
+        e._overcover_since = time.time() - 10
+    check("resting 0.005 vs held 0.01 -> no over-cover", "overcover" in e.attention, False)
+    # (f) a rebuilt lot marks its resting-add record booked in fractions
+    e, f = frac_engine(broker_qty=0.01)
+    o = f.broker._o("buy", 0.01, 758.90, "en-TEST-t-0007", True)
+    f.broker.fill("en-TEST-t-0007", 0.01, 758.90)
+    e.ledger.resting_adds.append({"lot_id": "TEST-t-0007", "coid": "en-TEST-t-0007", "order_id": o["id"],
+                                  "k": 1, "price": 758.90, "shares": 0.01, "side": "long", "xh": True,
+                                  "state": "working", "placed_at": time.time(), "placed_ms": 0.0,
+                                  "anchor": 759.0, "booked": 0, "hot_at": 0.0})
+    e.broker_avg = 758.90
+    e._rebuild_ladder("test")
+    check("(f) the rebuilt lot marks the record booked 0.01",
+          (e.ledger.resting_adds[0]["booked"], [l.id for l in e.ledger.open_lots]), (0.01, ["TEST-t-0007"]))
+    n = len(e.ledger.open_lots)
+    e._book_resting_adds([])
+    check("(f) a following _book_resting_adds books nothing new",
+          (len(e.ledger.open_lots), qsame(e.ledger.shares, 0.01)), (n, True))
+    # 4b: the structural guard
+    e, f = frac_engine(fractional="off", shares_per_lot=1, size_mode="dollars", lot_dollars=1500,
+                       lots=[(3, 500.0), (3, 499.0)], broker_qty=6)
+    e.last_price = 500.0
+    n = len(f.broker.cancelled)
+    e._reconcile()
+    check("4b is skipped for a dollars-sized ladder", (len(f.broker.cancelled), len(e.ledger.open_lots)), (n, 2))
+    e, f = frac_engine(lots=[(0.0109, 759.0), (0.01, 758.0)], broker_qty=0.0209)
+    for _ in range(5):
+        e._reconcile()
+    check("4b ignores a folded 0.0109 lot on a 0.01 ladder", (len(e.ledger.open_lots), f.broker.cancelled), (2, []))
+    e, f = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0), (100, 9.9)], broker_qty=200)
+    e.last_price = 10.0
+    e._reconcile()
+    check("4b control: a whole ladder at its unit is left alone", (len(e.ledger.open_lots), f.broker.cancelled), (2, []))
+
+
+# ====================================================================== 11
+def s11_dust() -> None:
+    print("\n11. dust: a remainder below the orderable minimum")
+    from qty import qsame
+    e, f = frac_engine(lots=[(0.01, 759.0), (0.01, 758.0)], broker_qty=0.02)
+    a, host = e.ledger.open_lots
+    n = len(f.broker.placed)
+    e._book_tp_progress(a, {"qty": "0.01", "filled_qty": "0.0096", "filled_avg_price": "759.10",
+                            "status": "partially_filled"})
+    check("0.0004 remainder folded into the other lot",
+          ([l.id for l in e.ledger.open_lots], qsame(e.ledger.open_lots[0].shares, 0.0104)), ([host.id], True))
+    check("weighted entry", round(host.entry_price, 4), round((758.0 * 0.01 + 759.0 * 0.0004) / 0.0104, 4))
+    check("host TP re-priced from the new entry", host.tp_price, round(host.entry_price + 0.10, 2))
+    check("host's exit re-placed at the new size", (len(f.broker.placed) > n, f.broker.placed[-1]["qty"]), (True, "0.0104"))
+    check("both old exits cancelled", len(f.broker.cancelled), 2)
+    check("no dust flag left", [k for k in e.attention if k.startswith("dust-")], [])
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    lot = e.ledger.open_lots[0]
+    e._book_tp_progress(lot, {"qty": "0.01", "filled_qty": "0.0096", "filled_avg_price": "759.10",
+                              "status": "partially_filled"})
+    check("alone: kept and flagged dust-<id>", (qsame(lot.shares, 0.0004), f"dust-{lot.id}" in e.attention), (True, True))
+    check("...the flag says what to do", "absorbed by the next lot, or flatten" in e.attention[f"dust-{lot.id}"], True)
+    e, f = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0), (100, 9.9)], broker_qty=200)
+    lot = e.ledger.open_lots[0]
+    e._book_tp_progress(lot, {"qty": "100", "filled_qty": "99", "filled_avg_price": "10.10", "status": "partially_filled"})
+    check("whole shares never fold: 1 sh left is a lot", (lot.shares, len(e.ledger.open_lots)), (1, 2))
+
+
+# ====================================================================== 12
+def s12_lots_from_history() -> None:
+    print("\n12. _lots_from_history rebuilds a fractional ladder in shares_per_lot pieces")
+    from qty import qsame
+    T1, T2 = "2026-09-10T14:00:00Z", "2026-09-10T14:05:00Z"
+
+    def hist(*fills):
+        return [{"client_order_id": c, "side": "buy" if c.startswith("en-") else "sell", "status": "filled",
+                 "filled_qty": q, "filled_avg_price": f"{p:.4f}", "filled_at": at} for c, q, p, at in fills]
+    e, f = frac_engine(broker_qty=0.03)
+    e.broker_avg = 759.0
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "0.030000000", 759.0, T1))
+    lots = e._lots_from_history(0.03, "long")
+    check("0.03 -> three 0.01 lots", [l.shares for l in lots], [0.01, 0.01, 0.01])
+    check("three distinct ids, one fill -> one target", (len({l.id for l in lots}), len({l.tp_price for l in lots})), (3, 1))
+    check("ledger sum 0.03", qsame(sum(l.shares for l in lots), 0.03), True)
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "0.01", 759.0, T1), ("en-TEST-t-0002", "0.01", 758.9, T1),
+                                        ("en-TEST-t-0003", "0.01", 758.8, T2))
+    lots = e._lots_from_history(0.03, "long")
+    check("three fills -> three lots with their own targets", sorted(l.tp_price for l in lots), [758.9, 759.0, 759.1])
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "0.025", 759.0, T1))
+    check("0.025 -> [0.01, 0.01, 0.005]", sorted(l.shares for l in e._lots_from_history(0.025, "long")), [0.005, 0.01, 0.01])
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "0.0105", 759.0, T1))
+    check("0.0105 -> ONE lot (the 0.0005 would be dust)", [l.shares for l in e._lots_from_history(0.0105, "long")], [0.0105])
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "0.01", 759.0, T1), ("tp-TEST-t-0001-1", "0.004", 759.1, T2))
+    check("en 0.01 minus tp 0.004 -> 0.006", [l.shares for l in e._lots_from_history(0.006, "long")], [0.006])
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "0.03", 759.0, T1))
+    lots = e._lots_from_history(0.05, "long")
+    check("0.05 held with 0.03 explained -> two 0.01 'r' lots at the account average",
+          sorted((l.shares, l.id.endswith("r"), l.entry_price) for l in lots),
+          [(0.01, False, 759.0)] * 3 + [(0.01, True, 759.0)] * 2)
+    e, f = frac_engine(fractional="off", shares_per_lot=100, broker_qty=800)
+    e.broker_avg = 12.0907
+    f.broker.orders = lambda **kw: hist(("en-TEST-t-0001", "800", 12.0907, T1))
+    lots = e._lots_from_history(800, "long")
+    check("whole control: 800 @ 100 -> 8 int lots", ([l.shares for l in lots], type(lots[0].shares).__name__),
+          ([100] * 8, "int"))
+
+
+# ====================================================================== 14
+def s14_ledger_bytes() -> None:
+    print("\n14. ledger bytes: a whole-share ledger never grows a '.0'; a fractional one round-trips")
+    import re
+    import time
+    from dataclasses import asdict
+    import engine
+    e, f = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0), (100, 9.9)], broker_qty=200)
+    e.last_price = 10.0
+    rx = re.compile(r'"(shares|tp_filled|booked)": -?\d+\.0\b')
+    before = json.dumps(asdict(e.ledger), indent=2)
+    check("before: no float share count", rx.search(before), None)
+    lot = e.ledger.open_lots[0]
+    e._book_tp_progress(lot, {"qty": "100", "filled_qty": "75", "filled_avg_price": "10.10", "status": "partially_filled"})
+    check("partial 75/100 -> int 25 / tp_filled int 75",
+          (lot.shares, type(lot.shares).__name__, lot.tp_filled, type(lot.tp_filled).__name__), (25, "int", 75, "int"))
+    f.set_position(100)
+    e.broker_qty = 100
+    e.position = f.position_of("TEST")
+    e._mismatch_since = time.time() - 100
+    e.mismatch_strikes = 5
+    e._auto_reconcile()
+    check("auto-reconcile trim of 25 keeps ints", [(l.shares, type(l.shares).__name__) for l in e.ledger.open_lots],
+          [(25, "int"), (75, "int")])
+    o = f.broker._o("buy", 100, 9.80, "en-TEST-t-0009", True)
+    f.broker.fill("en-TEST-t-0009", 100, 9.80)
+    e.ledger.resting_adds.append({"lot_id": "TEST-t-0009", "coid": "en-TEST-t-0009", "order_id": o["id"],
+                                  "k": 1, "price": 9.80, "shares": 100, "side": "long", "xh": True,
+                                  "state": "working", "placed_at": time.time(), "placed_ms": 0.0,
+                                  "anchor": 9.9, "booked": 0, "hot_at": 0.0})
+    e.broker_avg = 9.85
+    e._rebuild_ladder("bytes test")
+    rec = e.ledger.resting_adds[0]
+    check("rebuild marks the record booked as int 100", (rec["booked"], type(rec["booked"]).__name__), (100, "int"))
+    after = json.dumps(asdict(e.ledger), indent=2)
+    check("after: still no float share count anywhere", rx.search(after), None)
+    check("Ledger.shares is int", type(e.ledger.shares).__name__, "int")
+    d = SCRATCH / "led"
+    d.mkdir(exist_ok=True)
+    led = engine.Ledger(symbol="RAM", session_date="t")
+    led._dir = d
+    led.open_lots.append(engine.Lot(id="RAM-1", shares=100, entry_price=10.0, entry_time="t", tp_price=10.1))
+    led.save()
+    text = (d / "lots_RAM.json").read_text(encoding="utf-8")
+    check('the file says "shares": 100', '"shares": 100,' in text, True)
+    led2 = engine.Ledger.load("RAM", d)
+    check("Ledger.load of an int file -> int 100", (led2.shares, type(led2.open_lots[0].shares).__name__), (100, "int"))
+    led2.save()
+    check("save() reproduces the text byte for byte", (d / "lots_RAM.json").read_text(encoding="utf-8"), text)
+    led3 = engine.Ledger(symbol="SPY", session_date="t")
+    led3._dir = d
+    led3.open_lots.append(engine.Lot(id="SPY-1", shares=0.01, entry_price=759.01, entry_time="t", tp_price=759.11))
+    led3.save()
+    text3 = (d / "lots_SPY.json").read_text(encoding="utf-8")
+    led4 = engine.Ledger.load("SPY", d)
+    check("a 0.01 lot round-trips", (led4.open_lots[0].shares, led4.shares, '"shares": 0.01,' in text3), (0.01, 0.01, True))
+
+
 # ====================================================================== 13
 def s13_journal() -> None:
     print("\n13. journal rows carry fractional shares; whole-share rows stay ints")
@@ -346,7 +611,9 @@ def s17_golden() -> None:
     check("status()['shares'] is int", got["types"]["status_shares"], "int")
 
 
-SECTIONS = {1: s01_helpers, 2: s02_config, 13: s13_journal, 17: s17_golden, 18: s18_broker_submit}
+SECTIONS = {1: s01_helpers, 2: s02_config, 3: s03_sizing, 8: s08_partial_tp, 9: s09_reconcile,
+            11: s11_dust, 12: s12_lots_from_history, 13: s13_journal, 14: s14_ledger_bytes,
+            17: s17_golden, 18: s18_broker_submit}
 
 
 def main() -> int:

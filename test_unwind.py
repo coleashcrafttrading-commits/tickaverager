@@ -55,6 +55,13 @@ class FakeBroker:
         self._orders[coid] = o
         return o
 
+    # the DAY pair a fractional quantity is routed to, mirroring the gtc pair
+    def sell_limit_day(self, sym, qty, px, coid, extended_hours=False):
+        return self.sell_limit_gtc(sym, qty, px, coid, extended_hours)
+
+    def buy_limit_day(self, sym, qty, px, coid, extended_hours=False):
+        return self.buy_limit_gtc(sym, qty, px, coid, extended_hours)
+
     def order_by_client_id(self, coid):
         return self._orders.get(coid)
 
@@ -62,7 +69,7 @@ class FakeBroker:
         o = self._orders[coid]
         o["filled_qty"] = str(qty)
         o["filled_avg_price"] = str(px)
-        o["status"] = "filled" if qty >= int(o["qty"]) else "partially_filled"
+        o["status"] = "filled" if qty >= float(o["qty"]) - 1e-9 else "partially_filled"
 
 
 class _E(Engine):

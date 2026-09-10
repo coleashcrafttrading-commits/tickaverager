@@ -27,6 +27,8 @@ def main() -> int:
     check("defaults", (lot.entry_latency_ms, lot.tp_latency_ms), (0.0, 0.0))
     old = {"id": "T-2", "shares": 1, "entry_price": 10.0, "entry_time": "x", "tp_price": 10.1}
     check("a pre-latency lot record still loads", engine.Lot(**old).entry_latency_ms, 0.0)
+    check("a fractional lot record loads", engine.Lot(**{**old, "shares": 0.01}).shares, 0.01)
+    check("an int lot stays int", type(engine.Lot(**old).shares) is int, True)
 
     print("\n2. a take-profit placement is timed")
     e = build(entries=(10.0,))
