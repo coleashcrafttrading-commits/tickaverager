@@ -109,6 +109,95 @@ def s18_broker_submit() -> None:
     check("limit price still 2 dp", sent[-1][2]["limit_price"], "9.90")
 
 
+# ====================================================================== 13
+def s13_journal() -> None:
+    print("\n13. journal rows carry fractional shares; whole-share rows stay ints")
+    from types import SimpleNamespace
+    import engine
+    import journal
+    for k, fn in capture_golden._REAL_JOURNAL.items():
+        setattr(journal, k, fn)
+    jp = SCRATCH / "j13.jsonl"
+    cfg = dict(engine.TICKER_DEFAULTS)
+    cfg.update(symbol="SPY", shares_per_lot=0.01, fractional="on", fractional_sessions="regular", dry_run=False)
+    led = engine.Ledger(symbol="SPY", session_date="t")
+    led.save = lambda: None                                   # type: ignore[method-assign]
+    fl = SimpleNamespace(journal_path=jp, account_id="t")
+    eng = SimpleNamespace(cfg=cfg, ledger=led, symbol="SPY", last_price=759.0,
+                          _session_now=lambda: "regular", fleet=fl)
+    lot = engine.Lot(id="SPY-t-0001", shares=0.01, entry_price=759.01,
+                     entry_time="2026-09-10T10:00:00-04:00", tp_price=759.11)
+    led.open_lots.append(lot)
+    journal.record_open(eng, lot, why="test")
+    r = journal.load(path=jp)[-1]
+    check("open row shares == 0.01 and float", (r["shares"], type(r["shares"]).__name__), (0.01, "float"))
+    check("open row cost from the float", r["cost"], 7.59)
+    check("ladder_shares 0.01", r["ladder_shares"], 0.01)
+    check("cfg snapshot carries fractional", (r["cfg"]["fractional"], r["cfg"]["fractional_sessions"]),
+          ("on", "regular"))
+    journal.record_close(eng, lot, 0.004, 759.11, 0.0004, True, why="partial")
+    r = journal.load(path=jp)[-1]
+    check("partial row 0.004", (r["event"], r["shares"]), ("partial", 0.004))
+    # a whole-share row, byte for byte
+    wled = engine.Ledger(symbol="RAM", session_date="t")
+    wled.save = lambda: None                                  # type: ignore[method-assign]
+    wlot = engine.Lot(id="RAM-t-0001", shares=100, entry_price=10.0,
+                      entry_time="2026-09-10T10:00:00-04:00", tp_price=10.1)
+    wled.open_lots.append(wlot)
+    weng = SimpleNamespace(cfg={**cfg, "symbol": "RAM", "shares_per_lot": 100, "fractional": "off"},
+                           ledger=wled, symbol="RAM", last_price=10.0,
+                           _session_now=lambda: "regular", fleet=fl)
+    journal.record_open(weng, wlot)
+    line = jp.read_text(encoding="utf-8").splitlines()[-1]
+    check('whole-share open row is written as "shares": 100', '"shares": 100,' in line, True)
+    check("...and loads as int", type(json.loads(line)["shares"]).__name__, "int")
+    check('..."ladder_shares": 100 too', '"ladder_shares": 100,' in line, True)
+    journal.record_close(weng, wlot, 25.0, 10.1, 2.5, True)
+    line = jp.read_text(encoding="utf-8").splitlines()[-1]
+    check("a whole float close (25.0) is written as 25", '"shares": 25,' in line, True)
+    st = journal.stats(journal.load(symbol="SPY", path=jp))
+    check("stats shares_bought 0.01 / shares_sold 0.004", (st["shares_bought"], st["shares_sold"]), (0.01, 0.004))
+    stw = journal.stats(journal.load(symbol="RAM", path=jp))
+    check("whole-share stats stay ints", (stw["shares_bought"], type(stw["shares_bought"]).__name__), (100, "int"))
+    inv = journal.open_inventory(journal.load(symbol="SPY", path=jp))
+    check("open_inventory: one lot 0.006, cost 4.55", [(x["shares"], x["cost"]) for x in inv], [(0.006, 4.55)])
+    journal.record_close(eng, lot, 0.006, 759.11, 0.0006, False)
+    check("after the closing 0.006 row -> []", journal.open_inventory(journal.load(symbol="SPY", path=jp)), [])
+    gone = [engine.Lot(id="SPY-t-0002", shares=0.01, entry_price=759.0, entry_time="t", tp_price=759.1)]
+    added = [engine.Lot(id="SPY-t-0003", shares=0.01, entry_price=758.9, entry_time="t", tp_price=759.0)]
+    journal.record_lot_delta("SPY", gone, added, "test", cfg, path=jp, account="t")
+    rows = journal.load(symbol="SPY", path=jp)[-2:]
+    check("record_lot_delta rows carry 0.01", [r["shares"] for r in rows], [0.01, 0.01])
+    check("...with a real cost", rows[-1]["cost"], 7.59)
+    rungs = journal._replay_rungs(
+        {"L1": {"lot_id": "L1", "shares": 0.01, "price": 759.0, "at": "2026-09-10T14:00:00Z"}},
+        [{"lot_id": "L1", "shares": 0.01, "price": 759.1, "at": "2026-09-10T14:05:00Z"}])
+    check("_replay_rungs on fractional rows returns rung 1", rungs, {"L1": 1})
+    check("CFG_KEYS carries fractional + fractional_sessions",
+          ("fractional" in journal.CFG_KEYS, "fractional_sessions" in journal.CFG_KEYS), (True, True))
+
+    class B:
+        def orders(self, **kw):
+            return [{"client_order_id": "en-SPY-20260910-0001", "filled_qty": "0.010000000",
+                     "filled_avg_price": "759.01", "filled_at": "2026-09-10T14:00:00Z"},
+                    {"client_order_id": "tp-SPY-20260910-0001-1", "filled_qty": "0.01",
+                     "filled_avg_price": "759.11", "filled_at": "2026-09-10T14:05:00Z"}]
+    jp2 = SCRATCH / "j13b.jsonl"
+    with journal.target(jp2, "t"):
+        journal.backfill_from_orders(B(), "SPY", cfg)
+    rows = journal.load(symbol="SPY", path=jp2)
+    check("backfill writes 0.01 rows", sorted((r["event"], r["shares"]) for r in rows),
+          [("close", 0.01), ("open", 0.01)])
+    check("backfill realized", [r["realized"] for r in rows if r["event"] == "close"], [0.001])
+    (SCRATCH / "state").mkdir(exist_ok=True)
+    (SCRATCH / "state" / "lots_SPY.json").write_text(json.dumps({"open_lots": [
+        {"id": "SPY-t-0009", "shares": 0.01, "entry_price": 759.0, "tp_price": 759.1, "entry_time": "t"}]}))
+    res = journal.reconcile_with_ledger("SPY", ["SPY-t-0009"], path=jp2, state_dir=SCRATCH / "state", account="t")
+    r = journal.load(symbol="SPY", path=jp2)[-1]
+    check("reconcile_with_ledger writes the ledger's 0.01", (res["missing_from_journal"], r["shares"]),
+          (["SPY-t-0009"], 0.01))
+
+
 # ====================================================================== 17
 def s17_golden() -> None:
     print("\n17. GOLDEN whole-share capture: orders, ledger bytes and journal rows are unchanged")
@@ -137,7 +226,7 @@ def s17_golden() -> None:
     check("status()['shares'] is int", got["types"]["status_shares"], "int")
 
 
-SECTIONS = {1: s01_helpers, 17: s17_golden, 18: s18_broker_submit}
+SECTIONS = {1: s01_helpers, 13: s13_journal, 17: s17_golden, 18: s18_broker_submit}
 
 
 def main() -> int:
