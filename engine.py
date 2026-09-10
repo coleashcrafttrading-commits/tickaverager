@@ -790,7 +790,17 @@ class Engine:
                 return
             self._stop.set()
             self.running = False
-        self.ev("INFO", "Engine STOPPED. Resting take-profits were left alive at Alpaca.")
+        # A stopped engine does not tick, so a rung left resting would fill
+        # into a lot nobody books: cancel them here, OUTSIDE the lock (start
+        # and update_config take the same lock; a slow Alpaca cancel must not
+        # stall the API thread) and never raise. Exits stay, as always.
+        n = 0
+        try:
+            n = self._retire_resting_adds("engine stopped")
+        except Exception as e:                       # belt and braces: called from the API and from panic paths
+            self.ev("WARN", f"could not cancel resting add(s) on stop: {e}")
+        self.ev("INFO", f"Engine STOPPED. Resting take-profits were left alive at Alpaca; "
+                        f"{n} resting add(s) cancelled.")
 
     # ---------------- main loop ----------------
     def _loop(self) -> None:
@@ -1017,11 +1027,22 @@ class Engine:
         # the take-profits it had just cancelled were still cancelling.
         known = {l.tp_client_id for l in self.ledger.open_lots if l.tp_client_id}
         orphans = [c for c in resting_sell_coids if c not in known]
+        # the entry-side twin: a resting en- order that is neither the working
+        # entry nor one of the touch-mode records is nobody's -- a record lost
+        # with a ledger file, or a hand-placed order under our prefix. It gets
+        # the same grace, then the same cancel-or-halt.
+        pe = self.pending_entry or {}
+        exempt = {pe.get("client_order_id")} | {r.get("coid") for r in self.ledger.resting_adds}
+        if pe.get("lot_id"):
+            exempt |= {f"en-{pe['lot_id']}", f"en-{pe['lot_id']}m"}
+        stray = [str(o.get("client_order_id") or "") for o in open_orders
+                 if str(o.get("client_order_id") or "").startswith("en-")
+                 and o.get("client_order_id") not in exempt]
         now = time.time()
         for c in list(self._orphan_since):
-            if c not in orphans:
+            if c not in orphans and c not in stray:
                 self._orphan_since.pop(c, None)     # resolved itself
-        for c in orphans:
+        for c in orphans + stray:
             self._orphan_since.setdefault(c, now)
 
         # only act on ones that have been orphaned long enough to be real
@@ -1053,14 +1074,38 @@ class Engine:
                             f"{', '.join(foreign[:4])}. They may sell shares the ladder "
                             f"is tracking. Leaving them alone.")
 
+        # ---- 3a. entry-side orphans: a resting en- order with no record ----
+        stale_entries = [c for c in stray
+                         if now - self._orphan_since.get(c, now) >= ORPHAN_GRACE_SECONDS]
+        if stale_entries and self.cfg.get("auto_reconcile", True):
+            for c in stale_entries:
+                o = next((x for x in open_orders if x.get("client_order_id") == c), None)
+                if o:
+                    try:
+                        b.cancel(o["id"])
+                    except AlpacaError as e:
+                        self.ev("WARN", f"cancel of stray entry {c} failed ({e.status}) -- will retry")
+                        continue
+                self._orphan_since.pop(c, None)
+            self.ev("WARN", f"resting entry {', '.join(stale_entries[:3])} with no ledger record -- "
+                            f"cancelled; a fill will be adopted")
+        elif stale_entries:
+            self.halt(f"Resting entry order(s) at Alpaca with no ledger record: "
+                      f"{', '.join(stale_entries[:4])}. Cancel them in Alpaca or use Adopt, "
+                      f"then clear the halt.")
+            return
+
         # ---- 3b. adopt entries that filled while we were not looking ----
         self._adopt_orphan_entries()
 
         # ---- 4. sync guard: ledger vs the actual account ----
         # Alpaca is the truth. A disagreement that survives the grace period is
         # corrected here rather than halting the bot -- a halt at 09:40 used to
-        # cost the whole session.
-        if not self.pending_entry and not (self.ledger.unwind or {}).get("basket"):
+        # cost the whole session. Suspended while a resting add's cancel is
+        # settling: its fill may land after the position read, and step 1b
+        # books it on the next tick.
+        if (not self.pending_entry and not (self.ledger.unwind or {}).get("basket")
+                and not self._adds_settling()):
             mismatch = self.broker_qty != self.ledger.signed_shares
             if not mismatch:
                 self.mismatch_strikes = 0
@@ -1125,19 +1170,37 @@ class Engine:
         # too, not just the share total.
         resting = sum(max(0, int(float(o.get("qty") or 0))
                           - int(float(o.get("filled_qty") or 0)))
-                      for o in open_orders if o.get("side") == xside)
-        if (resting > self.held
+                      for o in open_orders
+                      if o.get("side") == xside and o.get("status") != "pending_cancel")
+        over = (resting > self.held
                 and not self.cfg["dry_run"]
-                and self.cfg.get("auto_reconcile", True)):
-            over = resting - self.held
-            self.flag("overcover",
-                      f"{resting} share(s) of resting {xside}s against a {self.held}"
-                      f"-share {self.pos_side()} position -- {over} too many. "
-                      f"Re-covering at the correct size.")
-            self.cancel_all_tps()
-            self.ensure_tps()
-            return
-        self.unflag("overcover")
+                and self.cfg.get("auto_reconcile", True))
+        if over:
+            # The position and the orders are separate reads: a TP that just
+            # filled leaves the orders list one snapshot after it leaves the
+            # position, and for that snapshot the account looks over-covered.
+            # Acting on ONE such read cancelled a TP that had already filled
+            # and, with its id blanked, turned a real fill into an ESTIMATED
+            # release. Two distinct snapshots and a grace, like the sync guard.
+            snap = getattr(self.fleet, "snap_at", 0.0)
+            if snap != self._overcover_snap:
+                self._overcover_snap = snap
+                self._overcover_strikes += 1
+                if not self._overcover_since:
+                    self._overcover_since = time.time()
+            if (self._overcover_strikes >= OVERCOVER_MIN_STRIKES
+                    and time.time() - self._overcover_since >= OVERCOVER_GRACE_SECONDS):
+                self.flag("overcover",
+                          f"{resting} share(s) of resting {xside}s against a {self.held}"
+                          f"-share {self.pos_side()} position -- {resting - self.held} too many. "
+                          f"Re-covering at the correct size.")
+                self.cancel_all_tps()
+                self.ensure_tps()
+                self._overcover_strikes, self._overcover_since, self._overcover_snap = 0, 0.0, 0.0
+                return
+        else:
+            self._overcover_strikes, self._overcover_since, self._overcover_snap = 0, 0.0, 0.0
+            self.unflag("overcover")
 
         # ---- 4d. clear flags whose lot is gone ----
         # A per-lot warning outlives its lot otherwise, so the dashboard keeps
@@ -1159,6 +1222,8 @@ class Engine:
             for lot in list(self.ledger.open_lots):
                 if lot.shares <= 0:
                     continue
+                if str(lot.tp_client_id or "").startswith("xs-"):
+                    continue                     # its exit is already in flight (step 2 tracks it)
                 if not self._strategy_says_exit(lot):
                     continue
                 self.ev("ORDER", f"Strategy exit on lot {lot.id}: closing "
@@ -1494,7 +1559,7 @@ class Engine:
                 and self.broker_side() != self.ledger.side):
             return                       # side conflict: _auto_reconcile owns it
         gap = self.held - self.ledger.shares
-        if gap <= 0 or self.pending_entry or self.cfg["dry_run"]:
+        if gap <= 0 or self.pending_entry or self.cfg["dry_run"] or self._adds_settling():
             return
         b = self.broker
         assert b
@@ -1505,7 +1570,10 @@ class Engine:
         # before and must not be resurrected
         covered = {o.get("client_order_id", "")[3:].rsplit("-", 1)[0]
                    for o in recent if o.get("client_order_id", "").startswith("tp-")}
-        known = {l.id for l in self.ledger.open_lots}
+        # ...and a resting add's fill belongs to reconcile step 1b, not here
+        known = ({l.id for l in self.ledger.open_lots}
+                 | {r.get("lot_id") for r in self.ledger.resting_adds}
+                 | {str(r.get("lot_id")) + "a" for r in self.ledger.resting_adds})
 
         for o in recent:                                  # newest first
             if gap <= 0:
@@ -2409,8 +2477,13 @@ class Engine:
             return False
         self.unflag("basket")
 
-        # 2. cancel the resting exits and wait for the shares to be free
-        ids = []
+        # 2. cancel the resting exits -- and, in touch mode, the resting rungs:
+        # a rung filling while the basket fills would leave the account
+        # non-flat and the flip would adopt a stray fill -- then wait for the
+        # shares to be free
+        self._retire_resting_adds(f"basket close: {why}")
+        add_ids = [r.get("coid") for r in self.ledger.resting_adds]
+        ids = list(add_ids)
         for lot in lots:
             if lot.tp_client_id:
                 o = next((x for x in self.open_orders
@@ -2423,11 +2496,17 @@ class Engine:
                         self.flag("basket", f"cancel of {lot.tp_client_id} rejected: {str(e)[:100]}")
                         return False
         deadline = time.time() + 8.0
-        while ids and time.time() < deadline:
+        live: set = set()
+        while ids:
             live = {x.get("client_order_id") for x in (b.orders(status="open", symbols=self.symbol) or [])}
-            if not any(c in live for c in ids):
+            if not any(c in live for c in ids) or time.time() >= deadline:
                 break
             time.sleep(0.4)
+        if any(c in live for c in add_ids):
+            self.flag("basket", f"{self.symbol}: a resting add is still live at Alpaca -- basket "
+                                f"held; the per-lot take-profits are re-placed")
+            self.ensure_tps()
+            return False
         for lot in lots:
             lot.tp_client_id = ""
             lot.tp_order_id = ""
@@ -2922,8 +3001,8 @@ class Engine:
         if now > float(uw.get("reverse_until") or 0):
             _drop(f"reversal to {new} expired", left=len(queue))
             return False
-        if uw.get("basket") or self.pending_entry:
-            return False                       # the close is still filling, or an entry is
+        if uw.get("basket") or self.pending_entry or self.ledger.resting_adds:
+            return False                       # the close is still filling, an entry is, or a rung can still fill
         if self.ledger.open_lots and self.ledger.side != new:
             return False                       # old-side lots still booking
         if (self.broker_qty or 0) != self.ledger.signed_shares:
@@ -2931,6 +3010,8 @@ class Engine:
         old_exit = "sell" if new == "short" else "buy"
         if any(str(o.get("side") or "") == old_exit for o in (self.open_orders or [])):
             return False                       # an old-side exit still rests (stale snapshot or a chase)
+        if any(str(o.get("client_order_id") or "").startswith("en-") for o in (self.open_orders or [])):
+            return False                       # an entry of ours still rests (a rung not yet confirmed gone)
         if self._session_now() == "overnight" and self._asset_flags().get("overnight") is False:
             return False                       # not overnight-tradable: the re-entry waits for 04:00
         bias = (self.trend or {}).get("bias") or "flat"
@@ -3001,6 +3082,7 @@ class Engine:
                 lot.tp_order_id = ""
             coid = f"xs-{lot.id}-{int(time.time()) % 100000}"
             short = lot.side == "short"
+            px = None
             if self.is_extended():
                 # extended hours will not take a market order; cross the spread
                 if short:
@@ -3017,6 +3099,17 @@ class Engine:
                 o = b.submit(symbol=self.symbol, qty=str(lot.shares),
                              side="buy" if short else "sell",
                              type="market", time_in_force="day", client_order_id=coid)
+            # The exit lives on the lot exactly like a take-profit: reconcile
+            # step 2 tracks it, _book_tp_progress books its fill (kind
+            # 'strategy', which moves the add anchor) and removes the lot.
+            # Leaving the id blank re-covered shares that were already being
+            # sold and released the fill ESTIMATED 25 s later.
+            lot.tp_client_id = coid
+            lot.tp_order_id = o.get("id", "")
+            lot.tp_filled = 0
+            if px is not None:
+                lot.tp_price = px
+            self.ledger.save()
             self.ev("TP", f"Strategy exit order sent for lot {lot.id} ({why}).")
             try:
                 journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self), event="strategy_exit", lot_id=lot.id,
@@ -4138,25 +4231,45 @@ class Engine:
                 "cancelling": cancelling}
 
     def cancel_all_tps(self) -> dict:
+        """Cancel every resting exit (tp-/xs-/unnamed on the exit side; never
+        an en- entry) and blank the lots' exit ids -- but BOOK FIRST any exit
+        that has already left the book by filling. Once an id is blanked a
+        filled order can never reach _book_tp_progress, ensure_tps re-covers a
+        lot that already sold, the cover guard fires again and the sync guard
+        releases the shares ESTIMATED: that was the real loss mechanism."""
         b = self.broker
         assert b
         xside = self.exit_side()
+        live = {o.get("client_order_id") or "": o
+                for o in (b.orders(status="open", symbols=self.symbol) or [])}
         n = 0
-        for o in b.orders(status="open", symbols=self.symbol):
-            coid = o.get("client_order_id") or ""
+        for coid, o in live.items():
             if o.get("side") == xside and (coid.startswith(("tp-", "xs-")) or not coid):
-                b.cancel(o["id"])
-                n += 1
+                try:
+                    b.cancel(o["id"])
+                    n += 1
+                except AlpacaError as e:
+                    self.ev("WARN", f"cancel {coid} failed ({e.status})")
+        for l in list(self.ledger.open_lots):
+            if l.tp_client_id and l.tp_client_id not in live:
+                o = b.order_by_client_id(l.tp_client_id)      # it left the book: filled, or already cancelled
+                if o and int(float(o.get("filled_qty") or 0)) > l.tp_filled:
+                    self._book_tp_progress(l, o)              # books the fill (moves the anchor), removes a sold lot
         for l in self.ledger.open_lots:
             l.tp_client_id = ""
             l.tp_order_id = ""
+            l.tp_filled = 0
         self.ledger.save()
         self.ev("WARN", f"OPERATOR: cancelled {n} resting TP(s). "
                         f"They will be re-placed on the next tick.")
         return {"ok": True, "cancelled": n}
 
     def adopt_broker_position(self) -> dict:
-        """Rebuild the ledger as ONE lot from what Alpaca actually holds."""
+        """Rebuild the ledger from what Alpaca actually holds."""
+        # the records go with the ledger: their rungs are cancelled first, and
+        # a rung that filled meanwhile is recovered from the order record like
+        # any other entry
+        self._retire_resting_adds("operator adopt")
         if self.held <= 0:
             self.cancel_all_tps()
             self.ledger.open_lots = []
@@ -4175,6 +4288,8 @@ class Engine:
         if not self._rebuild_ladder("operator pressed Adopt"):
             return {"ok": False, "lots": 0,
                     "msg": "no usable order history for this symbol"}
+        self.ledger.resting_adds = []
+        self.ledger.save()
         self.mismatch_strikes = 0
         self._mismatch_since = 0.0
         self._orphan_since.clear()
