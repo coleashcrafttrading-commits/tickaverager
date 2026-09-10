@@ -19,8 +19,8 @@ ZONE="${TA_ZONE:-us-east4-a}"
 OWNER="${TA_OWNER:-coleashcraft_trading}"
 DIR="${TA_DIR:-/home/$OWNER/tickaverager}"
 
-if [ -n "$(git status --short)" ]; then
-  echo "uncommitted changes -- commit (or stash) first"; git status --short | head; exit 1
+if [ -n "$(git status --short --untracked-files=no)" ]; then
+  echo "uncommitted changes to tracked files -- commit (or stash) first"; git status --short --untracked-files=no | head; exit 1
 fi
 echo "== push =="
 git push origin master
