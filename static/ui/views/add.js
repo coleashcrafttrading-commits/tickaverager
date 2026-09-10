@@ -25,8 +25,8 @@ VIEWS.add = {
       <div class="grid main">
         <div>
           ${card("1 · Find the symbol", `
-            <input id="aq" placeholder="Ticker or company name — NVDA, Tesla…"
-              style="font-size:15px;padding:11px 13px" autocomplete="off" spellcheck="false">
+            <input id="aq" class="big" placeholder="Ticker or company name — NVDA, Tesla…"
+              style="padding:11px 13px" autocomplete="off" spellcheck="false">
             <div class="hint" id="aqHint" style="margin-top:8px"></div>
             <div id="aRes" style="margin-top:12px"></div>`)}
           <div id="aCfgCard" style="display:none">

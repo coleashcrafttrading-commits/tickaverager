@@ -39,6 +39,10 @@
 
 const DPR = () => Math.max(1, Math.min(3, window.devicePixelRatio || 1));
 
+/* On a phone the chart takes about 45% of the screen whatever height was
+   chosen on a desktop, and the bitmap is sized to match -- never stretched. */
+const PHONE = window.matchMedia ? window.matchMedia("(max-width: 480px)") : null;
+
 function css(name, fallback) {
   const v = getComputedStyle(document.documentElement)
     .getPropertyValue(name).trim();
@@ -206,6 +210,20 @@ export class Chart {
     this.draw();
   }
 
+  /* The height actually drawn. On a phone it is 45% of the window, worked
+     out once per width: the window's height changes every time the address
+     bar slides away, and a chart that changed height with it would twitch
+     on every scroll. A rotation changes the width and starts again. */
+  _effHeight() {
+    if (!PHONE || !PHONE.matches) return this.height;
+    const w = window.innerWidth;
+    if (this._phoneW !== w) {
+      this._phoneW = w;
+      this._phoneH = Math.max(220, Math.round(window.innerHeight * 0.45));
+    }
+    return this._phoneH;
+  }
+
   /* `last` is only touched when passed: a caller that does not know about
      the live price leaves whatever the panel set. */
   setData(bars, { overlays = [], lines = [], trades = [], links = [],
@@ -234,7 +252,12 @@ export class Chart {
     } else {
       // not moved by hand: follow new bars, and only when there ARE new bars
       const shift = this.bars.length - had;
-      if (shift > 0) this.view = [this.view[0] + shift, this.view[1] + shift];
+      if (shift > 0) {
+        this.view = [this.view[0] + shift, this.view[1] + shift];
+        // the hovered candle keeps its identity, not its screen position: a
+        // finger's tap has no mousemove to put it right when the bars slide
+        if (this.hover != null) this.hover = this.hover >= shift ? this.hover - shift : null;
+      }
     }
     this.draw();
   }
@@ -339,7 +362,7 @@ export class Chart {
   /* --------------------------------------------------------------- draw */
   draw() {
     const w = this.host.clientWidth || 600;
-    const h = this.height;
+    const h = this._effHeight();
     const dpr = DPR();
     this.cv.width = w * dpr; this.cv.height = h * dpr;
     this.cv.style.height = h + "px";
@@ -714,7 +737,7 @@ export class Chart {
     }).join("");
     tt.hidden = false;
     // beside the candle, flipped left near the price axis, kept inside the plot
-    const plotW = this._S.plotW, h = this.height;
+    const plotW = this._S.plotW, h = this._effHeight();
     const tw = tt.offsetWidth, th = tt.offsetHeight;
     let left = x + 14;
     if (left + tw > plotW) left = Math.max(0, x - 14 - tw);
@@ -770,68 +793,90 @@ export class Chart {
   }
 
   /* ------------------------------------------------------------ events */
+  /* The bar under a screen point becomes the hovered one -- crosshair,
+     readout and, when it carries fills, the tooltip. Off the plot there is
+     none. Shared by the mouse and by a finger's tap. */
+  _hoverAt(clientX, clientY) {
+    const r = this.cv.getBoundingClientRect();
+    const plotW = r.width - this.padR;
+    this._mouseY = clientY - r.top;
+    if (clientX - r.left > plotW || !this._S || !this.view) {
+      this.hover = null; this.draw(); return;
+    }
+    // invert the same mapping the bars are drawn with, otherwise the
+    // crosshair reads a different bar than the one under the cursor
+    const seg = this._slice();
+    const vspan2 = this.view[1] - this.view[0];
+    const baseIdx = Math.max(0, Math.floor(this.view[0]));
+    const at = this.view[0] + ((clientX - r.left) / plotW) * vspan2;
+    const idx = Math.round(at - baseIdx - 0.5);
+    this.hover = (idx >= 0 && idx < seg.length) ? idx : null;
+    this.draw();
+  }
+
+  /* a drag begins: remember where, on which zone, and what the view was */
+  _startDrag(clientX, clientY) {
+    const zone = this._zone(clientX, clientY);
+    this._drag = {
+      x: clientX, y: clientY, zone,
+      view: this.view.slice(),
+      range: this.priceRange ? this.priceRange.slice()
+           : (this._S ? [this._S.lo, this._S.hi] : null),
+    };
+    return zone;
+  }
+
+  /* the drag in progress reached a screen point: pan the plot, or stretch
+     whichever axis it started on */
+  _dragMove(clientX, clientY) {
+    const r = this.cv.getBoundingClientRect();
+    const plotW = r.width - this.padR;
+    const dx = clientX - this._drag.x;
+    const dy = clientY - this._drag.y;
+    this._mouseY = clientY - r.top;
+
+    this.userMoved = true;
+    if (this._drag.zone === "price") {
+      // stretch price about the middle -- the aspect ratio control
+      this._lockPrice();
+      const [lo, hi] = this._drag.range;
+      const mid = (lo + hi) / 2;
+      const f = Math.exp(dy / 180);
+      const half = ((hi - lo) / 2) * f;
+      this.priceRange = [mid - half, mid + half];
+    } else if (this._drag.zone === "time") {
+      const [a, b] = this._drag.view;
+      const span = b - a;
+      const f = Math.exp(-dx / 240);
+      const next = Math.max(12, Math.min(this.bars.length * 3, span * f));
+      const anchor = b;
+      this.view = [anchor - next, anchor];
+    } else {
+      // Dragging the PLOT moves the canvas, it never reshapes it. Aspect
+      // ratio belongs to the axes and the wheel; a drag here should feel
+      // like sliding a sheet of paper. Vertical movement therefore locks
+      // the price scale on the way past -- autoscale would otherwise snap
+      // the drag straight back and the chart would feel nailed down.
+      this.view = this._drag.view.slice();
+      this._panX(-(dx / plotW));
+      if (Math.abs(dy) > 2) {
+        if (this.autoScale) {
+          this._lockPrice();
+          this._drag.range = this.priceRange.slice();
+        }
+        const [lo, hi] = this._drag.range;
+        const shift = (dy / (r.height - this.padB - this.padT)) * (hi - lo);
+        this.priceRange = [lo + shift, hi + shift];
+      }
+    }
+  }
+
   _bind() {
     const cv = this.cv;
 
     cv.addEventListener("mousemove", (e) => {
-      const r = cv.getBoundingClientRect();
-      const plotW = r.width - this.padR;
-      const seg = this._slice();
-      this._mouseY = e.clientY - r.top;
-
-      if (this._drag) {
-        const dx = e.clientX - this._drag.x;
-        const dy = e.clientY - this._drag.y;
-
-        this.userMoved = true;
-        if (this._drag.zone === "price") {
-          // stretch price about the middle -- the aspect ratio control
-          this._lockPrice();
-          const [lo, hi] = this._drag.range;
-          const mid = (lo + hi) / 2;
-          const f = Math.exp(dy / 180);
-          const half = ((hi - lo) / 2) * f;
-          this.priceRange = [mid - half, mid + half];
-        } else if (this._drag.zone === "time") {
-          const [a, b] = this._drag.view;
-          const span = b - a;
-          const f = Math.exp(-dx / 240);
-          const next = Math.max(12, Math.min(this.bars.length * 3, span * f));
-          const anchor = b;
-          this.view = [anchor - next, anchor];
-        } else {
-          // Dragging the PLOT moves the canvas, it never reshapes it. Aspect
-          // ratio belongs to the axes and the wheel; a drag here should feel
-          // like sliding a sheet of paper. Vertical movement therefore locks
-          // the price scale on the way past -- autoscale would otherwise snap
-          // the drag straight back and the chart would feel nailed down.
-          this.view = this._drag.view.slice();
-          this._panX(-(dx / plotW));
-          if (Math.abs(dy) > 2) {
-            if (this.autoScale) {
-              this._lockPrice();
-              this._drag.range = this.priceRange.slice();
-            }
-            const [lo, hi] = this._drag.range;
-            const shift = (dy / (r.height - this.padB - this.padT)) * (hi - lo);
-            this.priceRange = [lo + shift, hi + shift];
-          }
-        }
-        this.draw();
-        return;
-      }
-
-      if (e.clientX - r.left > plotW) { this.hover = null; this.draw(); return; }
-      // invert the same mapping the bars are drawn with, otherwise the
-      // crosshair reads a different bar than the one under the cursor
-      const S2 = this._S;
-      if (!S2) { this.hover = null; this.draw(); return; }
-      const vspan2 = this.view[1] - this.view[0];
-      const baseIdx = Math.max(0, Math.floor(this.view[0]));
-      const at = this.view[0] + ((e.clientX - r.left) / plotW) * vspan2;
-      const idx = Math.round(at - baseIdx - 0.5);
-      this.hover = (idx >= 0 && idx < seg.length) ? idx : null;
-      this.draw();
+      if (this._drag) { this._dragMove(e.clientX, e.clientY); this.draw(); return; }
+      this._hoverAt(e.clientX, e.clientY);
     });
 
     cv.addEventListener("mouseleave", () => {
@@ -839,13 +884,7 @@ export class Chart {
     });
 
     cv.addEventListener("mousedown", (e) => {
-      const zone = this._zone(e.clientX, e.clientY);
-      this._drag = {
-        x: e.clientX, y: e.clientY, zone,
-        view: this.view.slice(),
-        range: this.priceRange ? this.priceRange.slice()
-             : (this._S ? [this._S.lo, this._S.hi] : null),
-      };
+      const zone = this._startDrag(e.clientX, e.clientY);
       cv.style.cursor = zone === "price" ? "ns-resize"
         : zone === "time" ? "ew-resize" : "grabbing";
       cv.focus({ preventScroll: true });
@@ -884,6 +923,77 @@ export class Chart {
       }
       this.draw();
     }, { passive: false });
+
+    /* ---- touch. There is no hover on a phone, so a TAP does what a resting
+       mouse does: the candle under the finger gets the crosshair, the
+       readout and -- if it carries fills -- the tooltip, and they stay up
+       until the next tap. A sideways drag pans (touch-action: pan-y in the
+       CSS leaves an up-or-down drag to the page), two fingers pinch time. */
+    let touch = null, pinch = null;
+    cv.addEventListener("touchstart", (e) => {
+      if (!this.view) return;
+      if (e.touches.length === 2) {
+        const [a, b] = e.touches;
+        pinch = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
+                  view: this.view.slice(), mid: (a.clientX + b.clientX) / 2 };
+        touch = null; this._drag = null;
+        this.hover = null; this.draw();
+        return;
+      }
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      touch = { x: t.clientX, y: t.clientY, moved: false };
+      this._hoverAt(t.clientX, t.clientY);
+    }, { passive: true });
+
+    cv.addEventListener("touchmove", (e) => {
+      if (pinch && e.touches.length === 2) {
+        if (e.cancelable) e.preventDefault();
+        const [a, b] = e.touches;
+        const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        if (!(d > 0)) return;
+        this.userMoved = true;
+        const r = cv.getBoundingClientRect();
+        const [v0, v1] = pinch.view;
+        const span = v1 - v0;
+        const next = Math.max(12, Math.min(this.bars.length * 3, span * (pinch.d0 / d)));
+        const frac = Math.max(0, Math.min(1, (pinch.mid - r.left) / (r.width - this.padR)));
+        const anchor = v0 + span * frac;
+        this.view = [anchor - next * frac, anchor - next * frac + next];
+        this.draw();
+        return;
+      }
+      if (!touch || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (!touch.moved) {
+        const dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;          // still a tap
+        if (Math.abs(dy) > Math.abs(dx)) { touch = null; return; }  // the page scrolls
+        touch.moved = true;
+        this.hover = null;
+        this._startDrag(touch.x, touch.y);
+      }
+      if (e.cancelable) e.preventDefault();
+      this._dragMove(t.clientX, t.clientY);
+      this.draw();
+    }, { passive: false });
+
+    cv.addEventListener("touchend", (e) => {
+      if (pinch) { if (e.touches.length < 2) pinch = null; return; }
+      if (!touch) return;
+      const wasDrag = touch.moved;
+      touch = null;
+      this._drag = null;
+      if (wasDrag) { this.hover = null; this.draw(); return; }
+      // a tap leaves the readout and the fills tooltip up until the next
+      // one; the mouse events the browser would synthesise from the tap
+      // must not undo that
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    cv.addEventListener("touchcancel", () => {
+      touch = null; pinch = null; this._drag = null;
+    }, { passive: true });
 
     cv.addEventListener("dblclick", () => this.resetView());
 

@@ -130,6 +130,162 @@ function paintRail() {
   } else if (!S.pollFails) el("railFoot").innerHTML = `<span class="faint">—</span>`;
 }
 
+/* ----------------------------------------------------------------- shell */
+/* The left column collapses on every screen size. On a desktop it is a
+   real column that comes and goes and the choice is remembered per browser
+   (ta-rail, default open). Under 900 px it is an off-canvas drawer: shut by
+   default, opened from the menu button or a swipe in from the left edge,
+   closed by a tap outside, a swipe left, Escape, or choosing anything in it.
+   The shell's extra pieces -- the menu button, the status beside the title,
+   the scrim and the drawer's close button -- are created here rather than in
+   index.html, so the markup the server hands out is unchanged. */
+const LS_RAIL = "ta-rail";
+const NARROW = window.matchMedia ? window.matchMedia("(max-width: 900px)") : null;
+const isNarrow = () => !!(NARROW && NARROW.matches);
+const railSaved = () => {
+  try { return localStorage.getItem(LS_RAIL) !== "0"; } catch (e) { return true; }
+};
+const railRemember = (open) => {
+  try { localStorage.setItem(LS_RAIL, open ? "1" : "0"); } catch (e) { /* private mode */ }
+};
+const appEl = () => document.querySelector(".app");
+
+export function railOpen() {
+  const a = appEl();
+  if (!a) return true;
+  return isNarrow() ? a.classList.contains("drawer-open")
+                    : !a.classList.contains("rail-collapsed");
+}
+
+export function setRail(open, { remember = true } = {}) {
+  const a = appEl();
+  if (!a) return;
+  if (isNarrow()) {
+    a.classList.remove("rail-collapsed");     // a stale desktop choice must not hide the drawer
+    a.classList.toggle("drawer-open", !!open);
+  } else {
+    a.classList.remove("drawer-open");
+    a.classList.toggle("rail-collapsed", !open);
+    if (remember) railRemember(!!open);
+  }
+  const b = el("menuBtn");
+  if (b) {
+    b.setAttribute("aria-expanded", open ? "true" : "false");
+    b.title = open ? "Hide the sidebar" : "Show the sidebar";
+  }
+}
+const toggleRail = () => setRail(!railOpen());
+/* only the drawer closes on its own; a desktop column stays where it was put */
+const closeDrawer = () => { if (isNarrow() && railOpen()) setRail(false); };
+
+/* a desktop remembers its choice; a phone always starts with the drawer shut */
+function applyRailMode() {
+  if (isNarrow()) setRail(false);
+  else setRail(railSaved(), { remember: false });
+}
+
+function buildShell() {
+  const top = document.querySelector(".topbar");
+  const rail = document.querySelector(".rail");
+  const a = appEl();
+  if (!top || !rail || !a || el("menuBtn")) return;
+  const titleWrap = top.firstElementChild;
+  if (titleWrap) titleWrap.classList.add("title-wrap");
+
+  const btn = document.createElement("button");
+  btn.id = "menuBtn"; btn.className = "menu-btn"; btn.type = "button";
+  btn.setAttribute("aria-label", "Toggle the sidebar");
+  btn.setAttribute("aria-controls", "rail");
+  btn.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" fill="none"
+    stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <path d="M3 5h14M3 10h14M3 15h14"/></svg>`;
+  top.insertBefore(btn, top.firstChild);
+
+  // running / halted beside the title; today's realized P/L joins it on a
+  // phone, where the KPI strip has moved to its own row
+  const status = document.createElement("div");
+  status.className = "top-status"; status.id = "topStatus";
+  status.innerHTML = `<span class="pill" id="topPill" hidden></span>
+    <span class="top-pl num" id="topPl"></span>`;
+  const spacer = top.querySelector(".spacer");
+  top.insertBefore(status, spacer || el("kpis"));
+
+  rail.id = "rail";
+  const close = document.createElement("button");
+  close.className = "rail-close"; close.type = "button";
+  close.setAttribute("aria-label", "Close the menu");
+  close.textContent = "×";
+  (rail.querySelector(".brand") || rail).appendChild(close);
+
+  const scrim = document.createElement("div");
+  scrim.className = "scrim"; scrim.id = "scrim";
+  a.appendChild(scrim);
+
+  btn.onclick = toggleRail;
+  close.onclick = closeDrawer;
+  scrim.onclick = closeDrawer;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+  // swipe left on the open drawer shuts it; swipe in from the left edge opens it
+  let t0 = null;
+  document.addEventListener("touchstart", (e) => {
+    t0 = null;
+    if (!isNarrow() || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const open = railOpen();
+    if (open && !rail.contains(e.target) && e.target !== scrim) return;
+    if (!open && t.clientX > 28) return;          // only from the edge
+    t0 = { x: t.clientX, y: t.clientY, open };
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!t0) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - t0.x, dy = t.clientY - t0.y;
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      if (dx < 0 && t0.open) setRail(false);
+      else if (dx > 0 && !t0.open) setRail(true);
+    }
+    t0 = null;
+  }, { passive: true });
+  document.addEventListener("touchcancel", () => { t0 = null; }, { passive: true });
+
+  if (NARROW) {
+    if (NARROW.addEventListener) NARROW.addEventListener("change", applyRailMode);
+    else if (NARROW.addListener) NARROW.addListener(applyRailMode);
+  }
+  applyRailMode();
+}
+window.__setRail = setRail;
+
+/* the pill beside the title: the ticker's own state on a ticker page, the
+   fleet's on every other page */
+function paintStatus(ov, v) {
+  const pill = el("topPill"), pl = el("topPl");
+  if (!pill || !pl) return;
+  if (!ov) { pill.hidden = true; pl.innerHTML = ""; return; }
+  let cls = "", txt = "";
+  if (v.kind === "ticker") {
+    const t = (ov.tickers || []).find((x) => x.symbol === v.sym);
+    if (t) {
+      if (t.halted) { cls = "warn"; txt = "halted"; }
+      else if (t.running && !t.dry_run) { cls = "down"; txt = "armed"; }
+      else if (t.running) { cls = "up"; txt = "running"; }
+      else txt = "stopped";
+    }
+  } else {
+    const T = ov.totals || {};
+    if (ov.frozen) { cls = "down"; txt = "frozen"; }
+    else if (T.halted) { cls = "warn"; txt = `${T.halted} halted`; }
+    else if (T.running) { cls = T.armed ? "down" : "up"; txt = `${T.running} running`; }
+    else txt = "idle";
+  }
+  pill.hidden = !txt;
+  pill.className = "pill " + cls;
+  pill.textContent = txt;
+  const p = ov.portfolio || {};
+  pl.innerHTML = `<span class="faint">today</span>${sgn(p.realized_today)}`;
+}
+
 /* ---------------------------------------------------------------- topbar */
 function paintTop() {
   const ov = S.ov, v = S.view;
@@ -138,6 +294,7 @@ function paintTop() {
   el("title").innerHTML = esc(view ? view.title(ov, v) : "…")
     + (label ? ` <span class="title-acct">${esc(label)}</span>` : "");
   el("subtitle").textContent = view && view.sub ? view.sub(ov, v) : "";
+  paintStatus(ov, v);
 
   const tabs = view && view.tabs;
   const bar = el("tabs");
@@ -296,6 +453,7 @@ document.addEventListener("click", (e) => {
     : { kind, tab: g.dataset.tab || "" };
   if (g.dataset.acct !== undefined) v.account = g.dataset.acct;   // an account row
   go(v);
+  closeDrawer();                       // picking anything in the drawer shuts it
 });
 
 window.addEventListener("hashchange", () => {
@@ -324,6 +482,7 @@ window.addEventListener("hashchange", () => {
 /* ------------------------------------------------------------------ boot */
 (async function boot() {
   initTheme();
+  buildShell();
   let ok = true;
   try { await loadAccounts(); } catch (e) { ok = false; }
   const v = readHash();
