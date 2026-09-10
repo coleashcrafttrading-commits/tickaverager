@@ -1286,6 +1286,16 @@ class Engine:
         added = [l for i, l in after.items() if i not in before]
 
         self.ledger.open_lots = rebuilt
+        # rebuilt lots are sorted by entry_time, so last_open = newest; the
+        # last_fill record described lots that no longer exist
+        self.ledger.clear_fill()
+        # a resting add whose fill the rebuild just turned into a lot must not
+        # be booked a second time by the touch-mode fill step (1b)
+        for rec in self.ledger.resting_adds:
+            got = next((l for l in rebuilt
+                        if l.id in (rec.get("lot_id"), str(rec.get("lot_id")) + "a")), None)
+            if got is not None:
+                rec["booked"] = max(int(rec.get("booked") or 0), int(got.shares))
         self.ledger.save()
         if gone or added:
             try:
@@ -1399,6 +1409,8 @@ class Engine:
                 # have, and flagged as inferred so it is never mistaken for a
                 # booked fill
                 pnl = (lot.tp_price - lot.entry_price) * take * d
+                # the best available estimate of where the fill was
+                self.ledger.note_fill(lot.tp_price, self.exit_side(), "inferred", lot.id)
                 self.ledger.realized_today += pnl
                 self.ledger.realized_all += pnl
                 lot.shares -= take
@@ -1493,7 +1505,9 @@ class Engine:
             self.ev("WARN", f"Found entry {coid} filled ({qty} @ ${px:.4f}) with no lot "
                             f"in the ledger — the process missed it. Rebuilding the lot "
                             f"and covering it.")
-            self._open_lot(lot_id, qty, px, side=side)
+            # newest-first loop: the order's own filled_at decides the anchor,
+            # not the booking order
+            self._open_lot(lot_id, qty, px, side=side, filled_ts=_order_ts(o))
             gap -= qty
             known.add(lot_id)
 
@@ -1514,7 +1528,8 @@ class Engine:
             self.pending_entry = None
             self._open_lot(pe["lot_id"], qty, price, pe.get("why", ""),
                            side=pe.get("side", "long"),
-                           latency_ms=float(pe.get("latency_ms") or 0))
+                           latency_ms=float(pe.get("latency_ms") or 0),
+                           filled_ts=_order_ts(o))
         elif status in ("canceled", "cancelled", "expired", "rejected", "suspended"):
             if status == "rejected":
                 self._back_off_entries(f"Entry {pe['client_order_id']} was REJECTED by "
@@ -1527,7 +1542,8 @@ class Engine:
                 filled = int(float(o.get("filled_qty") or 0))
                 if filled > 0:
                     self._open_lot(pe["lot_id"], filled, float(o.get("filled_avg_price") or 0),
-                                   pe.get("why", ""), side=pe.get("side", "long"))
+                                   pe.get("why", ""), side=pe.get("side", "long"),
+                                   filled_ts=_order_ts(o))
                 self._requeue_mirror(int(pe.get("shares") or 0) - filled, status)
         else:
             age = time.time() - pe["sent_at"]
@@ -1545,7 +1561,7 @@ class Engine:
                     # head of the queue, and let the next tick re-send it at the quote
                     if filled > 0:
                         self._open_lot(pe["lot_id"], filled, float(o.get("filled_avg_price") or 0),
-                                       pe.get("why", ""), side=eside)
+                                       pe.get("why", ""), side=eside, filled_ts=_order_ts(o))
                     self._requeue_mirror(unfilled, f"timeout after {age:.0f}s")
                     return
 
@@ -1571,7 +1587,7 @@ class Engine:
                             # bank the limit portion now; the market fill becomes its own lot
                             self._open_lot(pe["lot_id"] + "a", filled,
                                            float(o.get("filled_avg_price") or 0),
-                                           side=eside)
+                                           side=eside, filled_ts=_order_ts(o))
                         self._watch_entry_fill()
                         return
                     except AlpacaError as e:
@@ -1580,7 +1596,8 @@ class Engine:
                 if filled > 0:
                     # partial: keep what filled, cover it with its own TP
                     self._open_lot(pe["lot_id"], filled,
-                                   float(o.get("filled_avg_price") or 0), side=eside)
+                                   float(o.get("filled_avg_price") or 0), side=eside,
+                                   filled_ts=_order_ts(o))
 
     def _requeue_mirror(self, shares: int, why: str) -> None:
         """A reversal's re-entry that ended unfilled goes back to the head of
@@ -1602,7 +1619,11 @@ class Engine:
         self.ev("WARN", f"REVERSAL: {shares} sh back at the head of the queue ({why}, try {tries + 1})")
 
     def _open_lot(self, lot_id: str, shares: int, price: float, why: str = "",
-                  side: str = "", latency_ms: float = 0.0) -> None:
+                  side: str = "", latency_ms: float = 0.0, filled_ts: float = 0.0) -> None:
+        """Book an entry fill as a lot and rest its take-profit. `filled_ts` is
+        the fill's epoch (Alpaca's filled_at) when the caller has the order --
+        it decides whether this fill becomes the add anchor, so a fill read
+        back after a restart never beats a newer one booked earlier."""
         if shares <= 0 or price <= 0:
             self.ev("ERR", f"Entry {lot_id} reported a fill of {shares} @ {price} -- ignoring.")
             return
@@ -1615,6 +1636,7 @@ class Engine:
                   entry_time=_now_ny().isoformat(timespec="seconds"), tp_price=tp,
                   side=side, entry_latency_ms=round(float(latency_ms or 0), 1))
         self.ledger.open_lots.append(lot)
+        self.ledger.note_fill(price, self.entry_side(side), "entry", lot_id, ts=filled_ts)
         self.ledger.save()
         # the ledger forgets a lot the moment it closes; the journal does not
         try:
@@ -1791,6 +1813,16 @@ class Engine:
             self.ledger.realized_today += pnl
             self.ledger.realized_all += pnl
             partial = lot.shares > 0
+            # an exit fill is a fill: the next rung is measured from HERE
+            # (a trail exit is a tp- order re-priced to the exit; a strategy
+            # exit is the xs- order recorded on the lot)
+            # (read from the lot and the cfg, not exit_side()/trailing(): the
+            # offline rule fixture borrows this method without those helpers)
+            kind = ("strategy" if str(lot.tp_client_id or "").startswith("xs-")
+                    else "trail" if self.cfg.get("exit_mode") == "trail"
+                    else ("tp_partial" if partial else "tp"))
+            self.ledger.note_fill(px, "buy" if lot.side == "short" else "sell", kind, lot.id,
+                                  ts=_order_ts(order))
             self.ledger.save()
             try:
                 journal.record_close(self, lot, newly, px, pnl, partial)
@@ -1812,6 +1844,8 @@ class Engine:
         if lot.shares <= 0:
             self.ledger.open_lots = [l for l in self.ledger.open_lots if l.id != lot.id]
             self.ledger.closed_count += 1
+            if not self.ledger.open_lots:
+                self.ledger.clear_fill()         # a flat ladder has no anchor; the next first entry sets it
             self.ledger.save()
             self.ev("WIN", f"Lot {lot.id} closed. {len(self.ledger.open_lots)} lot(s) left.")
             # wind-down: a winner banked inside the window ends the day
@@ -2466,6 +2500,10 @@ class Engine:
                 if not partial:
                     self.ledger.open_lots = [l for l in self.ledger.open_lots if l.id != lot.id]
                     self.ledger.closed_count += 1
+            self.ledger.note_fill(px, self.exit_side(), "basket",
+                                  bk["lot_ids"][0] if bk.get("lot_ids") else "", ts=_order_ts(o))
+            if not self.ledger.open_lots:
+                self.ledger.clear_fill()
             bk["booked"] = filled
             self.ledger.save()
         status = o.get("status")
@@ -3141,7 +3179,7 @@ class Engine:
         whole test is written once against the direction rather than twice.
         """
         mode = self.cfg["add_mode"]
-        anchor = self.ledger.last_fill_price
+        anchor = _anchor_of(self)
         d = self._dir(self.ledger.side)
         # rounded because a price boundary must not be decided by float noise:
         # 13.05 - 13.15 lands on -0.09999999999999964, which would silently skip
@@ -3177,20 +3215,27 @@ class Engine:
         self.unflag("rung")
         return _round_cent(max(floor, float(cfg.get("add_k", 1.0) or 1.0) * float(atr15)))
 
-    def _rung_price(self) -> Optional[float]:
-        """The exact level that triggers the next add -- the price the strategy
-        says we should be paying. None when flat (no anchor yet)."""
+    def _rung_price(self, k: int = 1) -> Optional[float]:
+        """The exact level that triggers the k-th next add -- the price the
+        strategy says we should be paying. None when flat (no anchor yet).
+
+        k > 1 is the touch-mode depth: rung k sits k distances from the anchor
+        (compounded in percent mode -- the prices sequential close-mode fills
+        would have produced). beyond_average has no fixed rung; k is ignored."""
         if not self.ledger.open_lots:
             return None
-        mode, anchor = self.cfg["add_mode"], self.ledger.last_fill_price
+        mode, anchor = self.cfg["add_mode"], _anchor_of(self)
         d = self._dir(self.ledger.side)
+        k = max(1, int(k))
         if mode == "atr":
-            return _round_cent(anchor - d * self._atr_rung_distance())
-        if mode == "points":
-            return _round_cent(anchor - d * float(self.cfg["add_distance"]))
-        if mode == "percent":
-            return _round_cent(anchor * (1 - d * float(self.cfg["add_percent"]) / 100.0))
-        return _round_cent(self.ledger.avg_price)
+            px = anchor - d * k * self._atr_rung_distance()
+        elif mode == "points":
+            px = anchor - d * k * float(self.cfg["add_distance"])
+        elif mode == "percent":
+            px = anchor * (1 - d * float(self.cfg["add_percent"]) / 100.0) ** k
+        else:
+            return _round_cent(self.ledger.avg_price)
+        return _round_cent(px) if px > 0.01 else None
 
     def _entry_limit_price(self, rung: Optional[float], side: str = "") -> float:
         """Where to put the entry limit. Pegged to a live quote reference plus a
@@ -3226,7 +3271,7 @@ class Engine:
         way = "below" if d > 0 else "above"
         if mode == "beyond_average":
             return f"close ${close:.2f} {way} avg ${self.ledger.avg_price:.4f}"
-        anchor = self.ledger.last_fill_price
+        anchor = _anchor_of(self)
         if mode == "atr":
             trig = "$%.2f (ATR15 x %g)" % (self._atr_rung_distance(),
                                            float(self.cfg.get("add_k", 1.0) or 1.0))
@@ -3234,8 +3279,10 @@ class Engine:
             trig = "$%.2f" % float(self.cfg["add_distance"])
         else:
             trig = "%s%%" % self.cfg["add_percent"]
-        return (f"close ${close:.2f} is ${abs(anchor - close):.2f} {way} last fill "
-                f"${anchor:.4f} (trigger {trig})")
+        kind = ((self.ledger.last_fill or {}).get("kind") or "last open") \
+            if str(self.cfg.get("add_anchor") or "last_fill") == "last_fill" else "last open"
+        return (f"close ${close:.2f} is ${abs(anchor - close):.2f} {way} anchor "
+                f"${anchor:.4f} ({kind}) (trigger {trig})")
 
     def _submit_entry(self, why: str, shares: Optional[int] = None,
                       t_trigger: Optional[float] = None) -> bool:
@@ -3424,7 +3471,8 @@ class Engine:
                 self._open_lot(pe["lot_id"], int(float(o.get("filled_qty") or 0)),
                                float(o.get("filled_avg_price") or 0), pe.get("why", ""),
                                side=pe.get("side", "long"),
-                               latency_ms=float(pe.get("latency_ms") or 0))
+                               latency_ms=float(pe.get("latency_ms") or 0),
+                               filled_ts=_order_ts(o))
                 self.ev("INFO", f"Entry -> take-profit resting in {gap:.2f}s.")
                 return
             if status in ("canceled", "cancelled", "expired", "rejected"):
@@ -3450,6 +3498,8 @@ class Engine:
         time.sleep(1.0)
         res = b.close_position(self.symbol) if held > 0 else None
         self.ledger.open_lots = []
+        self.ledger.resting_adds = []            # their en- orders were cancelled above
+        self.ledger.clear_fill()
         self.ledger.save()
         self.mismatch_strikes = 0
         self._mismatch_since = 0.0
@@ -3530,6 +3580,8 @@ class Engine:
         if self.held <= 0:
             self.cancel_all_tps()
             self.ledger.open_lots = []
+            self.ledger.resting_adds = []
+            self.ledger.clear_fill()
             self.ledger.save()
             self.mismatch_strikes = 0
             self._mismatch_since = 0.0
@@ -3694,15 +3746,9 @@ class Engine:
         px = self.last_price
         upnl = (sum((px - l.entry_price) * l.shares * self._dir(l.side)
                     for l in led.open_lots) if px else 0.0)
-        next_add = 0.0
-        if led.open_lots:
-            m = self.cfg["add_mode"]
-            if m == "points":
-                next_add = _round_cent(led.last_fill_price - float(self.cfg["add_distance"]))
-            elif m == "percent":
-                next_add = _round_cent(led.last_fill_price * (1 - float(self.cfg["add_percent"]) / 100.0))
-            else:
-                next_add = _round_cent(led.avg_price)
+        # the rung the engine itself would trade (anchor + mode + side), so the
+        # dashboard can never show a different level than the ladder acts on
+        next_add = self._rung_price() or 0.0
 
         if self.halted:
             state = "HALTED"
@@ -3935,15 +3981,9 @@ class Engine:
         else:
             state = "FLAT / WAITING"
 
-        next_add = 0.0
-        if led.open_lots:
-            m = self.cfg["add_mode"]
-            if m == "points":
-                next_add = _round_cent(led.last_fill_price - float(self.cfg["add_distance"]))
-            elif m == "percent":
-                next_add = _round_cent(led.last_fill_price * (1 - float(self.cfg["add_percent"]) / 100.0))
-            else:
-                next_add = _round_cent(led.avg_price)
+        # the rung the engine itself would trade (anchor + mode + side), so the
+        # dashboard can never show a different level than the ladder acts on
+        next_add = self._rung_price() or 0.0
 
         return {
             "symbol": self.symbol,
