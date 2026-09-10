@@ -45,6 +45,22 @@ next rung is $13.60. `add_trigger` (`touch` | `close`) decides whether the
 rungs rest at Alpaca as limits or are judged on bar closes; `add_depth` is
 how many rungs rest at once.
 
+### Fractional shares
+
+Two per-ticker settings, outside any preset: `fractional` (`off` | `on`)
+and `fractional_sessions` (`regular` | `extended` | `all`). With
+`fractional=on` on a name Alpaca marks fractionable, `shares_per_lot` (and
+`min_shares` / `max_shares`, dollar and ATR sizing too) may be a fraction —
+`0.01` SPY — rounded DOWN to Alpaca's increment and never floored to a whole
+share (on such a ladder the whole-share default `min_shares=1` means "no
+floor beyond Alpaca's minimum"; `0.5` or `2` are honoured). A fractional
+lot's exit is a **DAY** limit the engine re-places every session; outside
+`fractional_sessions` (default regular hours, 09:30–16:00 ET) a fractional
+ladder does not open, add or exit — it waits, never rounding up. Alpaca has
+no fractional short sales and no fractional trailing stops, and the engine
+refuses both. With `fractional=off` a fraction in `shares_per_lot` is
+refused, not rounded up. Whole-share tickers are unchanged, byte for byte.
+
 ### Current defaults
 
 `RAM` · 100 shares/lot · add every **$0.10** down from the last fill (any fill, entry or exit) · TP
@@ -307,5 +323,11 @@ there for a year, because eventually it will.
 `RAM` is a **2× leveraged** ETF, so it travels the $0.10 rung spacing roughly
 twice as fast as the underlying would. The ladder fills quicker on the way down
 and the rungs get hit harder. Size accordingly.
+
+A fractional lot's exit is a DAY order: outside its allowed sessions it is
+queued (it cannot fill) or, after a rejection, off the book for up to 300 s;
+nothing — stops included — can close a fractional lot outside 09:30–16:00 ET
+under `fractional_sessions=regular`. Alpaca has no fractional shorts and no
+fractional trailing stops.
 
 *Trading software, not financial advice.*

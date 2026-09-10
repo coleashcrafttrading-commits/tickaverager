@@ -9,7 +9,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, go, acctLabel, acctNumber,
+  money, money0, sgn, pct, px, qty, go, acctLabel, acctNumber,
 } from "../core.js";
 import { PortfolioChart } from "../portfolio.js";
 
@@ -34,8 +34,14 @@ function banners(ov) {
       Open each one to see why.</div>`);
   }
   if (t.uncovered) {
-    b.push(`<div class="note bad"><b>${t.uncovered} share(s) have no resting sell.</b>
-      They will not exit on their own.</div>`);
+    if (t.uncovered <= (t.offbook || 0) + 1e-6) {
+      // fractional DAY exits inside their retry timer (or dust): re-placed by the engine
+      b.push(`<div class="note info"><b>Fractional exit off the book:</b> ${qty(t.offbook)} sh —
+        re-placed by the engine at the next eligible session or retry (fractional lots rest DAY orders).</div>`);
+    } else {
+      b.push(`<div class="note bad"><b>${qty(t.uncovered)} share(s) have no resting sell.</b>
+        They will not exit on their own.</div>`);
+    }
   }
   const un = (p.unmanaged || []);
   if (un.length) {
@@ -55,7 +61,7 @@ function tickerRows(ov) {
       <td><span class="pill ${state}">${esc(t.state)}</span></td>
       <td class="num">${px(t.last_price)}</td>
       <td class="num">${t.lot_count}<span class="faint">/${t.max_lots}</span></td>
-      <td class="num">${t.shares}${t.in_sync ? "" : ' <span class="down">!</span>'}</td>
+      <td class="num">${qty(t.shares)}${t.in_sync ? "" : ' <span class="down">!</span>'}</td>
       <td class="num">${px(t.avg_price, 4)}</td>
       <td class="num">${px(t.next_add_at)}</td>
       <td class="num">${sgn(t.unrealized)}</td>
@@ -68,7 +74,7 @@ function tickerRows(ov) {
 function positionRows(p) {
   return (p.positions || []).map((x) => `<tr>
     <td><b>${x.symbol}</b>${x.managed ? "" : ' <span class="pill">unmanaged</span>'}</td>
-    <td class="num">${x.qty}</td>
+    <td class="num">${qty(x.qty)}</td>
     <td class="num">${px(x.avg_entry_price, 4)}</td>
     <td class="num">${px(x.current_price)}</td>
     <td class="num">${money(x.cost_basis)}</td>
@@ -161,7 +167,7 @@ VIEWS.overview = {
       + stat("Realized P/L", sgn(p.realized_today),
              `today · all time ${money0(p.realized_total)}`)
       + stat("Unrealized P/L", sgn(p.unrealized_today != null ? p.unrealized_today : p.open_today),
-             `today · total ${money0(p.unrealized_total != null ? p.unrealized_total : p.open_pl)} on ${t.shares} shares in ${t.lots} lots`)
+             `today · total ${money0(p.unrealized_total != null ? p.unrealized_total : p.open_pl)} on ${qty(t.shares)} shares in ${t.lots} lots`)
       + stat("Deployed", money0(p.deployed),
              `${money0(p.cash)} cash · ${money0(p.buying_power)} buying power`);
 
@@ -181,9 +187,9 @@ VIEWS.overview = {
         <td><b>${o.symbol}</b></td>
         <td class="faint mono" style="text-align:left">${esc(o.coid)}</td>
         <td class="${o.side === "sell" ? "up" : ""}">${o.side.toUpperCase()}</td>
-        <td class="num">${o.qty}</td>
-        <td class="num">${o.filled || 0}</td>
-        <td class="num"><b>${o.remaining}</b></td>
+        <td class="num">${qty(o.qty)}</td>
+        <td class="num">${qty(o.filled || 0)}</td>
+        <td class="num"><b>${qty(o.remaining)}</b></td>
         <td class="num">${px(o.limit)}</td>
         <td class="${o.extended_hours ? "up" : "faint"}">${o.extended_hours ? "yes" : "no"}</td>
         <td class="faint">${esc(o.status)}</td></tr>`),

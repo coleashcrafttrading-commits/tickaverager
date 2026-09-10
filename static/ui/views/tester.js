@@ -10,7 +10,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, act, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, go,
+  money, money0, sgn, pct, px, qty, go,
 } from "../core.js";
 import { ChartPanel } from "../chartpanel.js";
 import { EqChart } from "../eqchart.js";
@@ -226,7 +226,7 @@ async function draw(sym, tf, days) {
     return `<tr>
       <td class="faint">${esc(String(t.entry_t || "").slice(5, 16).replace("T", " "))}</td>
       <td><span class="pill ${t.side === "short" ? "down" : "up"}">${esc(t.side)}</span></td>
-      <td class="num">${t.shares}</td>
+      <td class="num">${qty(t.shares)}</td>
       <td class="num">${px(t.entry, 2)}</td>
       <td class="num">${px(t.exit, 2)}</td>
       <td class="num ${pnl >= 0 ? "up" : "down"}">${sgn(pnl, 2)}</td>

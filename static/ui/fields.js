@@ -10,8 +10,9 @@ import { esc } from "./core.js";
 
 export const STRATEGY_FIELDS = [
   { legend: "Size", fields: [
-    { k: "shares_per_lot", t: "num", label: "Shares per lot", step: 1, min: 1,
-      hint: "Every rung of the ladder buys this many shares." },
+    { k: "shares_per_lot", t: "num", label: "Shares per lot", step: 0.01, min: 0.01,
+      hint: "Every rung of the ladder buys this many shares. A fraction (0.01 SPY) only works with "
+          + "<b>Fractional shares</b> switched on below." },
     { k: "max_lots", t: "num", label: "Max lots", step: 1, min: 1,
       hint: "Caps <i>adds</i>, not losses. shares × price × max lots is your worst case." },
   ]},
@@ -29,8 +30,23 @@ export const STRATEGY_FIELDS = [
       hint: "ATR mode: shares = risk ÷ (ATR × stop multiple)." },
     { k: "atr_stop_mult", t: "num", label: "ATR stop multiple", step: 0.1, min: 0.1 },
     { k: "atr_period", t: "num", label: "ATR period", step: 1, min: 2 },
-    { k: "min_shares", t: "num", label: "Min shares", step: 1, min: 1 },
-    { k: "max_shares", t: "num", label: "Max shares", step: 1, min: 1 },
+    { k: "min_shares", t: "num", label: "Min shares", step: 0.01, min: 0,
+      hint: "On a fractional ladder the whole-share default (1) means no floor beyond Alpaca's minimum; "
+          + "0.5 or 2 are honoured." },
+    { k: "max_shares", t: "num", label: "Max shares", step: 0.01, min: 0.01 },
+  ]},
+
+  { legend: "Fractional shares", fields: [
+    { k: "fractional", t: "sel", label: "Fractional shares",
+      opts: [["off", "off — whole shares only (the default)"], ["on", "on — lots may be a fraction of a share"]],
+      hint: "Only names Alpaca marks <b>fractionable</b> (the Add screen shows it). A fractional lot exits with a "
+          + "<b>DAY</b> order that is re-placed each session, and it can <b>never be sold short</b>. Off: a "
+          + "fraction in Shares per lot is refused, not rounded up." },
+    { k: "fractional_sessions", t: "sel", label: "Fractional lots may trade in",
+      opts: [["regular", "regular hours only, 09:30–16:00 ET"], ["extended", "regular plus pre-market and after-hours"],
+             ["all", "any session, overnight included"]],
+      hint: "Outside these hours a fractional ladder does not open or add and its exit is queued for the next "
+          + "session — it never switches to whole shares on its own. Overnight is whole shares unless <b>all</b>." },
   ]},
 
   { legend: "Strategy control", fields: [

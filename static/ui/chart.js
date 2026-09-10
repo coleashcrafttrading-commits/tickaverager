@@ -49,6 +49,8 @@ function css(name, fallback) {
   return v || fallback;
 }
 
+import { qty } from "./core.js";
+
 const escHtml = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;");
@@ -740,7 +742,7 @@ export class Chart {
         ? ` · <b style="color:var(${m.pl >= 0 ? "--up" : "--down"})">${usd(m.pl)}</b>` : "";
       return `<div><span style="color:var(${tone})">${buy ? "▲" : "▼"} ${what}</span>`
         + (m.lot ? ` · <span class="mono">${escHtml(m.lot)}</span>` : "")
-        + ` · ${m.shares != null ? escHtml(m.shares) + " sh @ " : "@ "}${Number(m.price).toFixed(2)}`
+        + ` · ${m.shares != null ? escHtml(qty(m.shares)) + " sh @ " : "@ "}${Number(m.price).toFixed(2)}`
         + pl + (m.partial ? " · partial" : "") + (m.inferred ? " · bookkeeping" : "")
         + (m.note ? `<div class="faint">${escHtml(m.note)}</div>` : "") + `</div>`;
     }).join("");
@@ -1041,13 +1043,13 @@ export function orderLines(status) {
     resting.add(o.coid);
     out.push({
       kind: "tp", price: o.limit, dash: null, width: 1.6,
-      label: `${xside.toUpperCase()} ${o.remaining} @ ${o.limit.toFixed(2)}`,
+      label: `${xside.toUpperCase()} ${qty(o.remaining)} @ ${o.limit.toFixed(2)}`,
     });
   }
   for (const l of (status.lots || [])) {
     out.push({
       kind: "entry", price: l.entry_price, dash: [3, 3], width: 1,
-      label: `entry ${l.shares}`,
+      label: `entry ${qty(l.shares)}`,
     });
     if (!resting.has(l.tp_client_id)) {
       out.push({

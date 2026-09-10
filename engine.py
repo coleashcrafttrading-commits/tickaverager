@@ -4630,7 +4630,7 @@ class Engine:
                     # must not pretend the lot is naked
                     cancelling += 1
                     continue
-                if int(float(o.get("filled_qty") or 0)) > lot.tp_filled:
+                if qty(o.get("filled_qty")) > qty(lot.tp_filled) + QTY_EPS:
                     # it left the book by FILLING (fully, or partly before it
                     # died): book that first. Re-covering a lot that already
                     # sold is what over-covers the account and, a guard later,
@@ -4679,7 +4679,7 @@ class Engine:
         for l in list(self.ledger.open_lots):
             if l.tp_client_id and l.tp_client_id not in live:
                 o = b.order_by_client_id(l.tp_client_id)      # it left the book: filled, or already cancelled
-                if o and int(float(o.get("filled_qty") or 0)) > l.tp_filled:
+                if o and qty(o.get("filled_qty")) > qty(l.tp_filled) + QTY_EPS:
                     self._book_tp_progress(l, o)              # books the fill (moves the anchor), removes a sold lot
         for l in self.ledger.open_lots:
             l.tp_client_id = ""

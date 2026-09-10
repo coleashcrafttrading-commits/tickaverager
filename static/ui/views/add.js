@@ -4,7 +4,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat,
-  money, money0, px, go, hashFor,
+  money, money0, px, qty, go, hashFor,
 } from "../core.js";
 import { formHTML, formPatch } from "../fields.js";
 
@@ -119,7 +119,9 @@ async function pick(sym) {
         ${stat("Exchange", esc(r.exchange || "—"))}
         ${stat("Bid / ask", `${r.bid ? r.bid.toFixed(2) : "—"} / ${r.ask ? r.ask.toFixed(2) : "—"}`,
                spread ? `spread $${spread.toFixed(3)}` : "")}
-        ${stat("Fractionable", r.fractionable ? "yes" : "no")}
+        ${stat("Fractionable", r.fractionable ? "yes" : "no",
+               r.fractionable && (r.min_trade_increment || r.min_order_size)
+                 ? `min ${r.min_order_size || "—"} sh · step ${r.min_trade_increment || "—"}` : "")}
       </div>
       ${r.in_fleet ? `<div class="note warn" style="margin-top:14px">${r.symbol} is
         already in the fleet — <a href="${hashFor({ kind: "ticker", sym: r.symbol, tab: "settings" })}">open its settings</a>.
@@ -176,7 +178,7 @@ function math() {
   const spreadPct = tp ? Math.round(100 * spread / tp) : 0;
 
   el("aMath").innerHTML =
-    stat("Per lot", money(per), `${p.shares_per_lot || 0} sh @ ${px(price)}`)
+    stat("Per lot", money(per), `${qty(p.shares_per_lot)} sh @ ${px(price)}`)
     + stat("Max exposure", money(max), `${p.max_lots || 0} lots`)
     + stat("Win per lot", money(win), "before fees")
     + stat("Of buying power", bp

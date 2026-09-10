@@ -963,6 +963,81 @@ def s20_flatten() -> None:
     check("event says closed 0.01 shares", bool(evs(e, "closed 0.01 shares")), True)
 
 
+# ====================================================================== 21
+def s21_ui_wiring() -> None:
+    print("\n21. UI wiring, deploy list and docs")
+    import re
+    import engine
+    root = Path(engine.__file__).parent
+    ui = root / "static" / "ui"
+    core = (ui / "core.js").read_text(encoding="utf-8")
+    fields = (ui / "fields.js").read_text(encoding="utf-8")
+    check("core.js exports qty", "export const qty" in core, True)
+    check("fields.js has the two selects", ('k: "fractional"' in fields, 'k: "fractional_sessions"' in fields), (True, True))
+    for k, mn in (("shares_per_lot", "0.01"), ("min_shares", "0"), ("max_shares", "0.01")):
+        m = re.search(r'k: "%s"[^}]*step: ([0-9.]+), min: ([0-9.]+)' % k, fields)
+        check(f"fields.js {k}: step 0.01, min {mn}", (m and m.group(1), m and m.group(2)), ("0.01", mn))
+    check("fields.js: the Fractional shares legend", 'legend: "Fractional shares"' in fields, True)
+    for name in ("views/ticker.js", "views/overview.js", "views/performance.js", "chart.js", "app.js",
+                 "views/risk.js", "views/add.js", "views/backtest.js", "views/tester.js"):
+        src = (ui / name).read_text(encoding="utf-8")
+        check(f"{name} imports qty", bool(re.search(r"import \{[^}]*\bqty\b[^}]*\} from \"\.\.?/core\.js\"", src)), True)
+    ticker = (ui / "views" / "ticker.js").read_text(encoding="utf-8")
+    overview = (ui / "views" / "overview.js").read_text(encoding="utf-8")
+    check("ticker.js renders the DAY exit pill", "DAY exit" in ticker, True)
+    check("ticker.js / overview.js downgrade the banner on off-book exits",
+          ("offbook_shares" in ticker and "note info" in ticker, "t.offbook" in overview), (True, True))
+    check("no raw ${l.shares} / ${t.shares} / ${o.remaining} left in the views",
+          [n for n in ("views/ticker.js", "views/overview.js", "views/performance.js", "app.js")
+           if re.search(r"\$\{(l|t|x|r)\.shares\}|\$\{o\.remaining\}|\$\{A\.qty\}", (ui / n).read_text(encoding="utf-8"))], [])
+    deploy = (root / "deploy" / "vm_update.sh").read_text(encoding="utf-8")
+    check("deploy/vm_update.sh runs the eleven tests",
+          all(t in deploy for t in ("test_fractional.py", "test_touch_adds.py", "test_reconcile.py", "test_short.py",
+                                     "test_trail.py", "test_engine_strategy.py", "test_presets.py")), True)
+    claude = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    check("CLAUDE.md states the DAY-order rule and the medium health line",
+          ("exit is a DAY order" in claude, bool(re.search(r"`medium`,\s+not `critical`", claude)),
+           "test_fractional" in claude), (True, True, True))
+    check("README documents the two settings", ("### Fractional shares" in readme, "fractional_sessions" in readme), (True, True))
+    presets_doc = (root / "presets.py").read_text(encoding="utf-8")
+    check("presets.py docstring names the switches as ticker properties", "`infer` ignores them" in presets_doc, True)
+
+
+# ====================================================================== 22
+def s22_grep_gate() -> None:
+    print("\n22. grep gate: no int(float( on a quantity; int( in engine.py only on counts")
+    import re
+    import shutil
+    import subprocess
+    import engine
+    root = Path(engine.__file__).parent
+    files = ["engine.py", "fleet.py", "journal.py", "app.py"]
+    hits: list = []
+    if shutil.which("rg"):
+        r = subprocess.run(["rg", "-n", r"int\(float\(", *files], cwd=root, capture_output=True, text=True)
+        hits = [l for l in r.stdout.splitlines() if l.strip()]
+    else:
+        for name in files:
+            for i, line in enumerate((root / name).read_text(encoding="utf-8").splitlines(), 1):
+                if "int(float(" in line:
+                    hits.append(f"{name}:{i}: {line.strip()}")
+    check("no int(float( in engine/fleet/journal/app", hits, [])
+    allowed = ("max_lots", "n_target", "tp_seq", "add_depth", "k", "entry_fill_timeout", "chases", "tries",
+               "reverse_retries", "_parse_hms", "period", "ema", "dmi", "vwap", "st_1h", "st_1m", "atr", "unwind",
+               "ADD_MAX_DEPTH", "lot_id", "x[", "parts", "reverse", "len(", "time.time()", "interval",
+               "hold", "chunk", "days", "limit", "rung", "R", "M", "D", "S", "n_t", "mx", "span")
+    bad = []
+    for i, line in enumerate((root / "engine.py").read_text(encoding="utf-8").splitlines(), 1):
+        for m in re.finditer(r"\bint\(([^()]*(?:\([^()]*\))?[^()]*)\)", line):
+            arg = m.group(1)
+            if "cfg" in arg:
+                continue            # the whole-share sizing bounds: today's int(min_shares/max_shares), verbatim
+            if re.search(r"shares|qty|filled|held|remaining|booked|surplus|excess|missing|unfilled|newly", arg):
+                bad.append(f"{i}: {line.strip()}")
+    check("engine.py: no int() on a share count", bad, [])
+
+
 # ====================================================================== 17
 def s17_golden() -> None:
     print("\n17. GOLDEN whole-share capture: orders, ledger bytes and journal rows are unchanged")
@@ -995,7 +1070,8 @@ SECTIONS = {1: s01_helpers, 2: s02_config, 3: s03_sizing, 5: s05_entry_and_tp, 6
             7: s07_expiry_and_timer, 8: s08_partial_tp, 9: s09_reconcile, 10: s10_shorts,
             11: s11_dust, 12: s12_lots_from_history, 13: s13_journal, 14: s14_ledger_bytes,
             15: s15_status_summary_fleet_health, 16: s16_touch_adds, 17: s17_golden,
-            18: s18_broker_submit, 19: s19_backtest, 20: s20_flatten}
+            18: s18_broker_submit, 19: s19_backtest, 20: s20_flatten, 21: s21_ui_wiring,
+            22: s22_grep_gate}
 
 
 def main() -> int:

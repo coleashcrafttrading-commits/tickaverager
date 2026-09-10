@@ -88,7 +88,7 @@ one; `agentctl preset SYM basic` does the same from the CLI. Editing any
 setting by hand stamps the ticker `custom`.
 
 **Touch-mode adds** (from 10 Sep 2026, the default for every ticker):
-the ADDS are GTC limit entries resting at Alpaca at the next `add_depth`
+the ADDS are GTC limit entries (DAY for a fractional rung) resting at Alpaca at the next `add_depth`
 rungs (`basic` rests three), exactly the way the take-profits rest, so an
 intracandle touch fills them; the anchor the rungs are measured from is the
 **last fill of any kind** -- an add or a take-profit (`add_anchor=last_fill`;
@@ -139,6 +139,26 @@ If two disagree, say so loudly rather than picking the convenient one.
   opens. Only a human deletes it (`agentctl unfreeze --confirm UNFREEZE`).
 - **Exits are sacred.** Never cancel a resting take-profit without immediately
   re-covering the lot. Shares with no resting sell do not exit on their own.
+- **A fractional lot's exit is a DAY order.** With `fractional=on` (and an
+  asset Alpaca marks fractionable) a ticker may run `shares_per_lot=0.01`;
+  such a lot rests its exit as a DAY limit that the engine re-places every
+  session. Outside `fractional_sessions` (default `regular`, 09:30-16:00 ET)
+  the exit is queued (it cannot fill) or, after a rejection, off the book
+  for up to 300 s; nothing -- stops included -- can close a fractional lot
+  outside its sessions. Alpaca has no fractional shorts and no fractional
+  trailing stops, and the engine refuses both. With `fractional=off` a
+  fraction in `shares_per_lot` is refused, never rounded up to a whole
+  share. The health check reports an off-book fractional exit as `medium`,
+  not `critical`. Whole-share tickers are byte-identical
+  (`test_fractional.py` section 17 replays the golden capture).
+- **The full test loop** after any change: `test_rules test_reconcile
+  test_reverse test_unwind test_short test_trail test_entry_rule test_presets
+  test_engine_strategy test_latency test_refresh_trend test_accounts
+  test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
+  test_research test_indicators test_touch_adds test_fractional`, each
+  printing `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a
+  scratch file. `deploy/vm_update.sh` runs eleven of them on the VM and keeps
+  the old process if one is red.
 - The ticker is **RAM**, not "RAW". Glenn says RAW; RAM is correct.
 
 ## How to act
