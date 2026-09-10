@@ -183,6 +183,9 @@ class Fleet:
         self.open_orders: dict[str, list] = {}      # symbol -> [order, ...]
         self.quotes: dict[str, dict] = {}
         self.trades: dict[str, dict] = {}
+        # live price samples, one per snapshot, for the dashboard's forming
+        # candle: the same mid the engines trade on, at the same cadence
+        self.ticks: dict[str, deque] = {}
         self.bars: dict[str, dict[str, list]] = {}  # timeframe -> symbol -> bars
         # Completed 1-minute bars, per symbol, a few days deep. The snapshot in
         # self.bars is five rows -- enough for "did a bar just close", and
@@ -501,6 +504,7 @@ class Fleet:
                                    or self.quotes.get(s, {}).get("ap"))]
                 if missing:
                     self.trades.update(b.latest_trades(missing) or {})
+                self._record_ticks(syms)
 
                 self._refresh_bars(syms)
                 self._refresh_htf_bars(syms)
@@ -667,6 +671,37 @@ class Fleet:
 
     def orders_of(self, symbol: str) -> list:
         return self.open_orders.get(symbol) or []
+
+    def _record_ticks(self, syms: list[str]) -> None:
+        """One price sample per symbol per snapshot: the quote mid when both
+        sides are there, else the last trade. Kept in memory only (about
+        three hours at the 2 s cadence); the chart draws the candle that is
+        still forming from these instead of waiting for Alpaca's aggregated
+        bar, which lands 20 s or more after the minute closes."""
+        now = round(time.time(), 3)
+        for sym in syms:
+            q = self.quotes.get(sym) or {}
+            bid, ask = float(q.get("bp") or 0), float(q.get("ap") or 0)
+            if bid > 0 and ask > 0:
+                px = round((bid + ask) / 2, 4)
+            else:
+                px = float((self.trades.get(sym) or {}).get("p") or 0)
+            if px <= 0:
+                continue
+            d = self.ticks.get(sym)
+            if d is None:
+                d = self.ticks[sym] = deque(maxlen=5400)
+            if d and d[-1]["p"] == px and d[-1]["bid"] == bid and d[-1]["ask"] == ask:
+                d[-1]["t"] = now                  # unchanged quote: just bump its time
+                continue
+            d.append({"t": now, "p": px, "bid": bid, "ask": ask})
+
+    def ticks_of(self, symbol: str, since: float = 0.0) -> list:
+        """Price samples newer than `since` (epoch seconds), oldest first."""
+        d = self.ticks.get(symbol)
+        if not d:
+            return []
+        return [dict(t) for t in d if t["t"] > since]
 
     def quote_of(self, symbol: str) -> dict:
         return self.quotes.get(symbol) or {}

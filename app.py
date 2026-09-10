@@ -1179,6 +1179,25 @@ def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
     }
 
 
+
+@app.get("/api/a/{acct}/ticks")
+@app.get("/api/ticks")
+def ticks(symbol: str, since: float = 0.0, limit: int = 2000, f: Fleet = Depends(cur)):
+    """Live price samples for the chart's forming candle.
+
+    Served from memory: the fleet records one sample per symbol per snapshot
+    (the quote mid the engines trade on), so this costs Alpaca nothing however
+    often the browser polls. `since` is epoch seconds; pass the last sample's
+    t to get only what is new.
+    """
+    import time as _time
+    sym = symbol.upper()
+    rows = f.ticks_of(sym, since)[-max(1, limit):]
+    return {"ok": True, "symbol": sym, "now": round(_time.time(), 3),
+            "poll_seconds": float(f.gcfg.get("poll_seconds", 2.0) or 2.0),
+            "last": rows[-1] if rows else None, "ticks": rows}
+
+
 # ===================================================================== lookup
 @app.get("/api/a/{acct}/search")
 @app.get("/api/search")

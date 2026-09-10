@@ -172,6 +172,25 @@ def main() -> int:
         check("no pair for the bookkeeping write-off", len(tj["pairs"]), 1)
         check("no open lots (no ticker configured)", tj["open_lots"], [])
 
+        print("\n3c. live ticks come from the fleet's own snapshot buffer")
+        from collections import deque as _dq
+        fl = app_mod.REG.fleet("glenn-momentum")
+        fl.ticks["RAM"] = _dq([{"t": 1000.0, "p": 10.0, "bid": 9.99, "ask": 10.01},
+                               {"t": 1002.0, "p": 10.02, "bid": 10.01, "ask": 10.03}], maxlen=5400)
+        r = c.get("/api/a/glenn-momentum/ticks?symbol=ram")
+        check("ticks 200 with both samples", (r.status_code, len(r.json()["ticks"]), r.json()["symbol"]), (200, 2, "RAM"))
+        check("last is the newest sample", r.json()["last"]["p"], 10.02)
+        r = c.get("/api/a/glenn-momentum/ticks?symbol=RAM&since=1000")
+        check("since filters to the newer sample only", [t["p"] for t in r.json()["ticks"]], [10.02])
+        r = c.get("/api/a/glenn-momentum/ticks?symbol=NOPE")
+        check("unknown symbol is an empty list, not an error", (r.status_code, r.json()["ticks"], r.json()["last"]), (200, [], None))
+        fl.quotes = {"RAM": {"bp": 10.10, "ap": 10.12}}
+        fl._record_ticks(["RAM"])
+        check("a snapshot appends the quote mid", fl.ticks["RAM"][-1]["p"], 10.11)
+        n = len(fl.ticks["RAM"])
+        fl._record_ticks(["RAM"])
+        check("an unchanged quote does not grow the buffer", len(fl.ticks["RAM"]), n)
+
         print("\n4. the account gets its own files")
         acc = app_mod.REG.get("glenn-momentum")
         check("config.json under the account dir", acc.config_path.exists(), True)
