@@ -1149,6 +1149,43 @@ def main() -> int:
     check("no new TP placed for it either",
           len([o for o in f.broker.placed if str(o["client_order_id"]).startswith("tp-")]), 2)
 
+    print("\n33. A fractional ladder rests DAY rungs, never churns, and holds them outside its session")
+    FLAGS = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+             "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    e, f = make(lots=[(0.01, 759.0)], broker_qty=0.01, fractional="on", shares_per_lot=0.01)
+    e._asset_info = dict(FLAGS)
+    e.last_price = 759.0
+    e.quote = {"bp": 758.99, "ap": 759.01}
+    step(e, f)
+    en = entries(f)
+    check("one DAY buy rung at 758.90 x 0.01, not extended",
+          (len(en), en[0]["side"], en[0]["limit_price"], en[0]["qty"], en[0]["time_in_force"], en[0]["extended_hours"]),
+          (1, "buy", "758.90", "0.01", "day", False))
+    check("event says DAY", bool(evs(e, "ORDER", "ADD resting: BUY 0.01 TEST @ $758.90 DAY")), True)
+    oid = en[0]["id"]
+    for _ in range(5):
+        step(e, f)
+    check("five more ticks: zero cancels, the same order",
+          (f.broker.cancelled, entries(f)[0]["id"], len(entries(f))), ([], oid, 1))
+    fill(e, f, en[0]["client_order_id"], 0.01, 758.90)
+    step(e, f)
+    check("filled into a second 0.01 lot", [l.shares for l in e.ledger.open_lots], [0.01, 0.01])
+    tp = f.broker.by_coid[e.ledger.open_lots[-1].tp_client_id]
+    check("...with a DAY take-profit for 0.01", (tp["time_in_force"], tp["qty"], tp["extended_hours"]), ("day", "0.01", False))
+    e._session_now = lambda: "afterhours"                      # type: ignore[method-assign]
+    check("after hours the rungs are cancelled (not sticky)",
+          e._adds_hold_reason().startswith("cancel: fractional ladder: afterhours session"), True)
+    # a WHOLE-share touch ladder on a fractional ticker is section 1, byte for byte
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, fractional="on", shares_per_lot=10)
+    e._asset_info = dict(FLAGS)
+    step(e, f)
+    en = entries(f)
+    check("whole lots on a fractional ticker: GTC buy 10 @ 9.90, extended as before",
+          (en[0]["side"], en[0]["limit_price"], en[0]["qty"], en[0]["time_in_force"], en[0]["extended_hours"]),
+          ("buy", "9.90", "10", "gtc", e.wants_extended()))
+    check("...event says GTC", bool(evs(e, "ORDER", "ADD resting: BUY 10 TEST @ $9.90 GTC")), True)
+    check("...no tif key on the record (a whole ledger is byte-identical)", "tif" in adds(e)[0], False)
+
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
     return 1 if FAIL else 0
 

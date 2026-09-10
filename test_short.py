@@ -45,16 +45,24 @@ class ShortBroker:
 
     def __init__(self):
         self.sent: list[tuple] = []
+        self.tifs: list[str] = []          # the time-in-force of every order, in send order
         self.cancelled: list[str] = []
         self.seq = 0
 
-    def _o(self, side, qty, px, coid, typ):
+    def _o(self, side, qty, px, coid, typ, tif="gtc"):
         self.seq += 1
         o = {"id": f"o{self.seq}", "status": "new", "client_order_id": coid,
              "side": side, "qty": str(qty), "filled_qty": "0",
-             "limit_price": str(px), "type": typ}
+             "limit_price": str(px), "type": typ, "tif": tif}
         self.sent.append((side, typ, qty, px, coid))
+        self.tifs.append(tif)
         return o
+
+    def buy_limit_day(self, s, q, px, coid, extended_hours=False):
+        return self._o("buy", q, px, coid, "limit", tif="day")
+
+    def sell_limit_day(self, s, q, px, coid, extended_hours=False):
+        return self._o("sell", q, px, coid, "limit", tif="day")
 
     def buy_limit(self, s, q, px, coid, extended_hours=False):
         return self._o("buy", q, px, coid, "limit")
@@ -273,6 +281,36 @@ def main() -> int:
     side, typ, qty, px, coid = f.broker.sent[-1]
     check("trail exit is a BUY", side, "buy")
     check("priced through the ask", float(px), 10.04)
+
+    print("\n12b. Fractional shares are never sold short; a fractional long lot exits DAY")
+    FLAGS = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+             "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    # 0.5 sh at this harness's $10 tape ($5): a 0.01 lot would be $0.10 and refused under the $1 minimum
+    e, f = build(side_mode="short", bias="short", shares_per_lot=0.5, fractional="on",
+                 session_mode="always")
+    e._asset_info = dict(FLAGS)
+    e._session_now = lambda: "regular"          # type: ignore[method-assign]
+    e.running = True
+    n = len(f.broker.sent)
+    check("fractional short entry refused", e._submit_entry("test"), False)
+    check("nothing sent", len(f.broker.sent), n)
+    check("...and the flag says why", "no fractional short sales" in e.attention.get("short", ""), True)
+    br = e.block_reason()
+    check("block_reason names it", ("fractional" in br, "short" in br.lower()), (True, True))
+    e, f = build(side_mode="both", bias="long", shares_per_lot=0.5, fractional="on",
+                 session_mode="always")
+    e._asset_info = dict(FLAGS)
+    e._session_now = lambda: "regular"          # type: ignore[method-assign]
+    e.running = True
+    e._submit_entry("test")
+    check("a fractional LONG entry is sent, 0.5 through the ask",
+          f.broker.sent[-1][:4], ("buy", "limit", 0.5, 10.03))
+    e._open_lot("TEST-0001", 0.5, 10.00, "x", side="long")
+    check("its take-profit rests DAY", (f.broker.sent[-1][:3], f.broker.tifs[-1]), (("sell", "limit", 0.5), "day"))
+    e, f = build(side_mode="short", bias="short", shares_per_lot=100, fractional="on")
+    e._asset_info = dict(FLAGS)
+    e._submit_entry("test")
+    check("a whole-share short on a fractional ticker is unchanged", f.broker.sent[-1][:3], ("sell", "limit", 100))
 
     print("\n12. Unrealized P/L has the right sign")
     e, _ = build(side="short", lots=[(100, 10.00)], broker_qty=-100)

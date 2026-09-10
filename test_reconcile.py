@@ -316,6 +316,23 @@ def main() -> int:
           len({round(l.tp_price, 2) for l in e.ledger.open_lots}), 9)
     check("did not halt", e.halted, False)
 
+    print("\n6e. A fractional position is rebuilt as 0.01-share lots with DAY exits")
+    e, f = make_engine([], broker_qty=0.03, shares_per_lot=0.01, fractional="on")
+    e._asset_info = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+                     "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    f.broker.orders = lambda **kw: [
+        {"client_order_id": "en-TEST-0001", "side": "buy", "status": "filled",
+         "filled_qty": "0.030000000", "filled_avg_price": "759.0000",
+         "filled_at": "2026-09-10T14:00:00Z"}]
+    e.broker_avg = 759.0
+    e.last_price = 759.0
+    e.adopt_broker_position()
+    lots = e.ledger.open_lots
+    check("three lots of 0.01", (len(lots), all(abs(l.shares - 0.01) < 1e-6 for l in lots)), (3, True))
+    check("ledger shares 0.03", abs(e.ledger.shares - 0.03) < 1e-6, True)
+    check("every exit rests as a DAY order for 0.01",
+          [(o["tif"], o["qty"]) for o in f.broker.placed], [("day", "0.01")] * 3)
+
     print("\n7. It NEVER halts, however long the problem persists")
     e, f = make_engine([(100, 10.0)], broker_qty=100)
     corrections = 0

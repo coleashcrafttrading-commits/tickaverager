@@ -281,6 +281,166 @@ def s03_sizing() -> None:
     check("...and no gate for it", e._next_lot_fractional(), False)
 
 
+# ====================================================================== 5
+def s05_entry_and_tp() -> None:
+    print("\n5. entry and take-profit bodies for a 0.01 lot")
+    from dataclasses import asdict
+    from test_touch_adds import fill, step
+    e, f = frac_engine()
+    check("entry sent", e._submit_entry("t"), True)
+    coid = e.pending_entry["client_order_id"]
+    check("buy_limit 0.01 @ 759.02 (DAY, not extended)", f.broker.calls[-1],
+          ("buy_limit", ("TEST", 0.01, 759.02, coid), {"extended_hours": False}))
+    check("pending_entry shares 0.01", e.pending_entry["shares"], 0.01)
+    fill(e, f, coid, 0.01, 759.01)
+    step(e, f)
+    lot = e.ledger.open_lots[0]
+    check("lot 0.01 @ 759.01 -> TP 759.11", (lot.shares, lot.entry_price, lot.tp_price), (0.01, 759.01, 759.11))
+    tpc = [c for c in f.broker.calls if c[0].startswith("sell_limit")][-1]
+    check("TP via sell_limit_day, raw 0.01, extended False even under session_mode=always", tpc,
+          ("sell_limit_day", ("TEST", 0.01, 759.11, lot.tp_client_id), {"extended_hours": False}))
+    check("event: SELL 0.01 @ $759.11 DAY", bool(evs(e, "SELL 0.01 @ $759.11 DAY")), True)
+    check('ledger json carries "shares": 0.01', '"shares": 0.01' in json.dumps(asdict(e.ledger)), True)
+    e, f = frac_engine(fractional_sessions="extended")
+    e._submit_entry("t")
+    fill(e, f, e.pending_entry["client_order_id"], 0.01, 759.01)
+    step(e, f)
+    tpc = [c for c in f.broker.calls if c[0].startswith("sell_limit")][-1]
+    check("fractional_sessions=extended + session_mode=always -> DAY exit extended", (tpc[0], tpc[2]),
+          ("sell_limit_day", {"extended_hours": True}))
+
+
+# ====================================================================== 6
+def s06_routing() -> None:
+    print("\n6. routing per lot: whole lots GTC, fractional lots DAY, baskets on the sum")
+    e, f = frac_engine(lots=[(100, 759.0)], broker_qty=100)
+    lot = e.ledger.open_lots[0]
+    lot.tp_client_id = ""
+    e._place_tp(lot)
+    check("100-share lot on the fractional ticker -> sell_limit_gtc, event GTC",
+          (f.broker.calls[-1][0], bool(evs(e, "SELL 100 @ $759.10 GTC"))), ("sell_limit_gtc", True))
+    e, f = frac_engine(lots=[(0.5, 759.0, "short")], broker_qty=-0.5)
+    lot = e.ledger.open_lots[0]
+    lot.tp_client_id = ""
+    e._place_tp(lot)
+    check("short 0.5 lot -> buy_limit_day", f.broker.calls[-1][0], "buy_limit_day")
+    e, f = frac_engine(lots=[(0.01, 759.0), (0.02, 758.0)], broker_qty=0.03)
+    check("basket 0.01 + 0.02 accepted", e.close_lots(list(e.ledger.open_lots), "t"), True)
+    sells = [c for c in f.broker.calls if c[0].startswith("sell_limit")]
+    check("...one sell_limit_day for 0.03", (sells[-1][0], sells[-1][1][1]), ("sell_limit_day", 0.03))
+    e, f = frac_engine(lots=[(0.5, 759.0), (0.5, 758.0)], broker_qty=1)
+    e.close_lots(list(e.ledger.open_lots), "t")
+    sells = [c for c in f.broker.calls if c[0].startswith("sell_limit")]
+    check("basket 0.5 + 0.5 -> sell_limit_gtc for 1 (an int)",
+          (sells[-1][0], sells[-1][1][1], type(sells[-1][1][1]).__name__), ("sell_limit_gtc", 1, "int"))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    e.close_lots(list(e.ledger.open_lots), "t")
+    bk = e.ledger.unwind["basket"]
+    e._chase_basket(f.broker.by_coid[bk["coid"]], bk)
+    sells = [c for c in f.broker.calls if c[0].startswith("sell_limit")]
+    check("_chase_basket re-sends 0.01 as DAY", (sells[-1][0], sells[-1][1][1]), ("sell_limit_day", 0.01))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    e._session_now = lambda: "afterhours"
+    e._close_lot_now(e.ledger.open_lots[0], "t")
+    c = f.broker.calls[-1]
+    check("_close_lot_now after hours -> sell_limit_day extended", (c[0], c[2]), ("sell_limit_day", {"extended_hours": True}))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    e._close_lot_now(e.ledger.open_lots[0], "t")
+    c = f.broker.calls[-1]
+    check("_close_lot_now in RTH -> market DAY submit, qty 0.01",
+          (c[0], c[2].get("qty"), c[2].get("type"), c[2].get("time_in_force")), ("submit", 0.01, "market", "day"))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01, exit_mode="trail", trail_amount=0.05,
+                       trail_exit_offset=0.02)
+    lot = e.ledger.open_lots[0]
+    lot.tp_client_id, lot.armed, lot.peak = "", True, 759.5
+    e._place_trail_exit(lot)
+    check("_place_trail_exit -> sell_limit_day", (f.broker.calls[-1][0], f.broker.calls[-1][1][1]), ("sell_limit_day", 0.01))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01, exit_mode="trail")
+    lot = e.ledger.open_lots[0]
+    lot.tp_client_id, lot.armed = "", True
+    n = len(f.broker.calls)
+    check("_rest_broker_trail refuses a fractional lot: False, no call, trail-<id> flag",
+          (e._rest_broker_trail(lot), [c[0] for c in f.broker.calls[n:]],
+           "no broker trailing stop" in e.attention.get(f"trail-{lot.id}", "")), (False, [], True))
+    e, f = frac_engine(lots=[(100, 759.0)], broker_qty=100, exit_mode="trail")
+    lot = e.ledger.open_lots[0]
+    lot.tp_client_id, lot.armed = "", True
+    check("...a 100-share lot gets its trailing_stop_gtc", (e._rest_broker_trail(lot), f.broker.calls[-1][0]),
+          (True, "trailing_stop_gtc"))
+
+
+# ====================================================================== 7
+def s07_expiry_and_timer() -> None:
+    print("\n7. the DAY exit expires at the close: re-placed at once; a rejection starts the timer")
+    import time
+    from test_touch_adds import step
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    lot = e.ledger.open_lots[0]
+    seq0 = lot.tp_seq
+    f.broker.settle(lot.tp_client_id, "expired")
+    e._session_now = lambda: "afterhours"
+
+    def n_day():
+        return len([c for c in f.broker.calls if c[0] == "sell_limit_day"])
+    n = n_day()
+    step(e, f)
+    check("expired DAY exit is INFO, not WARN",
+          (bool(evs(e, "is expired -- re-placing", "INFO")), bool(evs(e, "is expired -- re-placing", "WARN"))), (True, False))
+    sells = [c for c in f.broker.calls if c[0] == "sell_limit_day"]
+    check("re-placed IMMEDIATELY (16:00 under regular): DAY, extended False, tp_seq+1",
+          (n_day() - n, sells[-1][2], lot.tp_seq), (1, {"extended_hours": False}, seq0 + 1))
+    check("the lot has a live exit", f.broker.by_coid[lot.tp_client_id]["status"], "new")
+    check("...flagged as queued for the next regular session",
+          "queued for the next regular session" in e.attention.get(f"frac-{lot.id}", ""), True)
+    check("status: uncovered 0", e.status()["reconcile"]["uncovered"], 0)
+    f.broker.reject_next_body = "qty must be integer"
+    f.broker.settle(lot.tp_client_id, "expired")
+    step(e, f)
+    check("rejected -> frac-<id> flag, no exit id, timer set",
+          (f"frac-{lot.id}" in e.attention, "refused its DAY exit" in e.attention.get(f"frac-{lot.id}", ""),
+           lot.tp_client_id, lot.id in e._frac_try_at), (True, True, "", True))
+    n = n_day()
+    for _ in range(10):
+        step(e, f)
+    check("10 more ticks inside 300 s: ZERO further placements", n_day() - n, 0)
+    e._session_now = lambda: "regular"
+    for _ in range(3):
+        step(e, f)
+    check("(e) in regular hours the timer still holds", n_day() - n, 0)
+    e._frac_try_at[lot.id] -= 301
+    step(e, f)
+    check("301 s later: exactly one retry, and it sticks", (n_day() - n, bool(lot.tp_client_id)), (1, True))
+    f.broker.reject_next_body = "qty must be integer"
+    f.broker.settle(lot.tp_client_id, "expired")
+    step(e, f)
+    n = n_day()
+    check("rejected again: timer running", lot.id in e._frac_try_at, True)
+    e._sess_last = "afterhours"
+    e._session_edge()                                          # what tick() does at 09:30
+    check("a session edge clears the timers", e._frac_try_at, {})
+    step(e, f)
+    check("...and the first tick retries at once", n_day() - n, 1)
+    # the basket timer
+    e, f = frac_engine(lots=[(0.01, 759.0), (0.02, 758.0)], broker_qty=0.03)
+    f.broker.reject_next_body = "fractional orders must be DAY"
+    ok = e.close_lots(list(e.ledger.open_lots), "t")
+    check("rejected fractional basket -> False, basket timer, TPs re-placed",
+          (ok, "basket" in e._frac_try_at, all(l.tp_client_id for l in e.ledger.open_lots)), (False, True, True))
+    n = len(f.broker.cancelled)
+    check("a second close_lots inside 300 s returns False BEFORE any cancel",
+          (e.close_lots(list(e.ledger.open_lots), "t"), len(f.broker.cancelled)), (False, n))
+    check("whole-share control: a rejected 100-share exit still retries every tick", True, True)
+    e, f = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0)], broker_qty=100)
+    lot = e.ledger.open_lots[0]
+    lot.tp_client_id = ""
+    n = len(f.broker.calls)
+    for _ in range(3):
+        f.broker.reject_next_body = "account not authorized"
+        e._place_tp(lot)
+    check("...three ticks, three attempts, no timer",
+          (len([c for c in f.broker.calls[n:] if c[0] == "sell_limit_gtc"]), e._frac_try_at), (3, {}))
+
+
 # ====================================================================== 8
 def s08_partial_tp() -> None:
     print("\n8. partial take-profit fills on a fractional lot")
@@ -367,6 +527,49 @@ def s09_reconcile() -> None:
     e.last_price = 10.0
     e._reconcile()
     check("4b control: a whole ladder at its unit is left alone", (len(e.ledger.open_lots), f.broker.cancelled), (2, []))
+
+
+# ====================================================================== 10
+def s10_shorts() -> None:
+    print("\n10. shorts: a fractional quantity is never sold short")
+    import time
+    e, f = frac_engine(side_mode="short")
+    e.trend = {"bias": "short"}
+    check("block_reason: no fractional short sales", "no fractional short sales" in e.block_reason(), True)
+    n = len(f.broker.calls)
+    check("_submit_entry refused, nothing sent",
+          (e._submit_entry("t"), [c[0] for c in f.broker.calls[n:] if c[0].startswith("sell")]), (False, []))
+    e, f = frac_engine(side_mode="both")
+    e.trend = {"bias": "long"}
+    e._submit_entry("t")
+    check("side_mode=both + long bias -> buy_limit 0.01", (f.broker.calls[-1][0], f.broker.calls[-1][1][1]), ("buy_limit", 0.01))
+    e, f = frac_engine(side_mode="short", shares_per_lot=100)
+    e.trend = {"bias": "short"}
+    e._submit_entry("t")
+    check("whole-share short (spl 100) -> sell_limit 100", (f.broker.calls[-1][0], f.broker.calls[-1][1][1]), ("sell_limit", 100))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01, side_mode="both")
+    check("_reverse_side(+1) on a fractional long ladder -> '' (flatten)", e._reverse_side(1), "")
+    e, f = frac_engine(lots=[(100, 759.0)], broker_qty=100, side_mode="both")
+    check("...a whole ladder still flips", e._reverse_side(1), "short")
+    e, f = frac_engine(side_mode="both")
+    e.trend = {"bias": "short"}
+    e.ledger.unwind = {"reverse_to": "short", "reverse_lots": [0.5], "reverse_until": time.time() + 3600}
+    r = e._maybe_reverse_entry()
+    check("a queued fractional flip to short is dropped with the reason",
+          (r, e.ledger.unwind.get("reverse_to"), "cannot be sold short" in e.attention.get("reverse", "")), (False, None, True))
+    e, f = frac_engine(side_mode="short")
+    n = len(f.broker.calls)
+    check("_place_resting_add refuses a fractional short rung",
+          (e._place_resting_add(1, 759.9, 0.01, "short"), [c[0] for c in f.broker.calls[n:]]), (False, []))
+    e, f = frac_engine(side_mode="short", entry_on_timeout="market")
+    o = f.broker._o("sell", 0.01, 759.0, "en-TEST-t-0050", False, tif="day")
+    o.update(filled_qty="0.004", filled_avg_price="759.0000", status="partially_filled")
+    e.pending_entry = {"lot_id": "TEST-t-0050", "client_order_id": "en-TEST-t-0050", "order_id": o["id"],
+                       "sent_at": time.time() - 100, "side": "short"}
+    e._check_pending_entry()
+    check("timeout escalation of a fractional SHORT remainder is refused",
+          (bool(evs(e, "no fractional short sales")), [c[0] for c in f.broker.calls if c[0] == "sell_market"]), (True, []))
+    check("...the 0.004 partial is kept as a short lot", [(l.shares, l.side) for l in e.ledger.open_lots], [(0.004, "short")])
 
 
 # ====================================================================== 11
@@ -583,6 +786,52 @@ def s13_journal() -> None:
           (["SPY-t-0009"], 0.01))
 
 
+# ====================================================================== 16
+def s16_touch_adds() -> None:
+    print("\n16. touch adds on a fractional ladder: DAY rungs, no churn, whole rungs unchanged")
+    from test_touch_adds import fill, step
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    ok = e._place_resting_add(1, 758.90, 0.01, "long")
+    rec = e.ledger.resting_adds[-1]
+    check("rung via buy_limit_day, xh False, DAY at the broker",
+          (ok, f.broker.calls[-1][0], rec["xh"], f.broker.by_coid[rec["coid"]]["time_in_force"]),
+          (True, "buy_limit_day", False, "day"))
+    check("no tif key on the record (derived from its quantity)", "tif" in rec, False)
+    oid = rec["order_id"]
+    for _ in range(5):
+        step(e, f)
+    check("(d) five ticks: zero cancels, the same order id",
+          (f.broker.cancelled, e.ledger.resting_adds[0]["order_id"], len(e.ledger.resting_adds)), ([], oid, 1))
+    fill(e, f, rec["coid"], 0.01, 758.90)
+    step(e, f)
+    check("fill -> a second 0.01 lot with a DAY TP",
+          ([l.shares for l in e.ledger.open_lots], f.broker.by_coid[e.ledger.open_lots[-1].tp_client_id]["time_in_force"]),
+          ([0.01, 0.01], "day"))
+    e._session_now = lambda: "afterhours"
+    check("after hours: hold reason is cancel: fractional ladder ...",
+          e._adds_hold_reason().startswith("cancel: fractional ladder"), True)
+    e, f = frac_engine(shares_per_lot=10, lots=[(10, 10.0)], broker_qty=10)
+    e.last_price = 10.0
+    e.quote = {"bp": 9.99, "ap": 10.01}
+    step(e, f)
+    en = [o for o in f.broker.placed if o["client_order_id"].startswith("en-")]
+    check("a whole-share touch ladder on a fractional ticker: GTC buy 10 @ 9.90, extended",
+          (en[0]["side"], en[0]["limit_price"], en[0]["qty"], en[0]["time_in_force"], en[0]["extended_hours"]),
+          ("buy", "9.90", "10", "gtc", True))
+    check("...event says GTC", bool(evs(e, "ADD resting: BUY 10 TEST @ $9.90 GTC")), True)
+
+
+# ====================================================================== 20
+def s20_flatten() -> None:
+    print("\n20. flatten_all on a 0.01 position")
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    r = e.flatten_all()
+    check("close_position called, sold 0.01, ledger cleared",
+          ([c[0] for c in f.broker.calls if c[0] == "close_position"], r["sold"], e.ledger.open_lots),
+          (["close_position"], 0.01, []))
+    check("event says closed 0.01 shares", bool(evs(e, "closed 0.01 shares")), True)
+
+
 # ====================================================================== 17
 def s17_golden() -> None:
     print("\n17. GOLDEN whole-share capture: orders, ledger bytes and journal rows are unchanged")
@@ -611,9 +860,10 @@ def s17_golden() -> None:
     check("status()['shares'] is int", got["types"]["status_shares"], "int")
 
 
-SECTIONS = {1: s01_helpers, 2: s02_config, 3: s03_sizing, 8: s08_partial_tp, 9: s09_reconcile,
+SECTIONS = {1: s01_helpers, 2: s02_config, 3: s03_sizing, 5: s05_entry_and_tp, 6: s06_routing,
+            7: s07_expiry_and_timer, 8: s08_partial_tp, 9: s09_reconcile, 10: s10_shorts,
             11: s11_dust, 12: s12_lots_from_history, 13: s13_journal, 14: s14_ledger_bytes,
-            17: s17_golden, 18: s18_broker_submit}
+            16: s16_touch_adds, 17: s17_golden, 18: s18_broker_submit, 20: s20_flatten}
 
 
 def main() -> int:
