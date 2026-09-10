@@ -18,6 +18,12 @@
    Order lines are drawn as their own layer with their own colours: a resting
    sell is not the same thing as a lot's entry, and they used to be the same
    dashed grey.
+
+   Trade markers sit the way TradingView draws them: a buy is an up-triangle
+   under the candle's low, a sell a down-triangle over its high, anchored to
+   the candle that contains the fill rather than to the fill price. A closed
+   trade can be joined entry->exit by a dashed link (setData's `links`), and
+   the fills on the hovered candle show in a small tooltip beside it.
    ========================================================================= */
 "use strict";
 
@@ -28,6 +34,10 @@ function css(name, fallback) {
     .getPropertyValue(name).trim();
   return v || fallback;
 }
+
+const escHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
 
 export const DEFAULTS = {
   showVolume: true,
@@ -51,7 +61,9 @@ export class Chart {
     this.bars = [];
     this.overlays = [];
     this.lines = [];            // {price, color, label, dash, width}
-    this.trades = [];
+    this.trades = [];           // {t, price, kind, side, win, lot?, shares?, pl?, note?}
+    this.links = [];            // {t0, p0, t1, p1, win, label?}: entry -> exit
+    this._tIndex = null;        // bar t -> absolute index, built when needed
 
     this.view = null;           // [i0, i1] visible bar range
     this.priceRange = null;     // null = autoscale
@@ -85,12 +97,15 @@ export class Chart {
     this.draw();
   }
 
-  setData(bars, { overlays = [], lines = [], trades = [], keepView = true } = {}) {
+  setData(bars, { overlays = [], lines = [], trades = [], links = [],
+                  keepView = true } = {}) {
     const had = this.bars.length;
     this.bars = bars || [];
     this.overlays = overlays;
     this.lines = lines;
-    this.trades = trades;
+    this.trades = trades || [];
+    this.links = links || [];
+    this._tIndex = null;
     if (!this.view || !keepView || !had) {
       const n = this.bars.length;
       this.view = [Math.max(0, n - 220), n];
@@ -343,25 +358,61 @@ export class Chart {
       g.setLineDash([]);
     }
 
+    /* ---- trade links: dashed entry -> exit, under the markers ---- */
+    // Ends are looked up against EVERY loaded bar, not just the visible slice,
+    // and S.x() is happy with an index outside the window: a link with one
+    // end scrolled off simply runs to the edge and the clip trims it. Only a
+    // link with an end on no loaded bar at all is dropped.
+    if (this.links.length) {
+      if (!this._tIndex) this._tIndex = new Map(this.bars.map((b, i) => [b.t, i]));
+      g.setLineDash([4, 4]); g.lineWidth = 1.2; g.globalAlpha = 0.9;
+      for (const L of this.links) {
+        const i0 = this._tIndex.get(L.t0), i1 = this._tIndex.get(L.t1);
+        if (i0 == null || i1 == null) continue;
+        const x0 = S.x(i0 - base), x1 = S.x(i1 - base);
+        if (Math.max(x0, x1) < 0 || Math.min(x0, x1) > plotW) continue;
+        g.strokeStyle = L.win ? C.up : C.down;
+        g.beginPath(); g.moveTo(x0, S.y(L.p0)); g.lineTo(x1, S.y(L.p1)); g.stroke();
+      }
+      g.setLineDash([]); g.globalAlpha = 1;
+    }
+
     /* ---- trade markers ---- */
+    // TradingView placement: a BUY is an up-triangle under the candle's low
+    // and a SELL a down-triangle over its high -- anchored to the candle,
+    // never to the fill price. So a long entry and a short exit (both buys)
+    // sit below, a long exit and a short entry (both sells) sit above.
+    // Several fills on one candle stack outward instead of piling up.
+    //
+    // An ENTRY is coloured by direction and an EXIT by outcome. Colouring
+    // every marker by order side makes a short-only strategy's winners and
+    // losers identical on screen, which defeats the point of looking.
     const idx = new Map(seg.map((b, i) => [b.t, i]));
+    const stack = new Map();           // "<i>:<a|b>" -> markers already there
+    const TIP = 4, TALL = 8, HALF = 4.5, STEP = 11;
     for (const t of this.trades) {
       const i = idx.get(t.t);
       if (i == null) continue;
-      const x = S.x(i), y = S.y(t.price);
-      // An ENTRY is coloured by direction and an EXIT by outcome. Colouring
-      // every marker by order side makes a short-only strategy's winners and
-      // losers identical on screen, which defeats the point of looking.
+      const b = seg[i];
+      const x = S.x(i);
       const isEntry = t.kind !== "exit";
-      g.fillStyle = isEntry
-        ? (t.side === "buy" ? C.accent : C.warn)
-        : (t.win === false ? C.down : C.up);
-      g.globalAlpha = isEntry ? 1 : 0.85;
+      const below = t.side === "buy";
+      const key = i + (below ? ":b" : ":a");
+      const n = stack.get(key) || 0;
+      stack.set(key, n + 1);
+      const off = TIP + n * STEP;
+      let col = C.up, alpha = 1;
+      if (isEntry) col = below ? C.up : C.warn;
+      else if (t.win === false) col = C.down;
+      else if (t.win !== true) { col = C.text; alpha = 0.6; }   // outcome unknown
+      g.fillStyle = col; g.globalAlpha = alpha;
       g.beginPath();
-      if (t.side === "buy") {
-        g.moveTo(x, y + 9); g.lineTo(x - 4.5, y + 17); g.lineTo(x + 4.5, y + 17);
+      if (below) {
+        const y = S.y(b.l) + off;      // the tip, pointing up at the low
+        g.moveTo(x, y); g.lineTo(x - HALF, y + TALL); g.lineTo(x + HALF, y + TALL);
       } else {
-        g.moveTo(x, y - 9); g.lineTo(x - 4.5, y - 17); g.lineTo(x + 4.5, y - 17);
+        const y = S.y(b.h) - off;      // the tip, pointing down at the high
+        g.moveTo(x, y); g.lineTo(x - HALF, y - TALL); g.lineTo(x + HALF, y - TALL);
       }
       g.closePath(); g.fill();
       g.globalAlpha = 1;
@@ -403,7 +454,9 @@ export class Chart {
         g.fillText(p.toFixed(2), plotW + 9, this._mouseY);
       }
       g.setLineDash([]);
-      this._readout(b);
+      // the fills on this candle, if any, go to the readout and the tooltip
+      const marks = this.trades.length ? this.trades.filter((t) => t.t === b.t) : [];
+      this._readout(b, marks, x);
     } else this._readout(null);
   }
 
@@ -411,13 +464,13 @@ export class Chart {
      candles covers the one thing the cursor is pointing at; every serious
      charting package puts this in a legend row instead. The panel supplies a
      destination through opt.readout. */
-  _readout(b) {
+  _readout(b, marks = [], x = 0) {
     // Written into a fixed-height row. Letting it size itself pushed the whole
     // chart down by a line the moment the cursor touched the canvas and pulled
     // it back up on the way out, so the chart twitched with every pass of the
     // mouse.
     const dest = this.opt.readout;
-    if (this.tt) this.tt.hidden = true;
+    this._tip(b && !this._drag ? marks : [], x);
     if (!dest) return;
     if (!b) {
       dest.innerHTML = this._lastLegend || "";
@@ -436,7 +489,47 @@ export class Chart {
       `<span class="ro-k">C</span><span class="ro-v ${cls}">${n(b.c)}</span>` +
       `<span class="${cls}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</span>` +
       (b.v ? `<span class="ro-k">V</span><span class="ro-v">${
-        b.v.toLocaleString()}</span>` : "");
+        b.v.toLocaleString()}</span>` : "") +
+      (marks.length ? `<span class="ro-k">·</span><span class="ro-v">${
+        marks.length} fill${marks.length > 1 ? "s" : ""}</span>` : "");
+  }
+
+  /* The fills on the hovered candle: entry or exit, lot, shares @ price and,
+     for an exit, the realized P/L. This is the one thing that DOES float over
+     the chart, because it is exactly what the cursor is asking about -- it
+     sits beside the candle rather than on it, and only appears on a candle
+     that carries a fill. The readout row is too short to hold it. */
+  _tip(marks, x) {
+    const tt = this.tt;
+    if (!tt) return;
+    if (!marks.length || !this._S) { tt.hidden = true; return; }
+    const usd = (v) => (v < 0 ? "-" : "+") + "$" + Math.abs(v).toFixed(2);
+    tt.innerHTML = marks.map((m) => {
+      const isEntry = m.kind !== "exit";
+      const buy = m.side === "buy";
+      const tone = isEntry ? (buy ? "--up" : "--warn")
+        : m.win === true ? "--up" : m.win === false ? "--down" : "--faint";
+      const what = isEntry ? (buy ? "long entry" : "short entry")
+                           : (buy ? "short exit" : "long exit");
+      const pl = !isEntry && m.pl != null && isFinite(m.pl)
+        ? ` · <b style="color:var(${m.pl >= 0 ? "--up" : "--down"})">${usd(m.pl)}</b>` : "";
+      return `<div><span style="color:var(${tone})">${buy ? "▲" : "▼"} ${what}</span>`
+        + (m.lot ? ` · <span class="mono">${escHtml(m.lot)}</span>` : "")
+        + ` · ${m.shares != null ? escHtml(m.shares) + " sh @ " : "@ "}${Number(m.price).toFixed(2)}`
+        + pl + (m.partial ? " · partial" : "") + (m.inferred ? " · bookkeeping" : "")
+        + (m.note ? `<div class="faint">${escHtml(m.note)}</div>` : "") + `</div>`;
+    }).join("");
+    tt.hidden = false;
+    // beside the candle, flipped left near the price axis, kept inside the plot
+    const plotW = this._S.plotW, h = this.height;
+    const tw = tt.offsetWidth, th = tt.offsetHeight;
+    let left = x + 14;
+    if (left + tw > plotW) left = Math.max(0, x - 14 - tw);
+    const my = this._mouseY != null ? this._mouseY : this.padT;
+    let top = my + 16;
+    if (top + th > h - this.padB) top = Math.max(0, my - 16 - th);
+    tt.style.left = left + "px";
+    tt.style.top = top + "px";
   }
 
   /* What the readout shows when the cursor is not on the chart. */

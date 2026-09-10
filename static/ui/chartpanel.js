@@ -30,6 +30,48 @@ function save(key, val) {
   catch (e) { /* private mode; the chart still works */ }
 }
 
+/* ------------------------------------------------- fills onto candles */
+/* Bar times parsed once per bar array (they are replaced wholesale on every
+   load, so a WeakMap keyed on the array can never go stale), together with
+   the timeframe: the smallest gap between consecutive bars. Session and
+   weekend gaps only ever make a gap LARGER, so the minimum is the bar size. */
+const BAR_TIMES = new WeakMap();
+function barTimes(bars) {
+  let c = BAR_TIMES.get(bars);
+  if (c) return c;
+  const ms = new Float64Array(bars.length);
+  for (let i = 0; i < bars.length; i++) ms[i] = Date.parse(bars[i].t);
+  let step = Infinity;
+  for (let i = 1; i < ms.length; i++) {
+    const d = ms[i] - ms[i - 1];
+    if (d > 0 && d < step) step = d;
+  }
+  c = { ms, step: isFinite(step) ? step : 60000 };
+  BAR_TIMES.set(bars, c);
+  return c;
+}
+
+/* The t of the bar that CONTAINS a fill: the last bar whose time is <= the
+   fill's, at whatever timeframe the chart is on. A bar's t is its open, so a
+   13:31:05 fill lands on the 13:31 one-minute candle, the 13:30 five-minute
+   candle and the day's daily candle. Null when the fill is older than the
+   first loaded bar, or more than one bar after the last one (an exit after
+   the loaded window -- the candle it belongs to is not on the chart yet).
+   Accepts any ISO-8601 string, "Z" or "+00:00". */
+export function matchToBars(bars, isoTs) {
+  if (!bars || !bars.length || !isoTs) return null;
+  const ts = Date.parse(isoTs);
+  if (!isFinite(ts)) return null;
+  const { ms, step } = barTimes(bars);
+  if (ts < ms[0] || ts >= ms[ms.length - 1] + step) return null;
+  let lo = 0, hi = ms.length - 1;
+  while (lo < hi) {                       // last index with ms[i] <= ts
+    const mid = (lo + hi + 1) >> 1;
+    if (ms[mid] <= ts) lo = mid; else hi = mid - 1;
+  }
+  return bars[lo].t;
+}
+
 export class ChartPanel {
   /**
    * host   container element
@@ -42,6 +84,8 @@ export class ChartPanel {
     this.symbol = symbol;
     this.onBars = onBars;
     this.bars = [];
+    this.trades = [];
+    this.links = [];
     this.status = null;
 
     const s = load(key, {});
@@ -289,10 +333,16 @@ export class ChartPanel {
      could be measured but not seen. */
   setTrades(trades) { this.trades = trades || []; this.render(); }
 
+  /* Dashed entry -> exit links between the two ends of a closed trade:
+     [{t0, p0, t1, p1, win, label?}], t0/t1 being bar timestamps. */
+  setLinks(links) { this.links = links || []; this.render(); }
+
   /* Changing timeframe invalidates trade markers: their indices belong to the
      bar array the backtest ran on. Clearing them is the honest response --
-     re-plotting them against different bars would silently move every arrow. */
-  clearTrades() { this.trades = []; }
+     re-plotting them against different bars would silently move every arrow.
+     (A view that derives its markers from fill TIMES, as the ticker page does,
+     rebuilds them from onBars once the new bars are in.) */
+  clearTrades() { this.trades = []; this.links = []; }
 
   render() {
     if (!this.bars.length) return;
@@ -320,7 +370,8 @@ export class ChartPanel {
 
     const lines = this.status ? orderLines(this.status) : [];
     this.chart.setData(this.bars, { overlays, lines, keepView: true,
-                                    trades: this.trades || [] });
+                                    trades: this.trades || [],
+                                    links: this.links || [] });
 
     const a14 = IND.atr(b.h, b.l, b.c, 14);
     const last = a14[a14.length - 1];
