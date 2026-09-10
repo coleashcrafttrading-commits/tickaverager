@@ -522,6 +522,46 @@ tr.on > td { background: var(--accent-dim); }
 .eqc-ro .up { color: var(--up); }
 .eqc-ro .down { color: var(--down); }
 
+/* ---- portfolio value chart (overview) ----------------------------------
+   The card sits under the stat tiles and must never be wider than the page:
+   the canvas takes its width from the host and every row of controls wraps. */
+.pf { min-width: 0; }
+.pf-head { display: flex; align-items: flex-start; gap: 10px 22px; flex-wrap: wrap;
+           margin-bottom: 12px; }
+.pf-val { min-width: 0; }
+.pf-now { font-size: 27px; font-weight: 640; letter-spacing: -0.02em; line-height: 1.15;
+          margin-top: 4px; overflow-wrap: anywhere; }
+.pf-chg { font-size: 13px; margin-top: 3px; }
+.pf-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pf-ext { display: inline-flex; gap: 6px; align-items: center; cursor: pointer;
+          font-size: 12px; color: var(--muted); }
+.pf-ext input { width: auto; margin: 0; }
+.pf-ctl { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 10px; }
+/* a segmented group; on a host too narrow for the whole row the pills wrap
+   inside it rather than push the card wider than the page */
+.pf-pills { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px;
+            border: 1px solid var(--hairline); border-radius: 8px; }
+.pf-pill {
+  appearance: none; border: 0; background: transparent; color: var(--faint);
+  font: inherit; font-size: 12px; font-weight: 550; padding: 4px 9px;
+  border-radius: 6px; cursor: pointer; line-height: 1.3; min-width: 34px;
+}
+.pf-pill:hover:not(:disabled) { color: var(--text); background: var(--hairline); }
+.pf-pill.on { background: var(--accent-dim); color: var(--accent); }
+.pf-pill:disabled { opacity: .3; cursor: not-allowed; }
+.pf-chart { position: relative; width: 100%; min-width: 0; }
+/* pan-y: a vertical swipe still scrolls the page; a sideways one pans */
+.pf-chart canvas { display: block; width: 100%; cursor: crosshair; touch-action: pan-y;
+                   user-select: none; -webkit-user-select: none; }
+.pf-cap { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 11.5px;
+          color: var(--faint); margin-top: 8px; font-variant-numeric: tabular-nums; }
+.pf-note { color: var(--warn); }
+.pf-err { color: var(--down); }
+@media (max-width: 640px) {
+  .pf-now { font-size: 22px; }
+  .pf-right { margin-left: 0; }
+}
+
 /* Active strategy bar on the ticker page */
 .strat { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
          padding: 2px 0 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line, #263038); }
