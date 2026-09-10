@@ -55,7 +55,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   background: var(--bg);
@@ -80,7 +80,12 @@ button, input, select, textarea { font-family: inherit; }
 .num, td.num, .stat-v, .kpi-v { font-variant-numeric: tabular-nums; }
 
 /* ============================== app shell ============================== */
-.app { display: grid; grid-template-columns: 236px 1fr; height: 100vh; }
+/* 100dvh where the browser has it: on a phone 100vh is the height WITH the
+   address bar hidden, so the bottom of the page sat under the bar. */
+.app { display: grid; grid-template-columns: 236px 1fr; height: 100vh; height: 100dvh; }
+/* the rail collapsed on a desktop: the content takes the whole width */
+.app.rail-collapsed { grid-template-columns: 1fr; }
+.app.rail-collapsed .rail { display: none; }
 
 .rail {
   background: var(--surface);
@@ -186,7 +191,9 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .tab:hover { color: var(--text); }
 .tab.on { color: var(--text); border-bottom-color: var(--accent); }
 
-.scroll { overflow-y: auto; flex: 1; min-height: 0; }
+/* overflow-x hidden: a table wider than the screen scrolls inside its own
+   card (.tw), never by dragging the whole page sideways */
+.scroll { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; }
 .page { padding: var(--gutter); max-width: 1440px; }
 
 /* ============================== cards ============================== */
@@ -207,6 +214,9 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .card-b.flush { padding: 14px 0 0; }
 
 .grid { display: grid; gap: 18px; }
+/* a grid item defaults to min-width:auto, so one wide table would widen its
+   column past the screen instead of scrolling inside its card */
+.grid > * { min-width: 0; }
 .grid.c2 { grid-template-columns: 1fr 1fr; }
 .grid.c3 { grid-template-columns: repeat(3, 1fr); }
 .grid.main { grid-template-columns: 1fr 356px; align-items: start; }
@@ -237,7 +247,7 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .mono { font-family: var(--mono); font-size: .93em; }
 
 /* ============================== tables ============================== */
-.tw { overflow-x: auto; }
+.tw { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
 table { width: 100%; border-collapse: collapse; }
 th {
   text-align: right; color: var(--faint);
@@ -300,6 +310,8 @@ input:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
+/* the one prominent search box (add a ticker); a phone lifts it to 16 px */
+input.big { font-size: 15px; }
 .hint { color: var(--faint); font-size: 11.5px; margin-top: -8px; margin-bottom: 14px; line-height: 1.5; }
 fieldset { border: 0; padding: 0; margin: 0 0 26px; }
 legend {
@@ -386,7 +398,10 @@ legend {
 
 /* ============================== chart ============================== */
 .chart-wrap { position: relative; width: 100%; }
-canvas.chart { display: block; width: 100%; }
+/* pan-y: a finger dragged sideways pans the chart (chart.js handles the
+   touch), dragged up or down it scrolls the page as it would anywhere else */
+canvas.chart { display: block; width: 100%; touch-action: pan-y;
+               -webkit-tap-highlight-color: transparent; }
 .chart-tt {
   position: absolute; pointer-events: none; z-index: 5;
   background: var(--raised); border: 1px solid var(--hairline2);
@@ -587,3 +602,184 @@ tr.on > td { background: var(--accent-dim); }
 .sty-foot { display: flex; gap: 12px; align-items: center; margin-top: 12px;
             padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 11.5px;
             flex-wrap: wrap; }
+
+
+/* ============================== shell: menu button, drawer, phone ==========
+   The left column collapses on every screen. On a desktop it is a real
+   column that comes and goes (the choice is remembered per browser); under
+   900 px it is an off-canvas drawer, shut by default, that opens from the
+   menu button and closes on a tap outside, a swipe, Escape, or picking
+   anything in it. Under 480 px the top bar wraps, the KPI strip becomes two
+   rows, forms go single-column at 16 px (iOS zooms anything smaller), taps
+   are 40 px, and the chart takes about 45% of the screen.
+   ========================================================================= */
+.menu-btn {
+  appearance: none; border: 1px solid transparent; background: transparent;
+  color: var(--muted); width: 40px; height: 40px; border-radius: var(--radius-sm);
+  cursor: pointer; flex: none; display: inline-flex; align-items: center;
+  justify-content: center; padding: 0; margin-left: -8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-btn:hover { background: var(--raised); color: var(--text); }
+.menu-btn svg { width: 20px; height: 20px; display: block; }
+
+.title-wrap { min-width: 0; }
+/* running / halted beside the title, and today's realized P/L on a phone */
+.top-status { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.top-pl { display: none; font-size: 13.5px; font-weight: 620; white-space: nowrap; }
+.top-pl .faint { font-weight: 500; margin-right: 4px; }
+
+.scrim { position: fixed; inset: 0; background: rgba(6,9,13,.55); z-index: 79; display: none; }
+.rail-close {
+  display: none; appearance: none; border: 0; background: transparent;
+  color: var(--muted); font-size: 24px; line-height: 1; width: 40px; height: 40px;
+  border-radius: var(--radius-sm); cursor: pointer; position: absolute; right: 8px; top: 12px;
+  -webkit-tap-highlight-color: transparent;
+}
+.rail-close:hover { background: var(--raised); color: var(--text); }
+.brand { position: relative; }
+
+/* the popover's own header and scrim: shown only when it is a bottom sheet */
+.pop-h { display: none; }
+.chart-scrim { display: none; }
+
+/* --------------------------------------------------- tablets and phones */
+@media (max-width: 900px) {
+  :root { --gutter: 16px; }
+  .app, .app.rail-collapsed { grid-template-columns: 1fr; }
+  .rail, .app.rail-collapsed .rail {
+    display: flex; position: fixed; top: 0; bottom: 0; left: 0; z-index: 80;
+    width: min(300px, 86vw); transform: translateX(-102%);
+    transition: transform .22s ease; border-right: 1px solid var(--hairline2);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .app.drawer-open .rail { transform: none; box-shadow: 0 0 60px rgba(0,0,0,.5); }
+  .app.drawer-open .scrim { display: block; }
+  .rail-close { display: inline-flex; align-items: center; justify-content: center; }
+  .brand { padding-right: 52px; }
+  .nav-item { min-height: 40px; }
+  .rail-foot { min-height: 44px; }
+
+  .topbar { gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
+  .kpis { flex-wrap: wrap; gap: 14px 22px; }
+
+  /* 16 px stops iOS zooming into every field; 40 px is a finger */
+  input, select, textarea, input.big { font-size: 16px; min-height: 40px; }
+  .btn { min-height: 40px; }
+  .btn.sm { min-height: 40px; }
+  .tab { padding: 12px 0 11px; }
+  .sw { width: 42px; height: 24px; }
+  .sw i:before { width: 18px; height: 18px; }
+  .sw input:checked + i:before { transform: translateX(18px); }
+  .chart-trades label, .sty-master { min-height: 32px; }
+  .sty-row { min-height: 36px; }
+  .sty-row input[type="color"] { width: 34px; height: 26px; min-height: 0; }
+  .sty-row input[type="range"], .sty-row input[type="checkbox"],
+  .chart-trades input[type="checkbox"], .sty-master input { min-height: 0; }
+  input[type="checkbox"], input[type="range"], input[type="color"] { min-height: 0; }
+
+  .toasts { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+  .modal { max-height: 92vh; overflow: auto; }
+  .log { max-height: 300px; }
+
+  /* the chart toolbar wraps: buttons on the first row, the OHLC readout and
+     the live pill on the second, instead of the readout being squeezed to
+     nothing between them (its row keeps a fixed height, so nothing jumps) */
+  .chart-bar { height: auto; min-height: 0; max-height: none; flex-wrap: wrap;
+               gap: 6px; overflow: visible; }
+  .chart-bar .btn.sm { padding: 6px 9px; min-height: 40px; }
+  .chart-bar > span[style*="width:10px"] { display: none; }
+  .chart-readout { flex: 1 1 160px; margin-left: 0; order: 10; height: 20px; }
+  .chart-bar-r { order: 11; margin-left: auto; }
+}
+
+/* ------------------------------------------------------------- phones */
+@media (max-width: 480px) {
+  :root { --gutter: 12px; }
+  .rail { width: min(300px, 84vw); }
+
+  /* one compact row: menu · title + account · status · today's P/L */
+  .topbar { padding: 8px 12px 10px; gap: 6px 10px; align-items: center; }
+  .menu-btn { margin-left: -6px; }
+  .title-wrap { flex: 1 1 0; }
+  .title { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title-acct { vertical-align: 2px; margin-left: 6px; padding: 1px 7px; font-size: 10px; }
+  .subtitle { font-size: 11.5px; margin-top: 0; white-space: nowrap; overflow: hidden;
+              text-overflow: ellipsis; }
+  .topbar .spacer { display: none; }
+  .top-status { gap: 4px; flex-direction: column; align-items: flex-end; }
+  .top-pl { display: inline; }
+  /* the KPI strip is its own row, two by two, instead of overflowing */
+  .kpis { flex: 1 0 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
+          padding-top: 8px; border-top: 1px solid var(--hairline); }
+  .kpis:empty { display: none; }
+  .kpis > div { min-width: 0; }
+  .kpi-k { font-size: 9.5px; }
+  .kpi-v { font-size: 15px; }
+
+  .tabs { gap: 18px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; flex: none; }
+
+  .page { padding-bottom: calc(var(--gutter) + env(safe-area-inset-bottom)); }
+  .card { margin-bottom: 12px; border-radius: 9px; }
+  .card-h { padding: 12px 14px 0; flex-wrap: wrap; gap: 8px 10px; }
+  .card-b { padding: 12px 14px 14px; }
+  .card-b.flush { padding: 12px 0 0; }
+  .grid { gap: 12px; }
+  .note { padding: 10px 12px; font-size: 12.5px; }
+
+  /* stat tiles two-up; a long dollar figure wraps rather than overflows */
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 14px; }
+  .stat-v { font-size: 18px; overflow-wrap: anywhere; }
+
+  th { padding: 8px 10px; }
+  td { padding: 9px 10px; font-size: 12.5px; }
+  th:first-child, td:first-child { padding-left: 14px; }
+  th:last-child, td:last-child { padding-right: 14px; }
+  .log-row { padding: 5px 14px; }
+
+  /* forms: one column */
+  .f2 { grid-template-columns: 1fr; }
+  .rule-h { flex-wrap: wrap; }            /* the strategy builder's group header */
+  .strat-sel { min-width: 0; width: 100%; flex: 1 1 100%; }
+  .strat-d { max-width: none; }
+  .modal { padding: 16px; width: calc(100% - 20px); }
+  .modal .acts { flex-wrap: wrap; }
+  .modal .acts .btn { flex: 1 1 auto; justify-content: center; }
+
+  /* the chart card: about 45% of the screen (chart.js sizes the bitmap to
+     match), the readout and the live pill each on a row of their own, and
+     the mouse instructions gone */
+  .chart-readout { flex: 1 0 100%; }
+  .chart-bar-r { flex: 1 0 100%; margin-left: 0; justify-content: space-between; }
+  .chart-tt { max-width: calc(100vw - 64px); white-space: normal; }
+  [data-panes] + .tip { display: none; }
+  .chart-trades { gap: 8px 14px; }
+  .chart-trades #tkTradesCount { margin-left: 0 !important; flex: 1 0 100%; }
+
+  /* Indicators / Style / settings: a bottom sheet with its own scrim */
+  .chart-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 84;
+                               background: rgba(6,9,13,.55); }
+  .chart-pop {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 85;
+    max-height: 78vh; margin: 0 !important; overflow: auto;
+    border-radius: 14px 14px 0 0; background: var(--surface);
+    border-top: 1px solid var(--hairline2); box-shadow: 0 -20px 60px rgba(0,0,0,.5);
+    padding: 6px 12px calc(14px + env(safe-area-inset-bottom));
+  }
+  .chart-pop::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px;
+                       background: var(--hairline2); margin: 4px auto 6px; }
+  .pop-h { display: flex; align-items: center; justify-content: space-between;
+           padding: 0 0 8px; font-weight: 620; font-size: 13.5px; }
+  .sty-grid { grid-template-columns: 1fr; }
+  /* a group may shrink to the sheet; its header wraps rather than widens */
+  .sty-group { min-width: 0; }
+  .sty-h { flex-wrap: wrap; }
+  .sty-row input[type="range"] { width: 64px; }
+  .sty-wrap { padding: 10px 12px; }
+  /* a table row is one line and the table scrolls sideways in its card,
+     instead of every cell wrapping into a tall narrow column */
+  .tw td:not(.empty) { white-space: nowrap; }
+  .chart-pop [style*="width:200px"] { width: 140px !important; }
+}

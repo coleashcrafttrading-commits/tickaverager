@@ -287,6 +287,7 @@ export class ChartPanel {
   destroy() {
     this._dead = true;
     this.stopLive();
+    if (this._onKey) document.removeEventListener("keydown", this._onKey);
     if (this.chart) this.chart.destroy();
     for (const p of (this._panes || [])) if (p.ro) p.ro.disconnect();
   }
@@ -313,7 +314,12 @@ export class ChartPanel {
           <span class="faint" data-meta></span>
         </span>
       </div>
-      <div class="chart-pop" data-pop style="display:none;margin-bottom:12px"></div>
+      <div class="chart-pop" data-pop style="display:none;margin-bottom:12px">
+        <div class="pop-h"><span data-pop-title></span>
+          <button class="btn sm" type="button" data-pop-close>Done</button></div>
+        <div data-pop-body></div>
+      </div>
+      <div class="chart-scrim" data-scrim hidden></div>
       <div data-price></div>
       <div data-panes></div>
       <div class="tip" style="margin-top:8px">
@@ -325,6 +331,11 @@ export class ChartPanel {
 
     this.$bar = this.host.querySelector(".chart-bar");
     this.$pop = this.host.querySelector("[data-pop]");
+    // the panels write into the body; the header and the scrim only show
+    // when the popover is a bottom sheet on a phone (app.css)
+    this.$popBody = this.host.querySelector("[data-pop-body]");
+    this.$popTitle = this.host.querySelector("[data-pop-title]");
+    this.$scrim = this.host.querySelector("[data-scrim]");
     this.$price = this.host.querySelector("[data-price]");
     this.$panes = this.host.querySelector("[data-panes]");
     this.$meta = this.host.querySelector("[data-meta]");
@@ -354,6 +365,10 @@ export class ChartPanel {
     this.$bar.querySelector('[data-act="ind"]').onclick = () => this._toggle("ind");
     this.$bar.querySelector('[data-act="sty"]').onclick = () => this._toggle("sty");
     this.$bar.querySelector('[data-act="cfg"]').onclick = () => this._toggle("cfg");
+    this.host.querySelector("[data-pop-close]").onclick = () => this._closePop();
+    this.$scrim.onclick = () => this._closePop();
+    this._onKey = (e) => { if (e.key === "Escape" && this._pop) this._closePop(); };
+    document.addEventListener("keydown", this._onKey);
     this._syncTfs();
     this._paintPill();
   }
@@ -364,14 +379,26 @@ export class ChartPanel {
   }
 
   _toggle(which) {
-    if (this._pop === which) { this.$pop.style.display = "none"; this._pop = null; return; }
+    if (this._pop === which) { this._closePop(); return; }
     this._pop = which;
     this.$pop.style.display = "";
+    this.$scrim.hidden = false;
+    this.$popTitle.textContent =
+      { ind: "Indicators", sty: "Style", cfg: "Chart settings" }[which] || "";
     this.$bar.querySelectorAll("[data-act]").forEach((b) =>
       b.classList.toggle("on", b.dataset.act === which));
     if (which === "ind") this._indicatorPanel();
     else if (which === "sty") this._stylePanel();
     else this._settingsPanel();
+  }
+
+  /* shut by its own button again, by Done, by the scrim behind a bottom
+     sheet, or by Escape */
+  _closePop() {
+    this._pop = null;
+    this.$pop.style.display = "none";
+    this.$scrim.hidden = true;
+    this.$bar.querySelectorAll("[data-act]").forEach((b) => b.classList.remove("on"));
   }
 
   /* ------------------------------------------------------------ settings */
@@ -381,7 +408,7 @@ export class ChartPanel {
       style="display:inline-flex;gap:6px;align-items:center;margin-right:16px;font-size:12.5px">
       <input type="checkbox" data-opt="${k}" style="width:auto" ${o[k] ? "checked" : ""}>
       ${label}</label>`;
-    this.$pop.innerHTML = `
+    this.$popBody.innerHTML = `
       <div style="border:1px solid var(--hairline);border-radius:8px;padding:14px;
                   background:var(--raised)">
         <div style="margin-bottom:12px">
@@ -461,7 +488,7 @@ export class ChartPanel {
       return `<div class="sty-group${cls}">
         <div class="sty-h">${esc(g)}${note}${master}</div>${rows.map(row).join("")}</div>`;
     }).join("");
-    this.$pop.innerHTML = `
+    this.$popBody.innerHTML = `
       <div class="sty-wrap">
         <div class="sty-grid">${html}</div>
         <div class="sty-foot">
@@ -543,7 +570,7 @@ export class ChartPanel {
       </div>`;
     }).join("") || `<div class="faint" style="padding:8px 0">No indicators.</div>`;
 
-    this.$pop.innerHTML = `
+    this.$popBody.innerHTML = `
       <div style="border:1px solid var(--hairline);border-radius:8px;padding:14px;
                   background:var(--raised)">
         ${rows}
