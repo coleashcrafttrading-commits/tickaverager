@@ -40,6 +40,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from qty import qstr
+
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = ROOT / "state"
 AUDIT_PATH = STATE_DIR / "audit.jsonl"
@@ -272,13 +274,25 @@ def cmd_health(a) -> int:
             problems.append({"severity": "high", "what": f"{sym} halted",
                              "detail": t.get("halt_reason", ""),
                              "action": "resolve, then clear_halt"})
-        if t.get("uncovered"):
-            problems.append({"severity": "critical", "what": f"{sym} uncovered shares",
-                             "detail": f"{t['uncovered']} shares have no resting sell",
-                             "action": f"agentctl recover {sym}"})
+        unc, off = float(t.get("uncovered") or 0), float(t.get("offbook_shares") or 0)
+        if unc > 1e-6:
+            if unc <= off + 1e-6:
+                # a fractional lot's DAY exit is off the book inside its retry
+                # timer (or it is dust): the engine re-places it itself, so
+                # this is worth seeing, not an emergency
+                problems.append({"severity": "medium", "what": f"{sym} fractional exit off the book",
+                                 "detail": f"{qstr(unc)} sh wait for the next "
+                                           f"{t.get('fractional_sessions', 'regular')} session or a retry "
+                                           f"(fractional lots rest DAY orders)",
+                                 "action": "none needed -- re-placed by the engine; flatten if it "
+                                           "persists past the session edge"})
+            else:
+                problems.append({"severity": "critical", "what": f"{sym} uncovered shares",
+                                 "detail": f"{qstr(unc)} shares have no resting sell",
+                                 "action": f"agentctl recover {sym}"})
         if not t.get("in_sync"):
             problems.append({"severity": "high", "what": f"{sym} ledger out of sync",
-                             "detail": f"held {t.get('held')} vs ledger {t.get('shares')}",
+                             "detail": f"held {qstr(t.get('held') or 0)} vs ledger {qstr(t.get('shares') or 0)}",
                              "action": "adopt or flatten, then clear_halt"})
         if not t.get("dry_run") and not t.get("running"):
             problems.append({"severity": "low", "what": f"{sym} armed but stopped",

@@ -4968,7 +4968,7 @@ class Engine:
         acct = self.account
         eq, last_eq = float(acct.get("equity") or 0), float(acct.get("last_equity") or 0)
         alpaca = {
-            "qty":              int(float(p["qty"])) if p else 0,
+            "qty":              qnum(p["qty"]) if p else 0,
             "avg_entry_price":  float(p["avg_entry_price"]) if p else 0.0,
             "cost_basis":       float(p["cost_basis"]) if p else 0.0,
             "market_value":     float(p["market_value"]) if p else 0.0,
@@ -4985,9 +4985,9 @@ class Engine:
             "orders": [{
                 "coid":      o.get("client_order_id", ""),
                 "side":      o.get("side", ""),
-                "qty":       int(float(o.get("qty") or 0)),
-                "filled":    int(float(o.get("filled_qty") or 0)),
-                "remaining": int(float(o.get("qty") or 0)) - int(float(o.get("filled_qty") or 0)),
+                "qty":       qnum(o.get("qty")),
+                "filled":    qnum(o.get("filled_qty")),
+                "remaining": qnum(max(0.0, round(qty(o.get("qty")) - qty(o.get("filled_qty")), QTY_DP))),
                 "limit":     float(o.get("limit_price") or 0),
                 "status":    o.get("status", ""),
                 # fixed at submission and NOT changeable afterwards, so a TP
@@ -5004,10 +5004,16 @@ class Engine:
         # counting it as cover reports "uncovered: 0" while shares genuinely
         # have no exit. That is exactly what hid 100 naked RAM shares.
         xside = self.exit_side()
-        covered = sum(o["remaining"] for o in alpaca["orders"]
-                      if o["side"] == xside and o["status"] != "pending_cancel")
+        covered = qnum(round(sum(qty(o["remaining"]) for o in alpaca["orders"]
+                                 if o["side"] == xside and o["status"] != "pending_cancel"), QTY_DP))
         if self.trailing():
             covered = abs(alpaca["qty"])
+        # fractional lots whose exit is not on the book right now (a rejected
+        # DAY exit inside its retry timer, or dust): the honest "uncovered"
+        # figure counts them, but they are not the naked-share emergency the
+        # red banner is for -- the engine re-places them itself
+        offbook = qnum(round(sum(qty(l.shares) for l in led.open_lots
+                                 if not qwhole(l.shares) and not l.tp_client_id), QTY_DP))
 
         # ---- P/L: one scope, TODAY, every figure from Alpaca ----
         # made_today (equity - last_equity) is the fact. It decomposes as
@@ -5045,9 +5051,12 @@ class Engine:
             "reconcile": {
                 "alpaca_shares":  alpaca["qty"],
                 "ledger_shares":  led.shares,
-                "in_sync":        alpaca["qty"] == led.shares,
+                # signed vs signed: a short ladder of -200 against Alpaca's -200
+                # is in sync (the old magnitude compare read every short as out)
+                "in_sync":        qsame(alpaca["qty"], led.signed_shares),
                 "covered_shares": covered,
-                "uncovered":      alpaca["qty"] - covered,
+                "uncovered":      qnum(max(0.0, round(abs(qty(alpaca["qty"])) - covered, QTY_DP))),
+                "offbook_shares": offbook,
                 "alpaca_avg":     alpaca["avg_entry_price"],
                 "ladder_avg":     round(led.avg_price, 4),
                 "avg_differs":    abs(alpaca["avg_entry_price"] - led.avg_price) > 0.0001,
@@ -5079,11 +5088,19 @@ class Engine:
             "attention": list(self.attention.values()),
             "side": led.side,
             "next_side": self.next_side(),
-            "resting_sell_shares": sum(
-                max(0, int(float(o.get("qty") or 0)) - int(float(o.get("filled_qty") or 0)))
-                for o in self.open_orders if o.get("side") == xside),
-            "oversized_lots": len([l for l in self.ledger.open_lots
-                                   if l.shares > int(self.cfg["shares_per_lot"])]),
+            "resting_sell_shares": qnum(round(sum(
+                max(0.0, qty(o.get("qty")) - qty(o.get("filled_qty")))
+                for o in self.open_orders if o.get("side") == xside), QTY_DP)),
+            "oversized_lots": (len([l for l in self.ledger.open_lots
+                                    if l.shares > self._lot_unit() + max(QTY_EPS, MIN_QTY)])
+                               if str(self.cfg.get("size_mode") or "fixed") == "fixed" else 0),
+            # fractional shares: the switch, the window, Alpaca's cached flag and
+            # the cheap reason a fractional next lot cannot open (config + cache only)
+            "fractional": self._fractional_on(),
+            "fractional_sessions": self._frac_sessions(),
+            "fractionable": (getattr(self, "_asset_info", None) or {}).get("fractionable"),
+            "frac_block": self._frac_block(),
+            "offbook_shares": offbook,
             "reconciles_this_hour": len([t for t in self._reconcile_times
                                          if time.time() - t < 3600]),
             "notes": self.cfg.get("notes", ""),
@@ -5126,7 +5143,7 @@ class Engine:
             "closed_count": led.closed_count,
             "broker_qty": self.broker_qty,
             "broker_avg": self.broker_avg,
-            "in_sync": self.broker_qty == led.signed_shares,
+            "in_sync": qsame(self.broker_qty, led.signed_shares),
             "pending_entry": self.pending_entry,
             # touch mode: the resting rungs. Everything here is READ from the
             # ledger and the caches the engine thread's sync leaves behind --
@@ -5155,7 +5172,7 @@ class Engine:
                 "cash": float(self.account.get("cash") or 0),
                 "buying_power": float(self.account.get("buying_power") or 0),
             },
-            "max_exposure": round(int(self.cfg["max_lots"]) * int(self.cfg["shares_per_lot"]) * (px or 0), 2),
+            "max_exposure": round(int(self.cfg["max_lots"]) * qty(self.cfg["shares_per_lot"]) * (px or 0), 2),
             "last_tick_at": self.last_tick_at,
             "last_error": self.last_error,
             "config": dict(self.cfg),
@@ -5176,11 +5193,13 @@ class Engine:
                          for l in led.open_lots) if px
                 else 0.0)
         xside = self.exit_side()
-        covered = sum(max(0, int(float(o.get("qty") or 0)) - int(float(o.get("filled_qty") or 0)))
-                      for o in self.open_orders
-                      if o.get("side") == xside
-                      and o.get("status") != "pending_cancel")
-        held = abs(int(float(p["qty"]))) if p else 0
+        covered = qnum(round(sum(max(0.0, qty(o.get("qty")) - qty(o.get("filled_qty")))
+                                 for o in self.open_orders
+                                 if o.get("side") == xside
+                                 and o.get("status") != "pending_cancel"), QTY_DP))
+        held = qnum(abs(qty(p["qty"]))) if p else 0
+        offbook = qnum(round(sum(qty(l.shares) for l in led.open_lots
+                                 if not qwhole(l.shares) and not l.tp_client_id), QTY_DP))
 
         if self.halted:
             state = "HALTED"
@@ -5213,8 +5232,11 @@ class Engine:
             "max_lots": int(self.cfg["max_lots"]),
             "shares": led.shares,
             "held": held,
-            "in_sync": held == led.shares,
-            "uncovered": max(0, held - covered),
+            "in_sync": qsame(held, led.shares),
+            "uncovered": qnum(max(0.0, round(held - covered, QTY_DP))),
+            "offbook_shares": offbook,
+            "fractional": self._fractional_on(),
+            "fractional_sessions": self._frac_sessions(),
             "avg_price": round(led.avg_price, 4),
             "next_add_at": next_add,
             "take_profit": float(self.cfg["take_profit"]),
@@ -5223,7 +5245,7 @@ class Engine:
             "add_percent": float(self.cfg["add_percent"]),
             "add_trigger": self.cfg.get("add_trigger", "touch"),
             "resting_adds": len(led.resting_adds),
-            "shares_per_lot": int(self.cfg["shares_per_lot"]),
+            "shares_per_lot": qnum(qty(self.cfg["shares_per_lot"])),
             "cost_basis": round(sum(l.cost for l in led.open_lots), 2),
             # the three-layer filter, so the dashboard can SEE what the gate is
             # doing. For a week it read "flat" on five bars and nothing showed it.
@@ -5237,7 +5259,7 @@ class Engine:
             "realized_today": round(led.realized_today, 2),
             "realized_all": round(led.realized_all, 2),
             "closed_count": led.closed_count,
-            "max_exposure": round(int(self.cfg["max_lots"]) * int(self.cfg["shares_per_lot"]) * (px or 0), 2),
+            "max_exposure": round(int(self.cfg["max_lots"]) * qty(self.cfg["shares_per_lot"]) * (px or 0), 2),
             "last_tick_at": self.last_tick_at,
             "last_error": self.last_error,
             "attention": list(self.attention.values()),

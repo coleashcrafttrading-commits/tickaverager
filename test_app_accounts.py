@@ -176,6 +176,20 @@ def main() -> int:
               tj["pairs"][0]["exit_price"], tj["pairs"][0]["side"]), (True, 10.0, 10.1, "long"))
         check("no pair for the bookkeeping write-off", len(tj["pairs"]), 1)
         check("no open lots (no ticker configured)", tj["open_lots"], [])
+        # a fractional trade under a SECOND symbol keeps its size through /trades
+        base2 = {"symbol": "SPY", "dry_run": False}
+        _journal.append({**base2, "event": "open", "lot_id": "SPY-1", "side": "long", "shares": 0.01,
+                         "entry_price": 759.01, "ts": "2026-09-10T14:30:00+00:00"}, jp, "glenn-momentum")
+        _journal.append({**base2, "event": "close", "lot_id": "SPY-1", "side": "long", "shares": 0.01,
+                         "entry_price": 759.01, "exit_price": 759.11, "realized": 0.001,
+                         "entry_time": "2026-09-10T14:30:00+00:00", "ts": "2026-09-10T14:45:00+00:00"}, jp, "glenn-momentum")
+        r = c.get("/api/a/glenn-momentum/ticker/SPY/trades?days=3650")
+        tj2 = r.json()
+        check("a 0.01-share trade keeps its size through /trades",
+              (tj2["entries"][0]["shares"], tj2["exits"][0]["shares"], tj2["pairs"][0]["shares"], tj2["pairs"][0]["win"]),
+              (0.01, 0.01, 0.01, True))
+        check("...and the RAM rows are still whole", (tj["entries"][0]["shares"], type(tj["entries"][0]["shares"]).__name__),
+              (1, "int"))
 
         print("\n3c. live ticks come from the fleet's own snapshot buffer")
         from collections import deque as _dq

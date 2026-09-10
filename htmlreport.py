@@ -23,6 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from qty import qstr
+
 ROOT = Path(__file__).resolve().parent
 REPORT_DIR = ROOT / "reports"
 
@@ -382,7 +384,7 @@ def build_operational(fleet: Any, kind: str = "daily", days: int = 1,
             '<span class="%s">%s</span>' % (cls(t["unrealized"]),
                                             signed(t["unrealized"])),
             "%d/%d" % (t["lot_count"], t["max_lots"]),
-            str(t["shares"]),
+            qstr(t["shares"]),
         ])
     B.append(table(["Ticker", "State", "Opened", "Closed", "Partials",
                     "Realized", "Open P/L", "Lots", "Shares"], trs,
@@ -459,7 +461,7 @@ def build_operational(fleet: Any, kind: str = "daily", days: int = 1,
                          % ("down" if x["age_days"] > 3
                             else "warn" if x["age_days"] > 1 else "dim",
                             x["age_days"]),
-                         str(x["shares"]), money(x["entry_price"], 4),
+                         qstr(x["shares"]), money(x["entry_price"], 4),
                          money(x["tp_price"]), money(x["cost"], 0)]
                         for x in inv[:60]]))
     else:

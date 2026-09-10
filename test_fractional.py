@@ -45,6 +45,25 @@ def _first_diff(a: str, b: str) -> str:
     return f"length {len(a)} vs {len(b)}"
 
 
+def _subset_eq(got, want, path="") -> list:
+    """Every key the golden recorded must be present with the same value;
+    a key the plan ADDED to status() (offbook_shares, the fractional keys)
+    is allowed and listed. Returns the list of differences."""
+    out: list = []
+    if isinstance(want, dict) and isinstance(got, dict):
+        for k, v in want.items():
+            if k not in got:
+                out.append(f"{path}.{k} missing")
+            else:
+                out += _subset_eq(got[k], v, f"{path}.{k}")
+        for k in got:
+            if k not in want:
+                print(f"      (status gained {path}.{k} = {got[k]!r}, not in the golden)")
+    elif got != want:
+        out.append(f"{path}: {got!r} != {want!r}")
+    return out
+
+
 # ====================================================================== 1
 def s01_helpers() -> None:
     print("\n1. qty.py helpers")
@@ -392,13 +411,19 @@ def s07_expiry_and_timer() -> None:
     check("the lot has a live exit", f.broker.by_coid[lot.tp_client_id]["status"], "new")
     check("...flagged as queued for the next regular session",
           "queued for the next regular session" in e.attention.get(f"frac-{lot.id}", ""), True)
-    check("status: uncovered 0", e.status()["reconcile"]["uncovered"], 0)
+    from test_touch_adds import sync_orders
+    sync_orders(e, f)                                          # the next snapshot sees the queued order
+    st = e.status()
+    check("status: uncovered 0, offbook 0 (the queued order counts as cover)",
+          (st["reconcile"]["uncovered"], st["offbook_shares"]), (0, 0))
     f.broker.reject_next_body = "qty must be integer"
     f.broker.settle(lot.tp_client_id, "expired")
     step(e, f)
     check("rejected -> frac-<id> flag, no exit id, timer set",
           (f"frac-{lot.id}" in e.attention, "refused its DAY exit" in e.attention.get(f"frac-{lot.id}", ""),
            lot.tp_client_id, lot.id in e._frac_try_at), (True, True, "", True))
+    st = e.status()
+    check("status: offbook 0.01, uncovered 0.01", (st["offbook_shares"], st["reconcile"]["uncovered"]), (0.01, 0.01))
     n = n_day()
     for _ in range(10):
         step(e, f)
@@ -594,6 +619,16 @@ def s11_dust() -> None:
                               "status": "partially_filled"})
     check("alone: kept and flagged dust-<id>", (qsame(lot.shares, 0.0004), f"dust-{lot.id}" in e.attention), (True, True))
     check("...the flag says what to do", "absorbed by the next lot, or flatten" in e.attention[f"dust-{lot.id}"], True)
+    f.broker.settle(lot.tp_client_id, "canceled")              # its partial exit left the book
+    lot.tp_client_id = ""
+    f.set_position(0.0004)                                     # Alpaca holds the remainder
+    e.broker_qty, e.position = 0.0004, f.position_of("TEST")
+    n = len(f.broker.calls)
+    check("...and _place_tp makes NO call for it", (e._place_tp(lot), len(f.broker.calls) - n), (False, 0))
+    from test_touch_adds import sync_orders
+    sync_orders(e, f)
+    st = e.status()
+    check("...status counts it off the book", (st["offbook_shares"], st["reconcile"]["uncovered"]), (0.0004, 0.0004))
     e, f = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0), (100, 9.9)], broker_qty=200)
     lot = e.ledger.open_lots[0]
     e._book_tp_progress(lot, {"qty": "100", "filled_qty": "99", "filled_avg_price": "10.10", "status": "partially_filled"})
@@ -786,6 +821,102 @@ def s13_journal() -> None:
           (["SPY-t-0009"], 0.01))
 
 
+# ====================================================================== 15
+def s15_status_summary_fleet_health() -> None:
+    print("\n15. status / summary / fleet totals / agentctl health in fractions")
+    import contextlib
+    import io
+    from types import SimpleNamespace
+    import agentctl
+    import fleet as fleet_mod
+    from test_touch_adds import sync_orders
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01, max_lots=20)
+    st = e.status()
+    check("status() is JSON-plain", bool(json.dumps(st)), True)
+    check("max_exposure 20 x 0.01 x 759 = 151.8", st["max_exposure"], 151.8)
+    check("next_lot_shares 0.01", st["next_lot_shares"], 0.01)
+    check("oversized_lots 0", st["oversized_lots"], 0)
+    check("fractional keys", (st["fractional"], st["fractional_sessions"], st["fractionable"], st["frac_block"]),
+          (True, "regular", True, ""))
+    check("reconcile: in sync, nothing uncovered, nothing off the book",
+          (st["reconcile"]["in_sync"], st["reconcile"]["uncovered"], st["reconcile"]["offbook_shares"], st["offbook_shares"]),
+          (True, 0, 0, 0))
+    check("alpaca qty / order rows in fractions",
+          (st["alpaca"]["qty"], st["alpaca"]["orders"][0]["qty"], st["alpaca"]["orders"][0]["remaining"]), (0.01, 0.01, 0.01))
+    sm = e.summary()
+    check("summary shares_per_lot / shares / held / in_sync / uncovered / offbook",
+          (sm["shares_per_lot"], sm["shares"], sm["held"], sm["in_sync"], sm["uncovered"], sm["offbook_shares"]),
+          (0.01, 0.01, 0.01, True, 0, 0))
+    check("summary fractional keys", (sm["fractional"], sm["fractional_sessions"]), (True, "regular"))
+    e2, f2 = frac_engine(fractional="off", shares_per_lot=200, lots=[(200, 10.0, "short")], broker_qty=-200)
+    e2.last_price = 10.0
+    st2 = e2.status()
+    check("in_sync True for ledger -200 vs broker -200 (the sign fix)",
+          (st2["reconcile"]["in_sync"], st2["in_sync"], st2["reconcile"]["uncovered"]), (True, True, 0))
+    sm2 = e2.summary()
+    check("whole-share summary stays ints", (sm2["shares_per_lot"], type(sm2["shares_per_lot"]).__name__,
+          sm2["shares"], type(sm2["held"]).__name__), (200, "int", 200, "int"))
+    # a fractional lot with no exit on the book
+    e3, f3 = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
+    lot = e3.ledger.open_lots[0]
+    f3.broker.settle(lot.tp_client_id, "canceled")
+    lot.tp_client_id = ""
+    sync_orders(e3, f3)
+    st3 = e3.status()
+    check("no exit on the book: offbook 0.01, uncovered 0.01", (st3["offbook_shares"], st3["reconcile"]["uncovered"]), (0.01, 0.01))
+    # fleet totals over a 0.01 ticker and a 100-share one
+    e4, f4 = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0)], broker_qty=100)
+    e4.last_price = 10.0
+    ns = SimpleNamespace(symbols=lambda: ["TEST", "RAM"], engines={"TEST": e, "RAM": e4}, events=[],
+                         is_paper=lambda: True, account={}, market_open=True, _feed_for_now=lambda: "sip",
+                         gcfg={}, portfolio=lambda: {}, snap_at=0.0, snap_error="")
+    ov = fleet_mod.Fleet.overview(ns)
+    check("fleet totals: 0.01 + 100 -> 100.01, offbook 0", (ov["totals"]["shares"], ov["totals"]["offbook"]), (100.01, 0))
+    # agentctl health: off-the-book fractional exit is medium; a real gap is critical
+
+    def health(tick):
+        agentctl._http = lambda *a, **k: {"tickers": [tick], "snap_age": 1, "totals": {}, "portfolio": {}}
+        agentctl._journal_path = lambda: SCRATCH / "no_such_journal.jsonl"
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            agentctl.cmd_health(SimpleNamespace())
+        return json.loads(buf.getvalue())["problems"]
+    base = {"symbol": "SPY", "in_sync": True, "dry_run": False, "running": True, "held": 0.01, "shares": 0.01,
+            "fractional_sessions": "regular"}
+    p = health({**base, "uncovered": 0.01, "offbook_shares": 0.01})
+    check("uncovered 0.01 == offbook 0.01 -> medium, 'off the book'",
+          [(x["severity"], "off the book" in x["what"]) for x in p], [("medium", True)])
+    p = health({**base, "uncovered": 0.02, "offbook_shares": 0.01})
+    check("uncovered 0.02 > offbook 0.01 -> critical", [x["severity"] for x in p], ["critical"])
+    check("...detail counts in fractions", "0.02 shares have no resting sell" in p[0]["detail"], True)
+    p = health({**base, "uncovered": 0, "offbook_shares": 0})
+    check("nothing uncovered -> no problem", p, [])
+
+
+# ====================================================================== 19
+def s19_backtest() -> None:
+    print("\n19. backtest.SimEngine trades fractions in lockstep; whole-share replays are unchanged")
+    import backtest
+    import engine
+    from test_engine_strategy import ramp
+    bars = ramp(60)
+    cfg = {**engine.DEFAULT_CONFIG, "symbol": "SIM", "shares_per_lot": 0.01, "fractional": "on",
+           "size_mode": "fixed", "trend_filter": False, "first_entry": "immediate", "add_mode": "points",
+           "add_distance": 0.10, "take_profit": 0.10, "max_lots": 5, "add_trigger": "close"}
+    r = backtest.run(bars, cfg)
+    trades = r.get("trades") or []
+    check("the replay closed trades", (r["closed_lots"] > 0, len(trades) > 0), (True, True))
+    check("every trade is 0.01 sh", all(abs(float(t["shares"]) - 0.01) < 1e-9 for t in trades), True)
+    pnl = sum((t["exit"] - t["entry"]) * t["shares"] for t in trades)
+    check("each trade realizes 0.10 x 0.01 = $0.001", round(pnl, 6), round(0.001 * r["closed_lots"], 6))
+    check("the report's 2-dp realized agrees", r["realized"], round(pnl, 2))
+    r1 = backtest.run(bars, {**cfg, "shares_per_lot": 1, "fractional": "off"})
+    t1 = r1.get("trades") or []
+    check("spl 1: shares are ints", all(isinstance(t["shares"], int) for t in t1), True)
+    check("...realized = 0.10 x closed", round(r1["realized"], 6), round(0.10 * r1["closed_lots"], 6))
+    check("...same trade count either way", r1["closed_lots"], r["closed_lots"])
+
+
 # ====================================================================== 16
 def s16_touch_adds() -> None:
     print("\n16. touch adds on a fractional ladder: DAY rungs, no churn, whole rungs unchanged")
@@ -854,8 +985,8 @@ def s17_golden() -> None:
                 print(f"      journal row {i} differs:\n        got  {g}\n        want {w}")
                 break
     check("every journal row is identical (ts/hold/cfg aside)", got["journal"] == golden["journal"], True)
-    check("status subset identical", got["status"], golden["status"])
-    check("summary subset identical", got["summary"], golden["summary"])
+    check("every recorded status value identical", _subset_eq(got["status"], golden["status"], "status"), [])
+    check("every recorded summary value identical", _subset_eq(got["summary"], golden["summary"], "summary"), [])
     check("status/summary/next-lot types unchanged", got["types"], golden["types"])
     check("status()['shares'] is int", got["types"]["status_shares"], "int")
 
@@ -863,7 +994,8 @@ def s17_golden() -> None:
 SECTIONS = {1: s01_helpers, 2: s02_config, 3: s03_sizing, 5: s05_entry_and_tp, 6: s06_routing,
             7: s07_expiry_and_timer, 8: s08_partial_tp, 9: s09_reconcile, 10: s10_shorts,
             11: s11_dust, 12: s12_lots_from_history, 13: s13_journal, 14: s14_ledger_bytes,
-            16: s16_touch_adds, 17: s17_golden, 18: s18_broker_submit, 20: s20_flatten}
+            15: s15_status_summary_fleet_health, 16: s16_touch_adds, 17: s17_golden,
+            18: s18_broker_submit, 19: s19_backtest, 20: s20_flatten}
 
 
 def main() -> int:

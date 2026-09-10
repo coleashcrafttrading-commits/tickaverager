@@ -72,6 +72,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 import accounts                                           # noqa: E402
 import journal                                            # noqa: E402
 import scheduler                                          # noqa: E402
+from qty import qty, qnum                                 # noqa: E402
 from engine import TICKER_DEFAULTS, frozen                # noqa: E402
 from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
                    Fleet, get_fleet, supervised)
@@ -539,7 +540,7 @@ def ticker_trades(sym: str, days: int = 30, f: Fleet = Depends(cur)):
         lot_id = str(r.get("lot_id") or "")
         if ev == "open":
             e = {"lot_id": lot_id, "t": r.get("ts"), "price": float(r.get("entry_price") or 0),
-                 "shares": int(r.get("shares") or 0), "side": str(r.get("side") or "long"),
+                 "shares": qnum(r.get("shares")), "side": str(r.get("side") or "long"),
                  "why": str(r.get("why") or ""), "inferred": bool(r.get("inferred"))}
             if e["price"] > 0:
                 opens[lot_id] = e
@@ -549,7 +550,7 @@ def ticker_trades(sym: str, days: int = 30, f: Fleet = Depends(cur)):
             inferred = bool(r.get("inferred")) or price <= 0
             o = opens.get(lot_id) or {}
             x = {"lot_id": lot_id, "t": r.get("ts"), "price": price,
-                 "shares": int(r.get("shares") or 0),
+                 "shares": qnum(r.get("shares")),
                  "side": str(r.get("side") or o.get("side") or "long"),
                  "realized": float(r.get("realized") or 0), "partial": ev == "partial",
                  "entry_t": r.get("entry_time") or o.get("t"),
@@ -567,7 +568,7 @@ def ticker_trades(sym: str, days: int = 30, f: Fleet = Depends(cur)):
         e = f.engine(sym)
         for l in e.ledger.open_lots:
             open_lots.append({"lot_id": l.id, "t": l.entry_time, "price": float(l.entry_price),
-                              "shares": int(l.shares), "side": str(getattr(l, "side", "long") or "long"),
+                              "shares": qnum(l.shares), "side": str(getattr(l, "side", "long") or "long"),
                               "tp_price": float(l.tp_price)})
     except KeyError:
         pass
@@ -715,7 +716,7 @@ def risk(f: Fleet = Depends(cur)):
                 a = float(series[-1]) if series else 0.0
         except Exception:
             a = 0.0
-        spl = int(c["shares_per_lot"])
+        spl = qty(c["shares_per_lot"])              # a 0.01 lot is a real number here, not $0
         maxlots = int(c["max_lots"])
         tp = float(c["take_profit"])
         add = float(c["add_distance"])
@@ -733,10 +734,10 @@ def risk(f: Fleet = Depends(cur)):
             "add_distance": add,
             "tp_in_atr": round(tp / a, 2) if a else None,
             "add_in_atr": round(add / a, 2) if a else None,
-            "shares_per_lot": spl,
+            "shares_per_lot": qnum(spl),
             "max_lots": maxlots,
             "lots_open": len(led.open_lots),
-            "shares_held": held,
+            "shares_held": qnum(held),
             "cost_basis": round(cost, 2),
             "max_exposure": round(full, 2),
             "used_pct": round(100 * len(led.open_lots) / maxlots, 1) if maxlots else 0.0,

@@ -4,6 +4,11 @@ A preset is a bundle of ticker settings. Applying one overwrites exactly
 those keys (through Engine.update_config, so every guard and re-cover rule
 runs) and stamps the ticker's `preset`; editing any setting by hand afterwards
 turns the stamp into "custom". New tickers start on DEFAULT.
+
+`fractional` and `fractional_sessions` are properties of the ticker (does
+Alpaca allow fractions on this asset, and when may they trade), not of a
+strategy: no preset sets them, applying a preset leaves them alone, and
+`infer` ignores them.
 """
 from __future__ import annotations
 
