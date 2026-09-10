@@ -497,6 +497,62 @@ def ticker_action(sym: str, action: str, body: dict = Body(default={}), f: Fleet
     raise HTTPException(404, f"Unknown ticker action {action!r}.")
 
 
+@app.get("/api/a/{acct}/ticker/{sym}/trades")
+@app.get("/api/ticker/{sym}/trades")
+def ticker_trades(sym: str, days: int = 30, f: Fleet = Depends(cur)):
+    """Every fill this account's journal holds for a symbol, shaped for the
+    chart: entries, exits, the closed (entry -> exit) pairs, and the lots still
+    open. Bookkeeping rows (inferred, no real exit price) are marked so the
+    chart can hide them -- they are not trades, they are reconciliation."""
+    sym = sym.upper()
+    rows = journal.load(symbol=sym, days=days or None, path=f.journal_path)
+    opens: dict[str, dict] = {}
+    entries: list[dict] = []
+    exits: list[dict] = []
+    pairs: list[dict] = []
+    for r in rows:
+        if r.get("dry_run"):
+            continue
+        ev = r.get("event")
+        lot_id = str(r.get("lot_id") or "")
+        if ev == "open":
+            e = {"lot_id": lot_id, "t": r.get("ts"), "price": float(r.get("entry_price") or 0),
+                 "shares": int(r.get("shares") or 0), "side": str(r.get("side") or "long"),
+                 "why": str(r.get("why") or ""), "inferred": bool(r.get("inferred"))}
+            if e["price"] > 0:
+                opens[lot_id] = e
+                entries.append(e)
+        elif ev in ("close", "partial"):
+            price = float(r.get("exit_price") or 0)
+            inferred = bool(r.get("inferred")) or price <= 0
+            o = opens.get(lot_id) or {}
+            x = {"lot_id": lot_id, "t": r.get("ts"), "price": price,
+                 "shares": int(r.get("shares") or 0),
+                 "side": str(r.get("side") or o.get("side") or "long"),
+                 "realized": float(r.get("realized") or 0), "partial": ev == "partial",
+                 "entry_t": r.get("entry_time") or o.get("t"),
+                 "entry_price": float(r.get("entry_price") or o.get("price") or 0),
+                 "why": str(r.get("why") or ""), "inferred": inferred}
+            exits.append(x)
+            if x["entry_t"] and x["entry_price"] > 0 and price > 0:
+                pairs.append({"lot_id": lot_id, "side": x["side"], "entry_t": x["entry_t"],
+                              "entry_price": x["entry_price"], "exit_t": x["t"],
+                              "exit_price": price, "shares": x["shares"],
+                              "realized": x["realized"], "win": x["realized"] >= 0,
+                              "partial": x["partial"], "inferred": inferred})
+    open_lots: list[dict] = []
+    try:
+        e = f.engine(sym)
+        for l in e.ledger.open_lots:
+            open_lots.append({"lot_id": l.id, "t": l.entry_time, "price": float(l.entry_price),
+                              "shares": int(l.shares), "side": str(getattr(l, "side", "long") or "long"),
+                              "tp_price": float(l.tp_price)})
+    except KeyError:
+        pass
+    return {"ok": True, "symbol": sym, "days": days, "account": f.account_id,
+            "entries": entries, "exits": exits, "pairs": pairs, "open_lots": open_lots}
+
+
 @app.get("/api/a/{acct}/ticker/{sym}/orders")
 @app.get("/api/ticker/{sym}/orders")
 def ticker_orders(sym: str, status: str = "all", limit: int = 50, f: Fleet = Depends(cur)):

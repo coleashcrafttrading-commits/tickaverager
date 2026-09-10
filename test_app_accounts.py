@@ -150,6 +150,28 @@ def main() -> int:
         r = c.get("/api/a/nobody/overview")
         check("unknown account is 404", r.status_code, 404)
 
+        print("\n3b. the chart's trade history comes from the account's journal")
+        import journal as _journal
+        jp = app_mod.REG.fleet("glenn-momentum").journal_path
+        base = {"symbol": "RAM", "dry_run": False}
+        _journal.append({**base, "event": "open", "lot_id": "RAM-1", "side": "long", "shares": 1,
+                         "entry_price": 10.0, "ts": "2026-09-10T14:30:00+00:00"}, jp, "glenn-momentum")
+        _journal.append({**base, "event": "close", "lot_id": "RAM-1", "side": "long", "shares": 1,
+                         "entry_price": 10.0, "exit_price": 10.1, "realized": 0.1,
+                         "entry_time": "2026-09-10T14:30:00+00:00", "ts": "2026-09-10T14:45:00+00:00"}, jp, "glenn-momentum")
+        _journal.append({**base, "event": "close", "lot_id": "RAM-0", "shares": 1, "entry_price": 9.0,
+                         "exit_price": 0.0, "realized": 0.0, "inferred": True,
+                         "ts": "2026-09-10T14:46:00+00:00"}, jp, "glenn-momentum")
+        r = c.get("/api/a/glenn-momentum/ticker/RAM/trades?days=3650")
+        check("trades 200", r.status_code, 200)
+        tj = r.json()
+        check("one entry, one real exit, one inferred exit", (len(tj["entries"]), len(tj["exits"]),
+              [x["inferred"] for x in tj["exits"]]), (1, 2, [False, True]))
+        check("the closed pair is a win with both ends", (tj["pairs"][0]["win"], tj["pairs"][0]["entry_price"],
+              tj["pairs"][0]["exit_price"], tj["pairs"][0]["side"]), (True, 10.0, 10.1, "long"))
+        check("no pair for the bookkeeping write-off", len(tj["pairs"]), 1)
+        check("no open lots (no ticker configured)", tj["open_lots"], [])
+
         print("\n4. the account gets its own files")
         acc = app_mod.REG.get("glenn-momentum")
         check("config.json under the account dir", acc.config_path.exists(), True)
