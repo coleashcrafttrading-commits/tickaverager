@@ -26,6 +26,11 @@ BASIC = {
     "add_mode": "points",
     "add_distance": 0.10,
     "take_profit": 0.10,
+    # adds are GTC limits resting at the next three rungs, so an intracandle
+    # touch fills them; every fill (add or take-profit) re-anchors the rungs
+    "add_trigger": "touch",
+    "add_anchor": "last_fill",
+    "add_depth": 3,
     "exit_mode": "limit",
     "max_lots": 100000,
     "reversal_mode": "off",
@@ -45,8 +50,10 @@ BASIC = {
 PRESETS: dict[str, dict[str, Any]] = {
     "basic": {
         "label": "Basic $0.10 ladder",
-        "description": "First red 1-minute candle -> 1 share; +1 share every $0.10 down; "
-                       "each lot exits $0.10 up. No filter, no flip, no cap, no lot limit, any hour.",
+        "description": "First red 1-minute candle -> 1 share; +1 share every $0.10 down, three rungs "
+                       "resting at Alpaca so an intracandle touch fills them; after any fill (add or "
+                       "take-profit) the next rung is $0.10 from that fill; each lot exits $0.10 up. "
+                       "No filter, no flip, no cap, no lot limit, any hour.",
         "settings": dict(BASIC),
     },
     "ladder_v3": {

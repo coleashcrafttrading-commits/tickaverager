@@ -325,6 +325,15 @@ def _order_ts(o: dict) -> float:
         return 0.0
 
 
+def _adds_notional(led) -> float:
+    """Notional of the touch-mode rungs still WORKING at Alpaca (price x the
+    shares not yet booked as a lot). Module level so the sizing cap, which
+    the backtester borrows on a bare Ledger, can read it without an engine."""
+    return sum(float(r["price"]) * (float(r["shares"]) - float(r.get("booked") or 0))
+               for r in (getattr(led, "resting_adds", None) or [])
+               if r.get("state") == "working")
+
+
 def frozen(state_dir: Optional[Path] = None) -> str:
     """Non-empty reason when trading is frozen for the whole machine -- or,
     given an account's state_dir, for that account (checked SECOND: the
@@ -809,6 +818,10 @@ class Engine:
                                        # before reconcile can mistake them for a gap
         self._reconcile()          # fills, TPs, sync guard
         self._trail_lots()         # trail mode: arm, track the peak, exit
+        # touch mode: keep the resting rungs in step with the ladder. BEFORE the
+        # halted return, so a halt cancels them on the very next tick; AFTER
+        # reconcile, which has already booked their fills and moved the anchor.
+        self._sync_resting_adds()
 
         if self.halted:
             return
@@ -941,17 +954,24 @@ class Engine:
         b = self.broker
         assert b
 
+        open_orders = self.fleet.orders_of(self.symbol)
+        self.open_orders = open_orders
+
         # ---- 1. a working entry order: fill / cancel / timeout ----
         if self.pending_entry:
             self._check_pending_entry()
+
+        # ---- 1b. touch mode: resting adds that filled, partialled, or died ----
+        # Before the TP step and the orphan adopt: a rung's fill must be a
+        # booked lot (TP resting) before adopt could spend a call re-finding
+        # it, and before the sync guard could count it as a strike.
+        self._book_resting_adds(open_orders)
 
         # ---- 2. resting TPs: did any fill, PARTIALLY fill, or vanish? ----
         # A partially_filled order is still returned by status=open, so it is
         # NOT enough to ask "is it still resting?" -- every tick we compare the
         # order's filled_qty against what this lot has already booked. Missing
         # that is what let 75 shares sell without the ledger noticing.
-        open_orders = self.fleet.orders_of(self.symbol)
-        self.open_orders = open_orders
         # "exits" are sells for a long ladder and buys for a short one. Reading
         # this from the ladder's own side is what keeps every guard below --
         # cover, orphan, over-cover -- looking at the right half of the book.
@@ -2192,13 +2212,16 @@ class Engine:
             return f
         return "boats" if self._session_now() == "overnight" else "sip"
 
-    def block_reason(self, ignore_reverse: bool = False, ignore_session: bool = False) -> str:
+    def block_reason(self, ignore_reverse: bool = False, ignore_session: bool = False,
+                     ignore_portfolio: bool = False) -> str:
         """Why an entry can't fire right now -- '' means clear to trade.
         ignore_reverse is for the reversal's own re-opening entries, which
         must not be blocked by the very flip they are completing;
         ignore_session lets those same entries run outside the new-lot window
         (they are not new risk -- the same shares the ladder held a minute
-        ago -- and the close that preceded them had no window either)."""
+        ago -- and the close that preceded them had no window either);
+        ignore_portfolio skips the fleet's cash/exposure caps -- the resting
+        adds ask those separately, with the notional they actually reserve."""
         fz = frozen(_sdir_of(self))
         if fz:                                       return f"FROZEN: {fz}"
         if self.halted:                              return f"HALTED: {self.halt_reason}"
@@ -2223,6 +2246,7 @@ class Engine:
                 and self._in_wind_down():
             return "wind-down: no new lots"
         tb = self._trend_entry_block()
+        self._trend_block_text = tb                  # the resting adds treat this reason as 'sticky'
         if tb:                                       return tb
         if self.pending_entry:                       return "entry order working"
         uw = self.ledger.unwind or {}
@@ -2237,7 +2261,7 @@ class Engine:
         # portfolio caps: only the fleet can see what the OTHER ladders are
         # holding, so the account-wide limits are asked about here
         f = getattr(self, "fleet", None)
-        if f is not None:
+        if f is not None and not ignore_portfolio:
             cost = int(self.cfg["shares_per_lot"]) * (self.last_price or 0)
             blocked = f.entry_block(self.symbol, cost)
             if blocked:
@@ -2251,6 +2275,10 @@ class Engine:
         self.last_bar = bar
         if bar["t"] == self.last_bar_ts:
             return                                     # already judged this bar
+        if self.ledger.resting_adds and not self.ledger.open_lots:
+            # flat, but a rung is still cancelling and can still fill: judge
+            # this bar again next tick rather than open lot 1 over it
+            return
         self.last_bar_ts = bar["t"]
 
         if self.block_reason():
@@ -2275,6 +2303,9 @@ class Engine:
             if ok:
                 self._submit_entry(why, t_trigger=t_trig)
             return
+
+        if self._touch_mode():
+            return          # adds are resting limits at Alpaca; a bar close only ever opens the FIRST lot
 
         if self._add_trigger_met(c):
             self._submit_entry(self._add_reason(c), t_trigger=t_trig)
@@ -3000,17 +3031,21 @@ class Engine:
                       f"Its take-profit will be re-placed on the next tick.")
             return False
 
-    def _lot_shares(self) -> int:
+    def _lot_shares(self, price: float = 0.0, extra_deployed: float = 0.0) -> int:
         """How many shares the next lot should be.
 
         Fixed share counts mean a $12 stock and a $500 one carry wildly
         different risk for the same 'lot'. Dollar and ATR sizing make a lot mean
         the same thing whatever the symbol.
+
+        `price` sizes the lot at a level other than the tape (a resting rung);
+        `extra_deployed` is notional the caller has already committed in the
+        same burst (the shallower rungs), counted against the ladder cap.
         """
         mode = self.cfg.get("size_mode", "fixed")
         lo = max(1, int(self.cfg.get("min_shares", 1)))
         hi = max(lo, int(self.cfg.get("max_shares", 100000)))
-        price = self.last_price or 0.0
+        price = price or self.last_price or 0.0
 
         if mode == "fixed" or price <= 0:
             n = int(self.cfg["shares_per_lot"])
@@ -3030,9 +3065,9 @@ class Engine:
         else:
             n = int(self.cfg["shares_per_lot"])
         n = max(lo, min(hi, max(1, n)))
-        return self._cap_to_ladder(n, price)
+        return self._cap_to_ladder(n, price, extra_deployed)
 
-    def _cap_to_ladder(self, n: int, price: float) -> int:
+    def _cap_to_ladder(self, n: int, price: float, extra_deployed: float = 0.0) -> int:
         """Truncate the next lot so the ladder never exceeds f_ladder of equity.
 
         E_max = f_ladder * live equity, in COST BASIS. The last lot is cut down
@@ -3055,7 +3090,9 @@ class Engine:
         if self.cfg.get("size_mode") == "dollars" and int(self.cfg.get("n_target", 0) or 0) > 0:
             lot_dollars = e_max / int(self.cfg["n_target"])
             n = min(n, max(1, int(lot_dollars / price)))
-        deployed = sum(l.cost for l in self.ledger.open_lots)
+        # what the ladder holds, plus the touch-mode rungs already resting
+        # (each reserves a lot of buying power), plus this burst so far
+        deployed = sum(l.cost for l in self.ledger.open_lots) + _adds_notional(self.ledger) + extra_deployed
         room = e_max - deployed
         q_cap = int(room / price) if room > 0 else 0
         lo = max(1, int(self.cfg.get("min_shares", 1)))
@@ -3321,6 +3358,9 @@ class Engine:
         if side == "long" and (self.broker_qty or 0) < 0:
             self.ev("WARN", "long entry skipped -- Alpaca still holds a short position.")
             return False
+        if not shares and self.ledger.resting_adds:          # working OR cancelling -- either can still fill
+            self.ev("WARN", "entry skipped -- resting add(s) are working or settling (touch mode)")
+            return False
         shares = int(shares) if shares else self._lot_shares()
         if shares <= 0:
             return False
@@ -3479,6 +3519,546 @@ class Engine:
                 return                       # reconcile handles these paths
 
     # ==================================================================
+    # RESTING ADDS (touch mode)
+    #
+    # In touch mode the ladder's ADDS are GTC limit entries resting at Alpaca,
+    # one per rung (k = 1..add_depth from the anchor), exactly the way the
+    # take-profits rest -- so an intracandle touch fills them instead of
+    # waiting for a bar to close past the level. Each resting add is a lot in
+    # waiting: a record in Ledger.resting_adds with client id en-<lot_id>,
+    # booked from Alpaca's filled_qty by _book_resting_adds (reconcile step
+    # 1b) through the ordinary _open_lot, which rests the TP. The FIRST entry
+    # when flat is still the bar rule in _maybe_decide. Exits are never
+    # touched by anything here: no code path cancels a TP to make room.
+    #
+    # The per-tick sync (_sync_resting_adds) re-derives the wanted rung set
+    # and diffs it against the records BY PRICE, so a fill exactly at rung 1
+    # costs zero cancels: the old rungs 2..depth are the new rungs 1..depth-1
+    # and only the new deepest one is placed. A cancel and its replacement
+    # are never sent in the same tick -- Alpaca still holds the cancelling
+    # order's buying power, and a same-tick replace is where the
+    # held_for_orders / insufficient qty / wash trade rejections come from.
+    # ==================================================================
+    def _touch_mode(self) -> bool:
+        """Adds rest at Alpaca as GTC limits (the default). Off for the
+        beyond_average rule (no fixed rung), for strategy-driven entries and
+        for add_trigger=close -- those judge adds on bar closes, as before."""
+        return (str(self.cfg.get("add_trigger") or "touch").lower() == "touch"
+                and self.cfg.get("add_mode") != "beyond_average"
+                and not self.cfg.get("strategy_entries"))
+
+    def _adds_settling(self) -> bool:
+        """A cancel is in flight and young enough that Alpaca may still
+        report a fill on it: the sync guard and the orphan adopt wait."""
+        now = time.time()
+        return any(r.get("state") == "cancelling"
+                   and now - float(r.get("cancel_at") or now) < ADD_CANCEL_WARN_SECONDS
+                   for r in self.ledger.resting_adds)
+
+    def _adds_working_notional(self) -> float:
+        return _adds_notional(self.ledger)
+
+    def _adds_hold_reason(self) -> str:
+        """'' = place freely.
+        'cancel: ...' = the reason for the orders is gone; cancel them NOW.
+        'sticky: ...' = a reason that can be a stale snapshot (fleet.market_open
+                        for up to one clock read at 09:30, a trend bias that
+                        flickers per bar); cancel only when it persists across
+                        ADD_BLOCK_MIN_STRIKES distinct fleet.snap_at.
+        'wait: ...'   = the picture is momentarily unreliable; neither place
+                        nor cancel. A fill during a wait is still booked."""
+        br = self.block_reason(ignore_portfolio=True)
+        if br:
+            if br.startswith("market closed") or br == getattr(self, "_trend_block_text", None):
+                return f"sticky: {br}"
+            return f"cancel: {br}"
+        if not self.ledger.open_lots:
+            return "cancel: flat -- the first entry is the bar rule"
+        side = self.ledger.side
+        mode = str(self.cfg.get("side_mode") or "auto").lower()
+        if mode == "short" and side == "long":
+            return "cancel: side_mode=short over a long ladder"
+        if mode in ("long", "auto") and side == "short":
+            return f"cancel: side_mode={mode} over a short ladder"
+        if side == "short" and not self._short_allowed():
+            return "cancel: no borrow for a short add"
+        if self.broker_qty and self.broker_side() != side:
+            return "cancel: Alpaca is on the other side"
+        if self._session_now() == "overnight" and self._asset_flags().get("overnight") is False:
+            return "cancel: not overnight-tradable"
+        f = getattr(self, "fleet", None)
+        if f is not None:
+            # KEEP decision, asked with cost 0: Alpaca's buying_power already
+            # nets the resting rungs, so asking with a lot's cost here is what
+            # oscillates (cancel, re-place, cancel...) when reserve_cash is tight
+            blocked = f.entry_block(self.symbol, 0.0, resting=self._adds_working_notional())
+            if blocked:
+                return f"wait: {blocked}"
+        if self.broker_qty != self.ledger.signed_shares:
+            return "wait: ledger and Alpaca disagree"
+        if (self.last_price or 0) <= 0:
+            return "wait: no price yet"
+        if self._adds_settling():
+            return "wait: a cancel is settling"
+        if time.time() < self._adds_backoff_until:
+            return f"wait: adds backing off ({int(self._adds_backoff_until - time.time())}s)"
+        return ""
+
+    def _desired_rungs(self) -> tuple:
+        """(rungs, skipped): rungs = [(k, price, shares)] the ladder wants
+        resting right now; skipped = why a rung was left out. Writes no
+        engine state -- status() reads the cache the sync leaves behind."""
+        depth = min(max(1, int(self.cfg.get("add_depth") or 1)), ADD_MAX_DEPTH,
+                    int(self.cfg["max_lots"]) - len(self.ledger.open_lots))
+        out: list = []
+        extra, skipped = 0.0, ""
+        xside = self.exit_side()
+        exits = [float(o.get("limit_price") or 0) for o in self.open_orders
+                 if o.get("side") == xside and o.get("status") != "pending_cancel"
+                 and float(o.get("limit_price") or 0) > 0]
+        d = self._dir(self.ledger.side)
+        for k in range(1, depth + 1):
+            px = self._rung_price(k)
+            if not px:
+                break
+            # a BUY rung at or above one of our own resting SELL exits is a
+            # wash trade at Alpaca (mirrored for a short ladder)
+            if exits and ((d > 0 and px >= min(exits)) or (d < 0 and px <= max(exits))):
+                skipped = f"rung {k} ${px:.2f} would cross a resting exit -- skipped"
+                continue
+            n = self._lot_shares(price=px, extra_deployed=extra)
+            if n <= 0:
+                break                              # f_ladder cap: flagged by _cap_to_ladder
+            out.append((k, px, n))
+            extra += px * n
+        return out, skipped
+
+    def _sync_resting_adds(self) -> None:
+        """Once per tick, after reconcile has booked fills and moved the
+        anchor: cancel the rungs the ladder no longer wants, then (on a later
+        tick) place the ones it is missing."""
+        if not self.broker:
+            return
+        recs = self.ledger.resting_adds
+        working = any(r.get("state") == "working" for r in recs)
+
+        if not self._touch_mode():
+            if working:
+                why = ("add_mode=beyond_average has no fixed rung"
+                       if self.cfg.get("add_mode") == "beyond_average"
+                       else "strategy entries" if self.cfg.get("strategy_entries")
+                       else "touch mode off")
+                self._retire_resting_adds(why)
+            self._adds_want = []
+            return
+
+        if self.cfg["dry_run"]:
+            if working:
+                self._retire_resting_adds("dry run")      # the orders were real when armed
+            want, _ = self._desired_rungs()
+            self._adds_want = want
+            key = repr(want)
+            if key != self._adds_dry_key and want \
+                    and not self._adds_hold_reason().startswith(("cancel:", "sticky:")):
+                self._adds_dry_key = key
+                word = "SELL" if self.ledger.side == "short" else "BUY"
+                kind = (self.ledger.last_fill or {}).get("kind") or "last open"
+                self.ev("DRY", f"[dry] would rest {word} "
+                               + ", ".join(f"{n} @ {p:.2f}" for _, p, n in want)
+                               + f" (rung{'s 1' if len(want) > 1 else ''}-{len(want)} from anchor "
+                                 f"{_anchor_of(self):.2f} {kind})")
+            return
+
+        # ---- what may rest at all ----
+        hold = self._adds_hold_reason()
+        if hold.startswith("sticky:"):
+            snap = float(getattr(self.fleet, "snap_at", 0.0) or 0.0)
+            if hold != self._adds_block_text:
+                self._adds_block_text = hold
+                self._adds_block_strikes = 0
+                self._adds_block_snap = 0.0
+            if snap != self._adds_block_snap:
+                self._adds_block_snap = snap
+                self._adds_block_strikes += 1
+            if self._adds_block_strikes >= ADD_BLOCK_MIN_STRIKES:
+                hold = "cancel: " + hold[len("sticky: "):]
+            else:
+                self._adds_hold = hold
+                return                                     # keep the rungs this tick
+        else:
+            self._adds_block_text = ""
+            self._adds_block_strikes = 0
+            self._adds_block_snap = 0.0
+        self._adds_hold = hold
+        if hold.startswith("cancel:"):
+            self._retire_resting_adds(hold)
+            self._adds_want = []
+            return
+        if hold.startswith("wait:"):
+            return
+
+        # ---- the diff, keyed by price ----
+        want, skipped = self._desired_rungs()
+        self._adds_want = want
+        if skipped:
+            self._adds_hold = skipped
+        wantkey = {round(p * 100): (k, p, n) for k, p, n in want}
+        side, xh = self.ledger.side, self.wants_extended()
+        fixed = str(self.cfg.get("size_mode") or "fixed") == "fixed"
+        tol = 0.0                                          # points/percent: the cent IS the tolerance
+        if self.cfg.get("add_mode") == "atr":
+            # the ATR rung breathes every bar; every re-price is a cancel, a
+            # placement and a burnt lot id, so it needs a real reason
+            tol = max(ADD_REPRICE_MIN, ADD_REPRICE_ATR_FRAC * self._atr_rung_distance())
+        satisfied: set = set()
+        unwanted: list = []
+        for r in recs:
+            if int(r.get("booked") or 0) >= int(r["shares"]):
+                continue            # fully filled, merely awaiting its terminal read: never cancel it
+            if r.get("state") != "working":
+                continue            # already on its way out
+            rp = float(r["price"])
+            rkey = round(rp * 100)
+            match = None
+            for key, (k, p, n) in wantkey.items():
+                if key in satisfied:
+                    continue
+                if rkey == key or (tol > 0 and abs(rp - p) <= tol + 1e-9):
+                    match = (key, n)
+                    break
+            ok = match is not None and r.get("side") == side and bool(r.get("xh")) == xh
+            if ok:
+                rs, n = int(r["shares"]), match[1]
+                ok = (rs == n) if fixed else (abs(rs - n) <= 0.10 * max(n, 1))
+            if ok:
+                satisfied.add(match[0])
+            else:
+                unwanted.append(r)
+
+        if unwanted:
+            wanted_px = [p for _, p, _ in want]
+            issued = 0
+            for r in unwanted[:10]:
+                if self._cancel_resting_add(r, f"rung moved: wanted {wanted_px}"):
+                    issued += 1
+            # attempted or done: nothing is placed in a cancel tick
+            self._adds_last_cancel_tick = self.loop_count
+            if issued < len(unwanted[:10]):
+                self._adds_hold = "wait: a cancel did not go through -- retrying next tick"
+            return
+        if self.loop_count == self._adds_last_cancel_tick:
+            return
+
+        # ---- place what is missing, shallowest first, one burst ----
+        missing = [(k, p, n) for key, (k, p, n) in sorted(wantkey.items(), key=lambda kv: kv[1][0])
+                   if key not in satisfied]
+        if not missing:
+            self._adds_hold = skipped
+            self.unflag("adds")
+            return
+        new_cost = 0.0                                  # notional placed in THIS burst only
+        bp = float(self.account.get("buying_power") or 0)   # Alpaca already nets the working rungs
+        resting = self._adds_working_notional()         # counted ONLY towards the exposure cap
+        f = getattr(self, "fleet", None)
+        for k, p, n in missing:
+            cost = p * n
+            if bp and new_cost + cost > bp:
+                self.flag("bp", f"Not enough buying power for the next {self.symbol} lot: "
+                                f"need ~${cost:,.0f}, have ${bp:,.0f}. Waiting, not halting.")
+                self._adds_hold = f"wait: buying power ${bp:,.0f} < ${new_cost + cost:,.0f} for rung {k}"
+                return
+            blocked = f.entry_block(self.symbol, new_cost + cost, resting=resting) if f is not None else ""
+            if blocked:
+                self._adds_hold = f"wait: {blocked}"
+                return
+            if not self._place_resting_add(k, p, n, side):
+                return
+            new_cost += cost
+        self.unflag("bp")
+        self._adds_hold = skipped
+        self.unflag("adds")
+
+    def _place_resting_add(self, k: int, price: float, shares: int, side: str) -> bool:
+        """Rest one rung. Returns True only when a record now exists for a
+        working (or already filled) order at Alpaca."""
+        b = self.broker
+        assert b
+        short = side == "short"
+        xh = self.wants_extended()
+        depth = max(1, int(self.cfg.get("add_depth") or 1))
+        word = "SELL" if short else "BUY"
+        for _ in range(3):
+            lot_id = self.ledger.next_lot_id()
+            self.ledger.save()                              # a burnt id is retired for ever
+            coid = f"en-{lot_id}"
+            t0 = time.perf_counter()
+            place = b.sell_limit_gtc if short else b.buy_limit_gtc
+            try:
+                o = place(self.symbol, shares, price, coid, extended_hours=xh)
+            except AlpacaError as e:
+                body = (e.body or str(e)).lower()
+                if "client_order_id" in body:
+                    existing = b.order_by_client_id(coid) or {}
+                    if existing.get("status") in self.LIVE_STATUSES:
+                        o = existing                        # genuinely already resting
+                    else:
+                        continue                            # id is burnt -- take a new one
+                elif short and "cannot be sold short" in body:
+                    af = dict(self._asset_flags())
+                    af["shortable"] = False
+                    self._asset_info = af
+                    self.flag("short", f"{self.symbol}: Alpaca has no borrow for this name "
+                                       f"({str(e)[:80]}) -- SHORT entries only; long entries are "
+                                       f"unaffected. Clears when the borrow returns or the ladder "
+                                       f"goes long-only.")
+                    return False
+                elif "wash trade" in body:
+                    # our own resting exit sits at or through this level: a soft
+                    # skip, re-tried on every diff, never a backoff
+                    self.flag("adds", f"rung {k} ${price:.2f} crosses a resting exit at Alpaca -- skipped")
+                    return False
+                elif "held_for_orders" in body or "insufficient qty" in body:
+                    self.ev("WARN", f"rung {k} not accepted yet ({str(e)[:100]}) -- a cancel is still settling")
+                    self._adds_backoff(str(e))
+                    return False
+                elif "insufficient" in body or "buying power" in body:
+                    self.flag("bp", f"Not enough buying power for rung {k} of {self.symbol}: "
+                                    f"{str(e)[:100]}. Waiting, not halting.")
+                    self._adds_backoff(str(e))
+                    return False
+                else:
+                    self.flag("adds", body[:120])
+                    self._adds_backoff(str(e))
+                    return False
+            placed_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+            st = o.get("status")
+            filled = int(float(o.get("filled_qty") or 0))
+            if st == "filled" or st in self.LIVE_STATUSES:
+                rec = {"lot_id": lot_id, "coid": coid, "order_id": o.get("id", ""), "k": k,
+                       "price": price, "shares": shares, "side": side, "xh": xh,
+                       "state": "working", "placed_at": time.time(), "placed_ms": placed_ms,
+                       "anchor": _anchor_of(self), "booked": 0, "hot_at": 0.0}
+                self.ledger.resting_adds.append(rec)
+                self.ledger.save()
+                self._adds_reject_streak = 0
+                self.unflag("adds")
+                self.ev("ORDER", f"ADD resting: {word} {shares} {self.symbol} @ ${price:.2f} GTC "
+                                 f"(rung {k}/{depth}, lot {lot_id}, {placed_ms:.0f} ms"
+                                 f"{', extended hours' if xh else ''})")
+                try:
+                    journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self),
+                                         event="add_rested", lot_id=lot_id, coid=coid, price=price,
+                                         shares=shares, k=k, anchor=rec["anchor"], side=side,
+                                         placed_ms=placed_ms)
+                except Exception:
+                    pass
+                if filled > 0:
+                    self._book_resting_add(rec, o)          # market was already through the rung: TP up NOW
+                if st == "filled":
+                    self._forget_add(rec, "filled", filled=filled)   # terminal already: nothing left to diff
+                return True
+            self.ev("WARN", f"resting add {coid} came back {st} -- retrying with a fresh id")
+        self.flag("adds", f"rung {k} ${price:.2f} did not stick after 3 attempts")
+        return False
+
+    def _adds_backoff(self, why: str) -> None:
+        """A rejected rung pauses NEW rungs for a while. It never touches the
+        entry backoff (block_reason would cancel the healthy rungs), the rungs
+        already resting, or any exit."""
+        self._adds_reject_streak += 1
+        wait = min(ADD_REJECT_MAX_BACKOFF, ADD_REJECT_BACKOFF * self._adds_reject_streak)
+        self._adds_backoff_until = time.time() + wait
+        self.flag("adds", f"{why[:140]}. No new resting adds for {wait}s "
+                          f"(attempt {self._adds_reject_streak}); the rungs already resting and "
+                          f"every exit are untouched.")
+        try:
+            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self),
+                                 event="add_rejected", why=why[:200], wait_s=wait,
+                                 attempt=self._adds_reject_streak)
+        except Exception:
+            pass
+
+    def _cancel_resting_add(self, rec: dict, why: str) -> bool:
+        """Ask Alpaca to cancel one rung. The record STAYS (state 'cancelling')
+        until a terminal read: a cancel is never proof the order did not fill."""
+        b = self.broker
+        if not b:
+            return False
+        coid = rec.get("coid", "")
+        try:
+            b.cancel(rec.get("order_id") or "")            # 404/422 = already gone or filled: swallowed
+        except AlpacaError as e:                            # 429 / 5xx: leave it working, retry next tick
+            warn_at = getattr(self, "_warn_at", None)
+            now = time.time()
+            if warn_at is None or now - warn_at.get(f"addcancel-{coid}", 0) >= 60:
+                if warn_at is not None:
+                    warn_at[f"addcancel-{coid}"] = now
+                self.ev("WARN", f"cancel of resting add {coid} failed ({e.status}) -- will retry")
+            return False
+        rec["state"] = "cancelling"
+        rec["cancel_at"] = time.time()
+        rec["why"] = why
+        self.ledger.save()
+        self.ev("INFO", f"ADD cancel: rung {rec.get('k')} ${float(rec.get('price') or 0):.2f} "
+                        f"(lot {rec.get('lot_id')}) -- {why}")
+        return True
+
+    def _retire_resting_adds(self, why: str) -> int:
+        """Cancel every WORKING rung. Never raises; returns how many cancels
+        went out. Safe on engines with no broker or an empty ledger."""
+        recs = getattr(getattr(self, "ledger", None), "resting_adds", None)
+        if not recs or not getattr(self, "broker", None):
+            return 0
+        n = 0
+        for rec in list(recs):
+            if rec.get("state") != "working":
+                continue
+            try:
+                if self._cancel_resting_add(rec, why):
+                    n += 1
+            except Exception as e:                          # one failure never skips the rest
+                LOG.warning("%s: cancel of resting add %s: %s", self.symbol, rec.get("coid"), e)
+        if n:
+            warn_at = getattr(self, "_warn_at", None)
+            now = time.time()
+            if warn_at is None or now - warn_at.get("adds-retire", 0) >= 30:
+                if warn_at is not None:
+                    warn_at["adds-retire"] = now
+                self.ev("INFO", f"{n} resting add(s) cancelled -- {why}")
+        return n
+
+    def _forget_add(self, rec: dict, why: str, filled: int = 0) -> None:
+        before = len(self.ledger.resting_adds)
+        self.ledger.resting_adds = [r for r in self.ledger.resting_adds if r is not rec]
+        if len(self.ledger.resting_adds) == before:
+            return                                          # already gone
+        self.ledger.save()
+        try:
+            journal.record_event(self.symbol, path=_jpath_of(self), account=_aid_of(self),
+                                 event="add_filled" if why == "filled" else "add_cancelled",
+                                 lot_id=rec.get("lot_id"), coid=rec.get("coid"), k=rec.get("k"),
+                                 price=rec.get("price"), shares=rec.get("shares"),
+                                 filled=filled, why=why)
+        except Exception:
+            pass
+
+    def _book_resting_adds(self, open_orders: list) -> None:
+        """Reconcile step 1b: for every resting-add record, book what filled
+        (a lot with its TP, at once), drop what died, and flag a cancel that
+        will not confirm. Costs nothing for a ladder with no records; one
+        order read per record that left the snapshot, changed, or is within
+        the hot band of the tape (rate-limited)."""
+        recs = list(self.ledger.resting_adds)
+        if not recs:
+            return
+        b = self.broker
+        if not b:
+            return
+        snap = {o.get("client_order_id"): o for o in (open_orders or [])}
+        now = time.time()
+        last = float(self.last_price or 0)
+        for rec in recs:
+            coid = rec.get("coid", "")
+            o = snap.get(coid)
+            booked = int(rec.get("booked") or 0)
+            price = float(rec.get("price") or 0)
+            d = self._dir(rec.get("side") or self.ledger.side)
+            hot = (rec.get("state") == "working" and last > 0
+                   and ((last <= price + ADD_HOT_BAND) if d > 0 else (last >= price - ADD_HOT_BAND))
+                   and now - float(rec.get("hot_at") or 0) >= ADD_HOT_CONFIRM_SECONDS)
+            if (o and o.get("status") in self.LIVE_STATUSES
+                    and int(float(o.get("filled_qty") or 0)) == booked
+                    and rec.get("state") == "working" and not hot):
+                continue                                    # resting, untouched: no API call
+            if hot:
+                rec["hot_at"] = now
+            try:
+                full = b.order_by_client_id(coid)
+            except AlpacaError as e:
+                self.ev("WARN", f"resting add {coid}: order read failed ({e.status}) -- next tick")
+                continue
+            o = full or o
+            if not o:
+                self.ev("WARN", f"resting add {coid} not found at Alpaca -- dropping the record")
+                self._forget_add(rec, "missing")
+                continue
+            st = o.get("status")
+            filled = int(float(o.get("filled_qty") or 0))
+            if filled - booked > 0:
+                self._book_resting_add(rec, o)              # books the delta, may cancel the remainder
+            if st in ADD_TERMINAL or st == "filled":
+                if st == "rejected" and filled == 0:
+                    self._adds_backoff(f"resting add {coid} rejected")
+                self._forget_add(rec, "filled" if st == "filled" else str(st), filled=filled)
+                continue
+            if rec.get("state") == "cancelling":
+                age = now - float(rec.get("cancel_at") or now)
+                if age > ADD_CANCEL_WARN_SECONDS:
+                    self.flag("adds", f"cancel of {coid} not confirmed after {age:.0f}s -- its "
+                                      f"shares/buying power may still be held")
+
+    def _book_resting_add(self, rec: dict, o: dict) -> None:
+        """Turn the newly filled part of a resting add into a lot (TP resting
+        at once) and cancel any unfilled remainder: the anchor has moved to
+        this fill, so the rest sits at a level the ladder no longer wants."""
+        filled = int(float(o.get("filled_qty") or 0))
+        booked = int(rec.get("booked") or 0)
+        newly = filled - booked
+        if newly <= 0:
+            return
+        px = float(o.get("filled_avg_price") or 0) or float(rec["price"])
+        ts = _order_ts(o)
+        k = int(rec.get("k") or 1)
+        lot_id = rec["lot_id"] if booked == 0 else rec["lot_id"] + "a"
+        existing = next((l for l in self.ledger.open_lots if l.id == lot_id), None)
+        if existing is not None:
+            # A lot with this id already exists: _rebuild_ladder / adopt built it
+            # from the filled en- order, or this is a third delta on the same
+            # order. Never fold the same shares in twice.
+            if existing.shares >= filled:
+                rec["booked"] = filled
+                self.ledger.save()
+                return
+            add = filled - existing.shares
+            if existing.tp_client_id:
+                oo = next((x for x in self.open_orders
+                           if x.get("client_order_id") == existing.tp_client_id), None)
+                if oo:
+                    try:
+                        self.broker.cancel(oo["id"])
+                    except AlpacaError as e:
+                        self.ev("WARN", f"cancel of {existing.tp_client_id} failed ({e.status})")
+            tot = existing.shares + add
+            existing.entry_price = (existing.entry_price * existing.shares + px * add) / tot
+            existing.shares = tot
+            existing.tp_price = _round_cent(existing.entry_price
+                                            + self._dir(existing.side) * float(self.cfg["take_profit"]))
+            existing.tp_client_id = ""                      # step 2 re-places it at the new size
+            existing.tp_order_id = ""
+            existing.tp_filled = 0
+            self.ledger.note_fill(px, self.entry_side(existing.side), "entry", existing.id, ts=ts)
+            self.ev("FILL", f"lot {existing.id} grew by {add} sh @ ${px:.4f} (rung {k} fill folded "
+                            f"in) -> {tot} sh; its take-profit is re-placed at the new size")
+        else:
+            self._open_lot(lot_id, newly, px,
+                           why=(f"touch add: rung {k} ${float(rec['price']):.2f} filled "
+                                f"{filled}/{rec['shares']} -- measured from ${float(rec.get('anchor') or 0):.4f}"),
+                           side=rec.get("side") or self.ledger.side,
+                           latency_ms=float(rec.get("placed_ms") or 0), filled_ts=ts)
+        rec["booked"] = filled
+        self._adds_reject_streak = 0
+        self.unflag("adds")
+        if (o.get("status") not in ("filled",) + ADD_TERMINAL and filled < int(rec["shares"])
+                and rec.get("state") == "working"):
+            self._cancel_resting_add(rec, f"partial {filled}/{rec['shares']} -- keeping what "
+                                          f"filled, cancelling the rest")
+        nxt = self._rung_price() or 0.0
+        self.ev("INFO", f"rung {k} touched -> lot in "
+                        f"{time.time() - float(rec.get('placed_at') or time.time()):.1f}s; "
+                        f"next rung ${nxt:.2f}")
+        self.ledger.save()
+
+    # ==================================================================
     # OPERATOR ACTIONS
     # ==================================================================
     def flatten_all(self) -> dict:
@@ -3605,6 +4185,7 @@ class Engine:
     # CONFIG
     # ==================================================================
     NUMERIC = {
+        "add_depth": int,
         "reverse_max_spread_pct": float,
         "basket_chase_s": float,
         "reverse_ttl_h": float, "reverse_cooldown_h": float,
@@ -3672,11 +4253,23 @@ class Engine:
                 if k == "entry_ma" and str(v).strip().lower() not in ("vwap", "ema"):
                     rejected.append(k)
                     continue
+                if k == "add_trigger":
+                    v = str(v).strip().lower()
+                    if v not in ("touch", "close"):
+                        rejected.append(k)
+                        continue
+                if k == "add_anchor":
+                    v = str(v).strip().lower()
+                    if v not in ("last_fill", "last_open"):
+                        rejected.append(k)
+                        continue
                 if k in self.NUMERIC:
                     try:
                         v = self.NUMERIC[k](v)
                     except (TypeError, ValueError):
                         continue
+                    if k == "add_depth":
+                        v = max(1, min(ADD_MAX_DEPTH, int(v)))
                 elif isinstance(TICKER_DEFAULTS[k], bool):
                     v = bool(v)
                 clean[k] = v
@@ -3758,6 +4351,8 @@ class Engine:
             state = "DONE FOR DAY"
         elif self.pending_entry:
             state = "ORDER WORKING"
+        elif any(r.get("state") == "working" for r in led.resting_adds):
+            state = "ADDS RESTING"
         elif led.open_lots:
             state = "IN LADDER"
         else:
@@ -3935,6 +4530,27 @@ class Engine:
             "broker_avg": self.broker_avg,
             "in_sync": self.broker_qty == led.signed_shares,
             "pending_entry": self.pending_entry,
+            # touch mode: the resting rungs. Everything here is READ from the
+            # ledger and the caches the engine thread's sync leaves behind --
+            # status() runs on the API thread and must never compute or place.
+            "add_trigger": self.cfg.get("add_trigger", "touch"),
+            "add_anchor": self.cfg.get("add_anchor", "last_fill"),
+            "add_depth": int(self.cfg.get("add_depth") or 1),
+            "anchor": {"price": round(_anchor_of(self), 4),
+                       "kind": (led.last_fill or {}).get("kind", "last_open")
+                       if str(self.cfg.get("add_anchor") or "last_fill") == "last_fill" else "last_open",
+                       "at": (led.last_fill or {}).get("at", ""),
+                       "lot_id": (led.last_fill or {}).get("lot_id", "")},
+            "resting_adds": [{"lot_id": r.get("lot_id"), "coid": r.get("coid"), "k": r.get("k"),
+                              "price": r.get("price"), "shares": r.get("shares"),
+                              "booked": r.get("booked", 0), "side": r.get("side"), "state": r.get("state"),
+                              "placed_ms": r.get("placed_ms", 0),
+                              "age_s": round(time.time() - float(r.get("placed_at") or time.time()), 1),
+                              "extended_hours": bool(r.get("xh")),
+                              "resting": r.get("coid") in {o.get("client_order_id") for o in self.open_orders}}
+                             for r in led.resting_adds],
+            "rungs": [{"k": k, "price": p, "shares": n} for k, p, n in list(self._adds_want)],
+            "adds_hold": self._adds_hold,
             "account": {
                 "number": self.account.get("account_number", ""),
                 "equity": float(self.account.get("equity") or 0),
@@ -4007,6 +4623,8 @@ class Engine:
             "add_mode": self.cfg["add_mode"],
             "add_distance": float(self.cfg["add_distance"]),
             "add_percent": float(self.cfg["add_percent"]),
+            "add_trigger": self.cfg.get("add_trigger", "touch"),
+            "resting_adds": len(led.resting_adds),
             "shares_per_lot": int(self.cfg["shares_per_lot"]),
             "cost_basis": round(sum(l.cost for l in led.open_lots), 2),
             # the three-layer filter, so the dashboard can SEE what the gate is

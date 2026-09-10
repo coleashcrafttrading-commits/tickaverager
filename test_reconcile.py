@@ -118,7 +118,7 @@ class FakeFleet:
         return []
 
     # guards
-    def entry_block(self, sym, cost):
+    def entry_block(self, sym, cost, resting=0.0):
         return ""
 
     def running_block(self, sym):

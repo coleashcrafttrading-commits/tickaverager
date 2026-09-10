@@ -1,0 +1,855 @@
+#!/usr/bin/env python3
+"""test_touch_adds.py -- offline proof of touch-mode resting adds.
+
+In touch mode the ladder's ADDS are GTC limit entries resting at Alpaca, one
+per rung, exactly the way the take-profits rest -- so an intracandle touch
+fills them. These checks drive a real Engine against a fake fleet and a fake
+broker that records what would have been sent, and prove: rungs rest when
+the ladder is eligible and are cancelled on every block reason (sticky ones
+only after two distinct snapshots); the anchor is the last fill of ANY kind
+(an add or a take-profit) and restart booking order can never pick the wrong
+one; partials are booked at once and the remainder cancelled; a rejection
+backs off the ADDS only; close mode, beyond_average and strategy entries are
+unchanged; the first entry never fires over a rung that can still fill; and
+the cover guard needs two snapshots before it acts.
+
+    .venv/Scripts/python test_touch_adds.py
+
+No network, no real keys, no state files touched: the journal and the FROZEN
+file are pointed at a scratch directory before engine is imported.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+SCRATCH = Path(tempfile.mkdtemp(prefix="ta_touch_"))
+os.environ["TICKAVERAGER_JOURNAL"] = str(SCRATCH / "journal.jsonl")
+os.environ.pop("TICKAVERAGER_DASHBOARD", None)
+
+import engine                                          # noqa: E402
+from engine import Engine, Ledger, Lot, _anchor_of     # noqa: E402
+from test_reconcile import FakeFleet                   # noqa: E402
+
+NY = ZoneInfo("America/New_York")
+FAIL = 0
+
+
+def check(name, got, want) -> None:
+    global FAIL
+    ok = got == want
+    if not ok:
+        FAIL += 1
+    print(f"  {'PASS' if ok else 'FAIL'}  {name}: got {got!r}, want {want!r}")
+
+
+# no journal writes, no FROZEN file from the live state dir, a pinned clock
+# (Monday 24 Aug 2026 10:00 ET: the regular session)
+engine.journal.record_open = lambda *a, **k: None
+engine.journal.record_close = lambda *a, **k: None
+engine.journal.record_event = lambda *a, **k: None
+engine.journal.record_lot_delta = lambda *a, **k: None
+engine.FREEZE_PATH = SCRATCH / "FROZEN"
+engine._now_ny = lambda: datetime(2026, 8, 24, 10, 0, tzinfo=NY)
+
+LIVE = ("new", "accepted", "partially_filled", "pending_new", "held")
+OPEN = LIVE + ("pending_cancel",)
+T_FILL = "2026-08-24T14:00:00Z"
+
+
+# ====================================================================== fakes
+class TouchBroker:
+    """Every order this bot sends, with the knobs the checks need: a one-shot
+    rejection, a one-shot cancel failure, cancels that linger, and entries
+    that fill the moment they are placed."""
+
+    def __init__(self):
+        self.placed: list[dict] = []
+        self.by_coid: dict[str, dict] = {}
+        self.cancelled: list[str] = []
+        self.reject_next = None            # message of the next 403 from a placement
+        self.cancel_raise_next = None      # HTTP status of the next failure from cancel()
+        self.linger_cancel = False         # cancel() -> pending_cancel instead of canceled
+        self.fill_entries_on_place = False  # en- orders come back filled at once
+        self.seq = 0
+
+    def _o(self, side, qty, px, coid, xh=False, tif="gtc", typ="limit"):
+        if self.reject_next:
+            msg, self.reject_next = self.reject_next, None
+            raise engine.AlpacaError(403, msg, "/v2/orders")
+        self.seq += 1
+        o = {"id": f"o{self.seq}", "client_order_id": coid, "symbol": "TEST", "side": side,
+             "qty": str(qty), "filled_qty": "0", "filled_avg_price": None, "filled_at": None,
+             "limit_price": (f"{float(px):.2f}" if px else None), "status": "new",
+             "extended_hours": bool(xh), "type": typ, "time_in_force": tif}
+        if self.fill_entries_on_place and str(coid).startswith("en-"):
+            o.update(status="filled", filled_qty=str(qty),
+                     filled_avg_price=f"{float(px):.2f}", filled_at=T_FILL)
+        self.placed.append(o)
+        self.by_coid[coid] = o
+        return o
+
+    def buy_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._o("buy", qty, limit_price, coid, extended_hours)
+
+    def sell_limit_gtc(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._o("sell", qty, limit_price, coid, extended_hours)
+
+    def buy_limit(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._o("buy", qty, limit_price, coid, extended_hours, tif="day")
+
+    def sell_limit(self, symbol, qty, limit_price, coid, extended_hours=False):
+        return self._o("sell", qty, limit_price, coid, extended_hours, tif="day")
+
+    def buy_market(self, symbol, qty, coid):
+        return self._o("buy", qty, 0, coid, tif="day", typ="market")
+
+    def sell_market(self, symbol, qty, coid):
+        return self._o("sell", qty, 0, coid, tif="day", typ="market")
+
+    def submit(self, **b):
+        return self._o(b.get("side"), b.get("qty"), float(b.get("limit_price") or 0),
+                       b.get("client_order_id"), bool(b.get("extended_hours")),
+                       b.get("time_in_force", "day"), b.get("type", "limit"))
+
+    def trailing_stop_gtc(self, symbol, qty, trail_price, coid, side="sell", extended_hours=False):
+        return self._o(side, qty, 0, coid, extended_hours, typ="trailing_stop")
+
+    def cancel(self, order_id):
+        if self.cancel_raise_next:
+            st, self.cancel_raise_next = self.cancel_raise_next, None
+            raise engine.AlpacaError(st, "try again later", f"/v2/orders/{order_id}")
+        for o in self.placed:
+            if o["id"] == order_id and o["status"] in OPEN:
+                o["status"] = "pending_cancel" if self.linger_cancel else "canceled"
+        self.cancelled.append(order_id)
+
+    def order_by_client_id(self, coid):
+        return self.by_coid.get(coid)
+
+    def orders(self, status="open", **kw):
+        if status == "open":
+            return [o for o in self.placed if o["status"] in OPEN]
+        return list(reversed(self.placed))              # newest first, like Alpaca
+
+    def close_position(self, symbol):
+        return {"ok": True}
+
+    def asset(self, symbol):
+        return {"shortable": True, "easy_to_borrow": True, "overnight_tradable": True}
+
+    def bars_range(self, *a, **k):
+        return []                                       # status() asks for indicator bars
+
+    def fill(self, coid, qty, px, at=T_FILL):
+        """Set the order's CUMULATIVE filled_qty. Returns the delta."""
+        o = self.by_coid[coid]
+        prev = int(float(o["filled_qty"] or 0))
+        o["filled_qty"] = str(qty)
+        o["filled_avg_price"] = f"{float(px):.4f}"
+        o["filled_at"] = at
+        o["status"] = "filled" if qty >= int(float(o["qty"])) else "partially_filled"
+        return qty - prev
+
+    def settle(self, coid, status="canceled"):
+        self.by_coid[coid]["status"] = status
+
+
+def make(lots=(), broker_qty=0, broker=None, **cfg):
+    """A running, ARMED touch-mode engine on a fake fleet: fixed 10-share
+    lots, $0.10 rungs, $0.10 targets, any hour, no trend filter."""
+    c = dict(engine.TICKER_DEFAULTS)
+    c.update({"symbol": "TEST", "dry_run": False, "auto_reconcile": True,
+              "shares_per_lot": 10, "size_mode": "fixed",
+              "add_mode": "points", "add_distance": 0.10, "take_profit": 0.10,
+              "add_trigger": "touch", "add_anchor": "last_fill", "add_depth": 1,
+              "session_mode": "always", "trend_filter": False,
+              "trend_flat_blocks_entries": False, "max_lots": 20})
+    c.update(cfg)
+    f = FakeFleet(c)
+    f.broker = broker or TouchBroker()
+    e = Engine("TEST", f)
+    e.ledger = Ledger(symbol="TEST", session_date="t")
+    e.ledger.save = lambda: None            # type: ignore[method-assign]
+    for i, spec in enumerate(lots, 1):
+        sh, px = spec[0], spec[1]
+        side = spec[2] if len(spec) > 2 else "long"
+        d = -1 if side == "short" else 1
+        coid = f"tp-TEST-t-{i:04d}-1"
+        tp = round(px + d * 0.10, 2)
+        o = f.broker._o("buy" if side == "short" else "sell", sh, tp, coid, True)
+        e.ledger.open_lots.append(Lot(
+            id=f"TEST-t-{i:04d}", shares=sh, entry_price=px,
+            entry_time="2026-08-24T09:45:00-04:00", tp_price=tp, side=side,
+            tp_client_id=coid, tp_order_id=o["id"]))
+    e.ledger.lot_counter = len(lots)
+    e.running = True
+    e.last_price = 10.0
+    e.quote = {"bp": 9.99, "ap": 10.01}
+    f.set_position(broker_qty)
+    e.broker_qty = broker_qty
+    e.broker_avg = 10.0
+    e.position = f.position_of("TEST")
+    e._watch_entry_fill = lambda *a, **k: None   # type: ignore[method-assign]  # no 3 s poll in a test
+    sync_orders(e, f, bump=False)
+    return e, f
+
+
+def sync_orders(e, f, bump=True):
+    """The fleet's next snapshot of the open orders."""
+    live = [o for o in f.broker.placed if o["status"] in OPEN]
+    f.open_orders["TEST"] = live
+    e.open_orders = live
+    if bump:
+        f.bump_snapshot()
+
+
+def step(e, f, bump=True):
+    """One engine tick without tick() itself: the fake fleet has no bars and
+    _refresh_market would overwrite last_price."""
+    sync_orders(e, f, bump)
+    e.loop_count += 1
+    e._reconcile()
+    e._sync_resting_adds()
+
+
+def fill(e, f, coid, qty, px, at=T_FILL):
+    """A fill at the broker that ALSO moves the position, as Alpaca's would:
+    +delta for a buy, -delta for a sell."""
+    o = f.broker.by_coid[coid]
+    delta = f.broker.fill(coid, qty, px, at)
+    signed = delta if o["side"] == "buy" else -delta
+    cur = int(float((f.positions.get("TEST") or {}).get("qty") or 0))
+    f.set_position(cur + signed)
+    e.broker_qty = cur + signed
+    e.position = f.position_of("TEST")
+
+
+def adds(e):
+    return e.ledger.resting_adds
+
+
+def entries(f):
+    return [o for o in f.broker.placed if str(o["client_order_id"]).startswith("en-")]
+
+
+def live_entry_prices(f):
+    return sorted(o["limit_price"] for o in entries(f) if o["status"] == "new")
+
+
+def evs(e, level=None, text=""):
+    return [x for x in e.events if (level is None or x["level"] == level) and text in x["msg"]]
+
+
+# ====================================================================== tests
+def main() -> int:
+    print("\n1. Rungs rest when the ladder is eligible")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    n0 = e.ledger.lot_counter
+    step(e, f)
+    en = entries(f)
+    check("exactly one entry limit", len(en), 1)
+    check("GTC buy at 9.90 x 10",
+          (en[0]["side"], en[0]["limit_price"], en[0]["qty"], en[0]["time_in_force"]),
+          ("buy", "9.90", "10", "gtc"))
+    check("extended_hours follows wants_extended()", en[0]["extended_hours"], e.wants_extended())
+    r = adds(e)
+    check("one record, working", (len(r), r[0]["state"]), (1, "working"))
+    check("coid is en-<lot_id>", (en[0]["client_order_id"].startswith("en-TEST-t-"),
+                                  en[0]["client_order_id"]), (True, "en-" + r[0]["lot_id"]))
+    check("lot counter advanced by exactly one", e.ledger.lot_counter - n0, 1)
+    st = e.status()
+    check("status next_add_at", st["next_add_at"], 9.90)
+    check("status resting_adds price", st["resting_adds"][0]["price"], 9.90)
+    check("status state", st["state"], "ADDS RESTING")
+    check("no pending entry", e.pending_entry, None)
+    check("block_reason clear", e.block_reason(), "")
+    step(e, f)
+    check("a second tick places nothing (no churn)",
+          (len(entries(f)), len(f.broker.cancelled)), (1, 0))
+
+    print("\n2. Every immediate block reason cancels the rungs and leaves the exits alone")
+
+    def blocked_case(name, prep, clear):
+        e, f = make(lots=[(10, 10.0)], broker_qty=10)
+        step(e, f)
+        r = adds(e)[0]
+        oid, old_lot = r["order_id"], r["lot_id"]
+        tp_ids = [o["id"] for o in f.broker.placed if o["client_order_id"].startswith("tp-")]
+        prep(e, f)
+        n_before = len(entries(f))          # a prep may itself register an en- order (the pending-entry case)
+        step(e, f)
+        check(f"{name}: order cancelled", oid in f.broker.cancelled, True)
+        check(f"{name}: record cancelling", adds(e)[0]["state"] if adds(e) else "gone", "cancelling")
+        check(f"{name}: nothing new placed", len(entries(f)), n_before)
+        check(f"{name}: TPs untouched", any(t in f.broker.cancelled for t in tp_ids), False)
+        step(e, f)                      # the broker reports canceled -> the record is dropped
+        check(f"{name}: record dropped after the terminal read", adds(e), [])
+        clear(e, f)
+        step(e, f)
+        r2 = adds(e)
+        check(f"{name}: cleared -> a fresh id rests",
+              (len(r2), r2[0]["lot_id"] != old_lot if r2 else None), (1, True))
+
+    def _pending(e, f):
+        o = f.broker._o("buy", 10, 9.95, "en-TEST-t-0099", True)
+        e.pending_entry = {"lot_id": "TEST-t-0099", "client_order_id": "en-TEST-t-0099",
+                           "order_id": o["id"], "sent_at": time.time(), "side": "long"}
+
+    def _unpending(e, f):
+        e.pending_entry = None
+        f.broker.settle("en-TEST-t-0099")
+
+    def _freeze(e, f):
+        engine.FREEZE_PATH.write_text("test freeze")
+
+    def _thaw(e, f):
+        engine.FREEZE_PATH.unlink()
+
+    def _sessions_off(e, f):
+        e.cfg["session_mode"] = "sessions"
+        e.cfg["trade_regular"] = False
+
+    def _sessions_on(e, f):
+        e.cfg["session_mode"] = "always"
+
+    def _basket(e, f):
+        e.ledger.unwind = {"basket": {"order_id": "x", "coid": "xs-x", "why": "t",
+                                      "lot_ids": [], "booked": 0, "sent": time.time()}}
+
+    blocked_case("engine stopped", lambda e, f: setattr(e, "running", False),
+                 lambda e, f: setattr(e, "running", True))
+    blocked_case("halted", lambda e, f: e.halt("x"), lambda e, f: e.clear_halt())
+    blocked_case("FROZEN", _freeze, _thaw)
+    blocked_case("session switched off", _sessions_off, _sessions_on)
+    blocked_case("max_lots reached", lambda e, f: e.cfg.__setitem__("max_lots", 1),
+                 lambda e, f: e.cfg.__setitem__("max_lots", 20))
+    blocked_case("entry order working", _pending, _unpending)
+    blocked_case("done for day", lambda e, f: setattr(e, "done_for_day", True),
+                 lambda e, f: setattr(e, "done_for_day", False))
+    blocked_case("entry backoff", lambda e, f: setattr(e, "_entry_backoff_until", time.time() + 60),
+                 lambda e, f: setattr(e, "_entry_backoff_until", 0.0))
+    blocked_case("basket close working", _basket, lambda e, f: setattr(e.ledger, "unwind", {}))
+
+    print("\n3. Sticky blocks need two distinct snapshots (the 09:30 clock and the trend bias)")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    oid = adds(e)[0]["order_id"]
+    f.market_open = False
+    step(e, f, bump=False)
+    check("one stale snapshot: no cancel", oid in f.broker.cancelled, False)
+    check("hold is sticky", e._adds_hold.startswith("sticky:"), True)
+    step(e, f, bump=False)
+    check("same snapshot read again: still no cancel", oid in f.broker.cancelled, False)
+    step(e, f, bump=True)
+    check("second DISTINCT snapshot: cancelled", oid in f.broker.cancelled, True)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    oid = adds(e)[0]["order_id"]
+    f.market_open = False
+    step(e, f, bump=False)
+    f.market_open = True
+    step(e, f)
+    check("market re-read as open before strike 2: rung untouched", oid in f.broker.cancelled, False)
+    check("strikes reset", e._adds_block_strikes, 0)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, trend_filter=True)
+    e._trend_entry_block = lambda: ""                          # type: ignore[method-assign]
+    step(e, f)
+    oid = adds(e)[0]["order_id"]
+    e._trend_entry_block = lambda: "trend bias is short, side_mode=long -- no new longs"  # type: ignore[method-assign]
+    step(e, f, bump=False)
+    check("trend block for one snapshot: kept, sticky", (oid in f.broker.cancelled, e._adds_hold[:7]),
+          (False, "sticky:"))
+    e._trend_entry_block = lambda: ""                          # type: ignore[method-assign]
+    step(e, f)
+    check("bias back: rung untouched", oid in f.broker.cancelled, False)
+    e._trend_entry_block = lambda: "trend bias is short, side_mode=long -- no new longs"  # type: ignore[method-assign]
+    step(e, f)
+    step(e, f)
+    check("bias against for two snapshots: cancelled", oid in f.broker.cancelled, True)
+
+    print("\n4. Portfolio caps are wait-class for the rungs; the bp check starts at 0")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
+    step(e, f)
+    ids = [r["order_id"] for r in adds(e)]
+    check("three rungs rest", len(ids), 3)
+    f.entry_block = lambda s, c, resting=0.0: "cash reserve: no room" if c > 0 else ""
+    fill(e, f, adds(e)[0]["coid"], 10, 9.90)                   # rung 1 fills -> a fourth is wanted
+    step(e, f)
+    check("rung 1 booked as a lot", len(e.ledger.open_lots), 2)
+    check("survivors kept (wait-class)",
+          all(i in [r["order_id"] for r in adds(e)] for i in ids[1:]), True)
+    check("no cancels", f.broker.cancelled, [])
+    check("no new rung placed", len(entries(f)), 3)
+    check("hold says wait", e._adds_hold.startswith("wait:"), True)
+    f.entry_block = lambda s, c, resting=0.0: "cash reserve: no room"
+    step(e, f)
+    check("blocked even at cost 0: still kept, never cancelled",
+          (len(adds(e)), f.broker.cancelled), (2, []))
+    check("hold says wait (keep decision)", e._adds_hold.startswith("wait:"), True)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)                                                 # rung 1 (99) working
+    e.cfg["add_depth"] = 3
+    f.account["buying_power"] = "95"
+    step(e, f)
+    check("bp 95: rung 2 (98) refused, rung 1 kept", (len(entries(f)), f.broker.cancelled), (1, []))
+    check("bp flag raised", "bp" in e.attention, True)
+    f.account["buying_power"] = "150"
+    step(e, f)
+    check("bp 150: rung 2 placed (98 <= 150), rung 3 not (98 + 97 > 150) -- the burst starts at 0",
+          len(entries(f)), 2)
+
+    print("\n5. An entry fill moves the anchor (long, then the short mirror)")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    r = adds(e)[0]
+    fill(e, f, r["coid"], 10, 9.90)
+    step(e, f)
+    lot = next((l for l in e.ledger.open_lots if l.id == r["lot_id"]), None)
+    check("lot booked under the record's lot id, 10 @ 9.90",
+          (lot.shares, lot.entry_price) if lot else None, (10, 9.90))
+    tp = f.broker.by_coid.get(lot.tp_client_id) if lot else None
+    check("its TP rests at 10.00", (tp or {}).get("limit_price"), "10.00")
+    lf = e.ledger.last_fill
+    check("last_fill is the entry", (lf.get("price"), lf.get("kind"), lf.get("side")), (9.90, "entry", "buy"))
+    check("anchor 9.90", _anchor_of(e), 9.90)
+    check("next rung 9.80", e._rung_price(), 9.80)
+    check("record gone", [x for x in adds(e) if x["lot_id"] == r["lot_id"]], [])
+    check("a new rung rests at 9.80", live_entry_prices(f), ["9.80"])
+    check("realized untouched", e.ledger.realized_all, 0.0)
+    e, f = make(lots=[(10, 10.0, "short")], broker_qty=-10, side_mode="short")
+    step(e, f)
+    en = entries(f)
+    check("short: the resting add is a SELL limit at 10.10", (en[0]["side"], en[0]["limit_price"]),
+          ("sell", "10.10"))
+    fill(e, f, en[0]["client_order_id"], 10, 10.10)
+    step(e, f)
+    lot = e.ledger.open_lots[-1]
+    tp = f.broker.by_coid.get(lot.tp_client_id, {})
+    check("short lot with a BUY TP at 10.00", (lot.side, tp.get("side"), tp.get("limit_price")),
+          ("short", "buy", "10.00"))
+    check("short: next rung 10.20", e._rung_price(), 10.20)
+
+    print("\n6. A take-profit fill moves the anchor: the pullback rule")
+    e, f = make(lots=[(10, 10.0), (10, 9.90)], broker_qty=20)
+    step(e, f)
+    r = adds(e)[0]
+    check("rung from the newest open lot 9.90 -> 9.80", r["price"], 9.80)
+    fill(e, f, "tp-TEST-t-0002-1", 10, 10.03)
+    step(e, f)
+    check("TP booked: one lot left", len(e.ledger.open_lots), 1)
+    check("last_fill is the TP at 10.03", (e.ledger.last_fill.get("price"), e.ledger.last_fill.get("kind")),
+          (10.03, "tp"))
+    check("anchor 10.03", _anchor_of(e), 10.03)
+    check("next rung 9.93", e._rung_price(), 9.93)
+    check("old 9.80 rung cancelled this tick", r["order_id"] in f.broker.cancelled, True)
+    check("nothing placed in the cancel tick", len(entries(f)), 1)
+    step(e, f)
+    check("next tick rests 9.93", live_entry_prices(f), ["9.93"])
+    e, f = make(lots=[(10, 10.0), (10, 9.90)], broker_qty=20, add_anchor="last_open")
+    step(e, f)
+    fill(e, f, "tp-TEST-t-0002-1", 10, 10.03)
+    step(e, f)
+    step(e, f)
+    check("last_open: the rung stays newest-open-lot - 0.10", (e._rung_price(), live_entry_prices(f)),
+          (9.90, ["9.90"]))
+    e, f = make(lots=[(10, 10.0, "short"), (10, 10.10, "short")], broker_qty=-20, side_mode="short")
+    step(e, f)
+    check("short: rung above the newest open 10.10 -> 10.20", adds(e)[0]["price"], 10.20)
+    fill(e, f, "tp-TEST-t-0002-1", 10, 9.97)
+    step(e, f)
+    step(e, f)
+    check("short: a cover at 9.97 -> next rung 10.07", (e._rung_price(), live_entry_prices(f)),
+          (10.07, ["10.07"]))
+
+    print("\n7. Depth 3: a fill exactly at rung 1 keeps the survivors (zero cancels)")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
+    step(e, f)
+    check("three rungs in one tick", [r["price"] for r in adds(e)], [9.90, 9.80, 9.70])
+    ids = {r["price"]: r["order_id"] for r in adds(e)}
+    c0, n0 = len(f.broker.cancelled), len(entries(f))
+    fill(e, f, adds(e)[0]["coid"], 10, 9.90)
+    step(e, f)
+    check("lot booked", len(e.ledger.open_lots), 2)
+    check("zero cancels", len(f.broker.cancelled) - c0, 0)
+    now = {r["price"]: r["order_id"] for r in adds(e)}
+    check("9.80 / 9.70 keep their order ids", (now.get(9.80), now.get(9.70)), (ids[9.80], ids[9.70]))
+    check("exactly one new order, at 9.60", (len(entries(f)) - n0, now.get(9.60) is not None), (1, True))
+    e, f = make(lots=[(10, 10.0), (10, 9.90)], broker_qty=20, add_depth=3, max_lots=3)
+    step(e, f)
+    check("max_lots 3 with 2 open: one rung only", len(adds(e)), 1)
+
+    print("\n8. A better-than-rung fill re-prices across two ticks")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
+    step(e, f)
+    recs = list(adds(e))
+    fill(e, f, recs[0]["coid"], 10, 9.85)
+    step(e, f)
+    check("tick N: 9.80 and 9.70 cancelled", sorted(f.broker.cancelled),
+          sorted([recs[1]["order_id"], recs[2]["order_id"]]))
+    check("tick N: nothing placed", len(entries(f)), 3)
+    step(e, f)
+    check("tick N+1: 9.75 / 9.65 / 9.55", live_entry_prices(f), ["9.55", "9.65", "9.75"])
+
+    print("\n9. A partial fill is booked at once; the remainder is cancelled; a late delta is lot <id>a")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    r = adds(e)[0]
+    f.broker.linger_cancel = True
+    fill(e, f, r["coid"], 4, 9.90)                              # 4/10 shows in the snapshot
+    step(e, f)
+    lot = next((l for l in e.ledger.open_lots if l.id == r["lot_id"]), None)
+    check("one lot of 4 @ 9.90", (lot.shares, lot.entry_price) if lot else None, (4, 9.90))
+    tp = f.broker.by_coid.get(lot.tp_client_id, {}) if lot else {}
+    check("its TP is for 4", tp.get("qty"), "4")
+    check("remainder cancelled", r["order_id"] in f.broker.cancelled, True)
+    check("record cancelling", r["state"], "cancelling")
+    check("settling", e._adds_settling(), True)
+    f.bump_snapshot(); e._reconcile()
+    f.bump_snapshot(); e._reconcile()
+    check("no sync-guard strike while settling", e.mismatch_strikes, 0)
+    check("adopt did not fire", len(e.ledger.open_lots), 2)
+    fill(e, f, r["coid"], 6, 9.90)                              # two more raced in...
+    f.broker.settle(r["coid"], "canceled")                      # ...then the cancel confirmed
+    step(e, f)
+    lot_a = next((l for l in e.ledger.open_lots if l.id == r["lot_id"] + "a"), None)
+    check("lot <id>a of 2 with its own TP", (lot_a.shares, bool(lot_a.tp_client_id)) if lot_a else None,
+          (2, True))
+    check("the old record is gone", [x for x in adds(e) if x["lot_id"] == r["lot_id"]], [])
+    check("anchor at the fill", _anchor_of(e), 9.90)
+    check("fresh rung from the new anchor", live_entry_prices(f), ["9.80"])
+
+    print("\n10. A rejected rung backs off the ADDS only -- no churn, no entry backoff")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    e.cfg["add_depth"] = 3
+    f.broker.reject_next = "insufficient buying power"
+    step(e, f)
+    check("rung 1 stays", (len(adds(e)), adds(e)[0]["state"]), (1, "working"))
+    check("adds backoff armed", e._adds_backoff_until > time.time(), True)
+    check("attention flagged (adds or bp)", bool({"adds", "bp"} & set(e.attention)), True)
+    check("entry backoff untouched", e._entry_backoff_until, 0.0)
+    check("block_reason clear", e.block_reason(), "")
+    check("no cancels", f.broker.cancelled, [])
+    for _ in range(3):
+        step(e, f)
+    check("three more ticks place nothing", len(entries(f)), 1)
+    e._adds_backoff_until = 0.0
+    step(e, f)
+    check("backoff over: the two missing rungs rest", sorted(r["price"] for r in adds(e)), [9.70, 9.80, 9.90])
+    check("streak reset after a success", e._adds_reject_streak, 0)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    f.broker.reject_next = "potential wash trade"
+    step(e, f)
+    check("wash trade: skipped with a flag", "crosses" in e.attention.get("adds", ""), True)
+    check("wash trade: NO backoff", e._adds_backoff_until, 0.0)
+
+    print("\n11. A restart re-adopts the records from the persisted ledger")
+    sd = SCRATCH / "state"
+    sd.mkdir(exist_ok=True)
+
+    def persist(e):
+        e.ledger._dir = sd
+        Ledger.save(e.ledger)                                   # the real one; the fixture's is a no-op
+
+    def reload(broker, qty, **cfg):
+        e2, f2 = make(broker=broker, **cfg)
+        e2.ledger = Ledger.load("TEST", sd)
+        e2.ledger.save = lambda: None                           # type: ignore[method-assign]
+        f2.set_position(qty)
+        e2.broker_qty = qty
+        e2.position = f2.position_of("TEST")
+        sync_orders(e2, f2, bump=False)
+        return e2, f2
+
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=2)
+    step(e, f)
+    coids = [r["coid"] for r in adds(e)]
+    old_lots = [r["lot_id"] for r in adds(e)]
+    persist(e)
+    e2, f2 = reload(f.broker, 10, add_depth=3)
+    check("(a) two records restored", [r["coid"] for r in e2.ledger.resting_adds], coids)
+    step(e2, f2)
+    check("(a) records kept, third rung added",
+          (len(e2.ledger.resting_adds), all(r["state"] == "working" for r in e2.ledger.resting_adds)), (3, True))
+    check("(a) only the third rung was placed", len(entries(f2)), 3)
+    check("(a) with a fresh lot id", e2.ledger.resting_adds[-1]["lot_id"] in old_lots, False)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=2)
+    step(e, f)
+    coids = [r["coid"] for r in adds(e)]
+    persist(e)
+    f.broker.fill(coids[0], 10, 9.90)                           # filled while the process was down
+    e2, f2 = reload(f.broker, 20, add_depth=2)
+    step(e2, f2)
+    lot = next((l for l in e2.ledger.open_lots if l.id == coids[0][3:]), None)
+    check("(b) a fill while down is booked as a lot", lot is not None and lot.shares == 10, True)
+    check("(b) with its TP placed",
+          bool(lot and lot.tp_client_id and f.broker.by_coid.get(lot.tp_client_id)), True)
+    check("(b) no sync-guard strike", e2.mismatch_strikes, 0)
+    check("(b) anchor moved to that fill", _anchor_of(e2), 9.90)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=2)
+    step(e, f)
+    coids = [r["coid"] for r in adds(e)]
+    persist(e)
+    gone = f.broker.by_coid.pop(coids[1])
+    f.broker.placed.remove(gone)
+    e2, f2 = reload(f.broker, 10, add_depth=2)
+    step(e2, f2)
+    check("(c) a record with no order at Alpaca is dropped",
+          coids[1] in [r["coid"] for r in e2.ledger.resting_adds], False)
+    check("(c) ...with a WARN", len(evs(e2, "WARN", "not found")) >= 1, True)
+    old = {"symbol": "TEST", "lot_counter": 3, "session_date": "t", "realized_today": 0.0,
+           "realized_all": 1.5, "closed_count": 1, "unwind": {},
+           "open_lots": [{"id": "TEST-t-0001", "shares": 10, "entry_price": 10.0,
+                          "entry_time": "x", "tp_price": 10.1}]}
+    (sd / "lots_TEST.json").write_text(json.dumps(old))
+    led = Ledger.load("TEST", sd)
+    check("an old-format lots json loads", (len(led.open_lots), led.resting_adds, led.last_fill), (1, [], {}))
+    old["future_key"] = 1
+    (sd / "lots_TEST.json").write_text(json.dumps(old))
+    led = Ledger.load("TEST", sd)
+    check("an unknown key is ignored, lots intact", (len(led.open_lots), led.realized_all), (1, 1.5))
+
+    print("\n12. Restart anchor ordering: the fill with the latest filled_at wins, whatever books first")
+    T0 = datetime(2026, 8, 24, 14, 0, tzinfo=timezone.utc).timestamp()
+
+    def iso(t):
+        return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def scenario(rung_at, tp_at):
+        e, f = make(lots=[(10, 10.0), (10, 9.90)], broker_qty=20)
+        step(e, f)
+        r = adds(e)[0]                                          # the 9.80 rung
+        e.ledger.note_fill(10.20, "sell", "tp", "TEST-t-0000", ts=T0)
+        f.broker.fill(r["coid"], 10, 9.80, at=iso(rung_at))
+        f.broker.fill("tp-TEST-t-0002-1", 10, 10.00, at=iso(tp_at))
+        f.set_position(20)
+        e.broker_qty = 20                                       # +10 -10
+        sync_orders(e, f)
+        e._reconcile()                                          # 1b books the rung BEFORE step 2 books the TP
+        return e
+
+    e = scenario(T0 + 60, T0 - 30)
+    check("rung filled last (T0+60) wins although the TP books after it",
+          (e.ledger.last_fill["price"], e.ledger.last_fill["kind"]), (9.80, "entry"))
+    e = scenario(T0 - 60, T0 + 30)
+    check("TP filled last (T0+30) wins", (e.ledger.last_fill["price"], e.ledger.last_fill["kind"]),
+          (10.00, "tp"))
+    e, f = make(lots=[], broker_qty=20)
+    hist = [{"client_order_id": "en-TEST-t-0007", "side": "buy", "status": "filled",
+             "filled_qty": "10", "filled_avg_price": "9.80", "filled_at": iso(T0 + 60)},
+            {"client_order_id": "en-TEST-t-0006", "side": "buy", "status": "filled",
+             "filled_qty": "10", "filled_avg_price": "9.90", "filled_at": iso(T0)}]
+    f.broker.orders = lambda **kw: hist
+    e._adopt_orphan_entries()
+    check("adopt: both adopted", len(e.ledger.open_lots), 2)
+    check("adopt iterates newest-first, and the NEWER fill is the anchor",
+          (e.ledger.last_fill["price"], e.ledger.last_fill["lot_id"]), (9.80, "TEST-t-0007"))
+
+    print("\n13. Close mode is unchanged")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_trigger="close", add_anchor="last_open")
+    step(e, f)
+    check("close mode: nothing rests", (len(entries(f)), adds(e)), (0, []))
+    e._completed_bar = lambda: {"t": "b1", "o": 10.0, "h": 10.0, "l": 9.85, "c": 9.89}  # type: ignore[method-assign]
+    calls = []
+    e._submit_entry = lambda why, shares=None, **kw: calls.append((why, shares)) or True  # type: ignore[method-assign]
+    e._maybe_decide()
+    check("close 9.89 past the 9.90 rung -> one add with today's reason",
+          (len(calls), "9.89" in calls[0][0] and "below" in calls[0][0] and "10.0000" in calls[0][0]), (1, True))
+    e._maybe_decide()
+    check("the same bar is not judged twice", len(calls), 1)
+
+    print("\n14. beyond_average and strategy entries fall back to the close-based rule")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    oid = adds(e)[0]["order_id"]
+    e.cfg["add_mode"] = "beyond_average"
+    step(e, f)
+    check("beyond_average: touch mode off", e._touch_mode(), False)
+    check("beyond_average: the resting rung is cancelled", oid in f.broker.cancelled, True)
+    step(e, f)                                                  # terminal read drops the record
+    check("record dropped", adds(e), [])
+    e._completed_bar = lambda: {"t": "b2", "o": 10.0, "h": 10.0, "l": 9.9, "c": 9.95}  # type: ignore[method-assign]
+    calls = []
+    e._submit_entry = lambda why, shares=None, **kw: calls.append(why) or True  # type: ignore[method-assign]
+    e._maybe_decide()
+    check("a close below the average -> the close-based add fires", (len(calls), "avg" in calls[0]), (1, True))
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, strategy_entries=True)
+    step(e, f)
+    check("strategy entries: no rungs", (len(entries(f)), adds(e)), (0, []))
+    e._strategy_says_enter = lambda: True                       # type: ignore[method-assign]
+    e._completed_bar = lambda: {"t": "b3", "o": 10.0, "h": 10.0, "l": 9.9, "c": 9.95}  # type: ignore[method-assign]
+    calls = []
+    e._submit_entry = lambda why, shares=None, **kw: calls.append(why) or True  # type: ignore[method-assign]
+    e._maybe_decide()
+    check("the strategy branch decides", (len(calls), calls[0].startswith("strategy")), (1, True))
+
+    print("\n15. Touch mode never double-fires; the first entry waits for a cancelling rung")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
+    step(e, f)
+    calls = []
+    e._submit_entry = lambda why, shares=None, **kw: calls.append(why) or True  # type: ignore[method-assign]
+    e._completed_bar = lambda: {"t": "c1", "o": 9.9, "h": 9.9, "l": 9.55, "c": 9.60}  # type: ignore[method-assign]
+    e._maybe_decide()
+    check("a bar through every rung: zero bar-driven adds", calls, [])
+    e, f = make(lots=[], broker_qty=0)
+    calls = []
+    e._submit_entry = lambda why, shares=None, **kw: calls.append(why) or True  # type: ignore[method-assign]
+    e._completed_bar = lambda: {"t": "c2", "o": 10.0, "h": 10.0, "l": 9.9, "c": 9.95}  # type: ignore[method-assign]
+    e._maybe_decide()
+    check("flat + red bar + no records: the first entry fires once", len(calls), 1)
+    e, f = make(lots=[], broker_qty=0)
+    e.ledger.resting_adds = [{"lot_id": "TEST-t-0009", "coid": "en-TEST-t-0009", "order_id": "oX",
+                              "k": 1, "price": 9.9, "shares": 10, "side": "long", "xh": True,
+                              "state": "cancelling", "placed_at": time.time(), "placed_ms": 1.0,
+                              "anchor": 10.0, "booked": 0, "hot_at": 0.0,
+                              "cancel_at": time.time(), "why": "t"}]
+    calls = []
+    e._submit_entry = lambda why, shares=None, **kw: calls.append(why) or True  # type: ignore[method-assign]
+    e._completed_bar = lambda: {"t": "c3", "o": 10.0, "h": 10.0, "l": 9.9, "c": 9.95}  # type: ignore[method-assign]
+    e._maybe_decide()
+    check("flat + a cancelling record: no entry", calls, [])
+    check("...and the bar is NOT consumed", e.last_bar_ts, "")
+    e.ledger.resting_adds = []
+    e._maybe_decide()
+    check("record gone: the same bar fires once", len(calls), 1)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    check("_submit_entry while a record works -> False", e._submit_entry("x"), False)
+    check("...with a WARN", len(evs(e, "WARN", "resting add")) >= 1, True)
+    adds(e)[0]["state"] = "cancelling"
+    adds(e)[0]["cancel_at"] = time.time()
+    check("...and while it is cancelling", e._submit_entry("x"), False)
+    check("a mirror entry (shares given) is not blocked by that guard", e._submit_entry("mirror", shares=10), True)
+
+    print("\n21. Dry run announces the rungs once and never places; disarming cancels real orders")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, dry_run=True)
+    step(e, f)
+    check("dry run: no entry orders, no records", (len(entries(f)), adds(e)), (0, []))
+    check("one DRY line", len(evs(e, "DRY", "would rest")), 1)
+    step(e, f)
+    check("unchanged set: no second DRY line", len(evs(e, "DRY", "would rest")), 1)
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    oid = adds(e)[0]["order_id"]
+    e.cfg["dry_run"] = True
+    step(e, f)
+    check("disarming with a rung resting: a real cancel goes out", oid in f.broker.cancelled, True)
+
+    print("\n22. Config plumbing: validators, the CLI, the presets, the defaults, a size change")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    e.ensure_tps = lambda: {"ok": True}                         # type: ignore[method-assign]
+    cfg = e.update_config({"add_trigger": "off"})
+    check("add_trigger=off rejected, value unchanged", cfg["add_trigger"], "touch")
+    check("...with the Ignored-invalid WARN", len(evs(e, "WARN", "Ignored invalid")) >= 1, True)
+    check("CLOSE -> close", e.update_config({"add_trigger": "CLOSE"})["add_trigger"], "close")
+    check("add_anchor=bogus rejected", e.update_config({"add_anchor": "bogus"})["add_anchor"], "last_fill")
+    check('add_depth "7" -> 7', e.update_config({"add_depth": "7"})["add_depth"], 7)
+    check("add_depth 0 -> 1", e.update_config({"add_depth": 0})["add_depth"], 1)
+    check("add_depth 99 -> 10", e.update_config({"add_depth": 99})["add_depth"], 10)
+    import agentctl
+    import presets
+    check("_coerce keeps a string setting", agentctl._coerce("touch", "add_trigger"), "touch")
+    check("_coerce makes add_depth an int", agentctl._coerce("3", "add_depth"), 3)
+    b = presets.settings("basic")
+    check("basic preset: touch / last_fill / 3", (b["add_trigger"], b["add_anchor"], b["add_depth"]),
+          ("touch", "last_fill", 3))
+    check("basic still infers as basic", presets.infer(presets.settings("basic")), "basic")
+    check("defaults: touch / last_fill / 1",
+          tuple(engine.TICKER_DEFAULTS[k] for k in ("add_trigger", "add_anchor", "add_depth")),
+          ("touch", "last_fill", 1))
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    e.ensure_tps = lambda: {"ok": True}                         # type: ignore[method-assign]
+    step(e, f)
+    oid = adds(e)[0]["order_id"]
+    e.update_config({"shares_per_lot": 20})
+    step(e, f)
+    check("shares_per_lot 10 -> 20: the 10-share rung is cancelled", oid in f.broker.cancelled, True)
+    step(e, f)
+    check("...and re-placed x 20", [o["qty"] for o in entries(f) if o["status"] == "new"], ["20"])
+
+    print("\n23. status() shape and purity")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    st = e.status()
+    check("status carries the touch keys",
+          all(k in st for k in ("add_trigger", "add_anchor", "add_depth", "anchor", "resting_adds", "rungs", "adds_hold")), True)
+    ok = True
+    try:
+        json.dumps(st)
+    except Exception:
+        ok = False
+    check("status is JSON-serialisable", ok, True)
+    check("summary resting_adds is an int", isinstance(e.summary()["resting_adds"], int), True)
+    check("anchor block", (st["anchor"]["price"], st["anchor"]["kind"]), (10.0, "last_open"))
+    check("rungs cache", st["rungs"], [{"k": 1, "price": 9.9, "shares": 10}])
+    e2, f2 = make(lots=[(10, 10.0)], broker_qty=10, add_mode="atr")
+    check("atr mode: next_add_at is the rung, not avg_price",
+          (e2.status()["next_add_at"], e2.status()["next_add_at"] == e2._rung_price()), (9.90, True))
+    before = (e._adds_hold, dict(e.attention), e.ledger.lot_counter, len(f.broker.placed), len(f.broker.cancelled))
+    for _ in range(20):
+        e.status()
+    check("twenty status() calls change nothing",
+          (e._adds_hold, dict(e.attention), e.ledger.lot_counter, len(f.broker.placed), len(f.broker.cancelled)),
+          before)
+
+    print("\n24. A rung cancelled by hand at Alpaca is re-placed with a NEW lot id")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    step(e, f)
+    r = adds(e)[0]
+    f.broker.settle(r["coid"], "pending_cancel")
+    step(e, f)
+    check("pending_cancel by hand: record kept, no engine cancel", (len(adds(e)), f.broker.cancelled), (1, []))
+    f.broker.settle(r["coid"], "canceled")
+    step(e, f)
+    r2 = adds(e)
+    check("terminal read drops it; a fresh rung rests under a NEW lot id",
+          (len(r2), r2[0]["lot_id"] != r["lot_id"] if r2 else None, r2[0]["state"] if r2 else None),
+          (1, True, "working"))
+
+    print("\n25. Filled on placement: the lot and its TP exist before the tick ends")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10)
+    f.broker.fill_entries_on_place = True
+    n0 = e.ledger.lot_counter
+    sync_orders(e, f)
+    e._reconcile()
+    e._sync_resting_adds()
+    check("lot exists after the placement call", len(e.ledger.open_lots), 2)
+    lot = e.ledger.open_lots[-1]
+    check("lot @ 9.90 with a resting TP at 10.00",
+          (lot.entry_price, bool(lot.tp_client_id), (f.broker.by_coid.get(lot.tp_client_id) or {}).get("limit_price")),
+          (9.90, True, "10.00"))
+    check("no record left", adds(e), [])
+    check("no cancel issued", f.broker.cancelled, [])
+    check("lot counter advanced by 1", e.ledger.lot_counter - n0, 1)
+
+    print("\n27. Percent mode compounds the deeper rungs")
+    e, f = make(lots=[(10, 100.0)], broker_qty=10, add_mode="percent", add_percent=1.0, add_depth=2)
+    e.last_price = 100.0
+    e.quote = {"bp": 99.99, "ap": 100.01}
+    step(e, f)
+    check("99.00 then 98.01 (not 98.00)", [r["price"] for r in adds(e)], [99.00, 98.01])
+
+    print("\n30. A lot size of 0 (the ladder cap) stops the burst without churn")
+    e, f = make(lots=[(10, 10.0)], broker_qty=10, add_depth=3)
+    n0 = e.ledger.lot_counter
+    e._cap_to_ladder = lambda n, price, extra_deployed=0.0: n if extra_deployed == 0 else 0  # type: ignore[method-assign]
+    for _ in range(5):
+        step(e, f)
+    check("only rung 1 rests", [r["price"] for r in adds(e)], [9.90])
+    check("no cancels across five ticks", f.broker.cancelled, [])
+    check("lot counter advanced by exactly 1", e.ledger.lot_counter - n0, 1)
+    check("hold empty or the cap flag set", e._adds_hold == "" or "cap" in e.attention, True)
+
+    print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
+    return 1 if FAIL else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

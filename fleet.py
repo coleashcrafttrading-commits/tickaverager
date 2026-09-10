@@ -200,6 +200,7 @@ class Fleet:
         self.snap_at = 0.0
         self.snap_error = ""
         self.cycle = 0
+        self._last_sess = ""                         # session label at the last clock read
 
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -485,9 +486,16 @@ class Fleet:
             if force or c % 3 == 1:
                 self.account = b.account() or {}
                 self.account_as_of = _now_ny_str()
-            if force or c % 15 == 1:
+            # the clock is re-read on every SESSION change too, not only every
+            # 15 cycles: at 09:30:00 a read from 09:29:40 says "closed" for up
+            # to 30 s, and every ladder would cancel its resting rungs over a
+            # stale snapshot (the engines also treat that reason as sticky)
+            from engine import session_now
+            sess = session_now()
+            if force or c % 15 == 1 or sess != self._last_sess:
                 self.clock = b.clock() or {}
                 self.market_open = bool(self.clock.get("is_open"))
+            self._last_sess = sess
 
             self.positions = {p["symbol"]: p for p in (b.positions() or [])}
 
@@ -811,17 +819,22 @@ class Fleet:
             self.ev("HALT", f"ACCOUNT LOSS LIMIT: ${made:,.2f} today "
                             f"<= -${lim:,.2f}. All ladders halted.")
 
-    def entry_block(self, symbol: str, cost: float) -> str:
+    def entry_block(self, symbol: str, cost: float, resting: float = 0.0) -> str:
         """'' means this new lot is allowed by the PORTFOLIO rules.
 
         Checked in addition to the ladder's own max_lots -- these are the caps
         that only mean anything when several ladders share one account.
+        `resting` is the notional of a ladder's touch-mode rungs already
+        working at Alpaca: counted against the exposure cap (deployed() sees
+        positions only) but NOT against the cash reserve, because Alpaca's
+        buying_power already nets open orders.
         """
         g = self.gcfg
         cap = float(g.get("max_total_exposure") or 0)
-        if cap > 0 and self.deployed() + cost > cap:
-            return (f"portfolio exposure cap: ${self.deployed():,.0f} deployed + "
-                    f"${cost:,.0f} would pass the ${cap:,.0f} limit")
+        if cap > 0 and self.deployed() + resting + cost > cap:
+            return (f"portfolio exposure cap: ${self.deployed():,.0f} deployed"
+                    + (f" + ${resting:,.0f} resting" if resting else "")
+                    + f" + ${cost:,.0f} would pass the ${cap:,.0f} limit")
         reserve = float(g.get("reserve_cash") or 0)
         bp = float(self.account.get("buying_power") or 0)
         if reserve > 0 and bp - cost < reserve:
