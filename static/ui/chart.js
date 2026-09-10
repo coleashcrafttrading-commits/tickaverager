@@ -24,6 +24,16 @@
    the candle that contains the fill rather than to the fill price. A closed
    trade can be joined entry->exit by a dashed link (setData's `links`), and
    the fills on the hovered candle show in a small tooltip beside it.
+
+   LAYERS AND STYLE
+     Everything drawn belongs to a named layer (LAYERS below): the two candle
+     colours, volume, each indicator overlay, each KIND of order line, the live
+     last-price line, each kind of trade arrow and each kind of link. A layer
+     resolves to {on, color, alpha}. The palette (CSS variables) supplies the
+     defaults, `chart.style` holds the operator's overrides -- the panel
+     persists them -- and resolveLayer() merges the two, so an untouched chart
+     looks exactly as it did before layers existed. Opacity is applied with
+     globalAlpha around that layer's drawing and nothing else.
    ========================================================================= */
 "use strict";
 
@@ -42,12 +52,109 @@ const escHtml = (s) => String(s == null ? "" : s)
 export const DEFAULTS = {
   showVolume: true,
   showGrid: true,
-  showMarkers: true,
+  showMarkers: true,           // master switch for every order-line layer
   showCrosshair: true,
   candleStyle: "candles",     // candles | bars | line
   logScale: false,
   height: 420,
 };
+
+/* ---------------------------------------------------------------- layers
+   The catalogue the Style panel is built from. `inherit` names the layer a
+   blank colour falls back to, for display: volume takes the candle's own
+   colour per bar and a still-open lot's arrow takes its side's entry colour,
+   unless the operator picks something explicit. Indicator overlays are not
+   listed here -- they are dynamic, keyed "ov:<kind>:<params>:<series>" by the
+   panel, and default to the colour the indicator picker gave them. */
+export const LAYERS = [
+  { key: "candle_up",         group: "Candles",      label: "Up candle" },
+  { key: "candle_down",       group: "Candles",      label: "Down candle" },
+  { key: "volume",            group: "Candles",      label: "Volume", inherit: "candle_up" },
+  { key: "entry",             group: "Order lines",  label: "Lot entries" },
+  { key: "avg",               group: "Order lines",  label: "Ladder average" },
+  { key: "tp",                group: "Order lines",  label: "Resting exit (sell order)" },
+  { key: "tp_pending",        group: "Order lines",  label: "Target with no resting order" },
+  { key: "next_add",          group: "Order lines",  label: "Next add level" },
+  { key: "resting_add",       group: "Order lines",  label: "Resting add order" },
+  { key: "last",              group: "Live",         label: "Last price" },
+  { key: "mark_entry_long",   group: "Trade arrows", label: "▲ Long entry" },
+  { key: "mark_entry_short",  group: "Trade arrows", label: "▼ Short entry" },
+  { key: "mark_exit_win",     group: "Trade arrows", label: "Exit · profit" },
+  { key: "mark_exit_loss",    group: "Trade arrows", label: "Exit · loss" },
+  { key: "mark_exit_unknown", group: "Trade arrows", label: "Exit · unknown P/L" },
+  { key: "mark_open",         group: "Trade arrows", label: "Still-open lot", inherit: "mark_entry_long" },
+  { key: "link_win",          group: "Trade links",  label: "Closed trade · profit" },
+  { key: "link_loss",         group: "Trade links",  label: "Closed trade · loss" },
+];
+export const LAYER_BY_KEY = Object.fromEntries(LAYERS.map((l) => [l.key, l]));
+
+/* the chart's colours, read from the theme every draw so a theme switch
+   repaints correctly */
+export function palette() {
+  return {
+    up: css("--up", "#35c98b"), down: css("--down", "#f2555a"),
+    grid: css("--hairline", "#232b36"), text: css("--faint", "#64707f"),
+    accent: css("--accent", "#4c8dff"), surface: css("--surface", "#161b22"),
+    warn: css("--warn", "#e8a33d"), ink: css("--text", "#e8edf4"),
+  };
+}
+
+/* What every layer looks like with nothing overridden. Pure: takes the
+   palette so it can be exercised without a document. Volume's old fill was
+   the candle colour with a "2e" alpha suffix, which is 46/255 = 0.18. */
+export function defaultStyle(C) {
+  const s = (color, alpha = 1) => ({ on: true, color, alpha });
+  return {
+    candle_up: s(C.up), candle_down: s(C.down), volume: s("", 0.18),
+    entry: s(C.accent), avg: s(C.text), tp: s(C.up), tp_pending: s(C.warn),
+    next_add: s(C.down), resting_add: s(C.down), last: s(C.ink, 0.85),
+    mark_entry_long: s(C.up), mark_entry_short: s(C.warn),
+    mark_exit_win: s(C.up), mark_exit_loss: s(C.down),
+    mark_exit_unknown: s(C.text, 0.6), mark_open: s(""),
+    link_win: s(C.up, 0.9), link_loss: s(C.down, 0.9),
+  };
+}
+
+/* override > per-item fallback > palette default. A blank colour survives
+   the merge so a caller can substitute its own inherit (volume, open lots). */
+export function resolveLayer(defaults, overrides, kind, fallback) {
+  const d = (defaults && defaults[kind]) || {};
+  const f = fallback || {};
+  const o = (overrides && overrides[kind]) || {};
+  const pick = (a, b, c, dflt) =>
+    (a != null ? a : b != null ? b : c != null ? c : dflt);
+  const alpha = Number(pick(o.alpha, f.alpha, d.alpha, 1));
+  return {
+    on: !!pick(o.on, f.on, d.on, true),
+    color: o.color || f.color || d.color || "",
+    alpha: isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1,
+  };
+}
+
+/* "#rgb", "#rrggbb", "#rrggbbaa", "rgb(...)" or "rgba(...)" -> "#rrggbb";
+   "" when it is none of those. <input type=color> accepts nothing else. */
+export function toHex(color) {
+  const c = String(color || "").trim().toLowerCase();
+  let m = c.match(/^#([0-9a-f]{3})$/);
+  if (m) return "#" + m[1].split("").map((x) => x + x).join("");
+  m = c.match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/);
+  if (m) return "#" + m[1];
+  m = c.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (m) {
+    return "#" + [m[1], m[2], m[3]].map((n) =>
+      Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, "0")).join("");
+  }
+  return "";
+}
+
+/* dark or light text on a filled tag of this colour */
+function inkOn(color) {
+  const h = toHex(color);
+  if (!h) return "#fff";
+  const r = parseInt(h.slice(1, 3), 16), g = parseInt(h.slice(3, 5), 16),
+        b = parseInt(h.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#0e1116" : "#fff";
+}
 
 export class Chart {
   constructor(host, opts = {}) {
@@ -60,9 +167,11 @@ export class Chart {
 
     this.bars = [];
     this.overlays = [];
-    this.lines = [];            // {price, color, label, dash, width}
-    this.trades = [];           // {t, price, kind, side, win, lot?, shares?, pl?, note?}
+    this.lines = [];            // {kind, price, label, dash, width, color?}
+    this.trades = [];           // {t, price, kind, side, win, open?, lot?, shares?, pl?, note?}
     this.links = [];            // {t0, p0, t1, p1, win, label?}: entry -> exit
+    this.last = null;           // {price, t}: the live last price, or null
+    this.style = {};            // layer overrides: {kind: {on?, color?, alpha?}}
     this._tIndex = null;        // bar t -> absolute index, built when needed
 
     this.view = null;           // [i0, i1] visible bar range
@@ -97,14 +206,17 @@ export class Chart {
     this.draw();
   }
 
+  /* `last` is only touched when passed: a caller that does not know about
+     the live price leaves whatever the panel set. */
   setData(bars, { overlays = [], lines = [], trades = [], links = [],
-                  keepView = true } = {}) {
+                  keepView = true, last } = {}) {
     const had = this.bars.length;
     this.bars = bars || [];
     this.overlays = overlays;
     this.lines = lines;
     this.trades = trades || [];
     this.links = links || [];
+    if (last !== undefined) this.last = last;
     this._tIndex = null;
     if (!this.view || !keepView || !had) {
       const n = this.bars.length;
@@ -125,6 +237,31 @@ export class Chart {
       if (shift > 0) this.view = [this.view[0] + shift, this.view[1] + shift];
     }
     this.draw();
+  }
+
+  setLast(last) { this.last = last || null; this.draw(); }
+
+  /* replace the layer overrides wholesale and repaint */
+  setStyle(overrides) { this.style = overrides || {}; this.draw(); }
+
+  /* The resolved {on, color, alpha} of a layer, as the next draw will see it.
+     A blank colour is filled from the catalogue's `inherit` so the Style
+     panel always has a swatch to show. */
+  layer(kind, fallback) {
+    if (!this._DEF) { this._C = palette(); this._DEF = defaultStyle(this._C); }
+    const r = resolveLayer(this._DEF, this.style, kind, fallback);
+    if (!r.color) {
+      const spec = LAYER_BY_KEY[kind];
+      r.color = spec && spec.inherit && spec.inherit !== kind
+        ? this.layer(spec.inherit).color : (this._C.accent || "#4c8dff");
+    }
+    return r;
+  }
+
+  /* an order line's layer, or a permissive one for a line with no kind */
+  _lineLayer(m) {
+    return m.kind ? this.layer(m.kind)
+      : resolveLayer(this._DEF, this.style, "", { color: m.color || this._C.accent });
   }
 
   resetView() {
@@ -163,11 +300,12 @@ export class Chart {
       for (const b of seg) { lo = Math.min(lo, b.l); hi = Math.max(hi, b.h); }
       // Order lines may widen the view a little, never dominate it. A ladder
       // holding lots far above price would otherwise squash the candles into a
-      // strip along the bottom.
+      // strip along the bottom. A hidden line does not widen anything.
       const range = (hi - lo) || 0.05;
       const room = range * 0.2;
       if (this.opt.showMarkers) {
         for (const m of this.lines) {
+          if (!this._lineLayer(m).on) continue;
           if (m.price >= lo - room && m.price <= hi + room) {
             lo = Math.min(lo, m.price); hi = Math.max(hi, m.price);
           }
@@ -209,12 +347,12 @@ export class Chart {
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
 
-    const C = {
-      up: css("--up", "#35c98b"), down: css("--down", "#f2555a"),
-      grid: css("--hairline", "#232b36"), text: css("--faint", "#64707f"),
-      accent: css("--accent", "#4c8dff"), surface: css("--surface", "#161b22"),
-      warn: css("--warn", "#e8a33d"), ink: css("--text", "#e8edf4"),
-    };
+    // the palette and the layer defaults are read fresh every draw, so a
+    // theme switch repaints in the new colours without a reload
+    const C = palette();
+    this._C = C;
+    this._DEF = defaultStyle(C);
+    const L = (kind, fallback) => resolveLayer(this._DEF, this.style, kind, fallback);
 
     const S = this._scales(w, h);
     if (!S) {
@@ -261,25 +399,34 @@ export class Chart {
 
     clip();
 
+    const cu = L("candle_up"), cd = L("candle_down");
+
     /* ---- volume ---- */
-    if (volH) {
+    // a blank volume colour means "the candle's own colour, per bar"
+    const vs = L("volume");
+    if (volH && vs.on) {
       const bw = Math.max(1, S.bw * 0.62);
+      g.globalAlpha = vs.alpha;
       for (let i = 0; i < seg.length; i++) {
         const b = seg[i];
-        g.fillStyle = (b.c >= b.o ? C.up : C.down) + "2e";
+        g.fillStyle = vs.color || (b.c >= b.o ? cu.color : cd.color);
         const y = S.vy(b.v || 0);
         g.fillRect(S.x(i) - bw / 2, y, bw, h - this.padB - y);
       }
+      g.globalAlpha = 1;
     }
 
     /* ---- order lines ---- */
     let above = 0, below = 0;
     if (this.opt.showMarkers) {
       for (const m of this.lines) {
+        const s = this._lineLayer(m);
+        if (!s.on) continue;
         if (m.price > hi) { above++; continue; }
         if (m.price < lo) { below++; continue; }
         const y = Math.round(S.y(m.price)) + 0.5;
-        g.strokeStyle = m.color || C.accent;
+        g.globalAlpha = s.alpha;
+        g.strokeStyle = s.color;
         g.lineWidth = m.width || 1;
         g.setLineDash(m.dash === null ? [] : (m.dash || [5, 4]));
         g.beginPath(); g.moveTo(0, y); g.lineTo(plotW, y); g.stroke();
@@ -289,11 +436,12 @@ export class Chart {
           const tw = g.measureText(m.label).width + 10;
           g.fillStyle = C.surface;
           g.fillRect(plotW - tw - 3, y - 8, tw, 16);
-          g.strokeStyle = m.color || C.accent; g.lineWidth = 1;
+          g.strokeStyle = s.color; g.lineWidth = 1;
           g.strokeRect(plotW - tw - 3.5, y - 8.5, tw, 16);
-          g.fillStyle = m.color || C.accent;
+          g.fillStyle = s.color;
           g.fillText(m.label, plotW - 8, y);
         }
+        g.globalAlpha = 1;
       }
       if (above || below) {
         g.font = "10px system-ui"; g.textAlign = "left"; g.fillStyle = C.text;
@@ -315,9 +463,11 @@ export class Chart {
     } else {
       for (let i = 0; i < seg.length; i++) {
         const b = seg[i];
-        const up = b.c >= b.o;
-        const col = up ? C.up : C.down;
+        const s = b.c >= b.o ? cu : cd;
+        if (!s.on) continue;
+        const col = s.color;
         const x = S.x(i);
+        g.globalAlpha = s.alpha;
         g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 1;
         g.beginPath();
         g.moveTo(Math.round(x) + 0.5, S.y(b.h));
@@ -336,14 +486,19 @@ export class Chart {
           else g.fillRect(x - bw / 2, top, bw, bh);
         }
       }
+      g.globalAlpha = 1;
     }
 
     /* ---- overlays ---- */
     const base = Math.max(0, Math.floor(this.view[0]));
     for (const o of this.overlays) {
       if (o.hidden) continue;
+      const s = o.key ? L(o.key, { color: o.color || C.accent })
+                      : { on: true, color: o.color || C.accent, alpha: 1 };
+      if (!s.on) continue;
       const vals = o.values || [];
-      g.strokeStyle = o.color || C.accent;
+      g.globalAlpha = s.alpha;
+      g.strokeStyle = s.color;
       g.lineWidth = o.width || 1.4;
       if (o.dash) g.setLineDash(o.dash);
       g.beginPath();
@@ -356,6 +511,7 @@ export class Chart {
       }
       g.stroke();
       g.setLineDash([]);
+      g.globalAlpha = 1;
     }
 
     /* ---- trade links: dashed entry -> exit, under the markers ---- */
@@ -365,14 +521,17 @@ export class Chart {
     // link with an end on no loaded bar at all is dropped.
     if (this.links.length) {
       if (!this._tIndex) this._tIndex = new Map(this.bars.map((b, i) => [b.t, i]));
-      g.setLineDash([4, 4]); g.lineWidth = 1.2; g.globalAlpha = 0.9;
-      for (const L of this.links) {
-        const i0 = this._tIndex.get(L.t0), i1 = this._tIndex.get(L.t1);
+      g.setLineDash([4, 4]); g.lineWidth = 1.2;
+      for (const Lk of this.links) {
+        const s = L(Lk.win ? "link_win" : "link_loss");
+        if (!s.on) continue;
+        const i0 = this._tIndex.get(Lk.t0), i1 = this._tIndex.get(Lk.t1);
         if (i0 == null || i1 == null) continue;
         const x0 = S.x(i0 - base), x1 = S.x(i1 - base);
         if (Math.max(x0, x1) < 0 || Math.min(x0, x1) > plotW) continue;
-        g.strokeStyle = L.win ? C.up : C.down;
-        g.beginPath(); g.moveTo(x0, S.y(L.p0)); g.lineTo(x1, S.y(L.p1)); g.stroke();
+        g.globalAlpha = s.alpha;
+        g.strokeStyle = s.color;
+        g.beginPath(); g.moveTo(x0, S.y(Lk.p0)); g.lineTo(x1, S.y(Lk.p1)); g.stroke();
       }
       g.setLineDash([]); g.globalAlpha = 1;
     }
@@ -386,26 +545,32 @@ export class Chart {
     //
     // An ENTRY is coloured by direction and an EXIT by outcome. Colouring
     // every marker by order side makes a short-only strategy's winners and
-    // losers identical on screen, which defeats the point of looking.
+    // losers identical on screen, which defeats the point of looking. A
+    // still-open lot (t.open) has its own layer that inherits the side's
+    // colour until the operator gives it one.
     const idx = new Map(seg.map((b, i) => [b.t, i]));
     const stack = new Map();           // "<i>:<a|b>" -> markers already there
     const TIP = 4, TALL = 8, HALF = 4.5, STEP = 11;
     for (const t of this.trades) {
       const i = idx.get(t.t);
       if (i == null) continue;
-      const b = seg[i];
-      const x = S.x(i);
       const isEntry = t.kind !== "exit";
       const below = t.side === "buy";
+      const sideKey = below ? "mark_entry_long" : "mark_entry_short";
+      let s;
+      if (t.open) s = L("mark_open", { color: L(sideKey).color });
+      else if (isEntry) s = L(sideKey);
+      else if (t.win === true) s = L("mark_exit_win");
+      else if (t.win === false) s = L("mark_exit_loss");
+      else s = L("mark_exit_unknown");                      // outcome unknown
+      if (!s.on) continue;
+      const b = seg[i];
+      const x = S.x(i);
       const key = i + (below ? ":b" : ":a");
       const n = stack.get(key) || 0;
       stack.set(key, n + 1);
       const off = TIP + n * STEP;
-      let col = C.up, alpha = 1;
-      if (isEntry) col = below ? C.up : C.warn;
-      else if (t.win === false) col = C.down;
-      else if (t.win !== true) { col = C.text; alpha = 0.6; }   // outcome unknown
-      g.fillStyle = col; g.globalAlpha = alpha;
+      g.fillStyle = s.color; g.globalAlpha = s.alpha;
       g.beginPath();
       if (below) {
         const y = S.y(b.l) + off;      // the tip, pointing up at the low
@@ -416,6 +581,21 @@ export class Chart {
       }
       g.closePath(); g.fill();
       g.globalAlpha = 1;
+    }
+
+    /* ---- live last price: a thin dashed line across the plot ---- */
+    // Drawn only while it is inside the price range: with the scale locked
+    // and panned away the line would otherwise sit on the axis and lie.
+    const lastP = this.last && Number(this.last.price);
+    const ls = lastP > 0 ? L("last") : null;
+    const lastIn = !!(ls && ls.on && lastP >= lo && lastP <= hi);
+    let lastY = 0;
+    if (lastIn) {
+      lastY = Math.round(S.y(lastP)) + 0.5;
+      g.globalAlpha = ls.alpha;
+      g.strokeStyle = ls.color; g.lineWidth = 1; g.setLineDash([2, 3]);
+      g.beginPath(); g.moveTo(0, lastY); g.lineTo(plotW, lastY); g.stroke();
+      g.setLineDash([]); g.globalAlpha = 1;
     }
 
     /* ---- time axis ---- */
@@ -433,6 +613,18 @@ export class Chart {
     g.strokeStyle = C.grid; g.beginPath();
     g.restore();                       // end of the clipped plot region
     g.moveTo(0, h - this.padB + 0.5); g.lineTo(plotW, h - this.padB + 0.5); g.stroke();
+
+    /* ---- the last-price tag, in the axis gutter (outside the clip) ---- */
+    if (lastIn) {
+      g.globalAlpha = ls.alpha;
+      g.fillStyle = ls.color;
+      g.fillRect(plotW + 1, lastY - 8, this.padR - 1, 16);
+      g.fillStyle = inkOn(ls.color); g.textAlign = "left";
+      g.textBaseline = "middle";
+      g.font = "10.5px ui-monospace, monospace";
+      g.fillText(lastP.toFixed(2), plotW + 9, lastY);
+      g.globalAlpha = 1;
+    }
 
     /* ---- crosshair ---- */
     if (this.opt.showCrosshair && this.hover != null
@@ -490,6 +682,7 @@ export class Chart {
       `<span class="${cls}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</span>` +
       (b.v ? `<span class="ro-k">V</span><span class="ro-v">${
         b.v.toLocaleString()}</span>` : "") +
+      (b.live ? `<span class="ro-k">live</span>` : "") +
       (marks.length ? `<span class="ro-k">·</span><span class="ro-v">${
         marks.length} fill${marks.length > 1 ? "s" : ""}</span>` : "");
   }
@@ -704,8 +897,19 @@ export class Chart {
 }
 
 /* ---------------------------------------------------------------- lines
-   Build the order-line layer for a ticker. Distinct colours per kind, because
-   a resting sell and a lot's entry are different facts about your position. */
+   Build the order-line layer for a ticker. Every line carries the KIND it
+   is -- the chart resolves colour, visibility and opacity from the style
+   for that kind, so a resting sell and a lot's entry can be told apart and
+   each can be switched off on its own. Nothing here picks a colour.
+
+     tp           a resting exit at Alpaca (a sell, or a BUY for a short ladder)
+     entry        an open lot's entry price
+     tp_pending   a lot's target that has no resting order behind it
+     avg          the ladder average
+     next_add     where the next rung would fill
+     resting_add  a buy (or short sell) resting at a rung, from
+                  status.resting_adds = [{price, shares, ...}] -- an engine
+                  feature that is on its way; absent today and simply skipped */
 export function orderLines(status) {
   if (!status) return [];
   const out = [];
@@ -717,34 +921,41 @@ export function orderLines(status) {
     if (o.side !== xside || !o.limit) continue;
     resting.add(o.coid);
     out.push({
-      price: o.limit, color: css("--up", "#35c98b"), dash: null, width: 1.6,
+      kind: "tp", price: o.limit, dash: null, width: 1.6,
       label: `${xside.toUpperCase()} ${o.remaining} @ ${o.limit.toFixed(2)}`,
     });
   }
   for (const l of (status.lots || [])) {
     out.push({
-      price: l.entry_price, color: css("--accent", "#4c8dff"),
-      dash: [3, 3], width: 1,
+      kind: "entry", price: l.entry_price, dash: [3, 3], width: 1,
       label: `entry ${l.shares}`,
     });
     if (!resting.has(l.tp_client_id)) {
       out.push({
-        price: l.tp_price, color: css("--warn", "#e8a33d"),
-        dash: [2, 4], width: 1,
+        kind: "tp_pending", price: l.tp_price, dash: [2, 4], width: 1,
         label: `target (not resting)`,
       });
     }
   }
   if (status.avg_price) {
     out.push({
-      price: status.avg_price, color: css("--faint", "#64707f"),
-      dash: [8, 4], width: 1.2, label: `avg ${status.avg_price.toFixed(2)}`,
+      kind: "avg", price: status.avg_price, dash: [8, 4], width: 1.2,
+      label: `avg ${status.avg_price.toFixed(2)}`,
     });
   }
   if (status.next_add_at) {
     out.push({
-      price: status.next_add_at, color: css("--down", "#f2555a"),
-      dash: [2, 3], width: 1, label: `next add`,
+      kind: "next_add", price: status.next_add_at, dash: [2, 3], width: 1,
+      label: `next add`,
+    });
+  }
+  // solid, like the resting exit: solid means an order is really there
+  for (const a of (Array.isArray(status.resting_adds) ? status.resting_adds : [])) {
+    const p = Number(a && a.price);
+    if (!(p > 0)) continue;
+    out.push({
+      kind: "resting_add", price: p, dash: null, width: 1.2,
+      label: `ADD ${a.shares != null ? a.shares + " " : ""}@ ${p.toFixed(2)}`,
     });
   }
   return out;

@@ -528,3 +528,62 @@ tr.on > td { background: var(--accent-dim); }
 .strat-k { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .strat-sel { font-size: 14px; padding: 7px 10px; min-width: 280px; }
 .strat-d { font-size: 12px; max-width: 60ch; }
+
+/* ---- chart toolbar: the live pill and the meta text sit at the right ---- */
+.chart-bar-r { margin-left: auto; display: inline-flex; gap: 10px; align-items: center;
+               flex: none; font-size: 11.5px; }
+.live-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
+  white-space: nowrap; font-variant-numeric: tabular-nums; cursor: help;
+  background: var(--raised); color: var(--faint);
+}
+.live-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
+                     background: currentColor; opacity: .55; }
+.live-pill.on { background: rgba(53,201,139,.14); color: var(--up); }
+.live-pill.on::before { opacity: 1; animation: livepulse 1.4s ease-in-out infinite; }
+.live-pill.stale { background: rgba(232,163,61,.14); color: var(--warn); }
+@keyframes livepulse { 50% { opacity: .25; } }
+
+/* ---- the popover under the toolbar (indicators, style, settings) ----------
+   It is part of the card, so on a narrow window it scrolls inside its own
+   box instead of pushing the chart off the bottom. */
+.chart-pop { max-height: min(420px, 55vh); overflow: auto; }
+
+/* ---- Style: one row per layer ------------------------------------------ */
+.sty-wrap { border: 1px solid var(--hairline); border-radius: 8px; padding: 12px 14px;
+            background: var(--raised); }
+.sty-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 4px 22px; align-items: start; }
+.sty-group.masked .sty-row { opacity: .45; }
+.sty-h { display: flex; align-items: center; gap: 8px;
+         color: var(--faint); font-size: 10.5px; font-weight: 650; letter-spacing: .06em;
+         text-transform: uppercase; padding: 8px 0 4px; border-bottom: 1px solid var(--hairline);
+         margin-bottom: 2px; }
+.sty-h .faint { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.sty-master { margin-left: auto; display: inline-flex; gap: 5px; align-items: center;
+              text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 11.5px;
+              color: var(--muted); cursor: pointer; white-space: nowrap; }
+.sty-master input { width: auto; margin: 0; }
+.sty-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12.5px; }
+.sty-row.off .sty-l { color: var(--faint); text-decoration: line-through; }
+.sty-row input[type="checkbox"] { width: auto; margin: 0; flex: none; }
+.sty-row input[type="color"] {
+  width: 28px; height: 20px; padding: 0 1px; flex: none; cursor: pointer;
+  border: 1px solid var(--hairline2); border-radius: 5px; background: var(--bg);
+}
+.sty-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
+.sty-row input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 3px; }
+.sty-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sty-row input[type="range"] { width: 84px; flex: none; padding: 0; margin: 0;
+                               background: transparent; border: 0; box-shadow: none; }
+.sty-pct { width: 36px; text-align: right; flex: none; color: var(--faint);
+           font-size: 11px; font-variant-numeric: tabular-nums; }
+.sty-reset { appearance: none; border: 0; background: transparent; color: var(--muted);
+             cursor: pointer; font-size: 13px; padding: 0 2px; flex: none; line-height: 1; }
+.sty-reset:hover:not(:disabled) { color: var(--text); }
+.sty-reset:disabled { opacity: .25; cursor: default; }
+.sty-foot { display: flex; gap: 12px; align-items: center; margin-top: 12px;
+            padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 11.5px;
+            flex-wrap: wrap; }

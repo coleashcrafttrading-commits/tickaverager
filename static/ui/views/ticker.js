@@ -115,7 +115,9 @@ function convertTrades(d, bars, inc) {
   for (const o of open) {
     if (drawn.has(o.lot_id)) continue;        // its entry fill is already on the chart
     const t = place(o.t); if (!t) continue;
-    marks.push({ t, price: o.price, kind: "entry", side: opens(o.side),
+    // `open` puts the arrow on its own style layer (mark_open), which inherits
+    // the side's entry colour until the operator gives it one of its own
+    marks.push({ t, price: o.price, kind: "entry", side: opens(o.side), open: true,
                  lot: o.lot_id, shares: o.shares,
                  note: o.tp_price ? `still open · target $${Number(o.tp_price).toFixed(2)}` : "still open" });
   }
@@ -196,20 +198,12 @@ function mountLive(sym) {
         </div>
       </div>`)}
     ${card("Chart", `<div id="chartHost"></div>
-      <div class="tip"><span style="color:var(--accent)">━━</span> lot entries ·
-        <span style="color:var(--up)">━━</span> resting sells ·
-        <span style="color:var(--warn)">━━</span> targets with no order ·
-        <span style="color:var(--faint)">━━</span> ladder average ·
-        <span style="color:var(--down)">━━</span> next add</div>
+      <div class="tip" id="tkLegend"></div>
       <div class="tip chart-trades">
         <label><input type="checkbox" id="tkShowTrades" checked> Show trades</label>
         <label title="Rows the ledger wrote to stay in step with Alpaca — a rebuilt ladder, a lot closed outside the bot. Bookkeeping, not real fills.">
           <input type="checkbox" id="tkShowInferred"> include bookkeeping rows</label>
-        <span>▲ entry (<span style="color:var(--up)">green</span> long ·
-          <span style="color:var(--warn)">orange</span> short) ·
-          ▼ exit (<span style="color:var(--up)">green</span> profit ·
-          <span style="color:var(--down)">red</span> loss) ·
-          dashed line = closed trade</span>
+        <span id="tkMarkLegend"></span>
         <span id="tkTradesCount" style="margin-left:auto">—</span>
       </div>`)}
     <div class="grid main">
@@ -305,13 +299,48 @@ function mountLive(sym) {
     toast(`${sym} is now on ${esc(p.label)}.`, "ok");
   });
 
-  panel = new ChartPanel(el("chartHost"), { key: "ticker", symbol: sym, onBars });
+  // live: the forming candle follows /api/ticks; onStyle: the legend under
+  // the chart is drawn in whatever colours the operator chose
+  panel = new ChartPanel(el("chartHost"), { key: "ticker", symbol: sym, onBars,
+                                            live: true, onStyle: paintLegend });
   TR = { data: null, at: 0, key: "" };
   const show = el("tkShowTrades");
   show.checked = tradesOn();
   show.onchange = () => { rememberTradesOn(show.checked); onBars(panel.bars || []); };
   el("tkShowInferred").onchange = applyTrades;
+  paintLegend();
   panel.load();
+}
+
+/* The legends under the chart, in the chart's own resolved colours -- a
+   static legend went wrong the moment a colour was changed in Style. A layer
+   that is switched off drops out of the legend, so the two never disagree. */
+function paintLegend() {
+  if (!panel) return;
+  const sw = (kind, text, glyph = "━━") => {
+    const s = panel.layer(kind);
+    if (!s.on) return "";
+    return `<span style="color:${esc(s.color)};opacity:${s.alpha}">${glyph}</span> ${text}`;
+  };
+  const lines = panel.opts.showMarkers ? [
+    sw("entry", "lot entries"), sw("tp", "resting sells"),
+    sw("tp_pending", "targets with no order"), sw("avg", "ladder average"),
+    sw("next_add", "next add"), sw("resting_add", "resting adds"),
+  ].filter(Boolean) : [];
+  lines.push(sw("last", "last price", "╌╌"));
+  const lg = el("tkLegend");
+  if (lg) lg.innerHTML = lines.filter(Boolean).join(" · ")
+    || `<span class="faint">order lines are hidden — see Style in the toolbar</span>`;
+  const tone = (kind, text) => {
+    const s = panel.layer(kind);
+    return s.on ? `<span style="color:${esc(s.color)};opacity:${s.alpha}">${text}</span>` : `<s class="faint">${text}</s>`;
+  };
+  const ml = el("tkMarkLegend");
+  if (ml) ml.innerHTML =
+    `▲ entry (${tone("mark_entry_long", "long")} · ${tone("mark_entry_short", "short")}) · `
+    + `▼ exit (${tone("mark_exit_win", "profit")} · ${tone("mark_exit_loss", "loss")}) · `
+    + `${tone("mark_open", "◆ still open")} · `
+    + `${tone("link_win", "╌╌")} closed trade`;
 }
 
 function paintLive() {
