@@ -399,7 +399,9 @@ export class PortfolioChart {
 
     this._syncPills();
     this._bind();
-    this._ro = new ResizeObserver(() => this.draw());
+    // draw on the next frame: resizing the canvas inside the callback would
+    // re-trigger the observer in the same frame (the 'ResizeObserver loop')
+    this._ro = new ResizeObserver(() => this._drawSoon());
     this._ro.observe(this.$chart);
     // a theme switch changes the CSS variables the canvas reads
     this._mo = new MutationObserver(() => this.draw());
@@ -491,6 +493,7 @@ export class PortfolioChart {
     this._dead = true;
     this.stopLive();
     try { this._ro.disconnect(); } catch (e) { /* gone */ }
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     try { this._mo.disconnect(); } catch (e) { /* gone */ }
     document.removeEventListener("visibilitychange", this._onVis);
     window.removeEventListener("mouseup", this._onUp);
@@ -697,14 +700,21 @@ export class PortfolioChart {
     this.view = [anchor - next * frac, anchor - next * frac + next];
   }
 
+  _drawSoon() {
+    if (this._raf || this._dead) return;
+    this._raf = requestAnimationFrame(() => { this._raf = 0; if (!this._dead) this.draw(); });
+  }
+
   /* --------------------------------------------------------------- draw */
   draw() {
     const w = this.$chart.clientWidth || 600;
     const h = this.opt.height || (w < 560 ? 260 : 340);
     const dpr = DPR();
     const cv = this.cv, g = this.ctx;
-    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
-    cv.style.height = h + "px";
+    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (cv.width !== bw) cv.width = bw;
+    if (cv.height !== bh) cv.height = bh;
+    if (cv.style.height !== h + "px") cv.style.height = h + "px";
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
     const C = palette();

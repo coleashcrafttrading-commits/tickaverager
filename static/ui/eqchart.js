@@ -28,7 +28,10 @@ export class EqChart {
     this.data = null;
     this.hover = null;
     this._bind();
-    this._ro = new ResizeObserver(() => this.draw());
+    this._ro = new ResizeObserver(() => {
+      if (this._raf) return;
+      this._raf = requestAnimationFrame(() => { this._raf = 0; this.draw(); });
+    });
     this._ro.observe(host);
   }
 

@@ -198,11 +198,19 @@ export class Chart {
     this.cv.__chart = this;
 
     this._bind();
-    this._ro = new ResizeObserver(() => this.draw());
+    // next frame, never inside the callback: resizing the canvas there
+    // re-triggers the observer (Chrome's 'ResizeObserver loop' report)
+    this._ro = new ResizeObserver(() => {
+      if (this._raf) return;
+      this._raf = requestAnimationFrame(() => { this._raf = 0; this.draw(); });
+    });
     this._ro.observe(host);
   }
 
-  destroy() { try { this._ro.disconnect(); } catch (e) { /* already gone */ } }
+  destroy() {
+    try { this._ro.disconnect(); } catch (e) { /* already gone */ }
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
+  }
 
   set(opt, value) {
     this.opt[opt] = value;
@@ -364,8 +372,9 @@ export class Chart {
     const w = this.host.clientWidth || 600;
     const h = this._effHeight();
     const dpr = DPR();
-    this.cv.width = w * dpr; this.cv.height = h * dpr;
-    this.cv.style.height = h + "px";
+    if (this.cv.width !== w * dpr) this.cv.width = w * dpr;
+    if (this.cv.height !== h * dpr) this.cv.height = h * dpr;
+    if (this.cv.style.height !== h + "px") this.cv.style.height = h + "px";
     const g = this.ctx;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);

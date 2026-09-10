@@ -44,6 +44,9 @@ window.addEventListener("error", function (e) {
   var v = document.getElementById("view");
   if (!v || v.dataset.failed) return;
   if (!(e.message || "").length) return;
+  // Chrome reports an observer that resized what it watches as an error;
+  // it is a warning about timing, not a failure, and never breaks the page
+  if (/ResizeObserver loop/i.test(e.message || "")) return;
   v.dataset.failed = "1";
   v.innerHTML = '<div class="note bad"><b>The dashboard failed to load:</b> '
     + String(e.message).replace(/</g, "&lt;")
