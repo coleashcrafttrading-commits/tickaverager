@@ -191,6 +191,22 @@ def main() -> int:
         fl._record_ticks(["RAM"])
         check("an unchanged quote does not grow the buffer", len(fl.ticks["RAM"]), n)
 
+        print("\n3d. the deploy's resume marker remembers running engines (autostart or not)")
+        import types as _types
+        r = c.post("/api/resume-marker")
+        check("no engines -> ok, nothing to resume", (r.status_code, r.json()["resume"]), (200, {"glenn-momentum": []}))
+        check("...and no resume file", fl.resume_path.exists(), False)
+        fl.engines["RAM"] = _types.SimpleNamespace(running=True, symbol="RAM")
+        fl.engines["ZZZ"] = _types.SimpleNamespace(running=False, symbol="ZZZ")
+        try:
+            r = c.post("/api/resume-marker")
+            check("running engines are listed", r.json()["resume"], {"glenn-momentum": ["RAM"]})
+            check("the resume file names them", json.loads(fl.resume_path.read_text())["symbols"], ["RAM"])
+        finally:
+            fl.engines.pop("RAM", None)
+            fl.engines.pop("ZZZ", None)
+            fl.clear_resume()
+
         print("\n4. the account gets its own files")
         acc = app_mod.REG.get("glenn-momentum")
         check("config.json under the account dir", acc.config_path.exists(), True)

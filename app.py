@@ -319,6 +319,28 @@ def set_settings(patch: dict = Body(...), f: Fleet = Depends(cur)):
     return {"ok": True, "global": f.update_global(patch)}
 
 
+@app.post("/api/resume-marker")
+def resume_marker():
+    """Remember what is running so the NEXT process restart brings it back.
+
+    The deploy script calls this right before its systemd restart. It writes
+    the same resume file the Restart button writes and stops nothing; a
+    ticker whose autostart flag is off (every newly added ticker) otherwise
+    comes back stopped after every deploy and has to be started by hand.
+    consume_resume() ignores a file older than five minutes, so a marker
+    written for a restart that never happened cannot arm anything later.
+    """
+    out: dict[str, list[str]] = {}
+    for f in _all_fleets():
+        was = sorted(s for s, e in f.engines.items() if getattr(e, "running", False))
+        if was:
+            f.write_resume(was)
+        else:
+            f.clear_resume()
+        out[f.account_id] = was
+    return {"ok": True, "resume": out}
+
+
 @app.post("/api/restart")
 def restart(body: dict = Body(default={})):
     """Stop everything and exit with the code start_bot.bat relaunches on.

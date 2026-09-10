@@ -12,7 +12,9 @@
 #   * the ladder tests run on the VM's own Python BEFORE the restart; red tests
 #     mean the running process keeps the old code and this script fails loudly
 #   * the restart is a systemd restart; resting take-profits live at Alpaca,
-#     ledgers live in state/, so a restart strands nothing
+#     ledgers live in state/, so a restart strands nothing; whatever was
+#     running is marked first (POST /api/resume-marker) and comes back
+#     running, autostart flag or not
 set -euo pipefail
 
 OWNER="${TA_OWNER:-coleashcraft_trading}"
@@ -52,6 +54,10 @@ for t in test_rules.py test_reverse.py test_accounts.py test_app_accounts.py; do
 done
 
 echo "-- restart --"
+# remember what is running so the new process resumes it (autostart or not);
+# an old process without this route answers 404 and the flags carry the rest
+curl -s -m 10 -X POST "http://127.0.0.1:$PORT/api/resume-marker" || true
+echo
 systemctl restart "$SERVICE"
 sleep 20
 echo "service: $(systemctl is-active "$SERVICE")"
