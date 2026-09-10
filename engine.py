@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo
 import journal
 import trend
 from broker import Alpaca, AlpacaError
+from qty import qty, qnum, qsame, qzero, qwhole, qfloor, qstr, QTY_DP, QTY_EPS, MIN_QTY, MIN_NOTIONAL
 
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = ROOT / "state"
@@ -87,6 +88,15 @@ ADD_BLOCK_MIN_STRIKES = 2         # 'sticky' block reasons must persist across t
 # ---- cover guard (4c) persistence, same shape as the sync guard's strikes ----
 OVERCOVER_MIN_STRIKES = 2         # distinct fleet.snap_at snapshots
 OVERCOVER_GRACE_SECONDS = 6
+# ---- fractional shares ----
+# A fractional quantity rests at Alpaca as a DAY order only (no GTC, no
+# trailing stop, no short sale). A rejected fractional order is retried no
+# sooner than this per key (lot id or "basket"); every session edge clears
+# the timers so the first tick of an eligible session retries at once.
+FRAC_RETRY_SECONDS = 300
+FRAC_SESSIONS = {"regular":  ("regular",),
+                 "extended": ("premarket", "regular", "afterhours"),
+                 "all":      ("premarket", "regular", "afterhours", "overnight")}
 
 # LADDER V2 -- the refined ladder as a PROFILE, applied per ticker, not as new
 # defaults. Existing tickers keep running byte-identically until someone sets
@@ -132,6 +142,16 @@ TICKER_DEFAULTS: dict[str, Any] = {
     # --- instrument ---
     "symbol":            "SPY",
     "shares_per_lot":    100,
+    # --- fractional shares ---
+    # off = whole shares (as it has always been) | on = shares_per_lot / min_shares /
+    # max_shares may be decimals when Alpaca marks the asset fractionable. A
+    # fractional lot's exit is a DAY limit re-placed each session; it can never
+    # be sold short. Off: a fraction in shares_per_lot is refused, not rounded up.
+    "fractional":          "off",
+    # regular = fractional lots open, add and exit 09:30-16:00 only | extended =
+    # pre/post too | all = overnight too. Outside it a fractional ladder WAITS --
+    # it never rounds up to whole shares.
+    "fractional_sessions": "regular",
 
     # --- ladder ---
     "add_mode":          "points",     # atr | points | percent | beyond_average
@@ -180,7 +200,6 @@ TICKER_DEFAULTS: dict[str, Any] = {
     # Martingale sizing produced $97k of peak capital in one week and lost.
     "f_ladder":          0.0,         # 0 = off. share of equity one ladder may hold
     "n_target":          8,           # rungs the cap is spread over (= max_lots)
-    "min_shares":        1,
     # --- ladder v2: the staged unwind (design section 3) ---
     # The reversal question was researched and the answer is blunt: at 15-60
     # minutes NOTHING predicts continuation better than ~55% -- 1h flips,
@@ -362,6 +381,14 @@ def frozen(state_dir: Optional[Path] = None) -> str:
     return ""
 
 
+def _qty_cfg(v):
+    """The NUMERIC coercer for the three share-count settings: a whole number
+    stays an int (so a whole-share ticker's config, and its journal cfg_hash,
+    are byte-identical), a fraction is a 9-dp float. A non-number raises, and
+    update_config drops the key as it always has."""
+    return qnum(float(v))
+
+
 def _parse_hms(s: str) -> dtime:
     parts = [int(x) for x in str(s).strip().split(":")]
     while len(parts) < 3:
@@ -428,13 +455,13 @@ def _round_cent(p: float) -> float:
 @dataclass
 class Lot:
     id: str
-    shares: int
+    shares: float               # an int for a whole lot, a 9-dp float for a fraction (qnum)
     entry_price: float
     entry_time: str
     tp_price: float
     tp_client_id: str = ""
     tp_order_id: str = ""
-    tp_filled: int = 0          # shares of THIS lot's TP already booked as sold
+    tp_filled: float = 0        # shares of THIS lot's TP already booked as sold
     tp_seq: int = 0             # bumped per placement -- Alpaca reserves used ids
     armed: bool = False         # trail mode: has this lot reached its target?
     peak: float = 0.0           # trail mode: highest price seen since arming
@@ -512,9 +539,10 @@ class Ledger:
 
     # ---- math ----
     @property
-    def shares(self) -> int:
-        """Always a MAGNITUDE. A short ladder of 300 shares reports 300."""
-        return sum(l.shares for l in self.open_lots)
+    def shares(self) -> float:
+        """Always a MAGNITUDE. A short ladder of 300 shares reports 300 -- as
+        an int when every lot is whole, else the 9-dp float (qnum)."""
+        return qnum(round(sum(qty(l.shares) for l in self.open_lots), QTY_DP))
 
     @property
     def side(self) -> str:
@@ -524,7 +552,7 @@ class Ledger:
         return self.open_lots[0].side if self.open_lots else "long"
 
     @property
-    def signed_shares(self) -> int:
+    def signed_shares(self) -> float:
         """What Alpaca would report for this ladder: negative when short.
         This, not `shares`, is what may be compared against broker_qty."""
         return -self.shares if self.side == "short" else self.shares
@@ -532,7 +560,7 @@ class Ledger:
     @property
     def avg_price(self) -> float:
         s = self.shares
-        return (sum(l.cost for l in self.open_lots) / s) if s else 0.0
+        return (sum(l.cost for l in self.open_lots) / s) if s > QTY_EPS else 0.0
 
     @property
     def last_fill_price(self) -> float:
@@ -658,6 +686,12 @@ class Engine:
         self._overcover_strikes = 0
         self._overcover_since = 0.0
         self._overcover_snap = 0.0
+        # fractional shares: per-key epoch before which a rejected fractional
+        # order is not retried (lot id, or "basket"); the session the last tick
+        # saw (an edge clears the timers); Alpaca's asset flags, cached per session
+        self._frac_try_at: dict[str, float] = {}
+        self._sess_last = ""
+        self._asset_info: Optional[dict] = None
         # non-blocking problems: surfaced in the dashboard, never stop trading
         self.attention: dict[str, str] = {}
         self.loop_count = 0
@@ -764,6 +798,7 @@ class Engine:
         self._adds_reject_streak = 0
         self._adds_block_snap, self._adds_block_strikes, self._adds_block_text = 0.0, 0, ""
         self._overcover_strikes, self._overcover_since, self._overcover_snap = 0, 0.0, 0.0
+        self._frac_try_at.clear()
         self.attention.clear()
         self.ev("INFO", "Halt cleared by operator.")
 
@@ -823,6 +858,12 @@ class Engine:
         self.last_tick_at = _now_ny().strftime("%H:%M:%S")
 
         self._roll_session()
+        sess = self._session_now()
+        if sess != self._sess_last:
+            self._sess_last = sess
+            self._frac_try_at.clear()      # a new session: fractional orders may be tried again at once
+        if self._fractional_on():
+            self._asset_flags()            # warm the cache on the ENGINE thread (block_reason only reads it)
         self._refresh_market()
         self._book_basket_progress()   # a basket close in flight books its fills HERE,
                                        # before reconcile can mistake them for a gap
@@ -879,7 +920,7 @@ class Engine:
         # dashboard shows is Alpaca's own, never re-derived locally
         pos = f.position_of(self.symbol)
         self.position = pos or {}
-        self.broker_qty = int(float(pos["qty"])) if pos else 0
+        self.broker_qty = qnum(pos["qty"]) if pos else 0
         self.broker_avg = float(pos["avg_entry_price"]) if pos else 0.0
 
         # AFTER broker_qty is current -- the realized walk cross-checks against it
@@ -921,10 +962,10 @@ class Engine:
         # short sets the basis, and the buy that covers it realizes
         # (basis - price) x qty. Treating every sell as a close is what would
         # book the whole notional of a short entry as instant profit.
-        qty, avg, realized, bought, sold = 0, 0.0, 0.0, 0, 0
+        held_q, avg, realized, bought, sold = 0.0, 0.0, 0.0, 0.0, 0.0
         for a in rows:
             try:
-                q, p = int(float(a["qty"])), float(a["price"])
+                q, p = qty(a["qty"]), float(a["price"])
             except (KeyError, TypeError, ValueError):
                 continue
             buy = a.get("side") == "buy"
@@ -933,29 +974,29 @@ class Engine:
                 bought += q
             else:
                 sold += q
-            if qty == 0 or (qty > 0) == (signed > 0):
+            if qzero(held_q) or (held_q > 0) == (signed > 0):
                 # opening or adding on the same side -- weight the basis
-                tot = qty + signed
-                avg = ((avg * abs(qty) + p * q) / abs(tot)) if tot else 0.0
-                qty = tot
+                tot = round(held_q + signed, QTY_DP)
+                avg = ((avg * abs(held_q) + p * q) / abs(tot)) if not qzero(tot) else 0.0
+                held_q = tot
             else:
                 # reducing: realize only the shares that actually close, and
                 # only up to the size we have. Anything past that FLIPS the
                 # position, and the remainder starts a fresh basis at p.
-                closing = min(q, abs(qty))
-                realized += (p - avg) * closing * (1 if qty > 0 else -1)
-                qty += signed
-                if qty == 0:
+                closing = min(q, abs(held_q))
+                realized += (p - avg) * closing * (1 if held_q > 0 else -1)
+                held_q = round(held_q + signed, QTY_DP)
+                if qzero(held_q):
                     avg = 0.0
-                elif (qty > 0) == (signed > 0):
+                elif (held_q > 0) == (signed > 0):
                     avg = p                   # flipped through flat
 
         self.realized_account = round(realized, 2)
-        self.fills_today, self.bought_today, self.sold_today = len(rows), bought, sold
+        self.fills_today, self.bought_today, self.sold_today = len(rows), qnum(bought), qnum(sold)
         # walking today's fills should land exactly on what Alpaca holds. If it
         # doesn't, shares were carried in from a prior session and this figure
         # is missing their cost basis -- say so rather than show a wrong number.
-        self.carry_in = qty != self.broker_qty
+        self.carry_in = not qsame(held_q, self.broker_qty)
 
     # ==================================================================
     # RECONCILE -- entry fills, TP fills, sync guard, orphan guard
@@ -1757,12 +1798,13 @@ class Engine:
         return -1 if side == "short" else 1
 
     @property
-    def held(self) -> int:
-        """How many shares Alpaca holds, as a magnitude (shorts are negative)."""
-        return abs(int(self.broker_qty or 0))
+    def held(self) -> float:
+        """How many shares Alpaca holds, as a magnitude (shorts are negative).
+        An int for a whole position, the 9-dp float for a fractional one."""
+        return qnum(abs(qty(self.broker_qty or 0)))
 
     def broker_side(self) -> str:
-        return "short" if int(self.broker_qty or 0) < 0 else "long"
+        return "short" if qty(self.broker_qty or 0) < -QTY_EPS else "long"
 
     def pos_side(self) -> str:
         """The side of the position that EXISTS right now -- the ledger's if it
@@ -2763,7 +2805,8 @@ class Engine:
         af = getattr(self, "_asset_info", None)
         if af is not None:
             return af
-        af = {"shortable": None, "overnight": None, "borrow": ""}
+        af = {"shortable": None, "overnight": None, "borrow": "",
+              "fractionable": None, "qty_step": 1e-9, "min_qty": MIN_QTY, "price_step": 0.01}
         b = self.broker
         if b is not None:
             try:
@@ -2772,16 +2815,122 @@ class Engine:
                 af = {"shortable": bool(a.get("shortable")) and borrow == "easy_to_borrow",
                       "overnight": (bool(a.get("overnight_tradable")) and not a.get("overnight_halted"))
                       if "overnight_tradable" in a else None,
-                      "borrow": borrow}
+                      "borrow": borrow,
+                      # fractional shares: unknown is NEVER fractional-capable
+                      "fractionable": bool(a.get("fractionable")) if "fractionable" in a else None,
+                      "qty_step": qty(a.get("min_trade_increment") or 0) or 1e-9,
+                      "min_qty": max(MIN_QTY, qty(a.get("min_order_size") or 0)),
+                      "price_step": float(a.get("price_increment") or 0.01)}
                 self.unflag("asset")
             except Exception as e:
                 self.flag("asset", f"asset lookup for {self.symbol} failed ({str(e)[:80]}); "
-                                   f"shortability unknown -- shorts are not blocked")
+                                   f"shortability unknown -- shorts are not blocked; a fractional "
+                                   f"ladder sizes no lot until the flags load")
         self._asset_info = af
         return af
 
     def _short_allowed(self) -> bool:
         return self._asset_flags().get("shortable") is not False
+
+    # ---------------- fractional shares ----------------
+    # A lot may be a fraction of a share only when the ticker says
+    # fractional=on AND Alpaca's asset object says fractionable. Whole-share
+    # tickers never enter any of these paths: every gate below is on the
+    # QUANTITY (qwhole), so a whole lot on a fractional ticker keeps its GTC
+    # exit exactly as before.
+    def _fractional_on(self) -> bool:
+        """Config only: no asset lookup, no side effects (safe on the API thread)."""
+        return str(self.cfg.get("fractional") or "off").lower() == "on"
+
+    def _frac_capable(self) -> bool:
+        """fractional=on AND Alpaca marks the asset fractionable. May do the
+        once-per-session lookup -- engine thread only."""
+        return self._fractional_on() and self._asset_flags().get("fractionable") is True
+
+    def _frac_sessions(self) -> str:
+        fs = str(self.cfg.get("fractional_sessions") or "regular").lower()
+        return fs if fs in FRAC_SESSIONS else "regular"
+
+    def _frac_session_ok(self) -> bool:
+        """May a fractional lot open, add or exit in the CURRENT session?"""
+        sess = self._session_now()
+        if sess == "overnight" and self._frac_sessions() == "all":
+            af = getattr(self, "_asset_info", None)
+            return af is None or af.get("overnight") is not False
+        return sess in FRAC_SESSIONS[self._frac_sessions()]
+
+    def _lot_unit(self) -> float:
+        """shares_per_lot as the structural guard and _lots_from_history see it."""
+        spl = qty(self.cfg.get("shares_per_lot") or 0)
+        return max(MIN_QTY, spl) if self._frac_capable() else max(1, int(spl))
+
+    def _next_lot_fractional(self) -> bool:
+        """Would the NEXT lot be a fraction of a share? Config only."""
+        if not self._fractional_on():
+            return False
+        if str(self.cfg.get("size_mode") or "fixed") == "fixed":
+            return not qwhole(qty(self.cfg.get("shares_per_lot") or 0))
+        return True                           # dollars/atr on a fractional ticker: assume fractional
+
+    def _frac_block(self) -> str:
+        """A readable reason a FRACTIONAL next lot cannot open now; '' when it
+        can. Cheap by design: config and the CACHED asset flag only (it runs
+        from block_reason on every overview poll), never _lot_shares()."""
+        spl = qty(self.cfg.get("shares_per_lot") or 0)
+        fixed = str(self.cfg.get("size_mode") or "fixed") == "fixed"
+        if not self._fractional_on():
+            if fixed and not qwhole(spl):
+                return (f"shares_per_lot {qstr(spl)} is a fraction of a share but fractional is off -- "
+                        f"no lot sent; set fractional=on or a whole number")
+            return ""
+        if not self._next_lot_fractional():
+            return ""
+        af = getattr(self, "_asset_info", None)
+        if af is None:
+            return f"fractional=on: waiting for Alpaca's asset flags for {self.symbol} to load"
+        if af.get("fractionable") is None:
+            return (f"fractional=on but Alpaca's asset flags for {self.symbol} are unknown (lookup failed) "
+                    f"-- not sizing a lot until they load")
+        if af.get("fractionable") is False:
+            return (f"fractional=on but {self.symbol} is not fractionable at Alpaca -- whole shares only; "
+                    f"set fractional=off")
+        if self.next_side() == "short":
+            return (f"fractional lot on a SHORT: Alpaca has no fractional short sales -- no short entry "
+                    f"(side_mode={self.cfg.get('side_mode')}); size this ladder in whole shares to short it")
+        if not self._frac_session_ok():
+            fs = self._frac_sessions()
+            win = {"regular": "09:30-16:00 only", "extended": "pre/regular/post only",
+                   "all": "any session"}[fs]
+            return (f"fractional ladder: {self._session_now()} session -- fractional shares trade {win} "
+                    f"(fractional_sessions={fs}); waiting, not rounding up")
+        return ""
+
+    def _tif_for(self, shares) -> tuple:
+        """(time_in_force, extended_hours) for a resting limit of this
+        quantity: today's GTC rule for a whole quantity; DAY for a fractional
+        one, extended only when the session rule allows it."""
+        if qwhole(shares):
+            return "gtc", self.wants_extended()
+        return "day", self.wants_extended() and self._frac_sessions() != "regular"
+
+    def _limit_place(self, b, side_word: str, shares):
+        """The broker method for a resting limit on this quantity. side_word: 'buy' | 'sell'."""
+        tif, _ = self._tif_for(shares)
+        return getattr(b, f"{side_word}_limit_{tif}")
+
+    @staticmethod
+    def _frac_reject(e) -> bool:
+        """Does this AlpacaError read as 'no fractional order of that shape'?"""
+        body = ((getattr(e, "body", "") or "") + " " + str(e)).lower()
+        return ("fractional" in body or "fractionable" in body or "must be integer" in body
+                or ("qty" in body and "integer" in body))
+
+    def _frac_wait(self, key: str) -> bool:
+        """True while a fractional order under this key must not be retried yet."""
+        return time.time() < self._frac_try_at.get(key, 0.0)
+
+    def _frac_defer(self, key: str, why: str) -> None:
+        self._frac_try_at[key] = time.time() + FRAC_RETRY_SECONDS
 
     def _reverse_side(self, s: int) -> str:
         """The side a reversal of an s-sided ladder would open, or '' when
@@ -4312,7 +4461,8 @@ class Engine:
         "reverse_max_spread_pct": float,
         "basket_chase_s": float,
         "reverse_ttl_h": float, "reverse_cooldown_h": float,
-        "entry_ma_period": int,"shares_per_lot": int, "max_lots": int, "entry_fill_timeout": int,
+        "entry_ma_period": int, "shares_per_lot": _qty_cfg, "min_shares": _qty_cfg, "max_shares": _qty_cfg,
+        "max_lots": int, "entry_fill_timeout": int,
                "add_distance": float, "add_percent": float, "take_profit": float,
                "daily_loss_limit": float, "poll_seconds": float,
                "entry_limit_offset": float, "trail_amount": float,
@@ -4324,6 +4474,8 @@ class Engine:
         with self.lock:
             old_tp = float(self.cfg["take_profit"])
             old_xh = bool(self.cfg.get("allow_extended_hours"))
+            old_frac = str(self.cfg.get("fractional") or "off").lower()
+            old_fs = self._frac_sessions()
             clean: dict[str, Any] = {}
             rejected: list[str] = []
             for k, v in patch.items():
@@ -4386,6 +4538,18 @@ class Engine:
                     if v not in ("last_fill", "last_open"):
                         rejected.append(k)
                         continue
+                if k == "fractional":
+                    v = str(v).strip().lower()
+                    v = {"true": "on", "yes": "on", "1": "on", "false": "off", "no": "off", "0": "off",
+                         "none": "off", "": "off"}.get(v, v)
+                    if v not in ("off", "on"):
+                        rejected.append(k)
+                        continue
+                if k == "fractional_sessions":
+                    v = str(v).strip().lower()
+                    if v not in FRAC_SESSIONS:
+                        rejected.append(k)
+                        continue
                 if k in self.NUMERIC:
                     try:
                         v = self.NUMERIC[k](v)
@@ -4393,9 +4557,36 @@ class Engine:
                         continue
                     if k == "add_depth":
                         v = max(1, min(ADD_MAX_DEPTH, int(v)))
+                    if k in ("shares_per_lot", "max_shares") and v < MIN_QTY:
+                        rejected.append(f"{k}={v} (below the {MIN_QTY} floor)")
+                        continue
+                    if k == "min_shares" and v < 0:
+                        rejected.append(k)
+                        continue
                 elif isinstance(TICKER_DEFAULTS[k], bool):
                     v = bool(v)
                 clean[k] = v
+            # ---- fractional shares: the share fields and the switch agree on the MERGED view ----
+            # A 0.01 must never reach _lot_shares on a whole-share ticker (it was
+            # coerced to 0 and floored to 1 whole SPY), and fractional=off must
+            # never land over a fractional share field already on disk.
+            merged = {**self.cfg, **clean}
+            if str(merged.get("fractional") or "off").lower() != "on":
+                offending = [k for k in ("shares_per_lot", "min_shares", "max_shares")
+                             if not qwhole(qty(merged.get(k) or 0))]
+                for k in offending:
+                    if k in clean:
+                        rejected.append(f"{k}={qstr(clean[k])} needs fractional=on (and a fractionable asset)")
+                        clean.pop(k, None)
+                if offending and clean.get("fractional") == "off":
+                    stuck = next(k for k in offending)
+                    rejected.append(f"fractional=off while {stuck} is {qstr(merged.get(stuck))} -- "
+                                    f"set a whole {stuck} in the same patch")
+                    clean.pop("fractional", None)
+            if clean.get("fractional") == "on" and self.broker is not None \
+                    and self._asset_flags().get("fractionable") is False:
+                rejected.append(f"fractional (Alpaca marks {self.symbol} not fractionable)")
+                clean.pop("fractional", None)
             # editing any strategy setting by hand takes the ticker off its preset
             if "preset" not in clean:
                 touched = {k for k, v in clean.items()
@@ -4424,6 +4615,21 @@ class Engine:
                 for l in self.ledger.open_lots:
                     l.tp_price = _round_cent(l.entry_price + float(self.cfg["take_profit"]))
                 self.ledger.save()
+
+            # the time-in-force / extended flag of a FRACTIONAL lot's exit follows
+            # these two settings, so its resting exit has to be re-placed for a
+            # change to mean anything; whole lots are untouched (their exit is GTC
+            # whatever the switch says), so their exits are never cancelled here
+            new_frac = str(self.cfg.get("fractional") or "off").lower()
+            if (new_frac != old_frac or self._frac_sessions() != old_fs):
+                frac_lots = [l for l in self.ledger.open_lots if not qwhole(l.shares)]
+                if frac_lots:
+                    self.ev("WARN", f"fractional settings changed: re-placing {len(frac_lots)} resting "
+                                    f"fractional exit(s) with the new time-in-force/extended flag")
+                    self.cancel_all_tps()
+                    if new_frac == "off":
+                        self.ev("WARN", f"{len(frac_lots)} fractional lot(s) keep DAY exits until they "
+                                        f"close; new lots are whole shares")
 
             if rejected:
                 self.ev("WARN", "Ignored invalid/blank value(s) for: " + ", ".join(rejected)

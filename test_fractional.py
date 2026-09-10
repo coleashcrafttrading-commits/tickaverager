@@ -109,6 +109,126 @@ def s18_broker_submit() -> None:
     check("limit price still 2 dp", sent[-1][2]["limit_price"], "9.90")
 
 
+# ====================================================================== fixtures
+def frac_engine(**cfg):
+    """A running, armed engine on a FracBroker at $759 in the regular session:
+    fractional=on, shares_per_lot=0.01 unless overridden. `_asset_info` is
+    preset to the fractionable flags (pass asset=None to test the warm-up)."""
+    from capture_golden import FracBroker
+    from test_touch_adds import make
+    asset = cfg.pop("asset", "default")
+    c = {"fractional": "on", "shares_per_lot": 0.01, "take_profit": 0.10, "add_distance": 0.10}
+    c.update(cfg)
+    e, f = make(broker=FracBroker(), **c)
+    e.last_price = 759.0
+    e.quote = {"bp": 758.99, "ap": 759.01}
+    e._session_now = lambda: "regular"                       # type: ignore[method-assign]
+    if asset == "default":
+        e._asset_info = {"shortable": True, "overnight": True, "borrow": "easy_to_borrow",
+                         "fractionable": True, "qty_step": 1e-9, "min_qty": 0.001, "price_step": 0.01}
+    else:
+        e._asset_info = asset
+    return e, f
+
+
+def evs(e, text: str, level=None) -> list:
+    return [x for x in e.events if text in x["msg"] and (level is None or x["level"] == level)]
+
+
+# ====================================================================== 2
+def s02_config() -> None:
+    print("\n2. config: fractional, fractional_sessions and the share fields")
+    import agentctl
+    import engine
+    import journal
+    import presets
+    e, f = frac_engine(fractional="off", shares_per_lot=100)
+    e.update_config({"shares_per_lot": "0.01"})
+    check("0.01 on fractional=off is rejected, 100 kept", e.cfg["shares_per_lot"], 100)
+    check("...and the WARN says why", bool(evs(e, "needs fractional=on")), True)
+    e.update_config({"fractional": "on", "shares_per_lot": "0.01"})
+    check("fractional=on + 0.01 in one patch -> 0.01 float",
+          (e.cfg["fractional"], e.cfg["shares_per_lot"], type(e.cfg["shares_per_lot"]).__name__),
+          ("on", 0.01, "float"))
+    check("a hand edit stamps custom", e.cfg["preset"], "custom")
+    e.update_config({"shares_per_lot": "100"})
+    check("'100' -> int 100", (e.cfg["shares_per_lot"], type(e.cfg["shares_per_lot"]).__name__), (100, "int"))
+    e.update_config({"min_shares": "0.005"})
+    check("min_shares '0.005' -> 0.005", e.cfg["min_shares"], 0.005)
+    e.update_config({"max_shares": "0.5"})
+    check("max_shares '0.5' -> 0.5", e.cfg["max_shares"], 0.5)
+    e.update_config({"shares_per_lot": 0})
+    check("shares_per_lot 0 rejected", e.cfg["shares_per_lot"], 100)
+    e.update_config({"min_shares": -1})
+    check("min_shares -1 rejected", e.cfg["min_shares"], 0.005)
+    e.update_config({"fractional": "off", "min_shares": 1, "max_shares": 100000})
+    check("back to off with whole fields", (e.cfg["fractional"], e.cfg["min_shares"]), ("off", 1))
+    e.update_config({"fractional": True})
+    check("{fractional: True} -> 'on'", e.cfg["fractional"], "on")
+    e.update_config({"fractional": "bogus"})
+    check("'bogus' rejected, keeps 'on'", e.cfg["fractional"], "on")
+    e.update_config({"shares_per_lot": 0.01})
+    e.update_config({"fractional": False})
+    check("{fractional: False} while spl is 0.01 -> rejected", e.cfg["fractional"], "on")
+    check("...names both keys", bool(evs(e, "fractional=off while shares_per_lot is 0.01")), True)
+    e.update_config({"fractional": "off", "shares_per_lot": 1})
+    check("off + a whole spl in the same patch -> ok", (e.cfg["fractional"], e.cfg["shares_per_lot"]), ("off", 1))
+    e.update_config({"fractional_sessions": False})
+    check("{fractional_sessions: False} rejected, keeps regular", e.cfg["fractional_sessions"], "regular")
+    e.update_config({"fractional_sessions": "ALL"})
+    check("'ALL' -> 'all'", e.cfg["fractional_sessions"], "all")
+    e.update_config({"fractional_sessions": "bogus"})
+    check("bogus sessions rejected", e.cfg["fractional_sessions"], "all")
+    f.broker.asset_obj["fractionable"] = False
+    e._asset_info = None
+    e.update_config({"fractional": "on"})
+    check("Alpaca says not fractionable -> fractional rejected", e.cfg["fractional"], "off")
+    check("...and says so", bool(evs(e, "not fractionable")), True)
+    f.broker.asset_obj["fractionable"] = True
+    e._asset_info = None
+    e.update_config({"fractional": "on"})
+    check("fractionable again -> accepted", e.cfg["fractional"], "on")
+    # a stale 0.01 on disk with fractional off: an unrelated patch is not blocked
+    e2, _ = frac_engine(fractional="off", shares_per_lot=100)
+    e2.cfg["shares_per_lot"] = 0.01                          # edited on disk, bypassing update_config
+    e2.update_config({"take_profit": 0.20})
+    check("an unrelated patch over a stale 0.01 still lands", e2.cfg["take_profit"], 0.20)
+    check("agentctl._coerce('0.01', 'shares_per_lot')", agentctl._coerce("0.01", "shares_per_lot"), 0.01)
+    check("agentctl._coerce('1', 'shares_per_lot') is int 1",
+          (agentctl._coerce("1", "shares_per_lot"), type(agentctl._coerce("1", "shares_per_lot")).__name__), (1, "int"))
+    check("agentctl._coerce keeps on / regular",
+          (agentctl._coerce("on", "fractional"), agentctl._coerce("regular", "fractional_sessions")),
+          ("on", "regular"))
+    check("TICKER_DEFAULTS fractional off / regular",
+          (engine.TICKER_DEFAULTS["fractional"], engine.TICKER_DEFAULTS["fractional_sessions"]), ("off", "regular"))
+    src = Path(engine.__file__).read_text(encoding="utf-8")
+    block = src[src.index("TICKER_DEFAULTS: dict[str, Any] = {"):src.index("DEFAULT_CONFIG: dict")]
+    check("TICKER_DEFAULTS declares min_shares exactly once", block.count('"min_shares":'), 1)
+    check("NUMERIC coerces the three share fields",
+          [engine.Engine.NUMERIC[k] is engine._qty_cfg for k in ("shares_per_lot", "min_shares", "max_shares")],
+          [True, True, True])
+    check("presets.infer ignores fractional", presets.infer({**presets.settings("basic"), "fractional": "on"}), "basic")
+    # (g) a whole-share ticker's config and cfg_hash do not move
+    e3, _ = frac_engine(fractional="off", shares_per_lot=100)
+    h = journal.cfg_hash(e3.cfg)
+    e3.update_config({"shares_per_lot": "100"})
+    check("(g) '100' stays int and cfg_hash is unchanged",
+          (type(e3.cfg["shares_per_lot"]).__name__, journal.cfg_hash(e3.cfg) == h), ("int", True))
+    e3.update_config({"shares_per_lot": 100.0})
+    check("(g) 100.0 stored as int 100", (e3.cfg["shares_per_lot"], type(e3.cfg["shares_per_lot"]).__name__), (100, "int"))
+    # flipping the switch re-places only FRACTIONAL exits
+    e4, f4 = frac_engine(lots=[(0.01, 759.0), (100, 758.0)], broker_qty=100.01)
+    n_cancel = len(f4.broker.cancelled)
+    e4.update_config({"fractional_sessions": "extended"})
+    check("a session change with a fractional lot open cancels/re-places its exit",
+          len(f4.broker.cancelled) > n_cancel, True)
+    check("...the whole-share lot is untouched (its exit is GTC either way)",
+          f4.broker.by_coid["tp-TEST-t-0002-1"]["status"], "new")
+    e5, f5 = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0)], broker_qty=100)
+    e5.update_config({"fractional": "on"})
+    check("flipping the switch with only whole lots cancels nothing", f5.broker.cancelled, [])
+
+
 # ====================================================================== 13
 def s13_journal() -> None:
     print("\n13. journal rows carry fractional shares; whole-share rows stay ints")
@@ -226,7 +346,7 @@ def s17_golden() -> None:
     check("status()['shares'] is int", got["types"]["status_shares"], "int")
 
 
-SECTIONS = {1: s01_helpers, 13: s13_journal, 17: s17_golden, 18: s18_broker_submit}
+SECTIONS = {1: s01_helpers, 2: s02_config, 13: s13_journal, 17: s17_golden, 18: s18_broker_submit}
 
 
 def main() -> int:
