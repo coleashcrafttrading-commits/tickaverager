@@ -70,6 +70,24 @@ RECONCILE_STREAK_RESET = 900      # quiet for this long and the backoff resets
 ENTRY_REJECT_BACKOFF = 60         # after a broker rejection, wait before retrying
 ENTRY_REJECT_MAX_BACKOFF = 900
 
+# ---- touch-mode resting adds ----
+# In touch mode the ADDS are GTC limit entries resting at Alpaca, one per rung,
+# exactly the way the take-profits rest -- so an intracandle touch fills them.
+# The FIRST entry when flat is still the bar rule.
+ADD_MAX_DEPTH = 10
+ADD_TERMINAL = ("canceled", "cancelled", "expired", "rejected", "done_for_day", "suspended")
+ADD_REJECT_BACKOFF = 60           # adds-only; never touches the entry backoff or exits
+ADD_REJECT_MAX_BACKOFF = 900
+ADD_CANCEL_WARN_SECONDS = 60      # a cancel not confirmed by then is flagged (and stops suspending the sync guard)
+ADD_REPRICE_MIN = 0.01            # a rung that moved less than this is left alone
+ADD_REPRICE_ATR_FRAC = 0.10       # atr mode: hysteresis = max(ADD_REPRICE_MIN, frac x rung distance)
+ADD_HOT_BAND = 0.02               # tape within this of a rung -> confirm the order with one API call ...
+ADD_HOT_CONFIRM_SECONDS = 6       # ... at most this often per record (rate limit)
+ADD_BLOCK_MIN_STRIKES = 2         # 'sticky' block reasons must persist across this many distinct fleet.snap_at before rungs are cancelled
+# ---- cover guard (4c) persistence, same shape as the sync guard's strikes ----
+OVERCOVER_MIN_STRIKES = 2         # distinct fleet.snap_at snapshots
+OVERCOVER_GRACE_SECONDS = 6
+
 # LADDER V2 -- the refined ladder as a PROFILE, applied per ticker, not as new
 # defaults. Existing tickers keep running byte-identically until someone sets
 # this on them; the tests that prove the old behaviour keep proving it. Apply
@@ -120,6 +138,10 @@ TICKER_DEFAULTS: dict[str, Any] = {
     "add_distance":      0.10,         # $/share adverse from last fill  (points)
     "add_percent":       0.50,         # % adverse from last fill        (percent)
     "take_profit":       0.10,         # $/share above EACH lot's own fill
+    # --- how an ADD is triggered (the first entry is always the bar rule) ---
+    "add_trigger":       "touch",      # touch = a limit rests at the rung and fills on a touch | close = judged on the bar close (old rule)
+    "add_anchor":        "last_fill",  # last_fill = the last fill of ANY kind (entry or exit) | last_open = newest open lot's entry (old rule)
+    "add_depth":         1,            # touch: rungs kept resting at once (1..ADD_MAX_DEPTH)
 
     # --- how a lot exits ---
     # limit : a GTC sell rests at entry + take_profit from the moment the lot
@@ -287,6 +309,22 @@ def _jpath_of(obj):
     return _fleet_attr(obj, "journal_path", None)
 
 
+def _anchor_of(e) -> float:
+    """The price the next rung is measured from, per the ladder's add_anchor.
+    Module level so the offline fixtures that borrow Engine methods by name
+    (test_rules' FakeEngine, backtest's SimEngine) resolve it too."""
+    return e.ledger.anchor_price(str((e.cfg or {}).get("add_anchor") or "last_fill"))
+
+
+def _order_ts(o: dict) -> float:
+    """Epoch of an Alpaca order's fill (filled_at, else updated_at), 0.0 when unknown."""
+    s = (o or {}).get("filled_at") or (o or {}).get("updated_at") or ""
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
 def frozen(state_dir: Optional[Path] = None) -> str:
     """Non-empty reason when trading is frozen for the whole machine -- or,
     given an account's state_dir, for that account (checked SECOND: the
@@ -412,6 +450,15 @@ class Ledger:
     # ladder v2: the staged unwind and any basket close in flight. Persisted so
     # a restart in the middle of stage 1 does not forget it is in stage 1.
     unwind: dict = field(default_factory=dict)
+    # touch mode: entry limits resting at Alpaca, each a lot in waiting.
+    # {lot_id, coid, order_id, k, price, shares, side, xh, state ('working'|'cancelling'),
+    #  placed_at (epoch), placed_ms, anchor, booked (shares already turned into a lot),
+    #  hot_at (epoch of the last hot-band confirm), cancel_at, why}
+    resting_adds: list[dict] = field(default_factory=list)
+    # the most recent fill of ANY kind on this ladder: {price, side ('buy'|'sell'),
+    # kind ('entry'|'tp'|'tp_partial'|'trail'|'strategy'|'basket'|'inferred'), lot_id,
+    # at (iso, display), ts (epoch, ordering)}
+    last_fill: dict = field(default_factory=dict)
 
     # ---- persistence ----
     @staticmethod
@@ -431,7 +478,14 @@ class Ledger:
                 raw = json.loads(p.read_text())
                 lots = [Lot(**x) for x in raw.pop("open_lots", [])]
                 raw.pop("symbol", None)
-                led = cls(symbol=symbol, open_lots=lots, **raw)
+                # a file written by a NEWER engine must never make this one
+                # "start empty": unknown keys are dropped with a warning, so a
+                # rollback keeps every lot
+                known = {k: v for k, v in raw.items() if k in cls.__dataclass_fields__}
+                extra = sorted(set(raw) - set(known))
+                if extra:
+                    LOG.warning("ledger for %s carries unknown key(s) %s -- ignored", symbol, extra)
+                led = cls(symbol=symbol, open_lots=lots, **known)
             except Exception as e:
                 LOG.error("ledger for %s unreadable (%s) -- starting empty", symbol, e)
         if led is None:
@@ -474,6 +528,38 @@ class Ledger:
     @property
     def last_fill_price(self) -> float:
         return self.open_lots[-1].entry_price if self.open_lots else 0.0
+
+    def anchor_price(self, mode: str = "last_fill") -> float:
+        """The price the next rung is measured from. 0.0 when flat.
+
+        last_fill = the most recent fill of ANY kind (an add or a take-profit),
+        so after a TP at P the next long rung is P - distance: the pullback
+        rule. last_open = the newest open lot's entry (the original rule), and
+        the fallback when no fill has been recorded yet."""
+        if not self.open_lots:
+            return 0.0
+        if mode == "last_fill":
+            p = float((self.last_fill or {}).get("price") or 0)
+            if p > 0:
+                return p
+        return self.last_fill_price
+
+    def note_fill(self, price: float, side: str, kind: str, lot_id: str = "",
+                  ts: float = 0.0) -> bool:
+        """Record a fill as the anchor UNLESS an already-recorded fill is newer.
+        ts = epoch seconds of the fill (Alpaca's filled_at for fills read back
+        from the broker, time.time() for fills seen live). Callers save.
+        Returns True when the anchor moved."""
+        ts = float(ts) or time.time()
+        if float((self.last_fill or {}).get("ts") or 0) > ts:
+            return False
+        self.last_fill = {"price": round(float(price), 4), "side": side, "kind": kind,
+                          "lot_id": lot_id, "ts": ts,
+                          "at": datetime.fromtimestamp(ts, NY).isoformat(timespec="seconds")}
+        return True
+
+    def clear_fill(self) -> None:
+        self.last_fill = {}
 
     def next_lot_id(self) -> str:
         self.lot_counter += 1
@@ -549,6 +635,20 @@ class Engine:
         self._reconcile_last = 0.0
         self._entry_backoff_until = 0.0
         self._entry_reject_streak = 0
+        # touch-mode resting adds
+        self._adds_backoff_until = 0.0
+        self._adds_reject_streak = 0
+        self._adds_hold = ""                 # why no rung is resting (shown in status) -- written ONLY by the engine thread
+        self._adds_want: list = []           # last desired rung set [(k, price, shares)] -- status() reads this cache
+        self._adds_last_cancel_tick = -1     # loop_count of the last tick that cancelled a rung
+        self._adds_dry_key = ""              # last dry-run rung set announced
+        self._adds_block_snap = 0.0          # sticky block persistence (distinct fleet.snap_at)
+        self._adds_block_strikes = 0
+        self._adds_block_text = ""
+        # cover guard (4c) persistence
+        self._overcover_strikes = 0
+        self._overcover_since = 0.0
+        self._overcover_snap = 0.0
         # non-blocking problems: surfaced in the dashboard, never stop trading
         self.attention: dict[str, str] = {}
         self.loop_count = 0
@@ -557,7 +657,9 @@ class Engine:
         self.ev("INFO", f"{self.symbol} ladder loaded: "
                         f"{len(self.ledger.open_lots)} open lot(s), "
                         f"{self.ledger.shares} sh"
-                        + ("" if self.cfg.get("dry_run") else " -- ARMED from the last run"))
+                        + ("" if self.cfg.get("dry_run") else " -- ARMED from the last run")
+                        + (f", {len(self.ledger.resting_adds)} resting add(s) carried from the last run"
+                           if self.ledger.resting_adds else ""))
 
     # ---------------- logging to the dashboard ----------------
     def ev(self, level: str, msg: str) -> None:
@@ -649,6 +751,10 @@ class Engine:
         self._reconcile_streak = 0
         self._entry_backoff_until = 0.0
         self._entry_reject_streak = 0
+        self._adds_backoff_until = 0.0
+        self._adds_reject_streak = 0
+        self._adds_block_snap, self._adds_block_strikes, self._adds_block_text = 0.0, 0, ""
+        self._overcover_strikes, self._overcover_since, self._overcover_snap = 0, 0.0, 0.0
         self.attention.clear()
         self.ev("INFO", "Halt cleared by operator.")
 
