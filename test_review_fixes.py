@@ -11,7 +11,9 @@ Fleet or the FastAPI app, in-process, with a fake Alpaca and no keys:
      a lot found without an exit is re-covered there
   2. flat equity takes no phantom point and the LIVE pill's time comes from
      `last_sample_at`; the sample deques are read from a snapshot
-  3. the portfolio-history route relays Alpaca's own refusal of a pair as a
+  3. a disarm the engine REFUSES (a rung still working at Alpaca) is reported
+     as a refusal by disarm_all, panic and the arm endpoint -- never as success
+  4. the portfolio-history route relays Alpaca's own refusal of a pair as a
      400 and every other failure as a 503
 
     .venv/Scripts/python test_review_fixes.py
@@ -308,7 +310,76 @@ def main() -> int:
     w.join()
     check("1,500 price-tick reads under a hammering writer: no error", errs[:2], [])
 
-    print("\n3. The portfolio-history route: Alpaca's refusal is a 400, everything else a 503")
+    print("\n3. A disarm the ENGINE refuses is reported as a refusal, never as success")
+    # the engine refuses dry_run=True while a rung is still WORKING at Alpaca
+    # (a real GTC order that can fill into a ladder that transmits nothing).
+    # Every caller used to announce success over it: 'DISARM ALL: 1 ladder(s)
+    # put back into dry run' / 'PANIC: everything disarmed' / ok:true.
+    a = seed_account("armed1")
+    f = fleet_mod.Fleet(autostart=False, account=a)
+    f._stop.set()                                              # no background poller racing this section
+    if f._thread:
+        f._thread.join(timeout=5)
+    try:
+        e = f.engines["TEST"]
+        rec = e.ledger.resting_adds[0]
+
+        def armed():
+            e.cfg["dry_run"] = False
+            e.ledger.resting_adds[:] = [rec]
+            rec["state"] = "working"
+        armed()
+        check("precondition: armed, one rung working",
+              (e.cfg["dry_run"], [r["state"] for r in e.ledger.resting_adds]), (False, ["working"]))
+        r = f.disarm_all()
+        check("disarm_all counts only the ladders that actually flipped",
+              (r["ok"], r["disarmed"], r["refused"]), (False, 0, ["TEST"]))
+        check("...the ladder is still ARMED", e.cfg["dry_run"], False)
+        check("...and the fleet log says REFUSED, not 'put back into dry run'",
+              (bool([x for x in f.events if "REFUSED and still ARMED" in x["msg"]]),
+               bool([x for x in f.events if "1 ladder(s) put back into dry run." in x["msg"]])),
+              (True, False))
+        # panic stops every engine first, and stop() cancels the rungs -- but
+        # a cancel Alpaca refuses (429/5xx) leaves the record WORKING, so the
+        # disarm behind it is refused and panic must not claim otherwise
+        armed()
+        real_cancel = f.broker.cancel
+
+        def refuse_cancel(order_id):
+            raise AlpacaError(429, "slow down", f"/v2/orders/{order_id}")
+        f.broker.cancel = refuse_cancel
+        try:
+            p = f.panic()
+        finally:
+            f.broker.cancel = real_cancel
+        check("panic reports what it could not disarm",
+              (p["ok"], p["refused"], e.cfg["dry_run"]), (False, ["TEST"], False))
+        check("...and does not claim everything is disarmed",
+              (bool([x for x in f.events if "could NOT be disarmed" in x["msg"]]),
+               bool([x for x in f.events if "every engine stopped and disarmed" in x["msg"]])),
+              (True, False))
+        import app as app_mod
+        armed()
+        res = app_mod.ticker_action("TEST", "arm", {"live": False}, f)
+        check("the arm endpoint answers ok:false with the engine's reason",
+              (res["ok"], res["dry_run"], "STILL ARMED" in res["error"],
+               "still working at Alpaca" in res["error"]), (False, False, True, True))
+        check("...and logs no 'disarmed -- back to dry run'",
+              [x for x in e.events if "back to dry run" in x["msg"]], [])
+        # control: with the rung gone the same calls succeed and say so
+        e.ledger.resting_adds[0]["state"] = "cancelling"
+        res = app_mod.ticker_action("TEST", "arm", {"live": False}, f)
+        check("a cancelling rung does not block the disarm",
+              (res["ok"], res["dry_run"], bool([x for x in e.events if "back to dry run" in x["msg"]])),
+              (True, True, True))
+        e.cfg["dry_run"] = False
+        r = f.disarm_all()
+        check("disarm_all with nothing in the way",
+              (r["ok"], r["disarmed"], r["refused"], e.cfg["dry_run"]), (True, 1, [], True))
+    finally:
+        f.shutdown()
+
+    print("\n4. The portfolio-history route: Alpaca's refusal is a 400, everything else a 503")
     try:
         from fastapi.testclient import TestClient
     except Exception as ex:                                # httpx missing

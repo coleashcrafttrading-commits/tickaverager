@@ -398,8 +398,12 @@ def cmd_arm(a) -> int:
 def cmd_disarm(a) -> int:
     sym = a.symbol.upper()
     r = _http("POST", f"/api/ticker/{sym}/arm", {"live": False})
-    audit("disarm", a.actor, {"symbol": sym, "reason": a.reason})
-    return _out(r)
+    # the engine refuses the flip while a rung is still working at Alpaca:
+    # exit non-zero so a script never reads "done" over a live ladder
+    ok = bool(r.get("ok", True))
+    audit("disarm", a.actor, {"symbol": sym, "reason": a.reason}, ok=ok,
+          refused=str(r.get("error") or "") if not ok else "")
+    return _out(r) if ok else _fail(str(r.get("error") or f"{sym} was NOT disarmed"))
 
 
 def cmd_flatten(a) -> int:

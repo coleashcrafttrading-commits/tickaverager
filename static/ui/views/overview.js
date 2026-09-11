@@ -131,7 +131,11 @@ VIEWS.overview = {
     });
     el("bAllDisarm").onclick = () => act(async () => {
       const r = await POST("/api/fleet/disarm_all");
-      toast(`${esc(acctLabel())}: ${r.disarmed} ladder(s) back to dry run.`, "ok");
+      const no = (r.refused || []);
+      if (no.length) toast(`${esc(acctLabel())}: ${r.disarmed} back to dry run, but `
+        + `<b>${esc(no.join(", "))} is STILL ARMED</b> — a rung is still working at Alpaca. `
+        + `Stop the ladder, then disarm.`, "err", 9000);
+      else toast(`${esc(acctLabel())}: ${r.disarmed} ladder(s) back to dry run.`, "ok");
     });
     el("bPanic").onclick = () => act(async () => {
       const who = acctLabel();
@@ -144,8 +148,12 @@ VIEWS.overview = {
             + `against them are left exactly as they are — flattening stays a `
             + `per-ticker decision.`,
       })) return;
-      await POST("/api/fleet/panic", { confirm: "PANIC" });
-      toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
+      const r = await POST("/api/fleet/panic", { confirm: "PANIC" });
+      const no = (r.refused || []);
+      if (no.length) toast(`${esc(who)}: everything stopped, but <b>${esc(no.join(", "))} is `
+        + `STILL ARMED</b> — a rung cancel is still pending at Alpaca. Disarm again in a moment.`,
+        "err", 9000);
+      else toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
     });
 
     // the account-value chart polls on its own: Alpaca's history on a cadence

@@ -134,7 +134,11 @@ VIEWS.settings = {
     });
     el("sDisarm").onclick = () => act(async () => {
       const r = await POST("/api/fleet/disarm_all");
-      toast(`${esc(acctLabel())}: disarmed ${r.disarmed}.`, "ok");
+      const no = (r.refused || []);
+      if (no.length) toast(`${esc(acctLabel())}: disarmed ${r.disarmed}, but `
+        + `<b>${esc(no.join(", "))} is STILL ARMED</b> — a rung is still working at Alpaca.`,
+        "err", 9000);
+      else toast(`${esc(acctLabel())}: disarmed ${r.disarmed}.`, "ok");
     });
     el("sPanic").onclick = () => act(async () => {
       const who = acctLabel();
@@ -143,8 +147,11 @@ VIEWS.settings = {
         body: `Every engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) stops and `
             + `every ladder returns to dry run. Other accounts are untouched.<br><br>`
             + `Nothing is sold. Positions and resting take-profits are left alone.` })) return;
-      await POST("/api/fleet/panic", { confirm: "PANIC" });
-      toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
+      const r = await POST("/api/fleet/panic", { confirm: "PANIC" });
+      const no = (r.refused || []);
+      if (no.length) toast(`${esc(who)}: everything stopped, but <b>${esc(no.join(", "))} is `
+        + `STILL ARMED</b> — a rung cancel is still pending at Alpaca.`, "err", 9000);
+      else toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
     });
     el("sRestart").onclick = doRestart;
 

@@ -452,23 +452,45 @@ class Fleet:
         return {"ok": True, "stopped": n}
 
     def disarm_all(self) -> dict:
-        n = 0
-        for e in self.engines.values():
-            if not e.cfg.get("dry_run"):
-                e.update_config({"dry_run": True})
+        """Put every armed ladder back into dry run -- and COUNT only the ones
+        that actually flipped. An engine refuses the flip while one of its
+        rungs is still working at Alpaca (a real GTC order that can fill into
+        a ladder that transmits nothing), so the result has to be read back
+        from the engine: reporting 'disarmed' over a refusal is how an
+        operator walks away from a live ladder believing it is dry."""
+        n, refused = 0, []
+        for sym, e in self.engines.items():
+            if e.cfg.get("dry_run"):
+                continue
+            e.update_config({"dry_run": True})
+            if e.cfg.get("dry_run"):
                 n += 1
-        self.ev("WARN", f"DISARM ALL: {n} ladder(s) put back into dry run. "
-                        f"Resting take-profits were left alive at Alpaca.")
-        return {"ok": True, "disarmed": n}
+            else:
+                refused.append(sym)
+        if refused:
+            self.ev("WARN", f"DISARM ALL: {n} ladder(s) put back into dry run, but "
+                            f"{len(refused)} REFUSED and still ARMED: {', '.join(refused)}. "
+                            f"A rung is still working at Alpaca -- stop the ladder (that cancels "
+                            f"its rungs), then disarm.")
+        else:
+            self.ev("WARN", f"DISARM ALL: {n} ladder(s) put back into dry run. "
+                            f"Resting take-profits were left alive at Alpaca.")
+        return {"ok": not refused, "disarmed": n, "refused": refused}
 
     def panic(self) -> dict:
         """Stop every engine and disarm every ladder. Positions are NOT sold --
         flattening is a per-ticker decision and stays an explicit one."""
         s = self.stop_all()
         d = self.disarm_all()
-        self.ev("HALT", "PANIC: every engine stopped and disarmed. Open positions and "
-                        "resting take-profits were left exactly as they are.")
-        return {"ok": True, **s, **d}
+        if d["refused"]:
+            self.ev("HALT", f"PANIC: every engine stopped, but {', '.join(d['refused'])} "
+                            f"could NOT be disarmed and is STILL ARMED (a rung cancel is still "
+                            f"pending at Alpaca). Open positions and resting take-profits were "
+                            f"left exactly as they are.")
+        else:
+            self.ev("HALT", "PANIC: every engine stopped and disarmed. Open positions and "
+                            "resting take-profits were left exactly as they are.")
+        return {"ok": not d["refused"], **s, **d}
 
     # ------------------------------------------------------- market data
     def _feed_for_now(self) -> str:

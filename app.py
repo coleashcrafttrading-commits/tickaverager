@@ -485,6 +485,16 @@ def ticker_action(sym: str, action: str, body: dict = Body(default={}), f: Fleet
             raise HTTPException(409, f"Trading is FROZEN: {frozen(f.state_dir)}. "
                                      f"Delete the FROZEN file to lift it.")
         e.update_config({"dry_run": not want_live})
+        if bool(e.cfg["dry_run"]) == want_live:
+            # the engine refused the flip (the only refusal today: disarming
+            # while a rung is still working at Alpaca). Saying "disarmed" here
+            # is how an operator walks away from a ladder that is still live.
+            working = [r for r in e.ledger.resting_adds if r.get("state") == "working"]
+            why = (f"{len(working)} resting add(s) still working at Alpaca. Stop the ladder "
+                   f"(that cancels its rungs), then disarm." if working
+                   else "the engine rejected the change -- see its log.")
+            return {"ok": False, "dry_run": e.cfg["dry_run"],
+                    "error": f"{e.symbol} is STILL {'DRY' if want_live else 'ARMED'}: {why}"}
         e.ev("WARN" if want_live else "INFO",
              f"*** {e.symbol} ARMED: orders will now transmit to Alpaca. ***" if want_live
              else f"{e.symbol} disarmed -- back to dry run. Resting TPs were left alive.")

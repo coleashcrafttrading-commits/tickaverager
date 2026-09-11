@@ -238,8 +238,9 @@ function mountLive(sym) {
   el("bStop").onclick = A(async () => {
     await POST(`/api/ticker/${sym}/stop`); toast(`${sym} stopped.`, "ok"); });
   el("bDisarm").onclick = A(async () => {
-    await POST(`/api/ticker/${sym}/arm`, { live: false });
-    toast(`${sym} back to dry run.`, "ok"); });
+    const r = await POST(`/api/ticker/${sym}/arm`, { live: false });
+    if (r.ok === false) toast(esc(r.error || `${sym} was NOT disarmed.`), "err", 9000);
+    else toast(`${sym} back to dry run.`, "ok"); });
   el("bClear").onclick = A(async () => {
     await POST(`/api/ticker/${sym}/clear_halt`); toast(`${sym} halt cleared.`, "ok"); });
   el("bRecover").onclick = A(async () => {
@@ -271,8 +272,9 @@ function mountLive(sym) {
         </tbody></table><br><b class="down">There is no stop loss.</b> Only ${sym} in
         <b>${esc(who)}</b> is affected — every other ticker and every other account is untouched.`,
     })) return;
-    await POST(`/api/ticker/${sym}/arm`, { live: true, confirm: "ARM" });
-    toast(`${sym} on ${esc(who)} is ARMED — orders now transmit.`, "err", 8000);
+    const r = await POST(`/api/ticker/${sym}/arm`, { live: true, confirm: "ARM" });
+    if (r.ok === false) toast(esc(r.error || `${sym} was NOT armed.`), "err", 9000);
+    else toast(`${sym} on ${esc(who)} is ARMED — orders now transmit.`, "err", 8000);
   });
   el("bFlatten").onclick = A(async () => {
     const s = S.ticker;
