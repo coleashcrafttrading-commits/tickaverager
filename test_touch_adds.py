@@ -1031,6 +1031,22 @@ def main() -> int:
     check("twenty status() calls change nothing",
           (e._adds_hold, dict(e.attention), e.ledger.lot_counter, len(f.broker.placed), len(f.broker.cancelled)),
           before)
+    # a rung resting AT the ladder cap: the engine's own tick sizes the wanted
+    # set WITHOUT the rung and so leaves no flag. A dashboard poll sizes it
+    # WITH the rung (right for the next lot) and must not write `attention`
+    # from the API thread -- the flag flickered on and off every 4 s
+    e3, f3 = make(lots=[(10, 10.0)] * 7, broker_qty=70, add_depth=1, f_ladder=0.2)
+    f3.account["equity"] = "4000"                               # E_max $800; $700 open + a $99 rung
+    step(e3, f3)
+    check("the rung rests and the tick leaves no cap flag",
+          ([r["price"] for r in adds(e3)], "cap" in e3.attention), ([9.90], False))
+    n_ev = len(e3.events)
+    for _ in range(3):
+        e3.status()
+    check("three status() polls raise no flag and write no events",
+          ("cap" in e3.attention, len(e3.events) - n_ev), (False, 0))
+    check("...while the engine thread still sizes to 0 and says why",
+          (e3._lot_shares(price=9.60), "cap" in e3.attention), (0, True))
 
     print("\n24. A rung cancelled by hand at Alpaca is re-placed with a NEW lot id")
     e, f = make(lots=[(10, 10.0)], broker_qty=10)
@@ -1325,8 +1341,63 @@ def main() -> int:
         f.broker.settle(r["coid"], "canceled")
         step(e, f)
         check("(d) once the rung is gone the exit goes out", str(lot.tp_client_id).startswith("xs-"), True)
+        # (e) a take-profit partial that lands AFTER this tick's snapshot: the
+        # exit re-reads the cancelled order, books it, and sizes itself to what
+        # is left. Blanking the id without the re-read lost the fill for good
+        # (no lot references that order any more) and sold shares we no longer had.
+        e, f = make(lots=[(10, 10.0)], broker_qty=10, add_trigger="close", strategy_exits=True)
+        lot = e.ledger.open_lots[0]
+        tp = lot.tp_client_id
+        sync_orders(e, f)
+        e.open_orders = [dict(o) for o in e.open_orders]        # frozen: later fills are invisible to it
+        fill(e, f, tp, 4, 10.10)                                # 4 sh sold at Alpaca after the snapshot
+        ok = e._close_lot_now(lot, "x")
+        check("(e) the late partial is booked before the exit is sized",
+              (round(e.ledger.realized_all, 2), lot.shares, lot.tp_filled), (0.40, 6, 0))
+        xo = f.broker.by_coid.get(lot.tp_client_id, {})
+        check("(e) ...and the exit goes out for the 6 sh still held",
+              (ok, str(lot.tp_client_id).startswith("xs-"), xo.get("qty")), (True, True, "6"))
+        # (f) a cancel Alpaca has not confirmed for a minute is not polled for:
+        # the exit is held at once instead of stalling the tick under the lock
+        e, f = make(lots=[(10, 10.0)], broker_qty=10, strategy_exits=True)
+        step(e, f)
+        r = adds(e)[0]
+        lot = e.ledger.open_lots[0]
+        f.broker.linger_cancel = True
+        e._strategy_says_exit = lambda l: True                  # type: ignore[method-assign]
+        step(e, f)                                              # the cancel goes out and lingers
+        r["cancel_at"] = time.time() - engine.ADD_CANCEL_WARN_SECONDS - 1
+        reads, real_orders = [], f.broker.orders
+        f.broker.orders = lambda *a, **k: (reads.append(1), real_orders(*a, **k))[1]
+        try:
+            held = e._close_lot_now(lot, "x")
+        finally:
+            f.broker.orders = real_orders
+        check("(f) an old unconfirmed cancel: no order reads, exit held, TP untouched",
+              (held, reads, str(lot.tp_client_id).startswith("tp-"),
+               "still live at Alpaca" in e.attention.get(f"xs-{lot.id}", "")), (False, [], True, True))
+        # (g) the wait is ONE budget per tick: three lots exiting together
+        # cannot turn one tick into three 8 s stalls with the lock held
+        engine.EXIT_WAIT_SECONDS, engine.EXIT_POLL_SECONDS = 0.3, 0.02
+        engine.time.sleep = real_sleep                          # type: ignore[assignment]
+        e4, f4 = make(lots=[(10, 10.0)], broker_qty=10)
+        stuck = [{"client_order_id": "en-STUCK"}]
+        reads = []
+        f4.broker.orders = lambda *a, **k: (reads.append(1), stuck)[1]
+        e4.loop_count = 7
+        first = e4._wait_gone(["en-STUCK"])
+        n1 = len(reads)
+        second = e4._wait_gone(["en-STUCK"])
+        n2 = len(reads) - n1
+        check("(g) both waits fail, but the second in the same tick costs one read",
+              (first, second, n1 > 1, n2), (False, False, True, 1))
+        e4.loop_count += 1                                      # the next tick gets a fresh budget
+        reads.clear()
+        e4._wait_gone(["en-STUCK"])
+        check("(g) the next tick may wait again", len(reads) > 1, True)
     finally:
         engine.EXIT_WAIT_SECONDS = 8.0
+        engine.EXIT_POLL_SECONDS = 1.0
         engine.time.sleep = real_sleep                          # type: ignore[assignment]
 
     print("\n34. An order Alpaca reports as replaced is terminal for the id we hold")
@@ -1342,6 +1413,21 @@ def main() -> int:
     check("a fresh rung rests under a new lot id",
           (len(r2), r2[0]["lot_id"] != r["lot_id"] if r2 else None, r2[0]["state"] if r2 else None), (1, True, "working"))
     lot = e.ledger.open_lots[0]
+    old = lot.tp_client_id
+    f.broker.settle(old, "replaced")
+    f.broker.by_coid[old]["replaced_by"] = "oTP2"
+    n_reads = []
+    real_obc = f.broker.order_by_client_id
+    f.broker.order_by_client_id = lambda c: (n_reads.append(c), real_obc(c))[1]
+    step(e, f)
+    check("the TICK re-covers a replaced take-profit under a fresh id",
+          (lot.tp_client_id != old, str(lot.tp_client_id).startswith("tp-"),
+           (f.broker.by_coid.get(lot.tp_client_id) or {}).get("status")), (True, True, "new"))
+    check("...with a WARN naming the replacing order", len(evs(e, "WARN", "oTP2")) >= 1, True)
+    n_reads.clear()
+    step(e, f)
+    f.broker.order_by_client_id = real_obc
+    check("...and the dead id is not re-read every tick for ever", old in n_reads, False)
     old = lot.tp_client_id
     f.broker.settle(old, "replaced")
     e.ensure_tps()

@@ -83,7 +83,8 @@ ADD_MAX_DEPTH = 10
 # order is no longer working and the sync re-places a fresh rung.
 ADD_TERMINAL = ("canceled", "cancelled", "expired", "rejected", "done_for_day", "suspended", "replaced")
 ADD_WASH_HOLD_SECONDS = 15        # a rung Alpaca refused as a wash trade waits this long before it is re-tried
-EXIT_WAIT_SECONDS = 8.0           # a strategy exit waits this long for the rungs and the TP to leave the book
+EXIT_WAIT_SECONDS = 8.0           # per TICK, not per call: every exit wait in one tick shares this budget
+EXIT_POLL_SECONDS = 1.0           # how often that wait re-reads the open book (it runs under the engine lock)
 ADD_REJECT_BACKOFF = 60           # adds-only; never touches the entry backoff or exits
 ADD_REJECT_MAX_BACKOFF = 900
 ADD_CANCEL_WARN_SECONDS = 60      # a cancel not confirmed by then is flagged (and stops suspending the sync guard)
@@ -713,6 +714,10 @@ class Engine:
         # lot.tp_price on purpose: if the exit dies unfilled, step 2 re-places
         # the take-profit at the lot's ORIGINAL target, not at the exit price.
         self._exit_limits: dict[str, float] = {}
+        # _wait_gone's budget for the CURRENT tick: the wait runs under the
+        # engine lock, so every exit in one tick shares EXIT_WAIT_SECONDS
+        self._exit_wait_tick = -1
+        self._exit_wait_left = 0.0
         # cover guard (4c) persistence
         self._overcover_strikes = 0
         self._overcover_since = 0.0
@@ -1101,8 +1106,13 @@ class Engine:
             if status == "filled":
                 self._book_tp_progress(lot, o)
             elif status in ("canceled", "cancelled", "expired", "rejected",
-                            "missing", "done_for_day", "suspended"):
-                # book whatever DID fill before it died, then re-cover the rest
+                            "missing", "done_for_day", "suspended", "replaced"):
+                # book whatever DID fill before it died, then re-cover the rest.
+                # 'replaced' is terminal for the id we hold (Alpaca re-issued
+                # the order under a new one after a corporate action or a hand
+                # edit): it is not in LIVE_STATUSES, ensure_tps and the exit
+                # path already treat it as dead, and leaving it out here meant
+                # the lot was never re-covered and its id was re-read for ever.
                 if o:
                     self._book_tp_progress(lot, o)
                 if lot in self.ledger.open_lots and lot.shares > QTY_EPS:
@@ -1115,7 +1125,9 @@ class Engine:
                     self.ev("INFO" if (status == "expired" and not qwhole(lot.shares)) else "WARN",
                             f"{'Strategy exit' if was_xs else 'TP'} for lot {lot.id} is {status} -- "
                             f"re-placing the take-profit at ${lot.tp_price:.2f} for its remaining "
-                            f"{qstr(lot.shares)} sh.")
+                            f"{qstr(lot.shares)} sh."
+                            + (f" (Alpaca replaced it with order {(o or {}).get('replaced_by') or '?'})"
+                               if status == "replaced" else ""))
                     lot.tp_client_id = ""
                     lot.tp_order_id = ""
                     lot.tp_filled = 0                    # fresh order, fresh counter
@@ -3484,18 +3496,33 @@ class Engine:
         """Poll the open book until none of `ids` is on it (True) or the
         deadline passes (False). The close_lots pattern: Alpaca rejects a sell
         for shares still held by a cancelling order, and a sell sent while our
-        own buy limit rests is a wash trade."""
+        own buy limit rests is a wash trade.
+
+        The whole wait happens under the engine lock, so EXIT_WAIT_SECONDS is
+        a budget for the TICK, not for the call: several lots exiting in the
+        same tick share it (one lingering cancel used to cost 8 s and ~20
+        order reads per lot per tick, with stop(), a settings save and the
+        fleet's idle push all queued behind it).
+        """
         b = self.broker
         if not b or not ids:
             return True
-        deadline = time.time() + (EXIT_WAIT_SECONDS if timeout is None else float(timeout))
-        while True:
-            live = {x.get("client_order_id") for x in (b.orders(status="open", symbols=self.symbol) or [])}
-            if not any(c in live for c in ids):
-                return True
-            if time.time() >= deadline:
-                return False
-            time.sleep(0.4)
+        if self._exit_wait_tick != self.loop_count:
+            self._exit_wait_tick = self.loop_count
+            self._exit_wait_left = EXIT_WAIT_SECONDS
+        want = EXIT_WAIT_SECONDS if timeout is None else float(timeout)
+        t0 = time.time()
+        deadline = t0 + max(0.0, min(want, self._exit_wait_left))
+        try:
+            while True:
+                live = {x.get("client_order_id") for x in (b.orders(status="open", symbols=self.symbol) or [])}
+                if not any(c in live for c in ids):
+                    return True
+                if time.time() >= deadline:
+                    return False
+                time.sleep(EXIT_POLL_SECONDS)
+        finally:
+            self._exit_wait_left = max(0.0, self._exit_wait_left - (time.time() - t0))
 
     def _close_lot_now(self, lot: "Lot", why: str) -> bool:
         """Close ONE lot now (a strategy exit): retire the touch-mode rungs and
@@ -3521,10 +3548,22 @@ class Engine:
             # on the exit and not on the lot: the lot's take-profit is what
             # covers it, and _place_tp must never be held up by a refused exit
             return False
-        # 1. the rungs first -- and any earlier cancel still settling
+        # 1. the rungs first -- and any earlier cancel still settling. Only a
+        # cancel that is still YOUNG is worth waiting for: a rung whose cancel
+        # was refused (state still 'working') or which Alpaca has not confirmed
+        # for a minute will not leave the book inside this tick, and polling
+        # for it held the engine lock for 8 s per lot per tick for nothing.
         self._retire_resting_adds(f"strategy exit: {why}")
-        add_ids = [r.get("coid") for r in self.ledger.resting_adds if r.get("coid")]
-        if add_ids and not self._wait_gone(add_ids):
+        _now = time.time()
+        wait_ids, stuck = [], []
+        for r in self.ledger.resting_adds:
+            coid = r.get("coid")
+            if not coid:
+                continue
+            young = (r.get("state") == "cancelling"
+                     and _now - float(r.get("cancel_at") or _now) < ADD_CANCEL_WARN_SECONDS)
+            (wait_ids if young else stuck).append(coid)
+        if stuck or (wait_ids and not self._wait_gone(wait_ids)):
             self.flag(f"xs-{lot.id}", f"{self.symbol}: strategy exit on lot {lot.id} held -- a resting "
                                       f"add is still live at Alpaca; its take-profit stays. Retrying next tick.")
             return False
@@ -3558,6 +3597,22 @@ class Engine:
                 self.flag(f"xs-{lot.id}", f"Strategy exit on lot {lot.id} held -- its take-profit is "
                                           f"still cancelling at Alpaca. Retrying next tick.")
                 return False
+            if o:
+                # it has left the book: READ IT ONCE MORE before the id is
+                # blanked. A partial that filled after this tick's snapshot is
+                # only visible now, and once the id is gone no lot references
+                # that order again -- the fill would be lost and the exit sent
+                # at the stale full size (cancel_all_tps re-reads for the same
+                # reason: "live or gone: its filled_qty is the truth").
+                try:
+                    fresh = b.order_by_client_id(tp_coid)
+                except AlpacaError as e:
+                    self.ev("WARN", f"strategy exit on lot {lot.id}: could not re-read its cancelled "
+                                    f"take-profit ({e.status}) -- next tick")
+                    return False
+                if fresh and qty(fresh.get("filled_qty")) > qty(lot.tp_filled) + QTY_EPS:
+                    if self._book_tp_progress(lot, fresh):
+                        return False               # it sold out under us: nothing left to exit
             lot.tp_client_id = ""
             lot.tp_order_id = ""
             lot.tp_filled = 0
@@ -3645,7 +3700,7 @@ class Engine:
         return False, 1.0, 1, lo, hi
 
     def _lot_shares(self, price: float = 0.0, extra_deployed: float = 0.0,
-                    include_resting: bool = True):
+                    include_resting: bool = True, flag: bool = True):
         """How many shares the next lot should be.
 
         Fixed share counts mean a $12 stock and a $500 one carry wildly
@@ -3658,6 +3713,11 @@ class Engine:
         `include_resting=False` leaves the rungs already WORKING out of the
         cap -- for _desired_rungs, which re-derives the whole wanted set and
         would otherwise count a resting rung against the room for itself.
+        `flag=False` sizes WITHOUT touching `attention`: status() runs on the
+        API thread on every dashboard poll, and a rung legitimately resting at
+        the cap made it raise and the next tick clear the same 'cap' warning
+        for ever -- a flicker in the dashboard, and engine state written from
+        a thread that does not hold the lock.
 
         Fractional shares: with fractional=on and a fractionable asset the
         answer may be a fraction (rounded DOWN to the asset's increment, never
@@ -3667,48 +3727,50 @@ class Engine:
         shares_per_lot is refused (0), never rounded up. An int for a whole
         answer, the 9-dp float otherwise.
         """
+        _flag = self.flag if flag else (lambda *a, **k: None)
+        _unflag = self.unflag if flag else (lambda *a, **k: None)
         mode = self.cfg.get("size_mode", "fixed")
         price = price or self.last_price or 0.0
         spl = qty(self.cfg.get("shares_per_lot") or 0)
         on = self._fractional_on()
         frac, step, floor_q, lo, hi = self._size_bounds()
         if on and not frac:
-            self.flag("size", self._frac_block()
-                      or f"{self.symbol}: fractional=on but the asset is not fractional-capable")
+            _flag("size", self._frac_block()
+                  or f"{self.symbol}: fractional=on but the asset is not fractional-capable")
             return 0
         if not on and mode == "fixed" and not qwhole(spl):
-            self.flag("size", f"shares_per_lot {qstr(spl)} is a fraction of a share but fractional "
-                              f"is off -- no lot sent; set fractional=on or a whole number")
+            _flag("size", f"shares_per_lot {qstr(spl)} is a fraction of a share but fractional "
+                          f"is off -- no lot sent; set fractional=on or a whole number")
             return 0
 
         if mode == "fixed" or price <= 0:
             n = qfloor(spl, step)
-            self.unflag("size")
+            _unflag("size")
         elif mode == "dollars":
             n = qfloor(float(self.cfg.get("lot_dollars", 1500)) / price, step)
-            self.unflag("size")
+            _unflag("size")
         elif mode == "atr_risk":
             a = self._atr_now()
             stop = a * float(self.cfg.get("atr_stop_mult", 2.0)) if a else 0.0
             if stop <= 0:
                 # no ATR yet: fall back rather than guess a size
-                self.flag("size", f"{self.symbol}: ATR not available yet, sizing "
-                                  f"this lot at shares_per_lot instead.")
+                _flag("size", f"{self.symbol}: ATR not available yet, sizing "
+                              f"this lot at shares_per_lot instead.")
                 n = qfloor(spl, step)
             else:
-                self.unflag("size")
+                _unflag("size")
                 n = qfloor(float(self.cfg.get("risk_dollars", 100)) / stop, step)
         else:
             n = qfloor(spl, step)
         n = max(lo, min(hi, max(floor_q, n)))
         if frac and n * price < MIN_NOTIONAL:
-            self.flag("size", f"{self.symbol}: {qstr(n)} x ${price:.2f} is under Alpaca's $1 minimum "
-                              f"-- raise shares_per_lot/lot_dollars")
+            _flag("size", f"{self.symbol}: {qstr(n)} x ${price:.2f} is under Alpaca's $1 minimum "
+                          f"-- raise shares_per_lot/lot_dollars")
             return 0
-        return qnum(self._cap_to_ladder(n, price, extra_deployed, include_resting))
+        return qnum(self._cap_to_ladder(n, price, extra_deployed, include_resting, flag))
 
     def _cap_to_ladder(self, n, price: float, extra_deployed: float = 0.0,
-                       include_resting: bool = True):
+                       include_resting: bool = True, flag: bool = True):
         """Truncate the next lot so the ladder never exceeds f_ladder of equity.
 
         E_max = f_ladder * live equity, in COST BASIS. The last lot is cut down
@@ -3722,7 +3784,9 @@ class Engine:
         the first entry and for status, WRONG for the rung sync, which sizes
         the whole wanted set every tick -- with the resting rung counted
         against its own room the rung is cancelled and re-placed on alternate
-        ticks for ever, burning a lot id per cycle.
+        ticks for ever, burning a lot id per cycle. `flag=False` answers
+        without raising or clearing the 'cap' warning: status() asks from the
+        API thread, and only the engine thread may write `attention`.
         """
         f = float(self.cfg.get("f_ladder", 0) or 0)
         if f <= 0 or price <= 0 or getattr(self, "fleet", None) is None:
@@ -3748,10 +3812,12 @@ class Engine:
         room = e_max - deployed
         q_cap = qfloor(room / price, step) if room > 0 else 0
         if q_cap < lo - QTY_EPS:
-            self.flag("cap", "%s: ladder cap reached (E_max $%.0f = %.0f%% of equity, "
-                             "$%.0f deployed)" % (self.symbol, e_max, 100 * f, deployed))
+            if flag:
+                self.flag("cap", "%s: ladder cap reached (E_max $%.0f = %.0f%% of equity, "
+                                 "$%.0f deployed)" % (self.symbol, e_max, 100 * f, deployed))
             return 0
-        self.unflag("cap")
+        if flag:
+            self.unflag("cap")
         return qnum(min(n, q_cap))
 
     def _atr_now(self) -> float:
@@ -5359,7 +5425,8 @@ class Engine:
             "strategy_entries": bool(self.cfg.get("strategy_entries")),
             "strategy_exits": bool(self.cfg.get("strategy_exits")),
             "size_mode": self.cfg.get("size_mode", "fixed"),
-            "next_lot_shares": self._lot_shares(),
+            # flag=False: this runs on the API thread on every dashboard poll
+            "next_lot_shares": self._lot_shares(flag=False),
             "atr": round(self._atr_now(), 4),
             "trail_amount": float(self.cfg.get("trail_amount", 0.05)),
             "trail_use_broker_stop": bool(self.cfg.get("trail_use_broker_stop", True)),
