@@ -458,6 +458,12 @@ export const MOVED = {
   "portfolio":         { kind: "overview", tab: "" },        // the home page
   // Agents is a Settings tab
   "agents":            { kind: "settings", tab: "agents" },
+  // the strategy builder is a Research tab
+  "strategies":        { kind: "research", tab: "builder" },
+  // the two orphan routes: registered, routable, and in no nav at all
+  "backtest":          { kind: "research", tab: "backtest" },
+  "tester":            { kind: "research", tab: "backtest" },
+  "research/tester":   { kind: "research", tab: "backtest" },
 };
 
 export function readHash() {

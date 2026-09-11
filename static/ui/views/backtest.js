@@ -11,11 +11,18 @@
 
    Ranking is on TOTAL P/L -- realized alone rewards a setting that banks
    winners while quietly accumulating lots it never closes.
+
+   This is Research's Backtest tab, not a destination of its own: it used to
+   be routable at #/a/<id>/backtest, a URL in no nav, on a page with no tab
+   bar and no highlighted rail entry. It also used to have a twin --
+   "Strategy tester" was a second full UI over the same job queue with a
+   worse report. That is gone; its two unique parts, the Pine export and the
+   buy-and-hold comparison, are here.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, qty, go,
+  S, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
+  money, money0, sgn, pct, qty,
 } from "../core.js";
 import { EqChart } from "../eqchart.js";
 
@@ -60,10 +67,44 @@ function parseSweep(txt) {
 
 const combos = (sw) => Object.values(sw).reduce((a, v) => a * (v.length || 1), 1);
 
-VIEWS.backtest = {
-  title: () => "Backtest",
-  sub: () => "replay any strategy over real Alpaca history",
+/* ------------------------------------------------------- arriving loaded
+   "Backtest it" used to navigate here carrying NOTHING: the Risk profile
+   editor read its form and threw it away, and the strategy builder saved
+   and jumped, leaving this page in ladder mode on whatever symbol was
+   first. Both hand over their subject now. A caller sets it, then
+   navigates; the next mount picks it up and says where it came from. */
+let pending = null;
+export function preset(p) { pending = p || null; }
 
+function applyPending() {
+  if (!pending) return;
+  const p = pending;
+  pending = null;
+  if (p.mode) {
+    mode = p.mode;
+    el("btMode").querySelectorAll(".seg-b").forEach((x) =>
+      x.classList.toggle("on", x.dataset.m === mode));
+    paintModeBox();
+  }
+  if (p.symbol) el("btSym").value = p.symbol;
+  if (p.label) el("btLabel").value = p.label;
+  if (p.sweep) {
+    el("btSweep").value = Object.entries(p.sweep)
+      .map(([k, v]) => `${k}=${v}`).join("\n");
+    updateCount();
+  }
+  if (p.strategy) {
+    const set = () => { const s = el("btStrat"); if (s) s.value = p.strategy; };
+    set();
+    setTimeout(set, 300);          // the list may still be loading
+  }
+  if (p.from) {
+    el("btResult").innerHTML = `<div class="note info"><b>Loaded from ${esc(p.from)}.</b>
+      ${esc(p.note || "Nothing has run yet — check the numbers and press Run backtest.")}</div>`;
+  }
+}
+
+export const BACKTEST = {
   mount() {
     if (forAcct !== S.account) {
       clearInterval(poll);
@@ -155,6 +196,7 @@ VIEWS.backtest = {
     loadCode();
     loadJobs();
     if (lastJob) renderJob(lastJob);
+    applyPending();
   },
 
   paint() { /* results are pushed by the watcher */ },
@@ -177,13 +219,15 @@ function paintModeBox() {
     fillStrategies();
   } else {
     box.innerHTML = `
-      <div style="display:flex;gap:8px;align-items:end;margin-bottom:4px">
-        <label class="f" style="flex:1;margin:0"><span>Saved code</span>
+      <div style="display:flex;gap:8px;align-items:end;margin-bottom:4px;flex-wrap:wrap">
+        <label class="f" style="flex:1 1 140px;margin:0"><span>Saved code</span>
           <select id="btCodeSel"></select></label>
         <button class="btn sm" id="btCodeNew">New</button>
         <button class="btn sm" id="btCodeSave">Save</button>
+        <button class="btn sm" id="btCodePine" title="The same strategy as Pine Script">Pine</button>
         <button class="btn sm" id="btCodeDel">×</button>
       </div>
+      <div id="btPineBox"></div>
       <textarea id="btCode" rows="18" spellcheck="false" class="code"></textarea>
       <div class="hint" id="btCodeErr"></div>
       <div class="hint">Define <code>on_bar(ctx, i)</code>; <code>init(ctx)</code>
@@ -202,6 +246,7 @@ function paintModeBox() {
     };
     el("btCodeSave").onclick = () => act(saveCode);
     el("btCodeDel").onclick = () => act(deleteCode);
+    el("btCodePine").onclick = () => act(showPine);
     el("btCodeSel").onchange = () => act(openCode);
     checkCode();
   }
@@ -241,7 +286,7 @@ function fillStrategies() {
     el("btStratNote").innerHTML = s
       ? `${esc(s.note || s.name)}${s.indicators && s.indicators.length
           ? ` <span class="faint">(${s.indicators.join(", ")})</span>` : ""}`
-      : `Build one on the <b>Strategies</b> page.`;
+      : `Build one on the <b>Builder</b> tab.`;
   };
   sel.onchange = note;
   note();
@@ -290,6 +335,45 @@ async function deleteCode() {
   await DEL("/api/code/" + encodeURIComponent(slug));
   await loadCode();
   el("btCode").value = TEMPLATE;
+}
+
+/* The same strategy as Pine Script, for looking at it in TradingView with
+   the entries, exits and connecting lines drawn. The execution half is
+   generated from one hand-written template that mirrors this project's
+   runner, so the two agree instead of telling different stories.
+   (Ported from the deleted Strategy tester, which was the only place it
+   lived; nothing else about that page was unique.) */
+async function showPine() {
+  const slug = (el("btCodeSel") || {}).value || "";
+  const m = String(slug).match(/^study-(\d+)-/);
+  const box = el("btPineBox");
+  if (!box) return;
+  if (!m) {
+    box.innerHTML = `<div class="note warn">Pine is generated for the study's
+      finalists — pick one of the <b>study-…</b> strategies.</div>`;
+    return;
+  }
+  const b = el("btCodePine");
+  b.disabled = true;
+  try {
+    const r = await GET("/api/pine/" + m[1]);
+    box.innerHTML = `
+      <div class="note info">
+        <b>${esc(r.name)}</b> as Pine Script
+        <div class="tip">Paste into TradingView → Pine Editor → Add to chart.
+          Set the chart to <b>${esc(r.timeframe)}</b>; the study only tested that.
+          Nothing here executes Pine, so it is untested on this side.</div>
+        <div class="row-btns" style="margin:8px 0">
+          <button class="btn sm primary" id="btPineCopy">Copy</button>
+          <button class="btn sm" id="btPineHide">Hide</button>
+        </div>
+        <pre class="mono" style="white-space:pre-wrap;font-size:10.5px;
+          max-height:320px;overflow:auto">${esc(r.pine)}</pre>
+      </div>`;
+    el("btPineCopy").onclick = () => navigator.clipboard.writeText(r.pine).then(
+      () => toast("Pine Script copied.", "ok"), () => toast("Could not copy.", "err"));
+    el("btPineHide").onclick = () => { box.innerHTML = ""; };
+  } finally { b.disabled = false; }
 }
 
 let checkTimer = null;
@@ -426,6 +510,8 @@ function renderJob(j) {
         <b>${failed.length} combination(s) failed.</b>
         <pre class="err">${esc(failed[0].error)}</pre></div>` : ""}
       <div id="btSummary"></div>`)
+    + card("Against buy and hold", `<div id="btBh"></div>`,
+        `<span class="faint">the number it has to beat</span>`, { flush: true })
     + card("Equity curve", `<div id="btChart"></div>`,
         `<span class="faint" id="btChartNote"></span>`)
     + card("", `
@@ -444,9 +530,46 @@ function renderJob(j) {
   });
 
   renderSummary(okRows[0] || rows[0]);
+  renderBuyHold(okRows[0] || rows[0]);
   renderChart();
   renderResBody(j, rows);
   renderActions(j, rows);
+}
+
+/* ONE benchmark, and it is always LONG: 100 shares bought at the first open
+   and sold at the last close. There is no such thing as buying and holding
+   a short, and reporting a direction-matched variant beside this one under
+   the same name was confusing for no gain.
+   (Ported from the deleted Strategy tester. Max drawdown is signed here, as
+   it is everywhere else on this page -- the tester rendered the same field
+   unsigned on one tab and signed on the other.) */
+function renderBuyHold(row) {
+  const host = el("btBh");
+  if (!host) return;
+  const s = detail ? detail.summary : row;
+  if (!s) { host.innerHTML = ""; return; }
+  const mine = Number(s.total_pl) || 0;
+  const bhD = s.buy_hold_dollars;
+  const vs = s.vs_buy_hold != null ? s.vs_buy_hold
+    : (bhD == null ? null : mine - Number(bhD));
+  if (bhD == null) {
+    host.innerHTML = tableHTML(["", "Value"], [`<tr>
+      <td style="text-align:left">This strategy</td><td class="num">${sgn(mine)}</td></tr>`,
+      `<tr><td style="text-align:left">Buying and holding over the window</td>
+       <td class="num">${(s.buy_hold_pct ?? 0).toFixed(2)}%</td></tr>`]);
+    return;
+  }
+  const r = (k, v) => `<tr><td style="text-align:left">${k}</td>
+    <td class="num">${v}</td></tr>`;
+  host.innerHTML = tableHTML(["", "Value"], [
+    r("This strategy", `<b>${sgn(mine)}</b>`),
+    r("Bought 100 shares and held", `${sgn(bhD)}
+       <span class="faint">${pct(s.buy_hold_pct, 2)}</span>`),
+    r("Strategy minus buy and hold", `<b>${sgn(vs)}</b>`),
+    r("Which was better", (vs || 0) >= 0
+      ? `<b class="up">the strategy</b>` : `<b class="down">buying and holding</b>`),
+    r("Max drawdown getting there", sgn(s.max_drawdown)),
+  ]);
 }
 
 function renderSummary(row) {
@@ -701,7 +824,7 @@ async function bankIt(j, row) {
     symbol: j.symbol, timeframe: j.timeframe, days: j.days,
     mode: j.mode, job: j.id, actor: "human",
   });
-  toast(`Banked against <b>${esc(prof.name)}</b>. See the Risk page.`, "ok", 9000);
+  toast(`Banked against <b>${esc(prof.name)}</b>. See the <b>Bank</b> tab.`, "ok", 9000);
 }
 
 const fmt = (v) => v == null ? "n/a"

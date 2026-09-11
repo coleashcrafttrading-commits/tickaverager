@@ -1,5 +1,11 @@
 /* ============================================================================
-   Strategies -- build one by clicking, not by writing JSON.
+   Research -> Builder -- build a strategy by clicking, not by writing JSON.
+
+   This was its own rail entry. It is a research tool: it produces a document
+   that the backtester runs and the engine can be pointed at, and it touches
+   no live money, so it belongs beside the backtester rather than in a slot
+   of its own two clicks away from it. "Backtest it" now hands the saved slug
+   to the Backtest tab instead of jumping to an empty ladder run.
 
    A strategy is a document, and the document is the single source of truth: the
    builder edits it, the JSON pane shows it, the backtester runs it and the
@@ -11,8 +17,9 @@
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, act, ask, toast, el, esc, card, tableHTML, go,
+  S, GET, POST, act, ask, toast, el, esc, card, tableHTML, go,
 } from "../core.js";
+import { preset as btPreset } from "./backtest.js";
 
 let CAT = {};              // indicator catalogue from the server
 let LIST = [];             // saved strategies
@@ -81,10 +88,7 @@ function parentOf(root, path) {
 function setRoot(which, node) { spec[which] = node; dirty = true; }
 
 /* ------------------------------------------------------------------ views */
-VIEWS.strategies = {
-  title: () => "Strategy builder",
-  sub: () => "a strategy is a document — build it, validate it, backtest it",
-
+export const BUILDER = {
   async mount() {
     el("view").innerHTML = `<div class="faint">Loading the indicator catalogue…</div>`;
     try {
@@ -201,9 +205,19 @@ function paintShell() {
     spec = BLANK(); slug = ""; dirty = false; vErr = "";
     paintShell(); renderAll();
   });
+  /* Save first, then hand the SLUG to the backtester in strategy mode. This
+     used to save and navigate, leaving the Backtest tab in ladder mode on
+     whatever symbol happened to be first -- it carried nothing at all. */
   el("stTest").onclick = () => act(async () => {
     if (!slug || dirty) await save();
-    if (slug) go({ kind: "backtest" });
+    if (!slug) return;
+    btPreset({
+      mode: "strategy", strategy: slug, label: spec.name || slug,
+      from: "the strategy builder",
+      note: `Running the saved document "${slug}". Pick a symbol and a window, `
+          + `then Run backtest.`,
+    });
+    go({ kind: "research", tab: "backtest" });
   });
   el("stToggleJSON").onclick = () => {
     showJSON = !showJSON;

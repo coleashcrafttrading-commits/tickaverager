@@ -19,11 +19,8 @@ import {
    page that now hosts it. core.js's MOVED map redirects their old URLs. */
 import "./views/overview.js";
 import "./views/ticker.js";
-import "./views/backtest.js";
-import "./views/tester.js";
 import "./views/research.js";
 import "./views/scanner.js";
-import "./views/strategies.js";
 import "./views/risk.js";
 import "./views/add.js";
 import "./views/settings.js";
@@ -125,7 +122,6 @@ function paintRail() {
   }
 
   html += `<div class="nav-label">Shared library</div>`
-    + item("strategies", "Strategies", "◇")
     + item("research", "Research", "◭")
     + item("scanner", "Scanner", "◉");
   el("nav").innerHTML = html;

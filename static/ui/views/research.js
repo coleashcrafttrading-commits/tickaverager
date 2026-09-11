@@ -1,48 +1,54 @@
 /* ============================================================================
-   Research -- one tab, three rooms.
+   Research -- everything that is not live money: build, test, rank.
 
-   The indicator builder, the strategy tester and the backtester were three
-   separate rail entries doing three parts of the same job. They are one entry
-   now, with tabs in the topbar rather than more panels on the page, so the
-   sidebar stays short and each room still opens on its own.
+   Three tabs, three rooms:
+     Indicators  describe an indicator in English and put it on a chart
+     Builder     build a strategy document by clicking (was its own nav item)
+     Backtest    replay anything over real history (was also reachable at an
+                 orphan URL with no tab bar and no highlighted nav entry)
 
-   The two existing views are not reimplemented here: this dispatches to their
-   own mount() and paint(), so there is exactly one strategy tester and one
-   backtester in the codebase.
+   Nothing here is reimplemented: each room is the module that already owned
+   it, dispatched into, so there is exactly one strategy builder and one
+   backtester in the codebase. The "Strategy tester" room is gone -- it was
+   the backtester again with a worse report.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, toast, el, esc, card, tableHTML, go,
+  VIEWS, GET, POST, DEL, act, toast, el, esc, card, tableHTML,
+  modelCredsHTML,
 } from "../core.js";
 import { CATALOG, cols } from "../ind.js";
 import { ChartPanel } from "../chartpanel.js";
+import { BACKTEST } from "./backtest.js";
+import { BUILDER } from "./strategies.js";
 
 const TABS = [
-  ["indicators", "Indicator builder"],
-  ["tester", "Strategy tester"],
+  ["indicators", "Indicators"],
+  ["builder", "Builder"],
   ["backtest", "Backtest"],
 ];
 
+const SUB = {
+  indicators: "describe an indicator in English and put it on the chart",
+  builder: "a strategy is a document — build it, validate it, backtest it",
+  backtest: "sweep parameters over real history",
+};
+
 VIEWS.research = {
   title: () => "Research",
-  sub: (ov, v) => ({
-    indicators: "describe an indicator in English and put it on the chart",
-    tester: "run a strategy on any symbol and see it on the chart",
-    backtest: "sweep parameters over real history",
-  }[v.tab || "indicators"]),
+  sub: (ov, v) => SUB[v.tab || "indicators"] || SUB.indicators,
   tabs: TABS,
 
   mount(v) {
     const t = v.tab || "indicators";
-    if (t === "tester") return VIEWS.tester.mount(v);
-    if (t === "backtest") return VIEWS.backtest.mount(v);
+    if (t === "builder") return BUILDER.mount(v);
+    if (t === "backtest") return BACKTEST.mount(v);
     return mountBuilder();
   },
 
   paint(v) {
     const t = v.tab || "indicators";
-    if (t === "tester" && VIEWS.tester.paint) return VIEWS.tester.paint(v);
-    if (t === "backtest" && VIEWS.backtest.paint) return VIEWS.backtest.paint(v);
+    if (t === "backtest" && BACKTEST.paint) return BACKTEST.paint(v);
   },
 };
 
@@ -129,21 +135,14 @@ async function refresh() {
   renderList();
 }
 
+/* The builder and the scheduled agents use the SAME credential and used to
+   explain it two different ways on two pages. One explainer, in core.js. */
 function renderReady() {
   const h = el("aiReady");
   if (!h) return;
-  if (ready && ready.ready) {
-    h.innerHTML = `<div class="note good" style="margin-top:0">Connected via
-      <b>${esc(ready.how === "api_key" ? "an API key" : "the Claude Code CLI")}</b>.</div>`;
-    return;
-  }
-  h.innerHTML = `<div class="note warn" style="margin-top:0">
-    <b>The builder cannot reach a model yet.</b> ${esc((ready && ready.problem) || "")}
-    <div class="tip">${esc((ready && ready.fix) || "")}</div>
-    <div class="tip">Either works: put <code>ANTHROPIC_API_KEY=sk-ant-…</code> in
-      <code>.env</code> and restart the dashboard, or open a terminal in the bot
-      folder and run <code>claude</code> once to accept the trust prompt and
-      sign in. Everything else on this page works meanwhile.</div></div>`;
+  h.innerHTML = modelCredsHTML(ready)
+    + (ready && ready.ready ? "" : `<div class="tip">Everything else on this
+        tab works meanwhile — saved indicators still draw.</div>`);
 }
 
 async function build() {
