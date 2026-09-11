@@ -1,11 +1,15 @@
 /* ============================================================================
    Research -- everything that is not live money: build, test, rank.
 
-   Three tabs, three rooms:
+   Four tabs, four rooms:
      Indicators  describe an indicator in English and put it on a chart
      Builder     build a strategy document by clicking (was its own nav item)
      Backtest    replay anything over real history (was also reachable at an
                  orphan URL with no tab bar and no highlighted nav entry)
+     Bank        how much an idea may cost, and which of those costs paid off
+                 -- the risk profiles and the append-only bank of results.
+                 Both were tabs of the Risk page, which is about live money
+                 and should not also be a filing cabinet.
 
    Nothing here is reimplemented: each room is the module that already owned
    it, dispatched into, so there is exactly one strategy builder and one
@@ -14,35 +18,43 @@
    ========================================================================= */
 "use strict";
 import {
-  VIEWS, GET, POST, DEL, act, toast, el, esc, card, tableHTML,
-  modelCredsHTML,
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
+  money0, sgn, go, modelCredsHTML,
 } from "../core.js";
 import { CATALOG, cols } from "../ind.js";
 import { ChartPanel } from "../chartpanel.js";
-import { BACKTEST } from "./backtest.js";
+import { BACKTEST, preset as btPreset } from "./backtest.js";
 import { BUILDER } from "./strategies.js";
 
 const TABS = [
   ["indicators", "Indicators"],
   ["builder", "Builder"],
   ["backtest", "Backtest"],
+  ["bank", "Bank"],
 ];
 
 const SUB = {
   indicators: "describe an indicator in English and put it on the chart",
   builder: "a strategy is a document — build it, validate it, backtest it",
   backtest: "sweep parameters over real history",
+  bank: "risk profiles that have been tested, and what happened",
+  profiles: "the numbers that decide how much one idea may cost",
 };
 
 VIEWS.research = {
   title: () => "Research",
   sub: (ov, v) => SUB[v.tab || "indicators"] || SUB.indicators,
   tabs: TABS,
+  /* Profiles is a room inside Bank with a URL of its own, so the old
+     #/a/<id>/risk/profiles bookmark lands exactly where it used to and the
+     tab bar still shows where you are. */
+  activeTab: (v) => (v.tab === "profiles" ? "bank" : (v.tab || "indicators")),
 
   mount(v) {
     const t = v.tab || "indicators";
     if (t === "builder") return BUILDER.mount(v);
     if (t === "backtest") return BACKTEST.mount(v);
+    if (t === "bank" || t === "profiles") return mountBank(t === "profiles");
     return mountBuilder();
   },
 
@@ -51,6 +63,285 @@ VIEWS.research = {
     if (t === "backtest" && BACKTEST.paint) return BACKTEST.paint(v);
   },
 };
+
+/* ======================================================= profiles + bank
+   Both were tabs of the Risk page. A risk profile is written, tested and
+   ranked; it is never watched, and applying one is a deliberate act -- so
+   it belongs beside the backtester that produces the evidence, not beside
+   the live exposure numbers. */
+let PROF = null;        // {profiles, fields, groups, defaults}
+let BANK = null;
+let editing = null;     // the profile open in the editor
+
+const bankTabs = (onProfiles) => `
+  <div class="tabs2">
+    <button class="t2 ${onProfiles ? "" : "on"}" data-go="research" data-tab="bank"
+      >What has been tested</button>
+    <button class="t2 ${onProfiles ? "on" : ""}" data-go="research" data-tab="profiles"
+      >Risk profiles</button>
+  </div>`;
+
+async function mountBank(onProfiles) {
+  el("view").innerHTML = `${bankTabs(onProfiles)}
+    <div class="faint">Loading…</div>`;
+  if (onProfiles) return mountProfiles();
+  try { BANK = await GET("/api/risk/bank?limit=300"); }
+  catch (e) {
+    el("view").innerHTML = bankTabs(false) + `<div class="note bad">${esc(e.message)}</div>`;
+    return;
+  }
+  const n = BANK.stats.entries;
+  el("view").innerHTML = bankTabs(false) + `
+    ${card("What worked", `<div id="rbBoard"></div>`,
+      `<span class="faint">ranked by profit per dollar of drawdown</span>`,
+      { flush: true })}
+    ${card("Everything banked", `<div id="rbAll"></div>`,
+      `<span class="faint">${n} entr${n === 1 ? "y" : "ies"}</span>`, { flush: true })}
+    ${card("How this is ranked", `<div class="tip" style="margin-top:0">
+      Sorted by <b>total P/L ÷ max drawdown</b>, never by profit. Ranking risk
+      profiles by profit just selects for whichever one took the most risk,
+      which is the opposite of the question being asked.<br><br>
+      Anything with fewer than <b>10 trades</b> is excluded rather than ranked —
+      three lucky trades beat a hundred good ones on every ratio ever invented.
+      A profile whose drawdown was exactly zero shows <b>—</b> and sorts last:
+      real, but not comparable.<br><br>
+      The bank is <b>append-only</b> (<code>state/risk_bank.jsonl</code>). A
+      finding that can be edited after the fact is not evidence.</div>`)}`;
+
+  const board = BANK.leaderboard || [];
+  el("rbBoard").innerHTML = tableHTML(
+    ["#", "Profile", "Strategy", "Symbol", "Total P/L", "Max DD", "P/L per $DD",
+     "Trades", "PF"],
+    board.map((r, i) => {
+      const res = r.result || {};
+      return `<tr>
+        <td class="faint">${i + 1}</td>
+        <td style="text-align:left"><b>${esc((r.profile || {}).name || "?")}</b></td>
+        <td style="text-align:left" class="faint">${esc(r.strategy || "—")}</td>
+        <td>${esc(r.symbol || "—")}</td>
+        <td class="num">${sgn(res.total_pl)}</td>
+        <td class="num">${sgn(res.max_drawdown)}</td>
+        <td class="num"><b>${r.score == null ? "—" : r.score.toFixed(2)}</b></td>
+        <td class="num">${res.total_trades ?? 0}</td>
+        <td class="num faint">${res.profit_factor == null ? "—"
+          : Number(res.profit_factor).toFixed(2)}</td>
+      </tr>`;
+    }),
+    "Nothing banked with enough trades to rank yet. Run a backtest and press "
+    + "“Bank this as a risk result”.");
+
+  el("rbAll").innerHTML = tableHTML(
+    ["When", "Who", "Profile", "Strategy", "Symbol", "Total P/L", "Max DD",
+     "Trades", "Params"],
+    (BANK.entries || []).map((r) => {
+      const res = r.result || {};
+      return `<tr>
+        <td class="faint">${String(r.ts).slice(5, 16).replace("T", " ")}</td>
+        <td class="faint">${esc(r.actor || "")}</td>
+        <td style="text-align:left">${esc((r.profile || {}).name || "?")}</td>
+        <td style="text-align:left" class="faint">${esc(r.strategy || "—")}</td>
+        <td>${esc(r.symbol || "—")}</td>
+        <td class="num">${sgn(res.total_pl)}</td>
+        <td class="num">${sgn(res.max_drawdown)}</td>
+        <td class="num">${res.total_trades ?? 0}</td>
+        <td class="faint mono" style="text-align:left;font-size:11px">${
+          esc(Object.entries(r.params || {}).map(([k, v]) => `${k}=${v}`).join(" ")) || "—"}</td>
+      </tr>`;
+    }), "Nothing banked yet.");
+}
+
+async function mountProfiles() {
+  try { PROF = await GET("/api/risk/profiles"); }
+  catch (e) {
+    el("view").innerHTML = bankTabs(true) + `<div class="note bad">${esc(e.message)}</div>`;
+    return;
+  }
+  if (!editing) {
+    editing = { slug: "", name: "", note: "", values: { ...PROF.defaults } };
+  }
+  el("view").innerHTML = bankTabs(true) + `
+    <div class="grid main">
+      <div>
+        ${card("Editor", `
+          <div class="f2">
+            <label class="f"><span>Name</span><input id="rpName"></label>
+            <label class="f"><span>Slug</span><input id="rpSlug"
+              placeholder="made from the name"></label>
+          </div>
+          <label class="f"><span>Note</span><textarea id="rpNote" rows="2"
+            placeholder="what this profile is for, and what you expect it to do"></textarea></label>
+          <div id="rpFields"></div>
+          <div class="row-btns" style="margin-top:14px">
+            <button class="btn primary sm" id="rpSave">Save profile</button>
+            <button class="btn sm" id="rpTest">Backtest it</button>
+            <button class="btn sm" id="rpApply">Apply to a ticker…</button>
+          </div>
+          <div class="tip"><b>Applying does not arm anything.</b> It writes the
+            settings onto a ticker; an armed ticker keeps trading with the new
+            numbers, a disarmed one stays disarmed.</div>`)}
+      </div>
+      <div>
+        ${card("Profiles", `<div id="rpList"></div>`,
+          `<span class="faint">${PROF.profiles.length}</span>`, { flush: true })}
+        ${card("Why these are separate from strategies", `
+          <div class="tip" style="margin-top:0">A strategy says <i>when</i> to
+            trade. A risk profile says <i>how much it may cost</i>. The same
+            strategy at two profiles is two completely different bets, which is
+            exactly what an agent needs to be able to test one against the
+            other.<br><br>
+            The <b>Live ladder</b> preset is what RAM and MSTX run today. It is
+            here as the baseline every other profile has to beat, not as a
+            recommendation — it has <b>no stop loss</b> and no portfolio cap.</div>`)}
+      </div>
+    </div>`;
+
+  renderProfileList();
+  renderProfileForm();
+  el("rpSave").onclick = () => act(saveProfile);
+  el("rpTest").onclick = () => act(testProfile);
+  el("rpApply").onclick = () => act(applyProfile);
+}
+
+function renderProfileList() {
+  const host = el("rpList");
+  if (!host) return;
+  host.innerHTML = PROF.profiles.map((p) => `
+    <div style="padding:10px 18px;border-bottom:1px solid var(--hairline)">
+      <div style="display:flex;gap:8px;align-items:center">
+        <b style="flex:1">${esc(p.name)}</b>
+        ${p.preset ? `<span class="pill">preset</span>` : ""}
+        <button class="btn sm" data-open="${esc(p.slug)}">Open</button>
+        ${p.preset ? "" : `<button class="btn sm" data-del="${esc(p.slug)}">×</button>`}
+      </div>
+      <div class="faint" style="font-size:11.5px;margin-top:4px">${esc(p.note || "")}</div>
+    </div>`).join("");
+  host.querySelectorAll("[data-open]").forEach((b) => {
+    b.onclick = () => {
+      const p = PROF.profiles.find((x) => x.slug === b.dataset.open);
+      editing = { slug: p.slug, name: p.name, note: p.note || "",
+                  values: { ...PROF.defaults, ...p.values } };
+      renderProfileForm();
+    };
+  });
+  host.querySelectorAll("[data-del]").forEach((b) => {
+    b.onclick = () => act(async () => {
+      if (!(await ask({ title: `Delete ${b.dataset.del}?`,
+        body: "Banked results that used it are kept — the bank is append-only.",
+        ok: "Delete", danger: true }))) return;
+      await DEL("/api/risk/profiles/" + encodeURIComponent(b.dataset.del));
+      PROF = await GET("/api/risk/profiles");
+      renderProfileList();
+    });
+  });
+}
+
+function renderProfileForm() {
+  el("rpName").value = editing.name;
+  el("rpSlug").value = editing.slug;
+  el("rpNote").value = editing.note;
+  const F = PROF.fields;
+  el("rpFields").innerHTML = PROF.groups.map((g) => {
+    const keys = Object.keys(F).filter((k) => F[k].group === g);
+    return `<fieldset><legend>${esc(g)}</legend>` + keys.map((k) => {
+      const f = F[k];
+      const v = editing.values[k];
+      const input = f.kind === "choice"
+        ? `<select name="${k}">${f.opts.map((o) =>
+            `<option value="${esc(o)}"${String(v) === o ? " selected" : ""}>${esc(o)}</option>`
+          ).join("")}</select>`
+        : `<input name="${k}" type="number" value="${esc(v)}"
+             step="${f.kind === "int" ? 1 : "any"}" min="${f.min}" max="${f.max}">`;
+      return `<label class="f"><span>${esc(f.label)}</span>${input}</label>`
+        + (f.note ? `<div class="hint">${esc(f.note)}</div>` : "");
+    }).join("") + `</fieldset>`;
+  }).join("");
+}
+
+function readForm() {
+  const out = {};
+  el("rpFields").querySelectorAll("[name]").forEach((i) => {
+    out[i.name] = PROF.fields[i.name].kind === "choice" ? i.value : Number(i.value);
+  });
+  editing.values = out;
+  editing.name = el("rpName").value.trim();
+  editing.slug = el("rpSlug").value.trim();
+  editing.note = el("rpNote").value.trim();
+  return editing;
+}
+
+async function saveProfile() {
+  const e = readForm();
+  if (!e.name) { toast("Give the profile a name.", "err"); return; }
+  const r = await POST("/api/risk/profiles",
+    { name: e.name, slug: e.slug, note: e.note, values: e.values });
+  editing.slug = r.profile.slug;
+  PROF = await GET("/api/risk/profiles");
+  renderProfileList();
+  toast(`Saved <b>${esc(r.profile.name)}</b>.`, "ok");
+}
+
+/* The nine keys a profile shares with a ladder run. The backtester takes a
+   sweep of one value per key as an override, so this is how a profile
+   actually reaches a backtest. */
+const RUN_KEYS = ["size_mode", "shares_per_lot", "lot_dollars", "risk_dollars",
+                  "atr_stop_mult", "max_shares", "take_profit", "max_lots",
+                  "daily_loss_limit"];
+
+/* "Backtest it" used to call readForm() and then navigate, carrying nothing
+   at all -- the backtester opened in ladder mode on whatever symbol was
+   first, with none of the profile's numbers. It hands them over now. */
+async function testProfile() {
+  const e = readForm();
+  const sweep = {};
+  for (const k of RUN_KEYS) {
+    const v = e.values[k];
+    if (v !== undefined && v !== null && v !== "" && v !== 0) sweep[k] = v;
+  }
+  if (!Object.keys(sweep).length) {
+    toast("This profile sets none of the values a ladder run uses.", "err");
+    return;
+  }
+  btPreset({
+    mode: "ladder", sweep, label: e.name || e.slug || "risk profile",
+    symbol: ((S.ov && S.ov.tickers) || [])[0]?.symbol || "",
+    from: `the risk profile "${e.name || e.slug || "unnamed"}"`,
+    note: "Its ladder settings are in the sweep box as single values, so the "
+        + "run uses them instead of the ticker's own. Pick a symbol and a "
+        + "window, then Run backtest.",
+  });
+  go({ kind: "research", tab: "backtest" });
+}
+
+async function applyProfile() {
+  const e = readForm();
+  const syms = (S.ov?.tickers || []).map((t) => t.symbol);
+  if (!syms.length) { toast("No tickers in the fleet.", "err"); return; }
+  const sym = prompt(`Apply "${e.name || "this profile"}" to which ticker?\n\n`
+                     + syms.join(", "), syms[0]);
+  if (!sym) return;
+  const S2 = sym.trim().toUpperCase();
+  if (!syms.includes(S2)) { toast(`${esc(S2)} is not in the fleet.`, "err"); return; }
+  const v = e.values;
+  const patch = {};
+  for (const k of RUN_KEYS) if (v[k] !== undefined) patch[k] = v[k];
+  /* Everything a profile can hold that a TICKER cannot. It has always been
+     dropped silently, including stop_mode -- the field riskbank.py itself
+     calls "the single biggest risk in this system". The dialog says so now
+     rather than showing only the nine that travel. */
+  const dropped = Object.keys(PROF.fields).filter((k) => !RUN_KEYS.includes(k));
+  if (!(await ask({
+    title: `Apply to ${S2}?`,
+    body: `<pre class="err">${esc(JSON.stringify(patch, null, 2))}</pre>
+      <p>These settings are written to ${esc(S2)} now. Its armed state does not
+      change. Resting take-profits are re-priced if the target moved.</p>
+      ${dropped.length ? `<p><b class="down">These are NOT applied:</b>
+        <code>${esc(dropped.join(", "))}</code>. A ticker has no setting for
+        them — the ladder has no stop loss and no per-ticker portfolio caps —
+        so they stay part of the profile for backtesting only.</p>` : ""}`,
+    ok: "Apply" }))) return;
+  await POST(`/api/ticker/${encodeURIComponent(S2)}/config`, patch);
+  toast(`Applied to <b>${esc(S2)}</b>.`, "ok", 8000);
+}
 
 /* ------------------------------------------------------------- the builder */
 let custom = [];

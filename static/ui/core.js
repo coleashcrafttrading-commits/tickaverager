@@ -56,8 +56,10 @@ export const stat = (k, v, sub) =>
   `<div><div class="stat-k">${k}</div><div class="stat-v num">${v}</div>` +
   (sub ? `<div class="stat-s">${sub}</div>` : "") + `</div>`;
 
+/* opts.cls adds a modifier -- "hero" is the one place the theme's gradient is
+   the surface rather than an accent, so at most one card per page may have it. */
 export const card = (title, body, extra = "", opts = {}) =>
-  `<div class="card"${opts.id ? ` id="${opts.id}"` : ""}>
+  `<div class="card${opts.cls ? " " + opts.cls : ""}"${opts.id ? ` id="${opts.id}"` : ""}>
      ${title ? `<div class="card-h"><div class="card-t">${title}</div>
        ${extra ? `<div class="card-x">${extra}</div>` : ""}</div>` : ""}
      <div class="card-b${opts.flush ? " flush" : ""}">${body}</div>
@@ -464,6 +466,10 @@ export const MOVED = {
   "backtest":          { kind: "research", tab: "backtest" },
   "tester":            { kind: "research", tab: "backtest" },
   "research/tester":   { kind: "research", tab: "backtest" },
+  // Risk keeps only live exposure; its two research artefacts moved
+  "risk/live":         { kind: "risk",     tab: "" },
+  "risk/profiles":     { kind: "research", tab: "profiles" },
+  "risk/bank":         { kind: "research", tab: "bank" },
 };
 
 export function readHash() {
