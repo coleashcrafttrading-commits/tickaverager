@@ -280,7 +280,7 @@ function mountLive(sym) {
 
       <aside class="tk-side">
         ${card("Active strategy", presetHTML(), `<span id="tkSide"></span>`,
-               { id: "tkStratCard" })}
+               { cls: "hero" })}
         ${card("Price", `<div class="stats tk-px">
           <div><div class="stat-k">Last</div>
                <div class="stat-v num" id="tkPx">—</div>
@@ -318,9 +318,6 @@ function mountLive(sym) {
 
     ${card("Order history", `<div id="poHist"></div>`,
       `<button class="btn sm" id="poReload">Reload</button>`, { flush: true })}`;
-
-  // the one gradient panel on the page: what this ladder is running
-  el("tkStratCard").classList.add("hero");
 
   const A = (fn) => () => act(fn);
   el("bStart").onclick = A(async () => {
@@ -610,7 +607,7 @@ function mountSettings() {
       <div class="tip" style="margin-top:14px">A preset sets every card below in one step.
         Change anything by hand afterwards and ${sym} is stamped
         <b>custom</b> — the preset is a starting point, not a lock.</div>`,
-      "", { id: "tkStratCard" })}
+      "", { cls: "hero" })}
 
     <form id="tform" autocomplete="off">
       <div class="setg">${cards}</div>
@@ -632,9 +629,6 @@ function mountSettings() {
           Remove ${sym}</button>`)}</div>
     </div>`;
 
-  // the Settings tab's one gradient panel: the preset is the primary way in
-  const sc = el("tkStratCard");
-  if (sc) sc.classList.add("hero");
   wirePreset(sym);
 
   const f = el("tform");
