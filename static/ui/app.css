@@ -16,30 +16,46 @@
 :root {
   color-scheme: dark;
 
-  /* surfaces — three steps, no more */
-  --bg:        #0e1116;
-  --surface:   #161b22;
-  --raised:    #1c232c;
-  --hairline:  #232b36;
-  --hairline2: #2d3744;
+  /* Ground. Not grey: a green-black that the mint accent belongs to, lit by
+     two hazes so a full-screen dark page has somewhere for the eye to rest. */
+  --bg:        #05100d;
+  --bg-2:      #071613;
+  --haze-a:    rgba(46, 230, 168, 0.10);   /* mint, top left */
+  --haze-b:    rgba(139, 108, 255, 0.09);  /* violet, bottom right */
+
+  /* Surfaces sit ON the ground and are translucent, so the haze shows through
+     and cards nearer the top of the page read as nearer the light. */
+  --surface:   rgba(255, 255, 255, 0.035);
+  --surface-2: rgba(255, 255, 255, 0.055);
+  --raised:    rgba(255, 255, 255, 0.075);
+  --solid:     #0d1c18;
+  --hairline:  rgba(255, 255, 255, 0.075);
+  --hairline2: rgba(255, 255, 255, 0.13);
 
   /* type */
-  --text:      #e8edf4;
-  --muted:     #9aa7b8;
-  --faint:     #64707f;
+  --text:      #e9f3ef;
+  --muted:     #93a9a1;
+  --faint:     #5f746c;
 
-  /* the single accent */
-  --accent:    #4c8dff;
-  --accent-dim:#1e3a5f;
+  /* mint is the living colour; violet is its counterweight, used for the
+     gradient panels and never for a number */
+  --accent:    #2ee6a8;
+  --accent-2:  #8b6cff;
+  --accent-dim: rgba(46, 230, 168, 0.14);
+  --accent-glow: rgba(46, 230, 168, 0.28);
 
-  /* semantic only */
-  --up:        #35c98b;
-  --down:      #f2555a;
-  --warn:      #e8a33d;
+  /* semantic */
+  --up:        #2ee6a8;
+  --down:      #ff5f7e;
+  --warn:      #ffb545;
 
-  --radius: 10px;
-  --radius-sm: 7px;
-  --gutter: 22px;
+  --radius:    16px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+  --gutter:    20px;
+
+  --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  --shadow-lift: 0 1px 2px rgba(0,0,0,.4), 0 18px 44px -18px rgba(0,0,0,.85);
 
   --font: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
@@ -47,11 +63,17 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f6f8fb; --surface: #ffffff; --raised: #f2f5f9;
-  --hairline: #e3e8ef; --hairline2: #d2dae4;
-  --text: #16202c; --muted: #5b6878; --faint: #8794a4;
-  --accent: #2f6fe4; --accent-dim: #dce8fd;
-  --up: #0f9d63; --down: #d63a3f; --warn: #b7791f;
+  --bg: #eef4f1; --bg-2: #f7faf9;
+  --haze-a: rgba(46, 230, 168, 0.16); --haze-b: rgba(139, 108, 255, 0.12);
+  --surface: rgba(255,255,255,.86); --surface-2: rgba(255,255,255,.95);
+  --raised: #ffffff; --solid: #ffffff;
+  --hairline: rgba(11, 40, 33, .10); --hairline2: rgba(11, 40, 33, .18);
+  --text: #0b2821; --muted: #4c665e; --faint: #7d918a;
+  --accent: #06a97a; --accent-2: #6d4fe0;
+  --accent-dim: rgba(6, 169, 122, .12); --accent-glow: rgba(6, 169, 122, .22);
+  --up: #06a97a; --down: #e0405f; --warn: #b9730a;
+  --shadow: 0 1px 2px rgba(11,40,33,.06), 0 8px 24px -14px rgba(11,40,33,.25);
+  --shadow-lift: 0 1px 2px rgba(11,40,33,.07), 0 18px 44px -20px rgba(11,40,33,.3);
 }
 
 * { box-sizing: border-box; }
@@ -82,6 +104,15 @@ button, input, select, textarea { font-family: inherit; }
 /* ============================== app shell ============================== */
 /* 100dvh where the browser has it: on a phone 100vh is the height WITH the
    address bar hidden, so the bottom of the page sat under the bar. */
+/* The ground is lit, not painted: two fixed radial hazes behind everything,
+   so scrolling moves the content across the light instead of dragging it. */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(900px 600px at 12% -8%, var(--haze-a), transparent 62%),
+    radial-gradient(800px 560px at 92% 108%, var(--haze-b), transparent 60%),
+    linear-gradient(180deg, var(--bg-2), var(--bg) 42%);
+}
 .app { display: grid; grid-template-columns: 236px 1fr; height: 100vh; height: 100dvh; }
 /* the rail collapsed on a desktop: the content takes the whole width */
 .app.rail-collapsed { grid-template-columns: 1fr; }
@@ -232,8 +263,9 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
    biggest reason the old dashboard read as cluttered. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  gap: 20px 26px;
+  /* wide enough that a six-figure account value never clips */
+  grid-template-columns: repeat(auto-fit, minmax(186px, 1fr));
+  gap: 16px;
 }
 .stat-k {
   color: var(--faint); font-size: 10.5px; font-weight: 600;
@@ -825,4 +857,149 @@ tr.on > td { background: var(--accent-dim); }
      instead of every cell wrapping into a tall narrow column */
   .tw td:not(.empty) { white-space: nowrap; }
   .chart-pop [style*="width:200px"] { width: 140px !important; }
+}
+
+
+/* ==========================================================================
+   The visual language. Cards sit on the lit ground with a hairline that
+   catches the light at the top, corners round enough to read as objects, and
+   the accent reserved for the one thing on a card that is alive.
+   ========================================================================== */
+
+.rail {
+  background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
+  border-right: 1px solid var(--hairline);
+  backdrop-filter: blur(14px);
+}
+.brand-n { letter-spacing: -0.02em; }
+.brand-dot { box-shadow: 0 0 0 3px rgba(46,230,168,.16), 0 0 12px var(--accent-glow); }
+
+.nav-label {
+  font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--faint); padding: 16px 10px 6px;
+}
+.nav-item {
+  border-radius: 12px; transition: background .14s ease, color .14s ease;
+}
+.nav-item:hover { background: rgba(255,255,255,.05); }
+.nav-item.on {
+  background: linear-gradient(90deg, var(--accent-dim), rgba(46,230,168,.04));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(46,230,168,.22);
+}
+.nav-item.on .ico { color: var(--accent); opacity: 1; }
+.tick-item { border-radius: 12px; }
+.acct-item { border-radius: 12px; }
+
+/* Cards: the light falls on the top edge. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+}
+.card::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent);
+  pointer-events: none;
+}
+.card-h { border-bottom: 1px solid var(--hairline); }
+.card-t { letter-spacing: .01em; }
+
+/* A stat is a number first. The label is a whisper above it. */
+.stat-k, .kpi-k {
+  font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint); font-weight: 600;
+}
+/* The number scales with the card so a big balance stays on one line. */
+.stat-v {
+  font-size: clamp(19px, 2.1vw, 27px); font-weight: 680; letter-spacing: -0.03em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kpi-v  { font-size: 19px; font-weight: 660; letter-spacing: -0.025em; white-space: nowrap; }
+.stat-s { line-height: 1.45; }
+.stats > * {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  padding: 16px 18px 17px;
+  position: relative; overflow: hidden;
+}
+.stats > *::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
+}
+
+/* Pills are fully round and carry their own colour at low opacity. */
+.pill {
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  padding: 3px 10px;
+}
+.pill.up   { color: var(--up);   background: rgba(46,230,168,.12);  border-color: rgba(46,230,168,.26); }
+.pill.down { color: var(--down); background: rgba(255,95,126,.12);  border-color: rgba(255,95,126,.26); }
+.pill.warn { color: var(--warn); background: rgba(255,181,69,.12);  border-color: rgba(255,181,69,.26); }
+
+/* Buttons: round, quiet by default, the primary one lit from within. */
+.btn {
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline2);
+  background: var(--surface-2);
+  font-weight: 600;
+  transition: background .14s ease, border-color .14s ease, transform .1s ease;
+}
+.btn:hover:not(:disabled) { background: var(--raised); border-color: var(--hairline2); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn.pri, .btn.primary {
+  background: linear-gradient(180deg, var(--accent), #17c78d);
+  border-color: transparent; color: #04231a;
+  box-shadow: 0 2px 14px -2px var(--accent-glow);
+}
+.btn.pri:hover:not(:disabled), .btn.primary:hover:not(:disabled) { filter: brightness(1.07); }
+.btn.danger { color: var(--down); border-color: rgba(255,95,126,.32); background: rgba(255,95,126,.1); }
+
+/* Tabs and segmented controls read as one object, not a row of links. */
+.tabs { gap: 2px; }
+.tab {
+  border-radius: var(--radius-pill); padding: 6px 14px;
+  font-weight: 600; border: 1px solid transparent;
+}
+.tab.on {
+  background: var(--accent-dim); color: var(--text);
+  border-color: rgba(46,230,168,.24);
+}
+.seg { border-radius: var(--radius-pill); overflow: hidden; border-color: var(--hairline); }
+.seg-b { border-radius: 0; font-weight: 600; }
+.seg-b.on { background: var(--accent-dim); color: var(--accent); }
+.t2 { border-radius: var(--radius-pill); }
+
+.sw i { background: rgba(255,255,255,.14); }
+.sw input:checked + i { background: rgba(46,230,168,.35); }
+.sw input:checked + i:before { background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+
+/* Tables breathe, and the header is a label rather than a row. */
+th {
+  font-size: 9.5px !important; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--faint) !important; font-weight: 600 !important;
+}
+tbody tr { transition: background .12s ease; }
+tbody tr:hover { background: rgba(255,255,255,.028); }
+
+.note { border-radius: var(--radius); border-width: 1px; }
+.modal { border-radius: var(--radius); box-shadow: var(--shadow-lift); background: var(--solid); }
+.toast { border-radius: var(--radius-sm); box-shadow: var(--shadow-lift); }
+.bar { border-radius: var(--radius-pill); background: rgba(255,255,255,.08); }
+.bar-f { border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--accent), #16c9c0); }
+
+input, select, textarea { border-radius: var(--radius-sm) !important; }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: rgba(46,230,168,.5) !important;
+  box-shadow: 0 0 0 3px rgba(46,230,168,.1);
 }
