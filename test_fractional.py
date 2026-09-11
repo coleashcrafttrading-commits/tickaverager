@@ -358,11 +358,29 @@ def s06_routing() -> None:
     e._chase_basket(f.broker.by_coid[bk["coid"]], bk)
     sells = [c for c in f.broker.calls if c[0].startswith("sell_limit")]
     check("_chase_basket re-sends 0.01 as DAY", (sells[-1][0], sells[-1][1][1]), ("sell_limit_day", 0.01))
+    # the ROUTER owns extended hours for a fraction, exactly as it does for a
+    # take-profit: fractional_sessions=regular means 09:30-16:00 only, so an
+    # afterhours strategy exit is a plain DAY order queued for the next
+    # session -- never an extended-hours one the ticker's rule forbids
     e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
     e._session_now = lambda: "afterhours"
     e._close_lot_now(e.ledger.open_lots[0], "t")
     c = f.broker.calls[-1]
-    check("_close_lot_now after hours -> sell_limit_day extended", (c[0], c[2]), ("sell_limit_day", {"extended_hours": True}))
+    check("_close_lot_now after hours under fractional_sessions=regular -> DAY, NOT extended",
+          (c[0], c[2], e._tif_for(0.01)), ("sell_limit_day", {"extended_hours": False}, ("day", False)))
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01, fractional_sessions="extended")
+    e._session_now = lambda: "afterhours"
+    e._close_lot_now(e.ledger.open_lots[0], "t")
+    c = f.broker.calls[-1]
+    check("...and under fractional_sessions=extended the same exit IS extended",
+          (c[0], c[2]), ("sell_limit_day", {"extended_hours": True}))
+    e, f = frac_engine(lots=[(100, 759.0)], broker_qty=100, session_mode="times",
+                       allow_extended_hours=False)
+    e._session_now = lambda: "afterhours"
+    e._close_lot_now(e.ledger.open_lots[0], "t")
+    c = f.broker.calls[-1]
+    check("whole-share control: a GTC exit after hours still carries extended_hours",
+          (c[0], c[2]), ("sell_limit_gtc", {"extended_hours": True}))
     e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
     e._close_lot_now(e.ledger.open_lots[0], "t")
     c = f.broker.calls[-1]
@@ -395,6 +413,7 @@ def s06_routing() -> None:
 def s07_expiry_and_timer() -> None:
     print("\n7. the DAY exit expires at the close: re-placed at once; a rejection starts the timer")
     import time
+    import engine
     from test_touch_adds import step
     e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01)
     lot = e.ledger.open_lots[0]
@@ -457,6 +476,48 @@ def s07_expiry_and_timer() -> None:
     n = len(f.broker.cancelled)
     check("a second close_lots inside 300 s returns False BEFORE any cancel",
           (e.close_lots(list(e.ledger.open_lots), "t"), len(f.broker.cancelled)), (False, n))
+    # the ENTRY timer is not a lot id: reconcile step 4d sweeps the per-lot
+    # keys, and clearing 'entry' with them re-sent the refused order every
+    # bar, burning a lot id on each attempt
+    e, f = frac_engine(add_trigger="close")
+    f.broker.reject_next_body = "qty must be integer"
+    check("a refused fractional entry -> False, the 'entry' timer set",
+          (e._submit_entry("t"), "entry" in e._frac_try_at), (False, True))
+    n0 = e.ledger.lot_counter
+    step(e, f)
+    c0 = len(f.broker.calls)
+    check("...the timer survives a reconcile tick",
+          ("entry" in e._frac_try_at, e._frac_wait("entry")), (True, True))
+    check("...so the entry is not re-sent and no lot id is burnt",
+          (e._submit_entry("t"), e.ledger.lot_counter - n0,
+           [c[0] for c in f.broker.calls[c0:] if c[0].startswith("buy_")]), (False, 0, []))
+    e._frac_try_at["entry"] -= 301
+    check("...and 301 s later it retries exactly once", e._submit_entry("t"), True)
+    # a refused fractional EXIT must never block the lot's RE-COVER: the two
+    # have separate timers, so step 2 covers the lot on the very next tick
+    e, f = frac_engine(lots=[(0.01, 759.0)], broker_qty=0.01, add_trigger="close", strategy_exits=True)
+    lot = e.ledger.open_lots[0]
+    bodies = ['{"message":"fractional order rejected"}',
+              '{"message":"insufficient qty available for order (requested: 0.01, available: 0)"}']
+    real_o = f.broker._o
+
+    def rejecting(*a, **k):
+        if bodies:
+            raise engine.AlpacaError(422, bodies.pop(0), "/v2/orders")
+        return real_o(*a, **k)
+    f.broker._o = rejecting
+    ok = e._close_lot_now(lot, "x")
+    check("exit refused AND its re-cover refused: the lot timer stays clear, the exit timer runs",
+          (ok, lot.tp_client_id, lot.id in e._frac_try_at, f"xs-{lot.id}" in e._frac_try_at),
+          (False, "", False, True))
+    step(e, f)
+    check("...so the NEXT tick covers the lot at its target instead of 300 s later",
+          (str(lot.tp_client_id).startswith("tp-"),
+           (f.broker.by_coid.get(lot.tp_client_id) or {}).get("status")), (True, "new"))
+    tp_now = lot.tp_client_id
+    check("...while the refused exit itself still waits out its own timer",
+          (e._close_lot_now(lot, "x"), lot.tp_client_id == tp_now,
+           f"xs-{lot.id}" in e._frac_try_at), (False, True, True))
     check("whole-share control: a rejected 100-share exit still retries every tick", True, True)
     e, f = frac_engine(fractional="off", shares_per_lot=100, lots=[(100, 10.0)], broker_qty=100)
     lot = e.ledger.open_lots[0]

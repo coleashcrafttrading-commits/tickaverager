@@ -98,9 +98,11 @@ OVERCOVER_GRACE_SECONDS = 6
 # ---- fractional shares ----
 # A fractional quantity rests at Alpaca as a DAY order only (no GTC, no
 # trailing stop, no short sale). A rejected fractional order is retried no
-# sooner than this per key (lot id or "basket"); every session edge clears
-# the timers so the first tick of an eligible session retries at once.
+# sooner than this per key (a lot id, "xs-<lot id>" for that lot's strategy
+# exit, "basket" or "entry"); every session edge clears the timers so the
+# first tick of an eligible session retries at once.
 FRAC_RETRY_SECONDS = 300
+FRAC_KEYS_KEPT = ("basket", "entry")   # retry-timer keys that are not a lot id: the tick must not sweep them
 FRAC_SESSIONS = {"regular":  ("regular",),
                  "extended": ("premarket", "regular", "afterhours"),
                  "all":      ("premarket", "regular", "afterhours", "overnight")}
@@ -1318,7 +1320,12 @@ class Engine:
                 self._warn_at.pop(key, None)
         for key in [k for k in self._exit_limits if k not in live_ids]:
             self._exit_limits.pop(key, None)
-        for key in [k for k in self._frac_try_at if k != "basket" and k not in live_ids]:
+        # the fractional retry timers are keyed by lot id, by "xs-<lot id>"
+        # (that lot's strategy exit) or by one of the NON-LOT keys "basket"
+        # and "entry" -- sweeping those two away every tick re-sent a refused
+        # fractional entry once a bar, burning a lot id on each attempt
+        for key in [k for k in self._frac_try_at if k not in FRAC_KEYS_KEPT
+                    and (k[3:] if k.startswith("xs-") else k) not in live_ids]:
             self._frac_try_at.pop(key, None)
 
         # ---- 4e. strategy exits ----
@@ -3509,9 +3516,10 @@ class Engine:
         if not b:
             return False
         frac = not qwhole(lot.shares)
-        if frac and self._frac_wait(lot.id):
-            # a fractional exit Alpaca refused waits for its timer (the lot's
-            # take-profit went straight back, so it is covered meanwhile)
+        if frac and self._frac_wait(f"xs-{lot.id}"):
+            # a fractional exit Alpaca refused waits for ITS OWN timer, keyed
+            # on the exit and not on the lot: the lot's take-profit is what
+            # covers it, and _place_tp must never be held up by a refused exit
             return False
         # 1. the rungs first -- and any earlier cancel still settling
         self._retire_resting_adds(f"strategy exit: {why}")
@@ -3562,11 +3570,14 @@ class Engine:
         else:
             ref = float(self.quote.get("bp") or 0) or self.last_price
             px = _round_cent(max(0.01, ref - off))
-        # a whole lot's exit is GTC as it always was; a fractional one is a
-        # DAY limit (Alpaca takes no fractional GTC), extended when the
-        # session rule or the clock says so
+        # a whole lot's exit is GTC as it always was, extended whenever the
+        # clock says so; a FRACTIONAL one takes the router's answer unchanged
+        # (a DAY limit, extended only when fractional_sessions allows it) --
+        # the same rule _place_tp and _place_trail_exit obey, so an exit can
+        # never execute in a session this ticker forbids fractions
         tif, xh = self._tif_for(lot.shares)
-        xh = xh or self.is_extended()
+        if not frac:
+            xh = xh or self.is_extended()
         coid = f"xs-{lot.id}-{int(time.time()) % 100000}"
         try:
             place = self._limit_place(b, "buy" if short else "sell", lot.shares)
@@ -3581,11 +3592,14 @@ class Engine:
             lot.tp_client_id = ""
             lot.tp_order_id = ""
             lot.tp_filled = 0
-            self._place_tp(lot)
             if frac:
-                # AFTER the re-cover (the timer would have refused it): the
-                # next exit attempt waits, so a rejection is never a 2 s storm
-                self._frac_defer(lot.id, str(e))
+                # the EXIT waits out its timer so a rejection is never a 2 s
+                # storm -- armed first, and under its own xs- key, so that a
+                # re-cover Alpaca also refuses (the shares are still held by
+                # the cancelling exit) is retried by step 2 on the next tick
+                # instead of leaving the lot uncovered for FRAC_RETRY_SECONDS
+                self._frac_defer(f"xs-{lot.id}", str(e))
+            self._place_tp(lot)
             return False
         # The exit lives on the lot exactly like a take-profit: reconcile
         # step 2 tracks it, _book_tp_progress books its fill (kind
