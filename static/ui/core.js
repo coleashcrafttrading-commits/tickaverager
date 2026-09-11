@@ -276,18 +276,157 @@ export async function act(fn) {
   catch (e) { toast(esc(e.message), "err", 9000); }
 }
 
+/* =================================================== shared components ====
+   Two pieces of chrome used to be pasted into more than one view. They are
+   defined ONCE here, so a change to the wording of a confirmation or to the
+   sign-in instructions cannot land on one page and not the other. */
+
+/* ---- the four fleet-wide actions ----------------------------------------
+   Rendered on Portfolio and nowhere else. Settings used to carry a
+   byte-for-byte copy; it links to Portfolio now. Every confirmation names
+   the account, so nobody arms the wrong one. */
+export const fleetControlsHTML = () => `
+  <span class="row-btns fleet-btns">
+    <button class="btn sm" data-fleet="start">Start all</button>
+    <button class="btn sm" data-fleet="stop">Stop all</button>
+    <button class="btn sm" data-fleet="disarm">Disarm all</button>
+    <button class="btn sm danger" data-fleet="panic">Panic</button>
+  </span>`;
+
+const FLEET = {
+  start: async () => {
+    const who = acctLabel();
+    if (!await ask({
+      title: `Start every engine in ${esc(who)}?`,
+      body: `Each ladder in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) begins `
+          + `deciding on its own settings. Any ladder that is <b>armed</b> will transmit `
+          + `real orders immediately. Other accounts are untouched.`,
+      ok: "Start all",
+    })) return;
+    const r = await POST("/api/fleet/start_all");
+    toast(`${esc(who)}: started ${r.started} engine(s).`, "ok");
+  },
+  stop: async () => {
+    const r = await POST("/api/fleet/stop_all");
+    toast(`${esc(acctLabel())}: stopped ${r.stopped}. Resting take-profits stay live `
+        + `at Alpaca.`, "ok");
+  },
+  disarm: async () => {
+    const r = await POST("/api/fleet/disarm_all");
+    const no = (r.refused || []);
+    if (no.length) toast(`${esc(acctLabel())}: ${r.disarmed} back to dry run, but `
+      + `<b>${esc(no.join(", "))} is STILL ARMED</b> — a rung is still working at Alpaca. `
+      + `Stop the ladder, then disarm.`, "err", 9000);
+    else toast(`${esc(acctLabel())}: ${r.disarmed} ladder(s) back to dry run.`, "ok");
+  },
+  panic: async () => {
+    const who = acctLabel();
+    if (!await ask({
+      title: `Stop and disarm everything in ${esc(who)}?`, danger: true, ok: "Panic",
+      requireWord: "PANIC",
+      body: `Every engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) stops and `
+          + `every ladder returns to dry run. Other accounts are untouched.<br><br>`
+          + `<b>Nothing is sold.</b> Open positions and the take-profits resting `
+          + `against them are left exactly as they are — flattening stays a `
+          + `per-ticker decision.`,
+    })) return;
+    const r = await POST("/api/fleet/panic", { confirm: "PANIC" });
+    const no = (r.refused || []);
+    if (no.length) toast(`${esc(who)}: everything stopped, but <b>${esc(no.join(", "))} is `
+      + `STILL ARMED</b> — a rung cancel is still pending at Alpaca. Disarm again in a moment.`,
+      "err", 9000);
+    else toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
+  },
+};
+
+export function wireFleetControls(root) {
+  if (!root) return;
+  root.querySelectorAll("[data-fleet]").forEach((b) => {
+    b.onclick = () => act(FLEET[b.dataset.fleet]);
+  });
+}
+
+/* ---- "can this dashboard reach a model" ---------------------------------
+   The agent runner and the indicator builder use the SAME credential. They
+   used to explain it two different ways on two pages; one explanation now.
+   `r` is {ready, auth|how, problem, fix} from /api/agents or
+   /api/indicators/custom. */
+const AUTH_NAME = {
+  api_key: "an API key from .env — billed per token",
+  cli_login: "the Claude Code CLI login — your subscription",
+};
+export function modelCredsHTML(r, { test = false, id = "mcTest" } = {}) {
+  r = r || {};
+  const how = r.auth || r.how || "";
+  if (r.ready) {
+    return `<div class="note good" style="margin-top:0"><b>Connected to a model.</b>
+      Authenticating with ${esc(AUTH_NAME[how] || how || "the Claude Code CLI")}.
+      ${test ? `<button class="btn sm" id="${id}" style="margin-left:8px">Test it</button>
+        <span id="${id}Out" class="faint"></span>` : ""}</div>`;
+  }
+  return `<div class="note warn" style="margin-top:0">
+    <b>This dashboard cannot reach a model yet.</b> ${esc(r.problem || "")}
+    ${r.fix ? `<br>${esc(r.fix)}` : ""}
+    <div class="tip">Two separate one-time steps, and you need <b>both</b>:<br>
+      <b>1. Trust</b> — open a terminal in the bot folder, run <code>claude</code>,
+      accept the trust prompt. Without it the CLI silently ignores every
+      permission rule in <code>.claude/settings.json</code>.<br>
+      <b>2. Credentials</b> — in that same session run <code>/login</code> (uses
+      your subscription), <i>or</i> put <code>ANTHROPIC_API_KEY=sk-ant-…</code> in
+      <code>.env</code> and restart the dashboard (billed per token, a few cents
+      a run).</div>
+    ${test ? `<button class="btn sm" id="${id}" style="margin-top:8px">Test it anyway</button>
+      <span id="${id}Out" class="faint"></span><br>
+      <span class="faint">Schedules still save; every run until then is recorded as
+      blocked rather than failing silently.</span>` : ""}</div>`;
+}
+
+/* Wire the Test button. `onDone` receives the rendered HTML so a caller can
+   keep it across its own repaints. */
+export function wireModelCreds(id = "mcTest", onDone = null) {
+  const b = el(id);
+  if (!b) return;
+  const out = el(id + "Out");
+  b.onclick = async () => {
+    b.disabled = true; b.textContent = "Asking…";
+    let html = `<span class="faint">asking the model…</span>`;
+    if (out) out.innerHTML = html;
+    try {
+      const r = await POST("/api/agents/selftest", {});
+      html = r.ok
+        ? `<span class="up">replied “${esc(r.reply)}” in ${r.seconds}s${
+            r.cost_usd ? `, $${Number(r.cost_usd).toFixed(4)}` : ""}</span>`
+        : `<span class="down">${esc(r.error || r.problem || "no answer")}</span>`;
+    } catch (e) {
+      html = `<span class="down">${esc(e.message)}</span>`;
+    } finally {
+      b.disabled = false;
+      b.textContent = "Test it";
+      const o = el(id + "Out");
+      if (o) o.innerHTML = html;
+      if (onDone) onDone(html);
+    }
+  };
+}
+
 /* -------------------------------------------------------------- router */
 export const VIEWS = {};        // kind -> { title, sub, mount, paint, tabs? }
 
-/* Hashes carry the account:  #/a/<id>/            overview
-                              #/a/<id>/t/SYM/tab   ticker
-                              #/a/<id>/kind/tab    any registered view
+/* Hashes carry the account:  #/a/<id>/               portfolio, its live tab
+                              #/a/<id>/portfolio/tab  portfolio's other tabs
+                              #/a/<id>/t/SYM/tab      ticker
+                              #/a/<id>/kind/tab       any registered view
    A view without an account (none configured yet) drops the 'a/<id>' pair. */
 export function hashFor(view) {
   const a = view.account !== undefined ? view.account : S.account;
   const base = a ? `#/a/${encodeURIComponent(a)}/` : "#/";
   if (view.kind === "ticker") return base + `t/${view.sym}/${view.tab || "live"}`;
-  if (!view.kind || view.kind === "overview") return base;
+  if (!view.kind || view.kind === "overview") {
+    // Portfolio's Live tab IS the account's home page; its other tabs hang
+    // off /portfolio/ so they can be linked to and bookmarked.
+    const t = view.tab || "";
+    return base + (t && t !== "live" ? "portfolio/" + t : "");
+  }
   return base + view.kind + (view.tab ? "/" + view.tab : "");
 }
 
@@ -307,6 +446,18 @@ export function go(view) {
   if (switched && window.__tick) window.__tick();
 }
 
+/* ---------------------------------------------------------------- moved
+   Eleven nav destinations became six. Every URL the old ones answered still
+   resolves -- to wherever its content lives now, never to a 404 and never to
+   a page with no highlighted nav item. app.js rewrites the address bar on
+   arrival, so an old bookmark quietly upgrades itself the first time it is
+   used. Keyed "kind" or "kind/tab"; the longer key wins. */
+export const MOVED = {
+  // Performance is Portfolio's History tab
+  "performance":       { kind: "overview", tab: "history" },
+  "portfolio":         { kind: "overview", tab: "" },        // the home page
+};
+
 export function readHash() {
   const h = (location.hash || "#/").slice(2).split("/").filter(Boolean);
   let account;
@@ -315,19 +466,25 @@ export function readHash() {
     h.splice(0, 2);
   }
   let v;
-  if (h[0] === "t" && h[1]) {
+  const kind = h[0] || "", tab = h[1] || "";
+  if (kind === "t" && h[1]) {
     v = { kind: "ticker", sym: h[1].toUpperCase(), tab: h[2] || "live" };
-  } else if (h[0] && VIEWS[h[0]]) v = { kind: h[0], tab: h[1] || "" };
+  } else if (MOVED[kind + "/" + tab]) v = { ...MOVED[kind + "/" + tab] };
+  else if (MOVED[kind]) v = { ...MOVED[kind], tab: MOVED[kind].tab || tab };
+  else if (kind && VIEWS[kind]) v = { kind, tab };
   else v = { kind: "overview" };
   if (account !== undefined) v.account = account;
   return v;
 }
 
 /* the account is part of the signature, so the same view on another account
-   is a different mount */
-export const sig = (v) => `${v.account !== undefined ? v.account : S.account}|`
-  + (v.kind === "ticker"
-     ? `ticker:${v.sym}:${v.tab || "live"}` : `${v.kind}:${v.tab || ""}`);
+   is a different mount. Portfolio's Live tab and its bare hash are the same
+   place, so they must sign the same or every click on Live mounts twice. */
+export const sig = (v) => {
+  const tab = (v.kind === "overview" && v.tab === "live") ? "" : (v.tab || "");
+  return `${v.account !== undefined ? v.account : S.account}|`
+    + (v.kind === "ticker" ? `ticker:${v.sym}:${v.tab || "live"}` : `${v.kind}:${tab}`);
+};
 
 /* ------------------------------------------------------------- theme */
 export function initTheme() {

@@ -1,15 +1,23 @@
 /* ============================================================================
-   Performance -- what the ladders have actually done, and printable reports.
+   Portfolio -> History -- what the LADDERS have booked, and printable reports.
 
-   Realized P/L is always shown NEXT TO open inventory and its age. This
-   strategy has no stop loss, so realized alone looks excellent right up until
-   the day it doesn't; the age and size of what is still open is where the risk
-   lives.
+   This is not a page of its own any more; it is Portfolio's History tab, and
+   it is deliberately a different SCOPE from the numbers above it. The strip at
+   the top of every page is the ACCOUNT: what Alpaca says the money did. Every
+   figure here comes from the append-only trade journal: what these ladders
+   opened and closed. The two do not have to agree -- the journal starts when
+   the file does, and it knows nothing about a position nobody's ladder owns --
+   so the account's own all-time P/L is shown beside them, labelled, rather
+   than left for someone to assume.
+
+   Realized is always shown NEXT TO open inventory and its age. This strategy
+   has no stop loss, so realized alone looks excellent right up until the day
+   it doesn't; the age and size of what is still open is where the risk lives.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, qty, dur, go,
+  S, GET, POST, DEL, act, toast, el, esc, card, stat, tableHTML,
+  money, money0, sgn, pct, px, qty, dur,
 } from "../core.js";
 
 let perf = null;
@@ -17,87 +25,84 @@ let reports = [];
 let scope = { symbol: "", days: 7 };
 let forAcct = "";       // the journal, reports and symbol filter are per account
 
-VIEWS.performance = {
-  title: () => "Performance",
-  sub: () => "from the append-only trade journal",
+export function mountHistory() {
+  if (forAcct !== S.account) {
+    perf = null; reports = []; scope = { symbol: "", days: 7 };
+    forAcct = S.account;
+  }
+  el("view").innerHTML = `
+    <div class="grid main">
+      <div>
+        ${card("What the ladders booked", `
+          <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+            <select id="pfSym" style="width:auto"></select>
+            <select id="pfDays" style="width:auto">
+              <option value="1">today</option>
+              <option value="7" selected>7 days</option>
+              <option value="30">30 days</option>
+              <option value="0">all time</option>
+            </select>
+            <span class="faint" id="pfRows" style="align-self:center"></span>
+          </div>
+          <div class="stats" id="pfStats"></div>
+          <div class="tip" id="pfNote"></div>`,
+          `<span class="faint">from the trade journal</span>`)}
+        ${card("By ladder rung", `<div id="pfRungs"></div>`,
+          "where the capital goes", { flush: true })}
+        ${card("Recent trades", `<div id="pfTrades"></div>`,
+          "journal rows, newest first", { flush: true })}
+      </div>
+      <div>
+        ${card("Reports", `
+          <div class="tip" style="margin-top:0">A printable PDF of everything on
+            this tab. An agent can generate these on a schedule too — the same
+            endpoint.</div>
+          <div class="row-btns" style="margin:12px 0">
+            <button class="btn primary sm" data-rep="daily">Daily</button>
+            <button class="btn sm" data-rep="weekly">Weekly</button>
+            <button class="btn sm" data-rep="inventory">Inventory</button>
+            <button class="btn sm" data-rep="full">Full history</button>
+          </div>
+          <div id="pfReports"></div>`)}
+        ${card("Open inventory", `<div id="pfInv"></div>`,
+          `<span id="pfInvN"></span>`, { flush: true })}
+      </div>
+    </div>`;
 
-  mount() {
-    if (forAcct !== S.account) {
-      perf = null; reports = []; scope = { symbol: "", days: 7 };
-      forAcct = S.account;
-    }
-    el("view").innerHTML = `
-      <div class="grid main">
-        <div>
-          ${card("Results", `
-            <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-              <select id="pfSym" style="width:auto"></select>
-              <select id="pfDays" style="width:auto">
-                <option value="1">today</option>
-                <option value="7" selected>7 days</option>
-                <option value="30">30 days</option>
-                <option value="0">all time</option>
-              </select>
-              <span class="faint" id="pfRows" style="align-self:center"></span>
-            </div>
-            <div class="stats" id="pfStats"></div>
-            <div class="tip" id="pfNote"></div>`)}
-          ${card("By ladder rung", `<div id="pfRungs"></div>`,
-            "where the capital goes", { flush: true })}
-          ${card("Recent trades", `<div id="pfTrades"></div>`, "", { flush: true })}
-        </div>
-        <div>
-          ${card("Reports", `
-            <div class="tip" style="margin-top:0">A printable PDF of everything on
-              this page. An agent can generate these on a schedule too — the same
-              endpoint.</div>
-            <div class="row-btns" style="margin:12px 0">
-              <button class="btn primary sm" data-rep="daily">Daily</button>
-              <button class="btn sm" data-rep="weekly">Weekly</button>
-              <button class="btn sm" data-rep="inventory">Inventory</button>
-              <button class="btn sm" data-rep="full">Full history</button>
-            </div>
-            <div id="pfReports"></div>`)}
-          ${card("Open inventory", `<div id="pfInv"></div>`,
-            `<span id="pfInvN"></span>`, { flush: true })}
-        </div>
-      </div>`;
-
-    el("pfSym").onchange = () => { scope.symbol = el("pfSym").value; load(); };
-    el("pfDays").onchange = () => { scope.days = Number(el("pfDays").value); load(); };
-    el("view").querySelectorAll("[data-rep]").forEach((b) => {
-      b.onclick = () => act(async () => {
-        b.disabled = true;
-        b.textContent = "Building…";
-        try {
-          const r = await POST("/api/reports", { kind: b.dataset.rep });
-          toast(`Report ready — <a href="${r.url}" target="_blank">${esc(r.name)}</a>`,
-                "ok", 12000);
-          // opens in a tab with a real title and draws its own charts; the
-          // PDF used to arrive as an attachment and left a blank tab behind
-          window.open(r.url, "_blank");
-          await loadReports();
-        } finally {
-          b.disabled = false;
-          b.textContent = b.dataset.rep === "full" ? "Full history"
-            : b.dataset.rep[0].toUpperCase() + b.dataset.rep.slice(1);
-        }
-      });
+  el("pfSym").onchange = () => { scope.symbol = el("pfSym").value; load(); };
+  el("pfDays").onchange = () => { scope.days = Number(el("pfDays").value); load(); };
+  el("view").querySelectorAll("[data-rep]").forEach((b) => {
+    b.onclick = () => act(async () => {
+      b.disabled = true;
+      b.textContent = "Building…";
+      try {
+        const r = await POST("/api/reports", { kind: b.dataset.rep });
+        toast(`Report ready — <a href="${r.url}" target="_blank">${esc(r.name)}</a>`,
+              "ok", 12000);
+        // opens in a tab with a real title and draws its own charts; the
+        // PDF used to arrive as an attachment and left a blank tab behind
+        window.open(r.url, "_blank");
+        await loadReports();
+      } finally {
+        b.disabled = false;
+        b.textContent = b.dataset.rep === "full" ? "Full history"
+          : b.dataset.rep[0].toUpperCase() + b.dataset.rep.slice(1);
+      }
     });
-    load();
-    loadReports();
-  },
+  });
+  load();
+  loadReports();
+}
 
-  paint() {
-    const sel = el("pfSym");
-    if (sel && !sel.options.length && S.ov) {
-      sel.innerHTML = `<option value="">All tickers</option>`
-        + S.ov.tickers.map((t) => `<option value="${t.symbol}">${t.symbol}</option>`).join("");
-      sel.value = scope.symbol;
-    }
-    if (perf) render();
-  },
-};
+export function paintHistory() {
+  const sel = el("pfSym");
+  if (sel && !sel.options.length && S.ov) {
+    sel.innerHTML = `<option value="">All tickers</option>`
+      + S.ov.tickers.map((t) => `<option value="${t.symbol}">${t.symbol}</option>`).join("");
+    sel.value = scope.symbol;
+  }
+  if (perf) render();
+}
 
 async function load() {
   try {
@@ -143,29 +148,41 @@ function render() {
   const st = perf.stats;
   const inv = perf.inventory || [];
   const aged = inv.filter((x) => x.age_days > 3);
+  const p = (S.ov && S.ov.portfolio) || {};
 
   el("pfRows").textContent = `${perf.rows} journal rows`;
 
+  /* The first two tiles are the whole point of the labelling: the ladders'
+     booked P/L over the chosen window, and beside it the account's own all
+     time P/L from Alpaca. They are different scopes and they are named as
+     such, so neither can be read as the other. */
   el("pfStats").innerHTML =
-    stat("Realized", sgn(st.realized), `${st.closes} lots closed`)
+    stat("Ladders booked", sgn(st.realized),
+         `${st.closes} lots closed in this window`)
+    + stat("Account, all time", p.total_pl == null ? "—" : sgn(p.total_pl),
+           `realized + open, from Alpaca — a different scope`)
     + stat("Still open", inv.length, `${money0(perf.inventory_cost)} tied up`)
     + stat("Oldest lot", perf.oldest_days ? perf.oldest_days.toFixed(1) + "d" : "—",
            aged.length ? `${aged.length} over 3 days` : "nothing stale")
-    + stat("Deployed", money0(st.capital_deployed), `${st.opens} lots opened`)
+    + stat("Deployed by the ladders", money0(st.capital_deployed), `${st.opens} lots opened`)
     + stat("Return on deployed", st.return_on_deployed_pct.toFixed(2) + "%")
     + stat("Median hold", dur(st.median_hold_seconds), `max ${dur(st.max_hold_seconds)}`)
-    + stat("Per day", sgn(st.realized_per_day), `${st.closes_per_day} closes/day`)
+    + stat("Booked per day", sgn(st.realized_per_day), `${st.closes_per_day} closes/day`)
     + stat("Deepest ladder", st.max_ladder_depth);
 
   el("pfNote").innerHTML = st.closes
-    ? `Win rate is deliberately absent: every lot exits on its own take-profit and
-       there is no stop loss, so closed trades are ~100% winners by construction.
-       The number that matters is how much capital is <b>still open</b> and how old.`
-    : `No closed trades in this window.`;
+    ? `Every figure on this tab except <b>Account, all time</b> comes from the
+       journal — the lots these ladders opened and closed — and not from the
+       account. Win rate is deliberately absent: every lot exits on its own
+       take-profit and there is no stop loss, so closed trades are ~100%
+       winners by construction. The number that matters is how much capital is
+       <b>still open</b> and how old.`
+    : `No closed trades in this window. <b>Account, all time</b> is the account
+       itself and is unaffected by the window picker.`;
 
   const rungs = Object.entries(st.by_rung || {});
   el("pfRungs").innerHTML = tableHTML(
-    ["Rung", "Opened", "Closed", "Still open", "Realized", "Avg hold"],
+    ["Rung", "Opened", "Closed", "Still open", "Booked", "Avg hold"],
     rungs.map(([r, x]) => {
       const open = x.opened - x.closed;
       return `<tr><td><b>${r}</b></td>
@@ -177,7 +194,7 @@ function render() {
     }), "No lots recorded yet.");
 
   el("pfTrades").innerHTML = tableHTML(
-    ["When", "Sym", "Event", "Lot", "Shares", "Entry", "Exit", "Realized", "Held"],
+    ["When", "Sym", "Event", "Lot", "Shares", "Entry", "Exit", "Booked", "Held"],
     (perf.recent || []).slice(0, 60).map((r) => `<tr>
       <td class="faint">${esc(String(r.ts).slice(5, 16).replace("T", " "))}</td>
       <td><b>${esc(r.symbol || "")}</b></td>

@@ -12,10 +12,14 @@ import {
   curAccount, acctLabel, initTheme, toast,
 } from "./core.js";
 
+/* Six destinations, six modules. The pages that stopped being destinations
+   did not stop existing: Performance is a tab of Portfolio (overview.js
+   imports it), Agents a tab of Settings, and the strategy builder, the
+   backtester and the risk bank are tabs of Research, each imported by the
+   page that now hosts it. core.js's MOVED map redirects their old URLs. */
 import "./views/overview.js";
 import "./views/ticker.js";
 import "./views/backtest.js";
-import "./views/performance.js";
 import "./views/tester.js";
 import "./views/research.js";
 import "./views/scanner.js";
@@ -86,17 +90,25 @@ function paintRail() {
   }
 
   if (ov) {
+    /* The rail's per-ticker number used to be `unrealized + realized_today`
+       silently summed -- two different scopes added together under no label
+       at all. It is the OPEN P/L now, labelled, with what the ladder booked
+       today on the line below it. Two numbers, two labels, no addition. */
     const tickers = (ov.tickers || []).map((t) => {
       const on = cur.kind === "ticker" && cur.sym === t.symbol;
       const dot = t.halted ? "halt" : (t.running && !t.dry_run) ? "live"
         : t.running ? "run" : "";
-      const pl = (t.unrealized || 0) + (t.realized_today || 0);
+      const open = Number(t.unrealized) || 0;
+      const today = Number(t.realized_today) || 0;
       return `<div class="nav-item tick-item ${on ? "on" : ""}"
                    data-go="ticker" data-sym="${t.symbol}">
         <div class="tick-top"><span class="dot ${dot}"></span>
           <span class="tick-sym">${t.symbol}</span>
-          <span class="tick-pl">${pl ? sgn(pl, 0) : `<span class="faint">—</span>`}</span></div>
+          <span class="tick-pl" title="Open P/L on what this ladder holds"
+            ><span class="pl-k">open</span>${
+            open ? sgn(open, 0) : `<span class="faint">—</span>`}</span></div>
         <div class="tick-sub">${t.lot_count}/${t.max_lots} lots · ${qty(t.shares)} sh${
+          today ? ` · ${sgn(today, 0)} booked` : ""}${
           t.dry_run ? "" : ` · <span class="down">armed</span>`}</div>
       </div>`;
     }).join("") || `<div class="nav-item faint" style="cursor:default">No tickers</div>`;
@@ -107,7 +119,6 @@ function paintRail() {
       + `<div class="nav-item" data-go="add"><span class="ico">＋</span>
           <span style="color:var(--accent)">Add a ticker</span></div>`
       + `<div class="nav-label">This account</div>`
-      + item("performance", "Performance", "◧")
       + item("risk", "Risk", "◎")
       + item("agents", "Agents", "◈")
       + item("settings", "Settings", "⚙");
@@ -201,12 +212,13 @@ function buildShell() {
     <path d="M3 5h14M3 10h14M3 15h14"/></svg>`;
   top.insertBefore(btn, top.firstChild);
 
-  // running / halted beside the title; today's realized P/L joins it on a
-  // phone, where the KPI strip has moved to its own row
+  // running / halted beside the title. It used to carry a second "today"
+  // P/L as well, on a different scope from the KPI strip's -- the strip is
+  // the one home for the account's money now, on a phone too (it wraps to
+  // its own row there), so this is state only.
   const status = document.createElement("div");
   status.className = "top-status"; status.id = "topStatus";
-  status.innerHTML = `<span class="pill" id="topPill" hidden></span>
-    <span class="top-pl num" id="topPl"></span>`;
+  status.innerHTML = `<span class="pill" id="topPill" hidden></span>`;
   const spacer = top.querySelector(".spacer");
   top.insertBefore(status, spacer || el("kpis"));
 
@@ -260,9 +272,9 @@ window.__setRail = setRail;
 /* the pill beside the title: the ticker's own state on a ticker page, the
    fleet's on every other page */
 function paintStatus(ov, v) {
-  const pill = el("topPill"), pl = el("topPl");
-  if (!pill || !pl) return;
-  if (!ov) { pill.hidden = true; pl.innerHTML = ""; return; }
+  const pill = el("topPill");
+  if (!pill) return;
+  if (!ov) { pill.hidden = true; return; }
   let cls = "", txt = "";
   if (v.kind === "ticker") {
     const t = (ov.tickers || []).find((x) => x.symbol === v.sym);
@@ -282,8 +294,6 @@ function paintStatus(ov, v) {
   pill.hidden = !txt;
   pill.className = "pill " + cls;
   pill.textContent = txt;
-  const p = ov.portfolio || {};
-  pl.innerHTML = `<span class="faint">today</span>${sgn(p.realized_today)}`;
 }
 
 /* ---------------------------------------------------------------- topbar */
@@ -296,12 +306,17 @@ function paintTop() {
   el("subtitle").textContent = view && view.sub ? view.sub(ov, v) : "";
   paintStatus(ov, v);
 
+  /* The tab bar. A view may name the tab to highlight (`activeTab`) when a
+     route is hosted by a tab but does not share its key -- Research's
+     Profiles pane lives under the Bank tab. On a phone the bar scrolls
+     inside its own strip rather than widening the page (app.css). */
   const tabs = view && view.tabs;
   const bar = el("tabs");
-  if (tabs) {
+  if (tabs && tabs.length) {
+    const on = (view.activeTab ? view.activeTab(v) : (v.tab || "")) || tabs[0][0];
     bar.style.display = "flex";
     bar.innerHTML = tabs.map(([k, l]) => `
-      <div class="tab ${(v.tab || tabs[0][0]) === k ? "on" : ""}"
+      <div class="tab ${on === k ? "on" : ""}"
            data-go="${v.kind}" ${v.sym ? `data-sym="${v.sym}"` : ""}
            data-tab="${k}">${l}</div>`).join("");
   } else bar.style.display = "none";

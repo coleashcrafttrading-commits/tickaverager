@@ -1,17 +1,23 @@
 /* ============================================================================
-   Overview -- the whole account on one calm screen.
+   Portfolio -- what the account is doing, and the one lever that stops it.
 
-   The old version put eight stat boxes, a ladder table, a positions table, an
-   orders table and a log on screen at once, all with equal weight. This leads
-   with the four numbers that decide whether you need to do anything, and puts
-   everything else behind clear headings underneath.
+   Three tabs, three questions:
+     Live     what is happening right now, and the four fleet-wide actions
+     Orders   what Alpaca holds and what is working there -- the broker's view
+     History  what the ladders have booked, and the printable reports
+
+   The account's money -- value, P/L today, P/L all time -- is in the strip at
+   the top of EVERY page and is not repeated here. This page's own stats are
+   the ones the strip cannot carry: where the capital is and what is holding it.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, qty, go, acctLabel, acctNumber,
+  S, VIEWS, el, esc, card, stat, tableHTML,
+  money, money0, sgn, pct, px, qty,
+  fleetControlsHTML, wireFleetControls,
 } from "../core.js";
 import { PortfolioChart } from "../portfolio.js";
+import { mountHistory, paintHistory } from "./performance.js";
 
 /* the account-value chart; one per mount, thrown away with the page */
 let pf = null;
@@ -84,131 +90,136 @@ function positionRows(p) {
   </tr>`);
 }
 
+const TABS = [["live", "Live"], ["orders", "Orders"], ["history", "History"]];
+const SUB = {
+  live: (ov) => ov ? `${ov.totals.count} ticker${ov.totals.count === 1 ? "" : "s"} · `
+    + `${ov.totals.running} running · ${ov.totals.armed} armed` : "",
+  orders: () => "what Alpaca holds and what is working there",
+  history: () => "what the ladders booked, from the trade journal",
+};
+
 VIEWS.overview = {
   title: () => "Portfolio",
-  sub: (ov) => ov ? `${ov.totals.count} ticker${ov.totals.count === 1 ? "" : "s"} · `
-    + `${ov.totals.running} running · ${ov.totals.armed} armed` : "",
+  sub: (ov, v) => (SUB[v.tab || "live"] || SUB.live)(ov),
+  tabs: TABS,
 
-  mount() {
+  mount(v) {
     if (pf) { pf.destroy(); pf = null; }
-    el("view").innerHTML = `
-      <div id="ovNotes"></div>
-      ${card("", `<div class="stats" id="ovStats"></div>`)}
-      ${card("", `<div id="ovChart"></div>`)}
-      ${card("Ladders", `<div id="ovTickers"></div>`,
-        `<span class="row-btns">
-           <button class="btn sm" id="bAllStart">Start all</button>
-           <button class="btn sm" id="bAllStop">Stop all</button>
-           <button class="btn sm" id="bAllDisarm">Disarm all</button>
-           <button class="btn sm danger" id="bPanic">Panic</button>
-         </span>`, { flush: true })}
-      <div class="grid main">
-        <div>
-          ${card("Open positions", `<div id="ovPos"></div>`,
-            "every position Alpaca holds", { flush: true })}
-          ${card("Working orders", `<div id="ovOrders"></div>`,
-            `<span id="ovOrdN"></span>`, { flush: true })}
-        </div>
-        ${card("Activity", `<div class="log" id="ovLog"></div>`, "", { flush: true })}
-      </div>`;
-
-    // every "everything" action names the account, so nobody arms the wrong one
-    el("bAllStart").onclick = () => act(async () => {
-      const who = acctLabel();
-      if (!await ask({
-        title: `Start every engine in ${esc(who)}?`,
-        body: `Each ladder in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) begins `
-            + `deciding on its own settings. Any ladder that is <b>armed</b> will transmit `
-            + `real orders immediately. Other accounts are untouched.`,
-        ok: "Start all",
-      })) return;
-      const r = await POST("/api/fleet/start_all");
-      toast(`${esc(who)}: started ${r.started} engine(s).`, "ok");
-    });
-    el("bAllStop").onclick = () => act(async () => {
-      const r = await POST("/api/fleet/stop_all");
-      toast(`${esc(acctLabel())}: stopped ${r.stopped}. Resting take-profits stay live at Alpaca.`, "ok");
-    });
-    el("bAllDisarm").onclick = () => act(async () => {
-      const r = await POST("/api/fleet/disarm_all");
-      const no = (r.refused || []);
-      if (no.length) toast(`${esc(acctLabel())}: ${r.disarmed} back to dry run, but `
-        + `<b>${esc(no.join(", "))} is STILL ARMED</b> — a rung is still working at Alpaca. `
-        + `Stop the ladder, then disarm.`, "err", 9000);
-      else toast(`${esc(acctLabel())}: ${r.disarmed} ladder(s) back to dry run.`, "ok");
-    });
-    el("bPanic").onclick = () => act(async () => {
-      const who = acctLabel();
-      if (!await ask({
-        title: `Stop and disarm everything in ${esc(who)}?`, danger: true, ok: "Panic",
-        requireWord: "PANIC",
-        body: `Every engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) stops and `
-            + `every ladder returns to dry run. Other accounts are untouched.<br><br>`
-            + `<b>Nothing is sold.</b> Open positions and the take-profits resting `
-            + `against them are left exactly as they are — flattening stays a `
-            + `per-ticker decision.`,
-      })) return;
-      const r = await POST("/api/fleet/panic", { confirm: "PANIC" });
-      const no = (r.refused || []);
-      if (no.length) toast(`${esc(who)}: everything stopped, but <b>${esc(no.join(", "))} is `
-        + `STILL ARMED</b> — a rung cancel is still pending at Alpaca. Disarm again in a moment.`,
-        "err", 9000);
-      else toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
-    });
-
-    // the account-value chart polls on its own: Alpaca's history on a cadence
-    // matched to the period, the fleet's equity samples every 2 s
-    pf = new PortfolioChart(el("ovChart"));
-    pf.start();
+    const tab = v.tab || "live";
+    if (tab === "history") return mountHistory();
+    if (tab === "orders") return mountOrders();
+    mountLive();
   },
 
-  paint() {
-    const ov = S.ov;
-    if (!ov || !el("ovStats")) return;
-    const p = ov.portfolio, t = ov.totals;
-
-    el("ovNotes").innerHTML = banners(ov);
-
-    el("ovStats").innerHTML =
-      stat("Account value", money(p.account_value),
-           `opened at ${money0(p.base_value)} · yesterday's close ${money0(p.start_of_day)}`)
-      + stat("P/L today", sgn(p.today_pl != null ? p.today_pl : p.made_today),
-             `${money0(p.realized_today)} booked · ${money0(p.unrealized_today != null ? p.unrealized_today : p.open_today)} still open`)
-      + stat("P/L all time", sgn(p.total_pl),
-             `${money0(p.realized_total)} booked · ${money0(p.unrealized_total != null ? p.unrealized_total : p.open_pl)} on ${qty(t.shares)} shares in ${t.lots} lots`)
-      + stat("Deployed", money0(p.deployed),
-             `${money0(p.cash)} cash · ${money0(p.buying_power)} buying power`);
-
-    el("ovTickers").innerHTML = tableHTML(
-      ["Ticker", "State", "Last", "Lots", "Shares", "Avg", "Next add",
-       "Open P/L", "Today", "TP / add"],
-      tickerRows(ov), "No tickers yet.");
-
-    el("ovPos").innerHTML = tableHTML(
-      ["Symbol", "Qty", "Avg entry", "Last", "Cost", "Value", "Open P/L", "%"],
-      positionRows(p), "Flat — the account holds nothing.");
-
-    el("ovOrdN").textContent = `${(p.orders || []).length} working`;
-    el("ovOrders").innerHTML = tableHTML(
-      ["Symbol", "Order", "Side", "Qty", "Filled", "Working", "Limit", "Ext", "Status"],
-      (p.orders || []).map((o) => `<tr>
-        <td><b>${o.symbol}</b></td>
-        <td class="faint mono" style="text-align:left">${esc(o.coid)}</td>
-        <td class="${o.side === "sell" ? "up" : ""}">${o.side.toUpperCase()}</td>
-        <td class="num">${qty(o.qty)}</td>
-        <td class="num">${qty(o.filled || 0)}</td>
-        <td class="num"><b>${qty(o.remaining)}</b></td>
-        <td class="num">${px(o.limit)}</td>
-        <td class="${o.extended_hours ? "up" : "faint"}">${o.extended_hours ? "yes" : "no"}</td>
-        <td class="faint">${esc(o.status)}</td></tr>`),
-      "Nothing working at Alpaca.");
-
-    el("ovLog").innerHTML = (ov.events || []).slice(0, 60).map((e) => `
-      <div class="log-row">
-        <span class="log-t">${esc(e.t)}</span>
-        <span class="log-s">${esc(e.symbol || "")}</span>
-        <span class="log-l lv-${esc(e.level)}">${esc(e.level)}</span>
-        <span class="log-m">${esc(e.msg)}</span>
-      </div>`).join("") || `<div class="empty">Nothing yet.</div>`;
+  paint(v) {
+    const tab = v.tab || "live";
+    if (tab === "history") return paintHistory();
+    if (tab === "orders") return paintOrders();
+    paintLive();
   },
 };
+
+/* ================================================================== live */
+function mountLive() {
+  el("view").innerHTML = `
+    <div id="ovNotes"></div>
+    ${card("", `<div class="stats" id="ovStats"></div>`)}
+    ${card("", `<div id="ovChart"></div>`)}
+    ${card("Ladders", `<div id="ovTickers"></div>`,
+      fleetControlsHTML(), { flush: true })}
+    ${card("Activity", `<div class="log" id="ovLog"></div>`,
+      "every ladder in this account", { flush: true })}`;
+
+  // one definition of the four fleet-wide actions, in core.js, and this is
+  // the only page that renders them
+  wireFleetControls(el("view"));
+
+  // the account-value chart polls on its own: Alpaca's history on a cadence
+  // matched to the period, the fleet's equity samples every 2 s
+  pf = new PortfolioChart(el("ovChart"));
+  pf.start();
+}
+
+function paintLive() {
+  const ov = S.ov;
+  if (!ov || !el("ovStats")) return;
+  const p = ov.portfolio, t = ov.totals;
+
+  el("ovNotes").innerHTML = banners(ov);
+
+  /* Account value and the two P/L figures are in the topbar strip on every
+     page. What is left is this page's own job: where the capital actually
+     is. */
+  const eq = Number(p.account_value) || 0;
+  const depPct = eq ? Math.round(100 * (p.deployed || 0) / eq) : 0;
+  const holding = (ov.tickers || []).filter((x) => x.lot_count > 0).length;
+  el("ovStats").innerHTML =
+    stat("Deployed", money0(p.deployed),
+         `<span class="${depPct > 90 ? "down" : depPct > 65 ? "warn" : "up"}">${depPct}%
+          of equity</span>`)
+    + stat("Cash", money0(p.cash), `${money0(p.buying_power)} buying power`)
+    + stat("Holding", `${holding}<span class="faint">/${t.count}</span>`,
+           `${t.lots} lot${t.lots === 1 ? "" : "s"} · ${qty(t.shares)} shares`)
+    + stat("At Alpaca", (p.positions || []).length,
+           `position(s) · ${(p.orders || []).length} working
+            <a href="#" data-go="overview" data-tab="orders">— see Orders</a>`);
+
+  el("ovTickers").innerHTML = tableHTML(
+    ["Ticker", "State", "Last", "Lots", "Shares", "Avg", "Next add",
+     "Open P/L", "Booked today", "TP / add"],
+    tickerRows(ov), "No tickers yet.");
+
+  el("ovLog").innerHTML = (ov.events || []).slice(0, 60).map((e) => `
+    <div class="log-row">
+      <span class="log-t">${esc(e.t)}</span>
+      <span class="log-s">${esc(e.symbol || "")}</span>
+      <span class="log-l lv-${esc(e.level)}">${esc(e.level)}</span>
+      <span class="log-m">${esc(e.msg)}</span>
+    </div>`).join("") || `<div class="empty">Nothing yet.</div>`;
+}
+
+/* ================================================================ orders */
+/* Alpaca's own view of this account: what it holds and what is working. Both
+   tables used to sit under the ladders on one very long page; they are a
+   different question from "what are my ladders doing", so they are a
+   different tab. */
+function mountOrders() {
+  el("view").innerHTML = `
+    ${card("Open positions", `<div id="ovPos"></div>`,
+      `<span id="ovPosN"></span>`, { flush: true })}
+    ${card("Working orders", `<div id="ovOrders"></div>`,
+      `<span id="ovOrdN"></span>`, { flush: true })}
+    ${card("What these are", `<div class="tip" style="margin-top:0">
+      Straight from Alpaca, not from the ledgers — this is the broker's answer
+      to "what do I own and what is resting". A resting <b>sell</b> is a
+      take-profit covering a lot; a resting <b>buy</b> is a rung waiting to
+      fill. A position with no matching working sell is the dangerous case and
+      the Live tab raises it as an alarm.</div>`)}`;
+  paintOrders();
+}
+
+function paintOrders() {
+  const ov = S.ov;
+  if (!ov || !el("ovPos")) return;
+  const p = ov.portfolio;
+
+  el("ovPosN").textContent = `${(p.positions || []).length} held`;
+  el("ovPos").innerHTML = tableHTML(
+    ["Symbol", "Qty", "Avg entry", "Last", "Cost", "Value", "Open P/L", "%"],
+    positionRows(p), "Flat — the account holds nothing.");
+
+  el("ovOrdN").textContent = `${(p.orders || []).length} working`;
+  el("ovOrders").innerHTML = tableHTML(
+    ["Symbol", "Order", "Side", "Qty", "Filled", "Working", "Limit", "Ext", "Status"],
+    (p.orders || []).map((o) => `<tr>
+      <td><b>${o.symbol}</b></td>
+      <td class="faint mono" style="text-align:left">${esc(o.coid)}</td>
+      <td class="${o.side === "sell" ? "up" : ""}">${o.side.toUpperCase()}</td>
+      <td class="num">${qty(o.qty)}</td>
+      <td class="num">${qty(o.filled || 0)}</td>
+      <td class="num"><b>${qty(o.remaining)}</b></td>
+      <td class="num">${px(o.limit)}</td>
+      <td class="${o.extended_hours ? "up" : "faint"}">${o.extended_hours ? "yes" : "no"}</td>
+      <td class="faint">${esc(o.status)}</td></tr>`),
+    "Nothing working at Alpaca.");
+}

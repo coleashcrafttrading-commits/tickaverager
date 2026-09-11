@@ -1003,3 +1003,152 @@ input:focus, select:focus, textarea:focus {
   outline: none; border-color: rgba(46,230,168,.5) !important;
   box-shadow: 0 0 0 3px rgba(46,230,168,.1);
 }
+
+
+/* ==========================================================================
+   TICKER PAGE (2026-09-10 rebuild)
+
+   Live leads with the chart and puts the decision beside it; Settings is
+   eight widgets instead of a 72-field column. Both are one column on a
+   phone, and every table on the page scrolls inside its own card rather
+   than widening the page.
+   ========================================================================== */
+
+/* ---- Live: the chart, with the strategy and the controls beside it ------ */
+.tk-top {
+  display: grid; gap: 18px; align-items: start; margin-bottom: 18px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.tk-top > * { min-width: 0; }
+/* the grid gap does the spacing; a card's own margin would double it */
+.tk-top > .card { margin-bottom: 0; }
+/* same breakpoint as .grid.main, so the whole page reflows at once:
+   chart first, the strategy panel under it */
+@media (max-width: 1180px) {
+  .tk-top { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* the preset row: the select takes the room, the button never wraps alone */
+.tk-strat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tk-strat .strat-sel { flex: 1 1 170px; min-width: 0; }
+.tk-strat .btn { flex: 0 0 auto; }
+.tk-strat-d { font-size: 12px; line-height: 1.55; margin-top: 10px; }
+.tk-strat-d:empty { display: none; }
+
+/* last price and spread: the two facts a start/arm decision needs */
+.tk-facts {
+  display: flex; gap: 10px 26px; flex-wrap: wrap;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hairline);
+}
+.tk-facts > div { min-width: 0; }
+.tk-fact { font-size: 21px; font-weight: 660; letter-spacing: -0.02em; margin-top: 4px; }
+.tk-fact.sm { font-size: 13.5px; font-weight: 560; color: var(--muted); margin-top: 9px; }
+.tk-ctl { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+
+/* ---- Settings: eight widgets ------------------------------------------- */
+/* Multi-column, not grid: the cards are wildly different heights (Entry holds
+   five fields, Exits eighteen) and a grid row is as tall as its tallest cell,
+   which left half a screen of hole beside every short card. Multicol packs
+   them and balances the two columns instead. */
+.setg { columns: 1; column-gap: 18px; }
+.setg > .card {
+  break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid;
+  margin-bottom: 18px; min-width: 0;
+}
+/* two columns only where a card is still wide enough to read; a 768 px
+   tablet and every phone keep one */
+@media (min-width: 980px) {
+  .setg { columns: 2; }
+}
+
+.setg-i {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin-right: 9px; vertical-align: -4px;
+  border-radius: 7px; font-size: 11px; line-height: 1;
+  background: var(--accent-dim); color: var(--accent);
+}
+.setg-x { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* the plain-English line: what this card currently does, before any field */
+.setg-sum {
+  font-size: 12.5px; line-height: 1.65; color: var(--muted);
+  background: var(--raised); border: 1px solid var(--hairline);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm); padding: 11px 14px; margin: 0 0 18px;
+}
+
+/* a field and its hint hide together: an inert setting is GONE, not greyed,
+   because a greyed field still has to be read before it can be ignored */
+.fld[hidden] { display: none !important; }
+.setg-f > .fld:last-child > label.f { margin-bottom: 0; }
+.setg-f > .fld:last-child > .hint { margin-bottom: 0; }
+
+/* Save follows the page down: eight cards is a long scroll on a phone and
+   the button was off the bottom of it. */
+.setg-save {
+  position: sticky; bottom: 0; z-index: 6;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 18px 0; padding: 12px 16px;
+  border: 1px solid var(--hairline2); border-radius: var(--radius);
+  background: var(--solid); box-shadow: var(--shadow-lift);
+}
+.setg-save .btn { flex: 0 0 auto; }
+.setg-hid { font-size: 11.5px; text-align: right; }
+
+@media (max-width: 900px) {
+  .setg-sum { font-size: 13px; }
+}
+@media (max-width: 480px) {
+  .tk-top { gap: 12px; margin-bottom: 12px; }
+  .setg { column-gap: 12px; }
+  .setg > .card { margin-bottom: 12px; }
+  .tk-facts { gap: 8px 20px; }
+  .tk-fact { font-size: 19px; }
+  .setg-save { padding: 10px 12px; gap: 8px 10px; margin: 12px 0; }
+  .setg-save .btn { flex: 1 1 auto; justify-content: center; }
+  .setg-hid, .setg-save .tip { flex: 1 0 100%; text-align: left; margin: 0; }
+  /* the form is one column inside a card that is already one column */
+  .setg-f .f2 { grid-template-columns: 1fr; }
+}
+
+/* ==========================================================================
+   Navigation clean-up (Sept 2026) -- eleven destinations became six, and
+   three pages gained a tab bar. Everything below exists because of that.
+   ========================================================================== */
+
+/* A tab bar must never widen the page. `main` is a grid track whose implicit
+   min-width is auto, so a long bar used to push the whole layout sideways and
+   the drawer button with it. */
+.app > main { min-width: 0; }
+
+/* The rail's per-ticker figure is labelled now: it is the OPEN P/L, not a
+   silent sum of two different scopes. */
+.tick-pl .pl-k {
+  color: var(--faint); font-size: 9.5px; letter-spacing: .07em;
+  text-transform: uppercase; margin-right: 4px;
+}
+
+/* --------------------------------------------------------- tabs on a phone
+   Portfolio has three tabs, Settings three, Research four. On a narrow
+   screen the strip scrolls inside itself -- it never wraps into the content
+   and never widens the page -- and every tab stays a 40 px target. */
+@media (max-width: 900px) {
+  .tabs {
+    gap: 4px; overflow-x: auto; flex-wrap: nowrap;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: none; white-space: nowrap; padding: 9px 13px; min-height: 40px;
+    display: inline-flex; align-items: center;
+  }
+  .tabs2 {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+  }
+  .tabs2::-webkit-scrollbar { display: none; }
+  .t2 { flex: none; white-space: nowrap; }
+  .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg-b { white-space: nowrap; flex: none; }
+}
