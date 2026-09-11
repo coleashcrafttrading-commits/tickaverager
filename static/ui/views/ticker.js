@@ -1,13 +1,27 @@
 /* ============================================================================
-   Ticker detail -- Live (chart + ladder), Orders & positions, Settings.
+   Ticker detail -- Live (the chart and the decision beside it) and Settings
+   (the strategy as eight widgets, not a 72-field wall).
+
+   Live is ordered the way a decision is made: the chart first, the strategy
+   and the controls beside it, then what the ladder is holding, then the
+   money, then the record. "Orders & positions" is gone -- every stat and the
+   working-orders table on it were already on this tab and on the Portfolio
+   page; only its Order history was unique, and that is now the last card
+   here.
+
+   Settings renders the SAME fields.js definitions grouped by what they
+   control, with everything inert for the modes this ticker is in hidden
+   rather than greyed, and one plain-English line per card.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, money0, sgn, pct, px, qty, dur, go,
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML, money, sgn, px, qty, go,
   acctLabel, acctNumber,
 } from "../core.js";
 import { ChartPanel, matchToBars } from "../chartpanel.js";
-import { STRATEGY_FIELDS, formHTML, formPatch } from "../fields.js";
+import {
+  formPatch, FIELD_GROUPS, groupHTML, applyVisibility, readValues, summaries,
+} from "../fields.js";
 
 let panel = null;
 
@@ -168,6 +182,10 @@ function liveNotes(s) {
   return b.join("");
 }
 
+/* ------------------------------------------------- the strategy control */
+/* One preset picker, rendered on Live (beside the chart) and at the top of
+   Settings (where it is the primary way to set a strategy). Only one tab is
+   ever mounted, so the ids are shared. */
 let PRESETS = [];          // from /api/presets, shared across accounts
 
 function presetOptions(current) {
@@ -182,23 +200,96 @@ function presetDesc(id) {
   return p ? p.description : (id === "custom" ? "Settings were edited by hand on the Settings tab." : "");
 }
 
+function presetHTML() {
+  return `<div class="tk-strat">
+      <select id="tkPreset" class="strat-sel" aria-label="Active strategy">
+        <option>Loading…</option></select>
+      <button class="btn sm" type="button" id="tkApply">Apply</button>
+    </div>
+    <div class="tk-strat-d faint" id="tkPresetDesc"></div>`;
+}
+
+function fillPreset() {
+  const sel = el("tkPreset");
+  if (!sel) return;
+  const cur = (S.ticker && S.ticker.config && S.ticker.config.preset) || "custom";
+  sel.innerHTML = presetOptions(cur);
+  const d = el("tkPresetDesc");
+  if (d) d.textContent = presetDesc(sel.value);
+}
+
+function wirePreset(sym) {
+  const sel = el("tkPreset");
+  if (!sel) return;
+  if (PRESETS.length) fillPreset();
+  else {
+    GET("/api/presets").then((r) => { PRESETS = r.presets || []; fillPreset(); })
+      .catch((e) => { sel.innerHTML = `<option>presets unavailable</option>`; toast(esc(e.message), "err"); });
+  }
+  sel.addEventListener("change", () => {
+    const d = el("tkPresetDesc");
+    if (d) d.textContent = presetDesc(sel.value);
+  });
+  el("tkApply").onclick = () => act(async () => {
+    const id = sel.value;
+    const p = PRESETS.find((x) => x.id === id);
+    if (!p) { toast("Pick a named strategy to apply.", "err"); return; }
+    const s = S.ticker, cur = (s && s.config && s.config.preset) || "custom";
+    if (!await ask({
+      title: `Put ${sym} on "${esc(p.label)}"?`, ok: "Apply strategy",
+      body: `<b>${esc(p.description)}</b><br><br>This overwrites ${sym}'s strategy settings on
+        <b>${esc(acctLabel())}</b> (currently: ${esc(cur)}). Open lots keep their exits; a changed
+        take-profit re-prices resting sells. Arming is unchanged.`,
+    })) return;
+    await POST(`/api/ticker/${sym}/preset`, { id });
+    S.touched = false;                 // the server's config is now the truth
+    toast(`${sym} is now on ${esc(p.label)}.`, "ok");
+    if (el("tform")) mountSettings();  // re-render the widgets against the new config
+  });
+}
+
+/* keep the dropdown honest on every poll without fighting the user's cursor */
+function syncPreset() {
+  const sel = el("tkPreset");
+  if (!sel || !PRESETS.length || document.activeElement === sel) return;
+  if (!S.ticker || !S.ticker.config) return;
+  const cur = S.ticker.config.preset || "custom";
+  const want = PRESETS.some((p) => p.id === cur) ? cur : "custom";
+  if (sel.value !== want) {
+    sel.value = want;
+    const d = el("tkPresetDesc");
+    if (d) d.textContent = presetDesc(want);
+  }
+}
+
+/* ------------------------------------------------------------ live mount */
 function mountLive(sym) {
   el("view").innerHTML = `
     <div id="tkNotes"></div>
-    ${card("", `
-      <div class="strat" id="tkStrat">
-        <span class="strat-k">Active strategy</span>
-        <select id="tkPreset" class="strat-sel"><option>Loading…</option></select>
-        <button class="btn sm primary" id="tkApply">Apply</button>
-        <span class="strat-d faint" id="tkPresetDesc"></span>
-      </div>
-      <div style="display:flex;align-items:baseline;gap:18px;flex-wrap:wrap">
-        <div><div class="stat-k">Last</div>
-          <div class="stat-v num" id="tkPx">—</div></div>
-        <div><div class="stat-k">Spread</div>
-          <div class="stat-s num" id="tkSpread" style="font-size:13px;margin-top:8px">—</div></div>
-        <div class="spacer" style="flex:1"></div>
-        <div class="row-btns" id="tkCtl">
+
+    <div class="tk-top">
+      ${card("Chart", `<div id="chartHost"></div>
+        <div class="tip" id="tkLegend"></div>
+        <div class="tip chart-trades">
+          <label><input type="checkbox" id="tkShowTrades" checked> Show trades</label>
+          <label title="Rows the ledger wrote to stay in step with Alpaca — a rebuilt ladder, a lot closed outside the bot. Bookkeeping, not real fills.">
+            <input type="checkbox" id="tkShowInferred"> include bookkeeping rows</label>
+          <span id="tkMarkLegend"></span>
+          <span id="tkTradesCount" style="margin-left:auto">—</span>
+        </div>`)}
+
+      <aside class="tk-side">
+        ${card("Active strategy", presetHTML(), `<span id="tkSide"></span>`,
+               { id: "tkStratCard" })}
+        ${card("Price", `<div class="stats tk-px">
+          <div><div class="stat-k">Last</div>
+               <div class="stat-v num" id="tkPx">—</div>
+               <div class="stat-s num" id="tkPxSub"></div></div>
+          <div><div class="stat-k">Spread</div>
+               <div class="stat-v num" id="tkSpread">—</div>
+               <div class="stat-s num" id="tkSpreadSub"></div></div>
+        </div>`)}
+        ${card("Controls", `<div class="row-btns tk-ctl" id="tkCtl">
           <button class="btn sm good" id="bStart">Start</button>
           <button class="btn sm" id="bStop">Stop</button>
           <button class="btn sm danger" id="bArm">Arm</button>
@@ -206,17 +297,10 @@ function mountLive(sym) {
           <button class="btn sm" id="bRecover">Re-cover lots</button>
           <button class="btn sm" id="bClear">Clear halt</button>
           <button class="btn sm danger" id="bFlatten">Flatten</button>
-        </div>
-      </div>`)}
-    ${card("Chart", `<div id="chartHost"></div>
-      <div class="tip" id="tkLegend"></div>
-      <div class="tip chart-trades">
-        <label><input type="checkbox" id="tkShowTrades" checked> Show trades</label>
-        <label title="Rows the ledger wrote to stay in step with Alpaca — a rebuilt ladder, a lot closed outside the bot. Bookkeeping, not real fills.">
-          <input type="checkbox" id="tkShowInferred"> include bookkeeping rows</label>
-        <span id="tkMarkLegend"></span>
-        <span id="tkTradesCount" style="margin-left:auto">—</span>
-      </div>`)}
+        </div>`)}
+      </aside>
+    </div>
+
     <div class="grid main">
       <div>
         ${card("Ladder", `<div class="stats" id="tkStats"></div>
@@ -230,7 +314,13 @@ function mountLive(sym) {
           `<span class="faint">R may exist · D may add · M drives the unwind</span>`)}
         ${card("Activity", `<div class="log" id="tkLog"></div>`, "", { flush: true })}
       </div>
-    </div>`;
+    </div>
+
+    ${card("Order history", `<div id="poHist"></div>`,
+      `<button class="btn sm" id="poReload">Reload</button>`, { flush: true })}`;
+
+  // the one gradient panel on the page: what this ladder is running
+  el("tkStratCard").classList.add("hero");
 
   const A = (fn) => () => act(fn);
   el("bStart").onclick = A(async () => {
@@ -288,30 +378,10 @@ function mountLive(sym) {
     toast(`${sym} flattened: cancelled ${r.cancelled}, sold ${r.sold} sh.`, "ok");
   });
 
-  // ---- the Active strategy dropdown ----
-  const sel = el("tkPreset");
-  const fill = () => {
-    const cur = (S.ticker && S.ticker.config && S.ticker.config.preset) || "custom";
-    sel.innerHTML = presetOptions(cur);
-    el("tkPresetDesc").textContent = presetDesc(sel.value);
-  };
-  GET("/api/presets").then((r) => { PRESETS = r.presets || []; fill(); })
-    .catch((e) => { sel.innerHTML = `<option>presets unavailable</option>`; toast(esc(e.message), "err"); });
-  sel.addEventListener("change", () => { el("tkPresetDesc").textContent = presetDesc(sel.value); });
-  el("tkApply").onclick = A(async () => {
-    const id = sel.value;
-    const p = PRESETS.find((x) => x.id === id);
-    if (!p) { toast("Pick a named strategy to apply.", "err"); return; }
-    const s = S.ticker, cur = (s && s.config && s.config.preset) || "custom";
-    if (!await ask({
-      title: `Put ${sym} on "${esc(p.label)}"?`, ok: "Apply strategy",
-      body: `<b>${esc(p.description)}</b><br><br>This overwrites ${sym}'s strategy settings on
-        <b>${esc(acctLabel())}</b> (currently: ${esc(cur)}). Open lots keep their exits; a changed
-        take-profit re-prices resting sells. Arming is unchanged.`,
-    })) return;
-    await POST(`/api/ticker/${sym}/preset`, { id });
-    toast(`${sym} is now on ${esc(p.label)}.`, "ok");
-  });
+  wirePreset(sym);
+
+  el("poReload").onclick = () => loadHistory(sym);
+  loadHistory(sym);
 
   // live: the forming candle follows /api/ticks; onStyle: the legend under
   // the chart is drawn in whatever colours the operator chose
@@ -358,22 +428,23 @@ function paintLegend() {
 }
 
 function paintLive() {
-  // keep the strategy dropdown honest without fighting the user's cursor
-  const sel = el("tkPreset");
-  if (sel && PRESETS.length && document.activeElement !== sel && S.ticker && S.ticker.config) {
-    const cur = S.ticker.config.preset || "custom";
-    const want = PRESETS.some((p) => p.id === cur) ? cur : "custom";
-    if (sel.value !== want) { sel.value = want; el("tkPresetDesc").textContent = presetDesc(want); }
-  }
+  syncPreset();
   const s = S.ticker;
   if (!s || !el("tkStats")) return;
   const A = s.alpaca, c = s.config, P = s.pnl;
 
   el("tkNotes").innerHTML = liveNotes(s);
+  // one figure per tile: the price, and the width of the book. The bid and the
+  // ask are the sub-line -- they explain the spread, they are not two more
+  // numbers to read.
   el("tkPx").textContent = s.last_price ? "$" + s.last_price.toFixed(2) : "—";
-  el("tkSpread").textContent = (s.bid && s.ask)
-    ? `${s.bid.toFixed(2)} / ${s.ask.toFixed(2)} (${((s.ask - s.bid)).toFixed(3)})`
-    : "no quote";
+  el("tkPxSub").textContent = s.last_tick_at ? `tick ${s.last_tick_at}` : "";
+  const quote = s.bid && s.ask;
+  el("tkSpread").textContent = quote ? "$" + (s.ask - s.bid).toFixed(3) : "—";
+  el("tkSpreadSub").textContent = quote
+    ? `${s.bid.toFixed(2)} bid · ${s.ask.toFixed(2)} ask` : "no quote";
+  const sideEl = el("tkSide");
+  if (sideEl) sideEl.textContent = s.lot_count ? `${s.side} · ${s.lot_count}/${c.max_lots} lots` : "flat";
 
   el("bStart").disabled = s.running;
   el("bStop").disabled = !s.running;
@@ -381,6 +452,10 @@ function paintLive() {
   el("bDisarm").disabled = s.dry_run;
   el("bClear").disabled = !s.halted;
 
+  /* Open P/L and this ladder's realized-today are rendered ONCE, on the Money
+     card. They used to appear here as well -- the same server values through
+     two formatters under two labels ("Closed/today" and "Today"), which is
+     how one number came to disagree with itself on one screen. */
   const bar = s.last_bar;
   el("tkStats").innerHTML =
     stat("Lots", `${s.lot_count}<span class="faint" style="font-size:15px">/${c.max_lots}</span>`,
@@ -390,18 +465,21 @@ function paintLive() {
            s.anchor && s.anchor.price
              ? `from ${s.anchor.kind === "last_open" ? "last open" : esc(s.anchor.kind)} ${px(s.anchor.price)}`
              : "")
-    + stat("Open P/L", sgn(s.unrealized))
-    + stat("Closed", s.closed_count, `today ${money0(s.realized_today)}`)
+    + stat("Closed", s.closed_count, "lots, all time")
     + stat("Last bar", bar
         ? `<span class="${bar.color === "red" ? "down" : bar.color === "green" ? "up" : "faint"}">${bar.color}</span>`
-        : "—", s.last_tick_at ? `tick ${s.last_tick_at}` : "");
+        : "—", `${esc(c.bar_size || "1Min")} candles`);
 
   const byCoid = Object.fromEntries((A.orders || []).map((o) => [o.coid, o]));
   el("tkLots").innerHTML = tableHTML(
     ["Lot", "Shares", "Entry", "Target", "To go", "P/L", "Placed in", "Resting"],
     (s.lots || []).map((l) => {
-      const pl = (s.last_price - l.entry_price) * l.shares;
-      const to = l.tp_price - s.last_price;
+      // a short lot makes money as price FALLS: the unsigned difference was
+      // rendering every short lot's P/L with the wrong sign, and its target
+      // (which sits below the entry) as permanently "at target"
+      const d = (l.side || s.side) === "short" ? -1 : 1;
+      const pl = (s.last_price - l.entry_price) * l.shares * d;
+      const to = (l.tp_price - s.last_price) * d;
       const o = byCoid[l.tp_client_id];
       const sell = o
         ? `<span class="up">${qty(o.remaining)} @ ${px(o.limit)}</span>`
@@ -447,45 +525,32 @@ function paintLive() {
         : "Close mode — adds are judged on bar closes.");
 
   // the three-layer filter. For a week it read "flat" on five bars and
-
   // nothing on this page showed it; now the stack, the bar counts and the
-
   // block reason are all here.
-
   const tr = s.trend || {};
-
   const tone = (b) => (b === "long" ? "up" : b === "short" ? "down" : "faint");
-
   if (el("tkTrendStats")) el("tkTrendStats").innerHTML =
-
     stat("Bias", `<span class="${tone(tr.bias)}">${esc(tr.bias || "—")}</span>`,
-
          s.block_reason ? esc(s.block_reason) : "clear to trade")
-
     + stat("R · D · M", `${tr.R ?? "—"} · ${tr.D ?? "—"} · ${tr.M ?? "—"}`, "regime · day bias · trend-change")
-
     + stat("15m slope t", tr.t15 == null ? "—" : Number(tr.t15).toFixed(2), tr.S == null ? "" : `S=${Number(tr.S).toFixed(2)}`)
-
     + stat("15m ATR", tr.atr15 == null ? "—" : "$" + Number(tr.atr15).toFixed(3), `${tr.bars_1m ?? 0} bars of history`);
 
   if (el("tkTrend")) el("tkTrend").innerHTML = tableHTML(
-
     ["Layer", "Timeframe", "Params", "Last", "Bias", ""],
-
     (tr.stack || []).map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="faint">${esc(x.timeframe)}</td>
-
       <td class="faint">${esc(x.params)}</td><td class="num">${x.last == null ? "—" : esc(String(x.last))}</td>
-
       <td class="${tone(x.bias)}">${esc(x.bias)}</td><td class="faint">${esc(x.note || "")}</td></tr>`),
-
     "No trend data yet — the engine has not refreshed.");
 
+  /* The one home of this ticker's money. `alpaca.unrealized_pl` and
+     `pnl.realized_ladder` are each rendered exactly once on this page. */
   el("tkMoney").innerHTML =
     stat("Position", money(A.market_value), `${qty(A.qty)} sh`)
     + stat("Cost", money(A.cost_basis))
     + stat("Open P/L", sgn(A.unrealized_pl),
            A.unrealized_plpc ? `${A.unrealized_plpc.toFixed(2)}% since entry` : "")
-    + stat("Today", sgn(P.realized_ladder), "this ladder's own lots")
+    + stat("Realized today", sgn(P.realized_ladder), "this ladder's own closed lots")
     + stat("All time", sgn(s.realized_all), `${s.closed_count} lots closed`);
 
   el("tkLog").innerHTML = (s.events || []).slice(0, 60).map((e) => `
@@ -497,18 +562,9 @@ function paintLive() {
   if (panel && panel.bars.length) panel.setStatus(s);
 }
 
-/* --------------------------------------------------------------- orders */
-function mountOrders(sym) {
-  el("view").innerHTML = `
-    ${card("Position at Alpaca", `<div class="stats" id="poStats"></div>
-      <div id="poRec" style="margin-top:16px"></div>`)}
-    ${card("Working orders", `<div id="poOrders"></div>`, "", { flush: true })}
-    ${card("Order history", `<div id="poHist"></div>`,
-      `<button class="btn sm" id="poReload">Reload</button>`, { flush: true })}`;
-  el("poReload").onclick = () => loadHistory(sym);
-  loadHistory(sym);
-}
-
+/* ---------------------------------------------------------- order history */
+/* The one card that was unique to the old "Orders & positions" tab. Its
+   stats and its working-orders table were the Live tab's and Portfolio's. */
 async function loadHistory(sym) {
   const b = el("poHist");
   if (!b) return;
@@ -533,62 +589,87 @@ async function loadHistory(sym) {
   }
 }
 
-function paintOrders() {
-  const s = S.ticker;
-  if (!s || !el("poStats")) return;
-  const A = s.alpaca, R = s.reconcile;
-  el("poStats").innerHTML =
-    stat("Shares held", qty(A.qty))
-    + stat("Avg entry", px(A.avg_entry_price, 4))
-    + stat("Cost basis", money(A.cost_basis))
-    + stat("Market value", money(A.market_value))
-    + stat("Open P/L", sgn(A.unrealized_pl))
-    + stat("Covered", `${qty(R.covered_shares)}`,
-           R.uncovered ? `<span class="down">${qty(R.uncovered)} uncovered</span>` : "all covered");
-
-  el("poRec").innerHTML = `<div class="note ${R.in_sync ? "info" : "bad"}">
-    <b>${R.in_sync ? "In sync" : "Out of sync"}</b> — Alpaca holds
-    <b>${qty(R.alpaca_shares)}</b> sh, the ladder tracks <b>${qty(R.ledger_shares)}</b> sh.
-    Covered by resting sells: <b>${qty(R.covered_shares)}</b>${R.uncovered
-      ? ` · <span class="down">uncovered ${qty(R.uncovered)}</span>` : ""}.</div>`;
-
-  el("poOrders").innerHTML = tableHTML(
-    ["Order", "Side", "Qty", "Filled", "Working", "Limit", "Ext", "Status"],
-    (A.orders || []).map((o) => `<tr>
-      <td class="mono faint" style="text-align:left">${esc(o.coid)}</td>
-      <td class="${o.side === "sell" ? "up" : ""}">${o.side.toUpperCase()}</td>
-      <td class="num">${qty(o.qty)}</td><td class="num">${qty(o.filled || 0)}</td>
-      <td class="num"><b>${qty(o.remaining)}</b></td>
-      <td class="num">${px(o.limit)}</td>
-      <td class="${o.extended_hours ? "up" : "down"}">${o.extended_hours ? "yes" : "no"}</td>
-      <td class="faint">${esc(o.status)}</td></tr>`),
-    "No working orders at Alpaca.");
-}
-
 /* -------------------------------------------------------------- settings */
+/* Eight widgets instead of one 72-field column, and about half of them
+   showing fewer fields than they hold, because a field whose mode is off is
+   hidden rather than greyed. The preset picker on top is the fast way in;
+   the cards below are the way to adjust what it set. */
 function mountSettings() {
   const s = S.ticker;
   if (!s) { el("view").innerHTML = `<div class="empty">Loading…</div>`; return; }
   const sym = s.symbol;
+
+  const cards = FIELD_GROUPS.map((g) => card(
+    `<span class="setg-i" aria-hidden="true">${g.icon}</span>${g.title}`,
+    `<div class="setg-sum" id="sum-${g.id}"></div>
+     <div class="setg-f" data-group="${g.id}">${groupHTML(g, s.config)}</div>`,
+    `<span class="setg-x" id="cx-${g.id}"></span>`)).join("");
+
   el("view").innerHTML = `
-    <div class="grid main">
-      <div>${card(`${sym} strategy`, `<form id="tform">${formHTML(s.config)}
-        <button type="submit" class="btn primary" style="width:100%">Save ${sym}</button>
-        <div class="tip" id="tsaveMsg"></div></form>`,
-        "independent of every other ticker")}</div>
-      <div>
-        ${card("What this ladder does", `<div class="stats" id="tsSum"></div>
-          <div class="tip" id="tsNote"></div>`)}
-        ${card("Remove", `<div class="tip" style="margin-top:0">Removing a ticker
-          deletes its settings. Its ledger is kept and <b>nothing at Alpaca is
-          cancelled or sold</b>.</div>
-          <button class="btn danger" id="bRemove" style="margin-top:12px">
-            Remove ${sym}</button>`)}
+    ${card("Strategy", `${presetHTML()}
+      <div class="tip" style="margin-top:14px">A preset sets every card below in one step.
+        Change anything by hand afterwards and ${sym} is stamped
+        <b>custom</b> — the preset is a starting point, not a lock.</div>`,
+      "", { id: "tkStratCard" })}
+
+    <form id="tform" autocomplete="off">
+      <div class="setg">${cards}</div>
+      <div class="setg-save">
+        <button type="submit" class="btn primary">Save ${sym}</button>
+        <span class="tip" id="tsaveMsg" style="margin:0"></span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="faint setg-hid" id="setgHidden"></span>
       </div>
+    </form>
+
+    <div class="grid main">
+      <div>${card("What this ladder does", `<div class="stats" id="tsSum"></div>`,
+        "independent of every other ticker")}</div>
+      <div>${card("Remove", `<div class="tip" style="margin-top:0">Removing a ticker
+        deletes its settings. Its ledger is kept and <b>nothing at Alpaca is
+        cancelled or sold</b>.</div>
+        <button class="btn danger" type="button" id="bRemove" style="margin-top:12px">
+          Remove ${sym}</button>`)}</div>
     </div>`;
 
+  // the Settings tab's one gradient panel: the preset is the primary way in
+  const sc = el("tkStratCard");
+  if (sc) sc.classList.add("hero");
+  wirePreset(sym);
+
   const f = el("tform");
-  f.addEventListener("input", () => { S.touched = true; });
+  /* The governing selects decide which OTHER fields mean anything, so the
+     visible set and every summary are recomputed on each keystroke. Nothing
+     is re-rendered: the fields are toggled in place, so whatever the user has
+     typed in a field that is not changing survives. */
+  const refresh = () => {
+    const v = readValues(f);
+    const counts = applyVisibility(f, v);
+    const sums = summaries(v, { side: (S.ticker && S.ticker.side) || "long" });
+    let hidden = 0;
+    for (const g of FIELD_GROUPS) {
+      const sum = el(`sum-${g.id}`);
+      if (sum) sum.textContent = sums[g.id] || g.lead;
+      const c = counts[g.id] || { shown: 0, hidden: 0 };
+      hidden += c.hidden;
+      const x = el(`cx-${g.id}`);
+      if (x) {
+        x.textContent = c.hidden ? `${c.shown} of ${c.shown + c.hidden}` : `${c.shown}`;
+        x.title = c.hidden
+          ? `${c.hidden} setting${c.hidden === 1 ? " does" : "s do"} nothing in this mode and ${
+              c.hidden === 1 ? "is" : "are"} hidden`
+          : "every setting in this card is live";
+      }
+    }
+    const h = el("setgHidden");
+    if (h) h.textContent = hidden
+      ? `${hidden} setting${hidden === 1 ? "" : "s"} hidden — they do nothing in the modes ${sym} is in`
+      : "every setting is live in these modes";
+  };
+  refresh();
+
+  f.addEventListener("input", () => { S.touched = true; refresh(); });
+  f.addEventListener("change", () => { S.touched = true; refresh(); });
   f.addEventListener("submit", async (e) => {
     e.preventDefault();
     await act(async () => {
@@ -617,6 +698,7 @@ function mountSettings() {
 }
 
 function paintSettings() {
+  syncPreset();
   const s = S.ticker;
   if (!s || !el("tsSum")) return;
   const c = s.config;
@@ -626,17 +708,6 @@ function paintSettings() {
     + stat("Max exposure", money(s.max_exposure), `${c.max_lots} lots`)
     + stat("Take profit", "$" + Number(c.take_profit).toFixed(2), "per share, per lot")
     + stat("Win per lot", money(c.take_profit * c.shares_per_lot), "before fees");
-  el("tsNote").innerHTML =
-    `Adds ${c.add_mode === "points" ? `every <b>$${Number(c.add_distance).toFixed(2)}</b> below the last fill`
-      : c.add_mode === "percent" ? `every <b>${c.add_percent}%</b> below the last fill`
-      : "on <b>any close below the ladder average</b>"}, ${
-      c.add_trigger === "touch"
-        ? `as resting limits (${c.add_depth} rung${c.add_depth > 1 ? "s" : ""} at a time), measured from the ${
-            c.add_anchor === "last_fill" ? "last fill of any kind" : "newest open lot"}`
-        : `on ${c.bar_size} closes`}, up to
-     <b>${c.max_lots}</b> lots. Exit mode: <b>${esc(c.exit_mode || "limit")}</b>${
-       c.exit_mode === "trail" ? ` (arms at target, trails $${c.trail_amount})` : ""}.
-     The cap stops <i>adds</i>, not losses — there is no stop loss.`;
 }
 
 /* ------------------------------------------------------------------ view */
@@ -646,22 +717,20 @@ VIEWS.ticker = {
     const t = (ov?.tickers || []).find((x) => x.symbol === v.sym);
     return t ? `${t.state} · ${t.lot_count}/${t.max_lots} lots · ${qty(t.shares)} shares` : "";
   },
-  tabs: [["live", "Live"], ["orders", "Orders & positions"], ["settings", "Settings"]],
+  // "Orders & positions" folded into Live: everything on it but Order history
+  // was already rendered on Live and on Portfolio.
+  tabs: [["live", "Live"], ["settings", "Settings"]],
 
   mount(v) {
     if (panel) { panel.destroy(); panel = null; }
-    const tab = v.tab || "live";
-    if (tab === "live") mountLive(v.sym);
-    else if (tab === "orders") mountOrders(v.sym);
-    else mountSettings();
+    // an old #/t/SYM/orders bookmark lands on Live, which now holds its content
+    if (v.tab === "settings") mountSettings();
+    else mountLive(v.sym);
   },
   paint(v) {
-    const tab = v.tab || "live";
-    if (tab === "live") paintLive();
-    else if (tab === "orders") paintOrders();
-    else {
+    if (v.tab === "settings") {
       if (!el("tform") && S.ticker) mountSettings();
       if (!S.touched) paintSettings();
-    }
+    } else paintLive();
   },
 };
