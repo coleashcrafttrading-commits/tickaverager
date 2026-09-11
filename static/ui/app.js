@@ -25,7 +25,6 @@ import "./views/research.js";
 import "./views/scanner.js";
 import "./views/strategies.js";
 import "./views/risk.js";
-import "./views/agents.js";
 import "./views/add.js";
 import "./views/settings.js";
 import "./views/addaccount.js";
@@ -120,7 +119,6 @@ function paintRail() {
           <span style="color:var(--accent)">Add a ticker</span></div>`
       + `<div class="nav-label">This account</div>`
       + item("risk", "Risk", "◎")
-      + item("agents", "Agents", "◈")
       + item("settings", "Settings", "⚙");
   } else if (S.account) {
     html += `<div class="nav-item faint" style="cursor:default">Loading ${esc(acctLabel())}…</div>`;

@@ -1,210 +1,224 @@
 /* ============================================================================
-   Settings -- this account's keys and label, its fleet-wide numbers, the
-   fleet controls and the restart button.
+   Settings -- this account: its keys, its fleet-wide numbers, and the
+   processes that act on it.
+
+   Three tabs, three jobs:
+     Account   which Alpaca account this is, its label and keys, the theme,
+               and restarting the server
+     Engine    the numbers that apply to every ladder in it, with each
+               portfolio guardrail showing how much of itself is used
+     Agents    the scheduled work and the audit log
+
+   Three cards are gone rather than moved: the fleet controls (Portfolio's,
+   byte for byte), the balances stats (Portfolio's and the topbar strip's),
+   and the ticker list (the rail's, on every page). The Risk page's read-only
+   mirror of the guardrails is gone too -- the "used" figures it existed to
+   show are on the guardrail fields themselves now, where they can be acted on.
    ========================================================================= */
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat,
   money, money0, go, toggleTheme, curAccount, acctLabel, acctNumber,
-  loadAccounts, setAccount, pickAccount,
+  loadAccounts, setAccount, pickAccount, hashFor,
 } from "../core.js";
+import { mountAgents, paintAgents } from "./agents.js";
 
-const G = [
+const ENGINE = [
   { k: "poll_seconds", label: "Poll seconds", step: 0.5, min: 1,
     hint: "How often the fleet reads Alpaca <b>once for all tickers</b>. Positions, "
         + "orders, quotes and bars are batched, so adding tickers costs almost "
         + "nothing here — but the account allows ~200 requests/minute, so do not go "
         + "below 1s." },
   { k: "ui_refresh_ms", label: "Dashboard refresh (ms)", step: 500, min: 500 },
+];
+
+/* Each guardrail knows how to measure itself against what the account is
+   doing right now, so the form can say "using 12% of this" instead of a
+   second read-only table on another page saying it for us. */
+const GUARDS = [
   { k: "max_total_exposure", label: "Max total exposure ($)", step: 1000, min: 0,
+    unit: "$",
     hint: "Cost basis across <b>every</b> ladder. A ladder that would push past this "
-        + "stops adding — it is not halted." },
-  { k: "reserve_cash", label: "Cash reserve ($)", step: 1000, min: 0,
-    hint: "Buying power the fleet will never spend." },
-  { k: "account_daily_loss_limit", label: "Account daily loss limit ($)", step: 100, min: 0,
+        + "stops adding — it is not halted.",
+    used: (p) => p.deployed || 0 },
+  { k: "reserve_cash", label: "Cash reserve ($)", step: 1000, min: 0, unit: "$",
+    hint: "Buying power the fleet will never spend.",
+    used: (p, ov, set) => Math.max(0, set - (p.buying_power || 0)) },
+  { k: "account_daily_loss_limit", label: "Account daily loss limit ($)", step: 100,
+    min: 0, unit: "$",
     hint: "Measured on the <b>account</b>, not one ladder. Hitting it halts every "
-        + "ladder at once — the check no individual engine can make for itself." },
-  { k: "max_running_tickers", label: "Max running tickers", step: 1, min: 0 },
+        + "ladder at once — the check no individual engine can make for itself.",
+    used: (p) => Math.max(0, -(p.today_pl != null ? p.today_pl : p.made_today || 0)) },
+  { k: "max_running_tickers", label: "Max running tickers", step: 1, min: 0, unit: "n",
+    hint: "Engines allowed to be running at once in this account.",
+    used: (p, ov) => (ov.tickers || []).filter((t) => t.running).length },
 ];
 
 let renaming = false;   // the label is being edited; the poll must not repaint it
 let acctMsg = "";       // the last Test-keys answer, survives the poll repaint
 
+const TABS = [["account", "Account"], ["engine", "Engine"], ["agents", "Agents"]];
+const SUB = {
+  account: () => "which Alpaca account this is, and the server that runs it",
+  engine: () => "applies to every ladder in this account",
+  agents: () => "scheduled work, and every action taken",
+};
+
 VIEWS.settings = {
   title: () => "Settings",
-  sub: () => "this account — applies to every ladder it runs",
+  sub: (ov, v) => (SUB[v.tab || "account"] || SUB.account)(),
+  tabs: TABS,
 
-  mount() {
-    renaming = false;
-    acctMsg = "";
-    el("view").innerHTML = `
-      ${card("Account", `
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-          <div id="acctName" style="flex:1;min-width:240px">
-            <div style="font-size:19px;font-weight:650;letter-spacing:-.01em" id="acctLabelTxt">—</div>
-            <div class="faint" style="font-size:12px;margin-top:2px" id="acctMeta"></div>
-          </div>
-          <div class="row-btns">
-            <button class="btn sm" id="acctRename">Rename</button>
-            <button class="btn sm" id="acctTest">Test keys</button>
-            <button class="btn sm danger" id="acctRemove">Remove account</button>
-          </div>
-        </div>
-        <div class="tip" id="acctMsg"></div>`,
-        `<span class="faint">one Alpaca key pair · one fleet</span>`)}
-      <div class="grid main">
-        <div>${card("Account-wide", `<form id="gform">
-          <fieldset><legend>Engine</legend>
-            ${G.slice(0, 2).map(f => `<label class="f"><span>${f.label}</span>
-              <input name="${f.k}" type="number" step="${f.step}" min="${f.min}"></label>
-              ${f.hint ? `<div class="hint">${f.hint}</div>` : ""}`).join("")}
-            <label class="f"><span>Data feed</span><select name="feed">
-              <option value="auto">auto — boats overnight, sip otherwise</option>
-              <option value="sip">sip</option><option value="iex">iex</option>
-              <option value="boats">boats (overnight)</option></select></label>
-            <div class="hint">The SIP tape is dark 20:00–04:00 ET. On <b>auto</b> the
-              fleet switches to Blue Ocean overnight by itself.</div>
-          </fieldset>
-          <fieldset><legend>Portfolio guardrails — 0 turns one off</legend>
-            ${G.slice(2).map(f => `<label class="f"><span>${f.label}</span>
-              <input name="${f.k}" type="number" step="${f.step}" min="${f.min}"></label>
-              ${f.hint ? `<div class="hint">${f.hint}</div>` : ""}`).join("")}
-          </fieldset>
-          <button type="submit" class="btn primary" style="width:100%">Save settings</button>
-          <div class="tip" id="gmsg"></div></form>`)}</div>
-        <div>
-          ${card("Balances", `<div class="stats" id="setAcct"></div>
-            <div class="tip" id="setNote"></div>`)}
-          ${card("Appearance", `<button class="btn" id="bTheme">Toggle light / dark</button>`)}
-          ${card("Fleet controls", `<div class="row-btns">
-              <button class="btn good" id="sStart">Start all</button>
-              <button class="btn" id="sStop">Stop all</button>
-              <button class="btn" id="sDisarm">Disarm all</button>
-              <button class="btn danger" id="sPanic">Panic</button>
-            </div>
-            <div class="tip">These act on <b id="fcAcct">this account</b> only. Panic
-              stops and disarms everything in it. It does <b>not</b> sell — positions
-              and their resting take-profits are left alone.</div>
-            <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--hairline)">
-              <button class="btn primary" id="sRestart" style="width:100%">
-                Restart dashboard</button>
-              <div class="tip" id="sRestartNote">Relaunches the server so new code and
-                settings take effect. This is one process for <b>every account</b> —
-                all of their fleets restart, not just this one.</div>
-            </div>`)}
-          ${card("Tickers", `<div id="setTickers"></div>
-            <button class="btn" data-go="add" style="margin-top:14px">Add a ticker</button>`,
-            "", { flush: false })}
-        </div>
-      </div>`;
-
-    const f = el("gform");
-    f.addEventListener("input", () => { S.touched = true; });
-    f.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      await act(async () => {
-        const patch = {};
-        for (const [k, v] of new FormData(f).entries()) {
-          if (String(v).trim() !== "") patch[k] = v;
-        }
-        await POST("/api/settings", patch);
-        S.touched = false;
-        toast("Settings saved.", "ok");
-        el("gmsg").innerHTML = `<span class="up">Saved.</span>`;
-        setTimeout(() => { const m = el("gmsg"); if (m) m.textContent = ""; }, 3500);
-      });
-    });
-
-    el("bTheme").onclick = toggleTheme;
-    el("sStart").onclick = () => act(async () => {
-      const who = acctLabel();
-      if (!await ask({
-        title: `Start every engine in ${esc(who)}?`,
-        body: `Each ladder in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) begins deciding `
-            + `on its own settings. Any ladder that is <b>armed</b> will transmit real orders `
-            + `immediately. Other accounts are untouched.`,
-        ok: "Start all",
-      })) return;
-      const r = await POST("/api/fleet/start_all");
-      toast(`${esc(who)}: started ${r.started}.`, "ok");
-    });
-    el("sStop").onclick = () => act(async () => {
-      const r = await POST("/api/fleet/stop_all");
-      toast(`${esc(acctLabel())}: stopped ${r.stopped}.`, "ok");
-    });
-    el("sDisarm").onclick = () => act(async () => {
-      const r = await POST("/api/fleet/disarm_all");
-      const no = (r.refused || []);
-      if (no.length) toast(`${esc(acctLabel())}: disarmed ${r.disarmed}, but `
-        + `<b>${esc(no.join(", "))} is STILL ARMED</b> — a rung is still working at Alpaca.`,
-        "err", 9000);
-      else toast(`${esc(acctLabel())}: disarmed ${r.disarmed}.`, "ok");
-    });
-    el("sPanic").onclick = () => act(async () => {
-      const who = acctLabel();
-      if (!await ask({ title: `Stop and disarm everything in ${esc(who)}?`, danger: true,
-        ok: "Panic", requireWord: "PANIC",
-        body: `Every engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) stops and `
-            + `every ladder returns to dry run. Other accounts are untouched.<br><br>`
-            + `Nothing is sold. Positions and resting take-profits are left alone.` })) return;
-      const r = await POST("/api/fleet/panic", { confirm: "PANIC" });
-      const no = (r.refused || []);
-      if (no.length) toast(`${esc(who)}: everything stopped, but <b>${esc(no.join(", "))} is `
-        + `STILL ARMED</b> — a rung cancel is still pending at Alpaca.`, "err", 9000);
-      else toast(`${esc(who)}: everything stopped and disarmed.`, "ok");
-    });
-    el("sRestart").onclick = doRestart;
-
-    el("acctRename").onclick = startRename;
-    el("acctTest").onclick = testKeys;
-    el("acctRemove").onclick = removeAccount;
-    paintAccount();
+  mount(v) {
+    const tab = v.tab || "account";
+    if (tab === "agents") return mountAgents();
+    if (tab === "engine") return mountEngine();
+    mountAccount();
   },
 
-  paint() {
-    const ov = S.ov;
+  paint(v) {
+    const tab = v.tab || "account";
+    if (tab === "agents") return paintAgents();
+    if (tab === "engine") return paintEngine();
     paintAccount();
-    if (!ov || !el("setAcct")) return;
-    const f = el("gform");
-    if (f && !S.touched) {
-      for (const [k, v] of Object.entries(ov.global || {})) {
-        const e = f.elements[k];
-        if (e && e.type !== "submit") e.value = v;
-      }
-    }
-    const p = ov.portfolio;
-    el("setAcct").innerHTML =
-      stat("Number", esc(acctNumber() || "—"))
-      + stat("Mode", ov.paper ? "Paper" : `<span class="down">LIVE</span>`)
-      + stat("Equity", money(p.account_value))
-      + stat("Cash", money(p.cash))
-      + stat("Buying power", money(p.buying_power))
-      + stat("Deployed", money(p.deployed));
-    el("setNote").innerHTML = `Market data ${ov.snap_error
-      ? `<span class="down">failing: ${esc(ov.snap_error)}</span>`
-      : `<span class="up">healthy</span>, ${ov.snap_age}s old`} · session
-      <b>${esc(ov.session)}</b> on the <b>${esc(ov.feed)}</b> feed.`;
-
-    if (ov.supervised === false) {
-      el("sRestartNote").innerHTML = `<span class="warn">Unavailable</span> — this
-        server was not launched by <code>start_bot.bat</code>, so nothing would bring
-        it back up.`;
-      el("sRestart").disabled = true;
-    }
-
-    el("setTickers").innerHTML = (ov.tickers || []).map((t) => `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
-                  border-bottom:1px solid var(--hairline)">
-        <b>${t.symbol}</b>
-        <span class="pill ${t.halted ? "warn" : t.running ? (t.dry_run ? "up" : "down") : ""}">
-          ${esc(t.state)}</span>
-        <span class="faint" style="font-size:12px">${t.lot_count}/${t.max_lots} lots</span>
-        <span style="margin-left:auto">
-          <button class="btn sm" data-go="ticker" data-sym="${t.symbol}"
-                  data-tab="settings">Open</button></span>
-      </div>`).join("") || `<div class="empty">No tickers configured.</div>`;
   },
 };
+
+/* =============================================================== account */
+function mountAccount() {
+  renaming = false;
+  acctMsg = "";
+  el("view").innerHTML = `
+    ${card("Account", `
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div id="acctName" style="flex:1;min-width:240px">
+          <div style="font-size:19px;font-weight:650;letter-spacing:-.01em" id="acctLabelTxt">—</div>
+          <div class="faint" style="font-size:12px;margin-top:2px" id="acctMeta"></div>
+        </div>
+        <div class="row-btns">
+          <button class="btn sm" id="acctRename">Rename</button>
+          <button class="btn sm" id="acctTest">Test keys</button>
+          <button class="btn sm danger" id="acctRemove">Remove account</button>
+        </div>
+      </div>
+      <div class="tip" id="acctMsg"></div>`,
+      `<span class="faint">one Alpaca key pair · one fleet</span>`)}
+    <div class="grid main">
+      <div>
+        ${card("The server", `
+          <button class="btn primary" id="sRestart" style="width:100%">
+            Restart dashboard</button>
+          <div class="tip" id="sRestartNote">Relaunches the server so new code and
+            settings take effect. This is one process for <b>every account</b> —
+            all of their fleets restart, not just this one. Take-profits resting
+            at Alpaca are the broker's orders and stay live throughout.</div>
+          <div class="tip" id="sHealth"></div>`)}
+      </div>
+      <div>
+        ${card("Appearance", `<button class="btn" id="bTheme">Toggle light / dark</button>`)}
+        ${card("Starting and stopping", `<div class="tip" style="margin-top:0">
+          Start all, Stop all, Disarm all and Panic live on
+          <a href="${hashFor({ kind: "overview" })}">Portfolio</a>, beside the
+          ladders they act on — there is one copy of them now, not two.
+          Balances and the ticker list are there and in the rail for the same
+          reason.</div>`)}
+      </div>
+    </div>`;
+
+  el("bTheme").onclick = toggleTheme;
+  el("sRestart").onclick = doRestart;
+  el("acctRename").onclick = startRename;
+  el("acctTest").onclick = testKeys;
+  el("acctRemove").onclick = removeAccount;
+  paintAccount();
+}
+
+/* ================================================================ engine */
+function mountEngine() {
+  el("view").innerHTML = `
+    <div class="grid main">
+      <div>${card("Account-wide", `<form id="gform">
+        <fieldset><legend>Engine</legend>
+          ${ENGINE.map((f) => `<label class="f"><span>${f.label}</span>
+            <input name="${f.k}" type="number" step="${f.step}" min="${f.min}"></label>
+            ${f.hint ? `<div class="hint">${f.hint}</div>` : ""}`).join("")}
+          <label class="f"><span>Data feed</span><select name="feed">
+            <option value="auto">auto — boats overnight, sip otherwise</option>
+            <option value="sip">sip</option><option value="iex">iex</option>
+            <option value="boats">boats (overnight)</option></select></label>
+          <div class="hint">The SIP tape is dark 20:00–04:00 ET. On <b>auto</b> the
+            fleet switches to Blue Ocean overnight by itself.</div>
+        </fieldset>
+        <fieldset><legend>Portfolio guardrails — 0 turns one off</legend>
+          ${GUARDS.map((f) => `<label class="f"><span>${f.label}</span>
+            <input name="${f.k}" type="number" step="${f.step}" min="${f.min}"></label>
+            <div class="use" data-use="${f.k}"></div>
+            ${f.hint ? `<div class="hint">${f.hint}</div>` : ""}`).join("")}
+        </fieldset>
+        <button type="submit" class="btn primary" style="width:100%">Save settings</button>
+        <div class="tip" id="gmsg"></div></form>`)}</div>
+      <div>
+        ${card("Why the used bars are here", `<div class="tip" style="margin-top:0">
+          Each guardrail shows how much of itself the account is using right
+          now, on the field that sets it. There used to be a read-only copy of
+          this table on the Risk page that could only send you back here to
+          change anything; a limit and how close you are to it are one thought,
+          so they are one place.<br><br>
+          What a move against you would <i>cost</i> — in dollars and in ATR —
+          is the <a href="${hashFor({ kind: "risk" })}">Risk</a> page's job and
+          stays there.</div>`)}
+      </div>
+    </div>`;
+
+  const f = el("gform");
+  f.addEventListener("input", () => { S.touched = true; });
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await act(async () => {
+      const patch = {};
+      for (const [k, v] of new FormData(f).entries()) {
+        if (String(v).trim() !== "") patch[k] = v;
+      }
+      await POST("/api/settings", patch);
+      S.touched = false;
+      toast("Settings saved.", "ok");
+      el("gmsg").innerHTML = `<span class="up">Saved.</span>`;
+      setTimeout(() => { const m = el("gmsg"); if (m) m.textContent = ""; }, 3500);
+    });
+  });
+  paintEngine();
+}
+
+function paintEngine() {
+  const ov = S.ov;
+  const f = el("gform");
+  if (!ov || !f) return;
+  if (!S.touched) {
+    for (const [k, v] of Object.entries(ov.global || {})) {
+      const e = f.elements[k];
+      if (e && e.type !== "submit") e.value = v;
+    }
+  }
+  const p = ov.portfolio || {};
+  for (const g of GUARDS) {
+    const host = el("view").querySelector(`[data-use="${g.k}"]`);
+    if (!host) continue;
+    const set = Number((f.elements[g.k] || {}).value) || 0;
+    if (!set) {
+      host.innerHTML = `<span class="use-t faint">off — nothing caps this</span>`;
+      continue;
+    }
+    const used = Math.max(0, Number(g.used(p, ov, set)) || 0);
+    const pcUsed = Math.round(100 * used / set);
+    const cls = pcUsed > 90 ? "down" : pcUsed > 70 ? "warn" : "up";
+    const fmt = (n) => g.unit === "$" ? money0(n) : String(n);
+    host.innerHTML = `
+      <span class="use-track"><span class="use-fill ${cls}"
+        style="width:${Math.min(100, pcUsed)}%"></span></span>
+      <span class="use-t"><b class="${cls}">${pcUsed}%</b> used —
+        ${fmt(used)} of ${fmt(set)}</span>`;
+  }
+}
 
 /* ------------------------------------------------------------- account */
 function paintAccount() {
@@ -224,8 +238,6 @@ function paintAccount() {
       a.connected === false ? `<span class="down">keys not answering</span>` : "",
     ].filter(Boolean).join(" · ");
   }
-  const fc = el("fcAcct");
-  if (fc) fc.textContent = a.label || a.id || "this account";
 
   const rm = el("acctRemove");
   if (rm) {
@@ -243,6 +255,21 @@ function paintAccount() {
       : `Removing an account deletes its keys and its fleet from this server. It is refused `
         + `while anything in it is running, armed or still holds lots.`);
   }
+
+  /* the one health line that belongs to the server rather than to a ladder */
+  const h = el("sHealth");
+  if (h && ov) {
+    h.innerHTML = `Market data ${ov.snap_error
+      ? `<span class="down">failing: ${esc(ov.snap_error)}</span>`
+      : `<span class="up">healthy</span>, ${ov.snap_age}s old`} · session
+      <b>${esc(ov.session)}</b> on the <b>${esc(ov.feed)}</b> feed.`;
+  }
+  if (ov && ov.supervised === false && el("sRestartNote")) {
+    el("sRestartNote").innerHTML = `<span class="warn">Unavailable</span> — this
+      server was not launched by <code>start_bot.bat</code>, so nothing would bring
+      it back up.`;
+    el("sRestart").disabled = true;
+  }
 }
 
 function startRename() {
@@ -252,7 +279,7 @@ function startRename() {
   el("acctName").innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <input id="acctNewLabel" value="${esc(a.label || a.id || "")}" maxlength="60"
-             style="width:280px" spellcheck="false" autocomplete="off">
+             style="width:280px;max-width:100%" spellcheck="false" autocomplete="off">
       <button class="btn sm primary" id="acctSaveLabel">Save</button>
       <button class="btn sm" id="acctCancelLabel">Cancel</button>
     </div>`;

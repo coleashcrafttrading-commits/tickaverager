@@ -456,6 +456,8 @@ export const MOVED = {
   // Performance is Portfolio's History tab
   "performance":       { kind: "overview", tab: "history" },
   "portfolio":         { kind: "overview", tab: "" },        // the home page
+  // Agents is a Settings tab
+  "agents":            { kind: "settings", tab: "agents" },
 };
 
 export function readHash() {

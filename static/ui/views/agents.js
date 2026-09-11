@@ -1,9 +1,21 @@
 /* ============================================================================
-   Agents -- schedule, toggle and run the subagents; plus the audit log.
+   Settings -> Agents -- schedule, toggle and run the subagents; plus the
+   audit log of every action anything took on this account.
+
+   Not a destination of its own any more. Scheduling work and reading what it
+   did is account administration, so it lives with the rest of it; the
+   "Freeze switch" card is gone, because it contained no switch -- the frozen
+   state is raised once, as a banner on Portfolio, and repeated here only when
+   it is actually true and actually blocking these jobs.
+
+   The "can this dashboard reach a model" explainer is the shared one from
+   core.js: the agent runner and the indicator builder use the same
+   credential and used to explain it two different ways.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, toast, el, esc, card, tableHTML, act,
+  S, GET, POST, toast, el, esc, card, tableHTML, act,
+  modelCredsHTML, wireModelCreds,
 } from "../core.js";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -11,32 +23,33 @@ let data = null;
 let testOut = "";   // survives the poll re-render
 let forAcct = "";   // schedules and the audit log are per account
 
-VIEWS.agents = {
-  title: () => "Agents",
-  sub: () => "scheduled work, and every action taken",
+export function mountAgents() {
+  if (forAcct !== S.account) { data = null; testOut = ""; forAcct = S.account; }
+  el("view").innerHTML = `
+    <div id="agNote"></div>
+    <div class="grid main">
+      <div>${card("Scheduled agents", `<div id="agCards"></div>`,
+        `<span id="agRunning" class="faint"></span>`)}</div>
+      <div>
+        ${card("Audit log", `<div id="agRows"></div>`,
+          `<button class="btn sm" id="agReload">Reload</button>`, { flush: true })}
+        ${card("What an agent may do", `<div class="tip" style="margin-top:0">
+          Every job says on its own row what it is allowed to change: a plain
+          one only reads, <b class="down">can arm</b> means it may transmit real
+          orders, <b>changes settings</b> means it may rewrite a ladder's
+          numbers, <b>adds tickers</b> means it may start a new one.<br><br>
+          Everything any of them does lands in the audit log beside this, with
+          the actor's name. While <code>state/FROZEN</code> exists no ladder
+          opens a lot and nothing can be armed — runs are recorded as blocked
+          rather than failing silently, and resting take-profits are
+          unaffected.</div>`)}
+      </div>
+    </div>`;
+  el("agReload").onclick = load;
+  load();
+}
 
-  mount() {
-    if (forAcct !== S.account) { data = null; testOut = ""; forAcct = S.account; }
-    el("view").innerHTML = `
-      <div id="agNote"></div>
-      <div class="grid main">
-        <div>${card("Agents", `<div id="agCards"></div>`,
-          `<span id="agRunning" class="faint"></span>`)}</div>
-        <div>
-          ${card("Freeze switch", `<div id="agFreeze"></div>
-            <div class="tip">While <code>state/FROZEN</code> exists no ladder opens a
-              lot and nothing can be armed. <b>Resting take-profits are unaffected</b>,
-              so freezing never leaves a position unprotected. Only you lift it.</div>`)}
-          ${card("Audit log", `<div id="agRows"></div>`,
-            `<button class="btn sm" id="agReload">Reload</button>`, { flush: true })}
-        </div>
-      </div>`;
-    el("agReload").onclick = load;
-    load();
-  },
-
-  paint() { if (data) render(); },
-};
+export function paintAgents() { if (data) render(); }
 
 async function load() {
   try {
@@ -79,51 +92,16 @@ function render() {
   const { a, au } = data;
   if (!el("agCards")) return;
 
-  const AUTH = { api_key: "an API key from .env — billed per token",
-                 cli_login: "the Claude Code CLI login — your subscription" };
-  el("agNote").innerHTML = a.ready.ready
-    ? `<div class="note good"><b>Agents can run.</b> Authenticating with
-         ${esc(AUTH[a.ready.auth] || a.ready.auth || "the CLI")}.
-         <button class="btn sm" id="agTest" style="margin-left:8px">Test it</button>
-         <span id="agTestOut" class="faint">${testOut}</span></div>`
-    : `<div class="note warn"><b>Agents cannot run yet</b> — ${esc(a.ready.problem)}<br>
-       ${esc(a.ready.fix)}<br>
-       <div class="tip" style="margin-top:8px">Two separate one-time steps, and
-         you need <b>both</b>:<br>
-         <b>1. Trust</b> — open a terminal in the bot folder, run
-         <code>claude</code>, accept the trust prompt. Without it the CLI
-         silently ignores every permission rule in
-         <code>.claude/settings.json</code>.<br>
-         <b>2. Credentials</b> — in that same session run <code>/login</code>
-         (uses your subscription), <i>or</i> put
-         <code>ANTHROPIC_API_KEY=sk-ant-…</code> in <code>.env</code> and
-         restart the dashboard (billed per token, a few cents a run).<br>
-         Then press <b>Test it</b> — a green reply means every scheduled agent
-         below will work.</div>
-       <button class="btn sm" id="agTest" style="margin-top:8px">Test it anyway</button>
-       <span id="agTestOut" class="faint">${testOut}</span><br>
-       <span class="faint">Schedules still save; every run until then is recorded as
-       blocked rather than failing silently.</span></div>`;
-  const tb = el("agTest");
-  if (tb) tb.onclick = () => act(async () => {
-    tb.disabled = true; tb.textContent = "Asking…";
-    testOut = `<span class="faint">asking the model…</span>`;
-    el("agTestOut").innerHTML = testOut;
-    try {
-      const r = await POST("/api/agents/selftest", {});
-      testOut = r.ok
-        ? `<span class="up">replied “${esc(r.reply)}” in ${r.seconds}s${
-            r.cost_usd ? `, $${Number(r.cost_usd).toFixed(4)}` : ""}</span>`
-        : `<span class="down">${esc(r.error || r.problem || "no answer")}</span>`;
-    } catch (e) {
-      testOut = `<span class="down">${esc(e.message)}</span>`;
-    } finally {
-      tb.disabled = false;
-      tb.textContent = "Test it";
-      const o = el("agTestOut");
-      if (o) o.innerHTML = testOut;
-    }
-  });
+  el("agNote").innerHTML =
+    ((au && au.frozen)
+      ? `<div class="note bad"><b>Trading is frozen</b> — ${esc(au.frozen)}. These
+         jobs still run and still report; none of them can arm or open a lot
+         until it is lifted.</div>`
+      : "")
+    + modelCredsHTML(a.ready, { test: true, id: "agTest" });
+  const o = el("agTestOut");
+  if (o && testOut) o.innerHTML = testOut;
+  wireModelCreds("agTest", (html) => { testOut = html; });
 
   el("agRunning").innerHTML = a.running
     ? `<span class="up">${esc(a.running)} running · ${a.running_for}s</span>` : "idle";
@@ -136,7 +114,7 @@ function render() {
          <span class="faint">${esc(String(l.ts).slice(5, 16).replace("T", " "))}
          · ${l.seconds || 0}s${l.cost_usd ? " · $" + Number(l.cost_usd).toFixed(3) : ""}</span>`;
     return `<div style="padding:15px 0;border-bottom:1px solid var(--hairline)">
-      <div style="display:flex;align-items:center;gap:11px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:6px;flex-wrap:wrap">
         <label class="sw ${arms ? "danger" : ""}">
           <input type="checkbox" data-job="${j.id}" data-k="enabled"
             ${s.enabled ? "checked" : ""}><i></i></label>
@@ -181,10 +159,6 @@ function render() {
       } catch (e) { toast(esc(e.message), "err"); }
     };
   });
-
-  el("agFreeze").innerHTML = (au && au.frozen)
-    ? `<div class="note bad" style="margin:0"><b>Frozen</b> — ${esc(au.frozen)}</div>`
-    : `<div class="note good" style="margin:0">Not frozen. Agents may arm.</div>`;
 
   el("agRows").innerHTML = tableHTML(["When", "Actor", "Action", ""],
     ((au && au.entries) || []).map((e) => `<tr>
