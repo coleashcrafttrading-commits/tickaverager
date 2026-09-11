@@ -470,6 +470,10 @@ export const MOVED = {
   "risk/live":         { kind: "risk",     tab: "" },
   "risk/profiles":     { kind: "research", tab: "profiles" },
   "risk/bank":         { kind: "research", tab: "bank" },
+  // the Scanner is one tab now: the Replication tab replayed a different
+  // strategy on a hypothetical account and touched nothing in this one
+  "scanner/list":      { kind: "scanner",  tab: "" },
+  "scanner/run":       { kind: "scanner",  tab: "" },
 };
 
 export function readHash() {

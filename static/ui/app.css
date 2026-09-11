@@ -1259,9 +1259,13 @@ input:focus, select:focus, textarea:focus {
 
 /* On a phone the rail's hero comes FIRST: the number you opened the app for
    should not be below a chart. Only where a page opts in. */
+/* Ordering grid items, NOT switching to flex: a flex column sizes its items
+   to their own content in the cross axis, so one wide table stretched the
+   whole column past the screen and `.scroll`'s overflow-x:hidden clipped it
+   where nobody could scroll to it. Grid keeps `.grid > * { min-width: 0 }`
+   doing its job. */
 @media (max-width: 1180px) {
   .grid.main.lead-rail > :last-child { order: -1; }
-  .grid.main.lead-rail { display: flex; flex-direction: column; }
 }
 
 /* Stats stacked in a narrow rail rather than spread across a page. */

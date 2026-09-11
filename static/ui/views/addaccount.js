@@ -4,10 +4,14 @@
    The keys go to POST /api/accounts, which validates them with Alpaca before
    storing anything. The secret is typed into a password field, sent once, and
    cleared; the server never returns it, so it is never on screen again.
+
+   It used to end with a list of the accounts already on this server, which
+   is the top of the rail on every page including this one. Paste keys,
+   validate, land: that is the whole job.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, POST, toast, el, esc, card, money, go, loadAccounts, pickAccount,
+  S, VIEWS, POST, toast, el, esc, card, go, loadAccounts, pickAccount,
 } from "../core.js";
 
 const PAPER_URL = "https://paper-api.alpaca.markets";
@@ -54,32 +58,14 @@ VIEWS.addaccount = {
             A key pair belongs to exactly one Alpaca account, and this server
             keeps one fleet per account. Adding the same keys twice is refused.
           </div>`)}
-          ${card("Accounts on this server", `<div id="acList"></div>`, "", { flush: true })}
         </div>
       </div>`;
 
     const f = el("acForm");
     f.addEventListener("submit", (e) => { e.preventDefault(); submit(f); });
     f.elements.label.focus();
-    paintList();
   },
-
-  paint() { paintList(); },
 };
-
-function paintList() {
-  const host = el("acList");
-  if (!host) return;
-  host.innerHTML = S.accounts.length ? S.accounts.map((a) => `
-    <div style="display:flex;align-items:center;gap:10px;padding:9px 18px;
-                border-bottom:1px solid var(--hairline)">
-      <b>${esc(a.label || a.id)}</b>
-      <span class="faint" style="font-size:12px">${esc(a.account_number || "")}</span>
-      ${a.is_default ? `<span class="pill">default</span>` : ""}
-      <span class="faint num" style="margin-left:auto;font-size:12px">${money(a.equity)}</span>
-    </div>`).join("")
-    : `<div class="empty">None yet — this will be the first.</div>`;
-}
 
 async function submit(f) {
   const fd = new FormData(f);

@@ -1,23 +1,29 @@
 /* ============================================================================
-   Scanner -- the momentum screen, and the replication built on top of it.
+   Scanner -- the momentum screen, and the one thing it can do about it.
 
-   Two tabs, because they answer two different questions. WATCHLIST is what the
-   screen would have shown at 09:30 on a given day, using only what was
-   knowable then. REPLICATION is what trading those names by the published
-   rules would have done to a $2,000 account.
+   What the screen would have shown at 09:30 on a given day, using only what
+   was knowable then, with an "Add to fleet" on every candidate. That button
+   is the only reason this page is part of this product: without it the page
+   is a research note about somebody else's method, and nothing on it touches
+   the fleet.
 
    The watchlist is deliberately shown as a FUNNEL rather than a final list.
    "Nine names" tells you nothing; "two hundred gapped, fifty-four had a small
    enough float" tells you which criterion is actually doing the selecting, and
    that is the number that moves when the market changes.
+
+   The Replication tab is gone (123 lines, a third hand-rolled equity chart).
+   It replayed a DIFFERENT strategy on a hypothetical $2,000 account and could
+   never inform a decision about this fleet; the replay itself lives on in
+   research/ on disk, where a research artefact belongs.
    ========================================================================= */
 "use strict";
 import {
-  VIEWS, GET, el, esc, card, stat, tableHTML, money, money0, sgn, pct,
+  S, VIEWS, GET, POST, act, ask, toast, el, esc, card, stat, tableHTML,
+  money, money0, pct, go,
 } from "../core.js";
 
 let scan = null;
-let run = null;
 let pickedDate = "";
 
 const num = (n) => (n == null ? "—" : Number(n).toLocaleString());
@@ -30,14 +36,9 @@ const flo = (n) => {
 
 VIEWS.scanner = {
   title: () => "Scanner",
-  sub: (ov, v) =>
-    (v.tab === "run"
-      ? "the published rules, on a $2,000 margin account"
-      : "five criteria, point-in-time"),
-  tabs: [["list", "Watchlist"], ["run", "Replication"]],
+  sub: () => "five criteria, point-in-time — and a way into the fleet",
 
-  mount(v) {
-    if (((v && v.tab) || "list") === "run") return mountRun();
+  mount() {
     el("view").innerHTML = `
       <div class="grid main">
         <div>
@@ -54,6 +55,15 @@ VIEWS.scanner = {
             "where candidates are lost", { flush: true })}
           ${card("The five criteria", `<div id="scCrit"></div>`,
             "as configured", { flush: true })}
+          ${card("Adding one", `<div class="tip" style="margin-top:0">
+            <b>Add to fleet</b> creates a ladder on that symbol with the default
+            strategy — the plain $0.10 ladder — <b>stopped and in dry run</b>.
+            Nothing transmits until you start it and arm it, and every setting
+            is editable on the ticker's own page afterwards.<br><br>
+            These names are picked by a momentum screen, not by anything the
+            ladder cares about. A small float and a big gap is exactly the shape
+            that can keep falling after the ladder is full, and the ladder has
+            <b>no stop loss</b>.</div>`)}
           ${card("Float", `
             <div class="tip" style="margin-top:0">Float comes from SEC filings,
               keyed on the date each figure was <b>filed</b> rather than the
@@ -74,9 +84,7 @@ VIEWS.scanner = {
     load().then(paintList);
   },
 
-  paint(v) {
-    if (((v && v.tab) || "list") === "list" && scan) paintList();
-  },
+  paint() { if (scan) paintList(); },
 };
 
 async function load() {
@@ -85,6 +93,36 @@ async function load() {
   } catch (e) {
     scan = { error: String(e.message || e) };
   }
+}
+
+/* The only thing on this page that touches the fleet. It goes through the
+   same POST /api/tickers the Add-a-ticker page uses, with no config, so the
+   new ladder gets the server's defaults plus the default preset -- stopped,
+   dry run, nothing transmitted. */
+function addToFleet(sym, price) {
+  return act(async () => {
+    const held = ((S.ov && S.ov.tickers) || []).some((t) => t.symbol === sym);
+    if (held) {
+      toast(`${esc(sym)} is already in the fleet.`, "err");
+      return;
+    }
+    if (!await ask({
+      title: `Add ${esc(sym)} to the fleet?`, ok: "Add ticker",
+      body: `A new ladder on <b>${esc(sym)}</b> with its own ledger, on the
+        default strategy (the plain $0.10 ladder).<br><br>
+        It arrives <b>stopped and in dry run</b> — nothing transmits until you
+        start it and arm it.<br><br>
+        ${price ? `The screen saw it open at <b>${money(price)}</b> on
+          ${esc(scan.date || "that day")}; it will size against today's price,
+          not that one.<br><br>` : ""}
+        This symbol was chosen by a momentum screen, which is not the thing
+        this ladder is good at. Check its settings before arming it.`,
+    })) return;
+    await POST("/api/tickers", { symbol: sym });
+    toast(`<b>${esc(sym)}</b> added — stopped and in dry run.`, "ok", 8000);
+    await window.__tick();
+    go({ kind: "ticker", sym, tab: "settings" });
+  });
 }
 
 function paintList() {
@@ -110,24 +148,34 @@ function paintList() {
     stat("Market", r.regime || "—", "sets the float ceiling") +
     stat("Float ceiling", flo(scan.float_max), "shares");
 
-  const rows = (scan.candidates || []).map(
-    (c) => `
+  const inFleet = new Set(((S.ov && S.ov.tickers) || []).map((t) => t.symbol));
+  const rows = (scan.candidates || []).map((c) => {
+    const open = Number(c.open_raw != null ? c.open_raw : c.open);
+    return `
     <tr>
       <td><b>${esc(c.symbol)}</b></td>
-      <td class="num">$${Number(c.open_raw != null ? c.open_raw : c.open).toFixed(2)}</td>
+      <td class="num">$${open.toFixed(2)}</td>
       <td class="num ${c.gap_pct >= 0 ? "up" : "down"}">${pct(c.gap_pct, 1)}</td>
       <td class="num">${flo(c.float_shares)}</td>
       <td><span class="faint">${esc(c.float_quality || "—")}</span></td>
       <td class="num">${c.float_turnover == null ? "—" : c.float_turnover + "x"}</td>
       <td class="num">${flo(c.avg_vol_30)}</td>
-    </tr>`
-  );
+      <td>${inFleet.has(c.symbol)
+        ? `<button class="btn sm" data-go="ticker" data-sym="${esc(c.symbol)}"
+             data-tab="live">In the fleet</button>`
+        : `<button class="btn sm" data-add="${esc(c.symbol)}"
+             data-px="${open}">Add to fleet</button>`}</td>
+    </tr>`;
+  });
   el("scTable").innerHTML = tableHTML(
     ["Symbol", "Open (as traded)", "Gap", "Float", "Quality", "Turnover",
-     "30d avg vol"],
+     "30d avg vol", ""],
     rows,
     "Nothing gapped into range that morning."
   );
+  el("scTable").querySelectorAll("[data-add]").forEach((b) => {
+    b.onclick = () => addToFleet(b.dataset.add, Number(b.dataset.px) || 0);
+  });
 
   const d = scan.dropped || {};
   el("scFunnel").innerHTML = tableHTML(
@@ -153,129 +201,4 @@ function paintList() {
       ["float", `≤ ${flo(scan.float_max)}`],
     ].map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`)
   );
-}
-
-/* ------------------------------------------------------------ replication */
-function mountRun() {
-  el("view").innerHTML = `
-    <div class="grid main">
-      <div>
-        ${card("Result", `<div class="stats" id="rnStats"></div>
-          <div class="tip" id="rnTip"></div>`)}
-        ${card("Equity", `<div id="rnCurve"></div>`)}
-        ${card("Trades", `<div id="rnTrades"></div>`, "", { flush: true })}
-      </div>
-      <div>
-        ${card("Against doing nothing clever", `<div id="rnBase"></div>`,
-          "the number it has to beat")}
-        ${card("Sessions", `<div id="rnDays"></div>`, "", { flush: true })}
-      </div>
-    </div>`;
-  GET("/api/scanner/backtest")
-    .then((r) => {
-      run = r;
-      paintRun();
-    })
-    .catch((e) => {
-      el("rnStats").innerHTML = `<div class="empty">${esc(e.message || e)}</div>`;
-    });
-}
-
-function paintRun() {
-  if (!run || !run.curve) {
-    el("rnStats").innerHTML = `<div class="empty">No replication run yet.</div>`;
-    return;
-  }
-  const cap = run.capital;
-  const fin = run.final;
-  const tr = run.trades || [];
-  const wins = tr.filter((t) => t.pl > 0);
-  let peak = run.curve[0];
-  let mdd = 0;
-  for (const v of run.curve) {
-    peak = Math.max(peak, v);
-    mdd = Math.min(mdd, (v - peak) / peak);
-  }
-  el("rnStats").innerHTML =
-    stat("Start", money0(cap)) +
-    stat("End", money(fin), sgn(fin - cap)) +
-    stat("Return", pct(100 * (fin / cap - 1), 1)) +
-    stat("Max drawdown", pct(100 * mdd, 1)) +
-    stat("Trades", num(tr.length), (run.days || []).length + " sessions") +
-    stat("Win rate", pct((100 * wins.length) / Math.max(1, tr.length), 1));
-  el("rnTip").innerHTML =
-    `He trades this on a 10-second chart. On 1-minute bars a real micro pullback
-     often prints as one green candle with no pause in it, so this is a
-     <b>floor</b> on trade count, not a measurement of it.`;
-
-  el("rnBase").innerHTML =
-    `<div class="tip" style="margin-top:0">Buy every name the scanner flagged,
-      the moment it flagged it, and sell at the cutoff. If the entry and exit
-      rules cannot beat this, what has been measured is the screen, not the
-      method.</div>
-     <div class="stats" style="margin-top:12px">
-       ${stat("Baseline, summed", pct(100 * (run.baseline_r || 0), 1))}
-     </div>`;
-
-  el("rnTrades").innerHTML = tableHTML(
-    ["Symbol", "In", "Shares", "Entry", "Stop", "P/L", "R", "Closed by"],
-    tr
-      .slice()
-      .reverse()
-      .slice(0, 120)
-      .map(
-        (t) => `
-      <tr><td><b>${esc(t.symbol)}</b></td>
-        <td class="faint">${esc(String(t.t || "").slice(11, 16))}</td>
-        <td class="num">${num(t.shares)}</td>
-        <td class="num">$${Number(t.entry).toFixed(2)}</td>
-        <td class="num">$${Number(t.stop).toFixed(2)}</td>
-        <td class="num ${t.pl >= 0 ? "up" : "down"}">${sgn(t.pl)}</td>
-        <td class="num">${t.r_multiple}</td>
-        <td class="faint">${esc(t.reason)}</td></tr>`
-      ),
-    "No trades in this run."
-  );
-
-  el("rnDays").innerHTML = tableHTML(
-    ["Date", "Trades", "P/L", "Equity"],
-    (run.days || [])
-      .slice()
-      .reverse()
-      .slice(0, 60)
-      .map(
-        (d) => `
-      <tr><td>${esc(d.date)}</td><td class="num">${d.n}</td>
-        <td class="num ${d.pl >= 0 ? "up" : "down"}">${sgn(d.pl)}</td>
-        <td class="num">${money0(d.equity)}</td></tr>`
-      )
-  );
-
-  drawCurve();
-}
-
-function drawCurve() {
-  const host = el("rnCurve");
-  if (!host || !run.curve || run.curve.length < 2) return;
-  const w = host.clientWidth || 640;
-  const h = 220;
-  const pad = 28;
-  const c = run.curve;
-  const lo = Math.min(...c);
-  const hi = Math.max(...c);
-  const sp = hi - lo || 1;
-  const X = (i) => pad + (i / (c.length - 1)) * (w - pad * 2);
-  const Y = (v) => h - pad - ((v - lo) / sp) * (h - pad * 2);
-  const path = c
-    .map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`)
-    .join("");
-  const base = Y(run.capital);
-  host.innerHTML = `
-    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;display:block">
-      <line x1="${pad}" y1="${base}" x2="${w - pad}" y2="${base}"
-            stroke="var(--line)" stroke-dasharray="4 4"/>
-      <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"/>
-      <text x="${pad}" y="14" font-size="11" fill="var(--fg-dim)">${money0(hi)}</text>
-      <text x="${pad}" y="${h - 6}" font-size="11" fill="var(--fg-dim)">${money0(lo)}</text>
-    </svg>`;
 }

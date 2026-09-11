@@ -119,14 +119,32 @@ VIEWS.overview = {
   },
 };
 
-/* ================================================================== live */
+/* ================================================================== live
+   The shape is the owner's reference: a wide main column -- four small
+   tiles, then the chart as the dominant object, then the ladders -- beside a
+   narrow rail whose gradient hero carries the account's money and whose
+   positions list is the visual anchor. Anything that is genuinely a table
+   runs full width underneath both.
+
+   The hero is why the topbar KPI strip is suppressed on this tab (app.js):
+   the account's money has one home per screen, and on its own page that
+   home is the hero rather than a strip two inches above it. */
 function mountLive() {
   el("view").innerHTML = `
     <div id="ovNotes"></div>
-    ${card("", `<div class="stats" id="ovStats"></div>`)}
-    ${card("", `<div id="ovChart"></div>`)}
-    ${card("Ladders", `<div id="ovTickers"></div>`,
-      fleetControlsHTML(), { flush: true })}
+    <div class="grid main lead-rail">
+      <div>
+        <div class="stats tiles" id="ovStats"></div>
+        ${card("", `<div id="ovChart"></div>`)}
+        ${card("Ladders", `<div id="ovTickers"></div>`,
+          fleetControlsHTML(), { flush: true })}
+      </div>
+      <div>
+        ${card("", `<div id="ovHero"></div>`, "", { cls: "hero" })}
+        ${card("Positions", `<div id="ovHold"></div>`,
+          `<span id="ovHoldN" class="faint"></span>`, { flush: true })}
+      </div>
+    </div>
     ${card("Activity", `<div class="log" id="ovLog"></div>`,
       "every ladder in this account", { flush: true })}`;
 
@@ -147,22 +165,49 @@ function paintLive() {
 
   el("ovNotes").innerHTML = banners(ov);
 
-  /* Account value and the two P/L figures are in the topbar strip on every
-     page. What is left is this page's own job: where the capital actually
-     is. */
+  /* ---- the hero: the account's money, once ---- */
   const eq = Number(p.account_value) || 0;
-  const depPct = eq ? Math.round(100 * (p.deployed || 0) / eq) : 0;
-  const holding = (ov.tickers || []).filter((x) => x.lot_count > 0).length;
+  const total = Number(p.total_pl) || 0;
+  const today = Number(p.today_pl != null ? p.today_pl : p.made_today) || 0;
+  const base = Number(p.base_value) || 0;
+  const totalPct = base ? (100 * total / base) : 0;
+  el("ovHero").innerHTML = `
+    <div class="hero-k">Account value</div>
+    <div class="hero-v num">${money(eq)}</div>
+    <div class="hero-row">
+      <div><span class="hero-lk">Today</span>
+        <span class="hero-lv num">${sgn(today)}</span></div>
+      <div><span class="hero-lk">All time</span>
+        <span class="hero-lv num">${sgn(total)}${base
+          ? ` <span class="hero-pc">${totalPct >= 0 ? "+" : ""}${totalPct.toFixed(1)}%</span>`
+          : ""}</span></div>
+    </div>`;
+
+  /* ---- four tiles: one number, one label, nothing else ---- */
+  const running = (ov.tickers || []).filter((x) => x.running).length;
   el("ovStats").innerHTML =
-    stat("Deployed", money0(p.deployed),
-         `<span class="${depPct > 90 ? "down" : depPct > 65 ? "warn" : "up"}">${depPct}%
-          of equity</span>`)
-    + stat("Cash", money0(p.cash), `${money0(p.buying_power)} buying power`)
-    + stat("Holding", `${holding}<span class="faint">/${t.count}</span>`,
-           `${t.lots} lot${t.lots === 1 ? "" : "s"} · ${qty(t.shares)} shares`)
-    + stat("At Alpaca", (p.positions || []).length,
-           `position(s) · ${(p.orders || []).length} working
-            <a href="#" data-go="overview" data-tab="orders">— see Orders</a>`);
+    stat("Deployed", money0(p.deployed))
+    + stat("Cash", money0(p.cash))
+    + stat("Open lots", t.lots)
+    + stat("Ladders running", `${running}<span class="faint">/${t.count}</span>`);
+
+  /* ---- the positions list: a glance, not the broker's table ---- */
+  const pos = p.positions || [];
+  const shown = pos.slice(0, 6);
+  el("ovHoldN").textContent = pos.length ? `${pos.length} held` : "";
+  el("ovHold").innerHTML = (shown.map((x) => `
+    <div class="plist-row">
+      <span class="pbadge">${esc(String(x.symbol).slice(0, 4))}</span>
+      <span class="pname"><b>${esc(x.symbol)}</b>
+        <span class="psub">${qty(x.qty)} sh · avg ${px(x.avg_entry_price, 2)}${
+          x.managed ? "" : ` · <span class="warn">unmanaged</span>`}</span></span>
+      <span class="pval"><b>${money0(x.market_value)}</b>
+        <span class="psub num">${sgn(x.unrealized_pl, 0)}</span></span>
+    </div>`).join("")
+    || `<div class="empty">Flat — the account holds nothing.</div>`)
+    + `<div class="plist-foot"><a href="#" data-go="overview" data-tab="orders">
+        ${pos.length > shown.length ? `All ${pos.length} positions` : "Positions"}
+        and ${(p.orders || []).length} working order(s) →</a></div>`;
 
   el("ovTickers").innerHTML = tableHTML(
     ["Ticker", "State", "Last", "Lots", "Shares", "Avg", "Next add",

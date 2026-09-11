@@ -315,7 +315,13 @@ function paintTop() {
            data-tab="${k}">${l}</div>`).join("");
   } else bar.style.display = "none";
 
-  if (!ov) { el("kpis").innerHTML = ""; return; }
+  /* The account's money has ONE home per screen. Everywhere it is this
+     strip, which follows you from page to page. The single exception is
+     Portfolio's Live tab, whose own gradient hero carries it as the page's
+     anchor -- rendering both would put the same three figures twice in the
+     first screen, which is the thing this strip is here to prevent. */
+  const heroOwns = v.kind === "overview" && (v.tab || "live") === "live";
+  if (!ov || heroOwns) { el("kpis").innerHTML = ""; return; }
   const p = ov.portfolio;
   /* Two numbers, each the whole truth: realized AND unrealized together.
      Today is the account against yesterday's close, all time against the
