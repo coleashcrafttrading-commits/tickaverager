@@ -139,6 +139,21 @@ SYMBOL_RE = re.compile(r"[A-Z][A-Z.\-]{0,9}")
 
 
 # =================================================================== fleet
+def _merge_bars(day: list, night: list) -> list:
+    """One series out of two tapes, oldest first.
+
+    The two cover disjoint hours, so a collision means both tapes printed the
+    same minute; the consolidated one wins because it is every venue, not one.
+    """
+    if not night:
+        return list(day or [])
+    if not day:
+        return list(night or [])
+    by_t = {str(r.get("t")): r for r in night}
+    by_t.update({str(r.get("t")): r for r in day})
+    return [by_t[k] for k in sorted(by_t)]
+
+
 class Fleet:
     def __init__(self, autostart: bool = False, account: Any = None) -> None:
         """autostart=False by default, and that default is a safety rule.
@@ -509,6 +524,59 @@ class Fleet:
         # an account whose keys probed without SIP entitlement is polled on iex
         return "iex" if str(getattr(self.acct, "feed", "") or "") == "iex" else "sip"
 
+    # The consolidated tape covers 04:00-20:00 ET and is DARK overnight; Blue
+    # Ocean covers 20:00-04:00 ET and nothing else. A history read that asks
+    # only the feed the engine happens to be trading on loses a whole session
+    # the moment the clock crosses 20:00, which is what emptied the charts.
+    OVERNIGHT_FEED = "boats"
+
+    def day_feed(self) -> str:
+        """The tape that carries 04:00-20:00 ET for THIS account."""
+        f = self.gcfg.get("feed", "auto")
+        if f not in ("auto", "boats"):
+            return f
+        return "iex" if str(getattr(self.acct, "feed", "") or "") == "iex" else "sip"
+
+    def bars_history(self, symbol: str, timeframe: str, start: str, end: str = "",
+                     adjustment: str = "split") -> list:
+        """Bars for a chart or an indicator: BOTH tapes, merged, oldest first.
+
+        Intraday only. A daily bar already spans the whole session, so mixing
+        an overnight partial into it would double-count the same hours.
+        """
+        b = self.broker
+        if not b:
+            return []
+        day = b.bars_range(symbol, timeframe, start, end, adjustment=adjustment,
+                           feed=self.day_feed())
+        if str(timeframe).endswith(("Day", "Week", "Month")):
+            return day
+        try:
+            night = b.bars_range(symbol, timeframe, start, end, adjustment=adjustment,
+                                 feed=self.OVERNIGHT_FEED)
+        except Exception as e:
+            LOG.warning("%s overnight bars: %s", symbol, e)
+            night = []
+        return _merge_bars(day, night)
+
+    def bars_history_multi(self, symbols: list[str], timeframe: str, start: str,
+                           adjustment: str = "split") -> dict:
+        """bars_history for a whole fleet in two requests per timeframe."""
+        b = self.broker
+        if not b or not symbols:
+            return {}
+        day = b.bars_multi_range(symbols, timeframe, start, adjustment=adjustment,
+                                 feed=self.day_feed()) or {}
+        if str(timeframe).endswith(("Day", "Week", "Month")):
+            return day
+        try:
+            night = b.bars_multi_range(symbols, timeframe, start, adjustment=adjustment,
+                                       feed=self.OVERNIGHT_FEED) or {}
+        except Exception as e:
+            LOG.warning("overnight %s bars: %s", timeframe, e)
+            night = {}
+        return {s: _merge_bars(day.get(s) or [], night.get(s) or []) for s in symbols}
+
     def symbols(self) -> list[str]:
         return sorted(self.engines)
 
@@ -676,7 +744,7 @@ class Fleet:
         from datetime import datetime, timedelta, timezone
         start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            rows = b.bars_range(sym, "1Min", start, adjustment="split")
+            rows = self.bars_history(sym, "1Min", start)
         except Exception as e:
             LOG.warning("%s seed_hist: %s", sym, e)
             return 0
@@ -717,7 +785,7 @@ class Fleet:
             windows.append(("1Day", (utc - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")))
         for tf, start in windows:
             try:
-                data = b.bars_multi_range(syms, tf, start, adjustment="split")
+                data = self.bars_history_multi(syms, tf, start)
             except Exception as e:
                 LOG.warning("HTF %s bars: %s", tf, e)
                 continue

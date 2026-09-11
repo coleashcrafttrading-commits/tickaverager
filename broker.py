@@ -280,16 +280,18 @@ class Alpaca:
                       params={"symbols": ",".join(symbols), "feed": self.feed})
         return (d or {}).get("trades", {}) or {}
 
-    def bars(self, symbol: str, timeframe: str = "1Min", limit: int = 10) -> list:
+    def bars(self, symbol: str, timeframe: str = "1Min", limit: int = 10,
+             feed: str = "") -> list:
         d = self._mkt("GET", f"/stocks/{symbol}/bars",
                       params={"timeframe": timeframe, "limit": limit,
-                              "feed": self.feed, "sort": "desc", "adjustment": "raw"})
+                              "feed": feed or self.feed, "sort": "desc",
+                              "adjustment": "raw"})
         rows = (d or {}).get("bars", []) or []
         return list(reversed(rows))          # oldest -> newest
 
     def bars_multi_range(self, symbols: list[str], timeframe: str, start: str,
                          end: str = "", max_pages: int = 40,
-                         adjustment: str = "raw") -> dict:
+                         adjustment: str = "raw", feed: str = "") -> dict:
         """Bars for many symbols over a date RANGE -> {symbol: [oldest..newest]}.
 
         Safe where the limit-based multi-symbol call is not: paging is driven by
@@ -302,7 +304,7 @@ class Alpaca:
         token = ""
         for _ in range(max_pages):
             p: dict[str, Any] = {"symbols": ",".join(symbols), "timeframe": timeframe,
-                                 "start": start, "feed": self.feed, "sort": "asc",
+                                 "start": start, "feed": feed or self.feed, "sort": "asc",
                                  "adjustment": adjustment, "limit": 10000}
             if end:
                 p["end"] = end
@@ -317,7 +319,8 @@ class Alpaca:
         return out
 
     def bars_range(self, symbol: str, timeframe: str, start: str, end: str = "",
-                   max_pages: int = 60, adjustment: str = "raw") -> list:
+                   max_pages: int = 60, adjustment: str = "raw",
+                   feed: str = "") -> list:
         """Every bar between two timestamps, oldest first, paged through.
 
         The backtester needs whole days at a time, which is far past the single
@@ -327,7 +330,7 @@ class Alpaca:
         token = ""
         for _ in range(max_pages):
             p: dict[str, Any] = {"timeframe": timeframe, "start": start,
-                                 "feed": self.feed, "sort": "asc",
+                                 "feed": feed or self.feed, "sort": "asc",
                                  "adjustment": adjustment, "limit": 10000}
             if end:
                 p["end"] = end

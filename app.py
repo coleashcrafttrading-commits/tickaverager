@@ -1193,6 +1193,10 @@ def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
     The same Alpaca bars the engine decides on, so the candles on screen are
     not a third-party widget showing something subtly different. Split-adjusted
     because a reverse split otherwise draws a cliff that never happened.
+
+    Both tapes, merged: the consolidated feed is dark 20:00-04:00 ET and Blue
+    Ocean carries only those hours, so a chart drawn from whichever one the
+    engine is trading on right now loses a whole session every evening.
     """
     from datetime import datetime, timedelta, timezone
     if not f.broker:
@@ -1201,12 +1205,14 @@ def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
     start = (datetime.now(timezone.utc)
              - timedelta(days=max(0.05, days))).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        rows = f.broker.bars_range(sym, timeframe, start, adjustment="split")
+        rows = f.bars_history(sym, timeframe, start)
     except Exception as e:
         raise HTTPException(502, f"bars for {sym}: {e}")
     rows = rows[-limit:]
     return {
         "ok": True, "symbol": sym, "timeframe": timeframe, "count": len(rows),
+        "feeds": [f.day_feed()] + ([] if str(timeframe).endswith(("Day", "Week", "Month"))
+                                   else [f.OVERNIGHT_FEED]),
         "bars": [{"t": b["t"], "o": float(b["o"]), "h": float(b["h"]),
                   "l": float(b["l"]), "c": float(b["c"]),
                   "v": float(b.get("v") or 0)} for b in rows],

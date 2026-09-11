@@ -36,6 +36,7 @@ class FakeAlpaca:
     """Enough of broker.Alpaca for a fleet to construct and a rail to paint."""
     def __init__(self, key, secret, base_url, data_url, feed="sip"):
         self.key, self.feed = key, feed
+        self.feeds_asked: list = []
 
     def account(self):
         return {"account_number": "PA" + self.key[-4:], "equity": "12345.5", "cash": "12345.5",
@@ -70,8 +71,16 @@ class FakeAlpaca:
     def bars_multi_range(self, *a, **kw):
         return {}
 
-    def bars_range(self, *a, **kw):
-        return []
+    def bars_range(self, symbol, timeframe, start, end="", max_pages=60,
+                   adjustment="raw", feed=""):
+        """The two tapes, faithfully: the consolidated one is dark overnight,
+        Blue Ocean carries only those hours, and 00:04 prints on both."""
+        self.feeds_asked.append(feed)
+        if feed == "boats":
+            return [{"t": "2026-09-11T00:00:00Z", "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                    {"t": "2026-09-11T00:04:00Z", "o": 9, "h": 9, "l": 9, "c": 9, "v": 9}]
+        return [{"t": "2026-09-10T14:00:00Z", "o": 2, "h": 2, "l": 2, "c": 2, "v": 2},
+                {"t": "2026-09-11T00:04:00Z", "o": 5, "h": 5, "l": 5, "c": 5, "v": 5}]
 
     def latest_quotes(self, syms):
         return {}
@@ -245,6 +254,35 @@ def main() -> int:
         r = c.get("/api/a/glenn-momentum/portfolio/history?period=1D&timeframe=1Min")
         check("live samples newer than the last Alpaca point ride along", r.json()["live"][-1]["equity"], 12350.25)
         fl.equity_ticks.clear()
+
+        print("\n3f. the chart reads BOTH tapes, so 20:00 ET does not empty it")
+        import fleet as _fleet
+        merged = _fleet._merge_bars(
+            [{"t": "2026-09-10T14:00:00Z", "c": 2}, {"t": "2026-09-11T00:04:00Z", "c": 5}],
+            [{"t": "2026-09-11T00:00:00Z", "c": 1}, {"t": "2026-09-11T00:04:00Z", "c": 9}])
+        check("both tapes, oldest first", [b["t"][5:16] for b in merged],
+              ["09-10T14:00", "09-11T00:00", "09-11T00:04"])
+        check("the consolidated tape wins a shared minute", merged[-1]["c"], 5)
+        check("one tape alone is passed through", _fleet._merge_bars([], [{"t": "x"}]),
+              [{"t": "x"}])
+        fl.broker.feeds_asked.clear()
+        r = c.get("/api/a/glenn-momentum/bars?symbol=RAM&timeframe=1Min&days=1")
+        j = r.json()
+        check("bars 200 with both sessions", (r.status_code, [b["t"][5:16] for b in j["bars"]]),
+              (200, ["09-10T14:00", "09-11T00:00", "09-11T00:04"]))
+        check("...and it says which tapes it read", j["feeds"], ["sip", "boats"])
+        check("both tapes were actually asked", sorted(fl.broker.feeds_asked), ["boats", "sip"])
+        fl.broker.feeds_asked.clear()
+        r = c.get("/api/a/glenn-momentum/bars?symbol=RAM&timeframe=1Day&days=30")
+        check("a daily bar spans the session already -- consolidated only",
+              (r.json()["feeds"], fl.broker.feeds_asked), (["sip"], ["sip"]))
+        # the fleet points the broker at whatever tape is LIVE (overnight ->
+        # boats) for quotes and decisions; a chart read must not disturb it
+        fl.broker.feed = "boats"
+        c.get("/api/a/glenn-momentum/bars?symbol=RAM&timeframe=1Min&days=1")
+        check("a chart read never moves the engine's own feed", fl.broker.feed, "boats")
+        check("an iex-entitled account reads its own tape", _fleet.Fleet.day_feed(
+              type("F", (), {"gcfg": {"feed": "auto"}, "acct": type("A", (), {"feed": "iex"})()})()), "iex")
 
         print("\n4. the account gets its own files")
         acc = app_mod.REG.get("glenn-momentum")
