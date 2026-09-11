@@ -1,0 +1,183 @@
+/* ============================================================================
+   theme.css -- the skin. Loaded AFTER app.css, which keeps the structure.
+
+   Indigo, not green. The mint accent was on every surface at once -- nav,
+   buttons, focus rings, pills, rising numbers -- and a saturated green held
+   that wide is tiring to sit in front of. Here violet carries the chrome and
+   blue answers it, while green is spent only where it means something: a
+   number that went up. Losses stay rose.
+
+   The surfaces are glass. Not a flat translucent panel: real glass takes the
+   colour of what is behind it, bends the light at its edge, and catches a
+   highlight along its top rim. Each of those is a separate effect below --
+   saturated backdrop blur for the tint, a bright inset hairline for the rim,
+   a soft outer shadow for the lift -- and together they read as one material.
+   `backdrop-filter` is doing the real work: where a browser lacks it the
+   @supports block falls back to an opaque panel rather than unreadable text.
+   ========================================================================= */
+
+:root {
+  /* Ground: deep indigo, lit from two corners. */
+  --bg:        #080611;
+  --bg-2:      #0d0a1d;
+  --haze-a:    rgba(124, 92, 255, 0.20);   /* violet, top left */
+  --haze-b:    rgba(56, 140, 255, 0.15);   /* blue, bottom right */
+  --haze-c:    rgba(168, 85, 247, 0.10);   /* a third, low and central */
+
+  /* Glass. The alpha is low because the blur, not the fill, is what makes it
+     read as a surface. */
+  --glass:     rgba(255, 255, 255, 0.045);
+  --glass-2:   rgba(255, 255, 255, 0.075);
+  --glass-3:   rgba(255, 255, 255, 0.11);
+  --surface:   var(--glass);
+  --surface-2: var(--glass-2);
+  --raised:    var(--glass-3);
+  --solid:     #12102a;
+  --hairline:  rgba(255, 255, 255, 0.09);
+  --hairline2: rgba(255, 255, 255, 0.16);
+  --rim:       rgba(255, 255, 255, 0.26);  /* the lit top edge */
+
+  --text:      #eceaf8;
+  --muted:     #a6a2c4;
+  --faint:     #6f6a92;
+
+  /* Violet leads, blue answers. Neither is ever used for a P/L figure. */
+  --accent:     #7c5cff;
+  --accent-2:   #38a8ff;
+  --accent-dim: rgba(124, 92, 255, 0.16);
+  --accent-glow: rgba(124, 92, 255, 0.42);
+  --grad:      linear-gradient(135deg, #8b5cff, #5b8bff 55%, #38a8ff);
+
+  /* Semantic. Softer than before: these are read, not stared at. */
+  --up:        #3ddc97;
+  --down:      #ff6b8a;
+  --warn:      #ffc061;
+
+  --radius:      20px;
+  --radius-sm:   12px;
+  --radius-pill: 999px;
+
+  --shadow:      0 1px 1px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+  --shadow-lift: 0 1px 1px rgba(0,0,0,.5), 0 26px 60px -22px rgba(0,0,0,.92);
+}
+
+:root[data-theme="light"] {
+  --bg: #f2f1fa; --bg-2: #fbfaff;
+  --haze-a: rgba(124, 92, 255, 0.18); --haze-b: rgba(56, 140, 255, 0.14);
+  --haze-c: rgba(168, 85, 247, 0.10);
+  --glass: rgba(255,255,255,.72); --glass-2: rgba(255,255,255,.85);
+  --glass-3: rgba(255,255,255,.94);
+  --solid: #ffffff;
+  --hairline: rgba(26, 18, 58, .10); --hairline2: rgba(26, 18, 58, .18);
+  --rim: rgba(255, 255, 255, .95);
+  --text: #17123a; --muted: #565080; --faint: #837da8;
+  --accent: #6242e8; --accent-2: #1b7fe0;
+  --accent-dim: rgba(98, 66, 232, .13); --accent-glow: rgba(98, 66, 232, .3);
+  --up: #12a06c; --down: #e04b6c; --warn: #b87407;
+  --shadow: 0 1px 1px rgba(26,18,58,.05), 0 10px 30px -16px rgba(26,18,58,.28);
+  --shadow-lift: 0 1px 1px rgba(26,18,58,.06), 0 26px 60px -24px rgba(26,18,58,.32);
+}
+
+/* --------------------------------------------------------------- the room */
+body::before {
+  background:
+    radial-gradient(1000px 680px at 8% -10%, var(--haze-a), transparent 60%),
+    radial-gradient(860px 620px at 96% 106%, var(--haze-b), transparent 58%),
+    radial-gradient(1100px 700px at 50% 46%, var(--haze-c), transparent 70%),
+    linear-gradient(170deg, var(--bg-2), var(--bg) 46%) !important;
+}
+
+/* ------------------------------------------------------------- the material
+   One recipe, applied to everything that is a surface. The ::after rim is the
+   specular highlight; the inset shadow is the thickness of the glass. */
+.card,
+.stats > *,
+.rail,
+.modal,
+.toast {
+  background: var(--glass) !important;
+  border: 1px solid var(--hairline) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255,255,255,.09),
+    inset 0 -1px 0 0 rgba(0,0,0,.22),
+    var(--shadow) !important;
+}
+.card, .stats > * { border-radius: var(--radius) !important; }
+
+.card::after,
+.stats > *::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(90deg, transparent 8%, var(--rim) 50%, transparent 92%);
+  opacity: .75; pointer-events: none;
+}
+
+/* Where the browser cannot blur, glass would just be grey haze over text. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card, .stats > *, .rail, .modal, .toast { background: var(--solid) !important; }
+}
+
+/* A card lifts slightly toward the pointer, the way a physical pane would. */
+.card { transition: box-shadow .2s ease, border-color .2s ease; }
+.card:hover {
+  border-color: var(--hairline2) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255,255,255,.13),
+    inset 0 -1px 0 0 rgba(0,0,0,.22),
+    var(--shadow-lift) !important;
+}
+
+.rail {
+  border-radius: 0 !important;
+  border-right: 1px solid var(--hairline) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.025)) !important;
+}
+
+/* ------------------------------------------------------------------ accent */
+.nav-item.on {
+  background: linear-gradient(90deg, var(--accent-dim), rgba(124,92,255,.05)) !important;
+  box-shadow: inset 0 0 0 1px rgba(124,92,255,.3),
+              inset 0 1px 0 0 rgba(255,255,255,.07) !important;
+}
+.nav-item.on .ico { color: var(--accent-2); }
+.brand-dot { box-shadow: 0 0 0 3px rgba(124,92,255,.18), 0 0 14px var(--accent-glow); }
+
+.btn.pri, .btn.primary {
+  background: var(--grad) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: 0 2px 18px -4px var(--accent-glow),
+              inset 0 1px 0 0 rgba(255,255,255,.28) !important;
+}
+.btn { backdrop-filter: blur(10px); }
+.tab.on { background: var(--accent-dim); border-color: rgba(124,92,255,.32); }
+.seg-b.on { background: var(--accent-dim); color: var(--accent-2); }
+.bar-f { background: var(--grad); }
+.sw input:checked + i { background: rgba(124,92,255,.42); }
+.sw input:checked + i:before { background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(124,92,255,.62) !important;
+  box-shadow: 0 0 0 3px rgba(124,92,255,.14) !important;
+}
+.log-s { color: var(--accent-2); }
+
+/* A hero panel: the one place the gradient is the surface, not an accent. */
+.card.hero {
+  background: var(--grad) !important;
+  border-color: transparent !important;
+  box-shadow: 0 18px 50px -18px var(--accent-glow),
+              inset 0 1px 0 0 rgba(255,255,255,.3) !important;
+}
+.card.hero .card-t, .card.hero .stat-k, .card.hero .stat-s,
+.card.hero .faint, .card.hero .muted { color: rgba(255,255,255,.82) !important; }
+.card.hero .stat-v, .card.hero .card-b { color: #fff; }
+
+/* Numbers are the point of this dashboard: let them be the brightest thing. */
+.stat-v, .kpi-v { color: var(--text); }
+.up { color: var(--up) !important; }
+.down { color: var(--down) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card { transition: none; }
+}

@@ -316,7 +316,8 @@ export function palette() {
   return {
     up: css("--up", "#35c98b"), down: css("--down", "#f2555a"),
     grid: css("--hairline", "#232b36"), text: css("--faint", "#64707f"),
-    muted: css("--muted", "#9aa7b8"), accent: css("--accent", "#4c8dff"),
+    muted: css("--muted", "#9aa7b8"), accent: css("--accent", "#7c5cff"),
+    accent2: css("--accent-2", "#38a8ff"),
     surface: css("--surface", "#161b22"), ink: css("--text", "#e8edf4"),
     warn: css("--warn", "#e8a33d"),
   };
@@ -810,7 +811,11 @@ export class PortfolioChart {
     for (const q of vis) { if (q.x >= v0 && q.x <= v1) { if (!firstVis) firstVis = q; lastVis = q; } }
     if (!firstVis) { firstVis = vis[0]; lastVis = vis[vis.length - 1]; }
     const ref = (S[0].x >= v0 && base != null) ? base : firstVis.v;
-    const col = lastVis.v >= ref ? C.up : C.down;
+    /* The curve is drawn in the theme's accent, not in green or red. Whether
+       the period is up or down is already stated in words above the chart,
+       and a full-height wash of colour to say it again is just glare. */
+    const col = C.accent;
+    const col2 = C.accent2;
 
     /* ---- grid + value axis ---- */
     g.font = "10.5px ui-monospace, monospace"; g.textBaseline = "middle";
@@ -854,8 +859,9 @@ export class PortfolioChart {
 
     // area under the line, fading to nothing
     const grad = g.createLinearGradient(0, padT, 0, padT + plotH);
-    grad.addColorStop(0, withAlpha(col, 0.28));
-    grad.addColorStop(1, withAlpha(col, 0.0));
+    grad.addColorStop(0, withAlpha(col, 0.34));
+    grad.addColorStop(0.55, withAlpha(col2, 0.12));
+    grad.addColorStop(1, withAlpha(col2, 0.0));
     g.beginPath();
     g.moveTo(X(vis[0].x), Y(vis[0].v));
     for (let i = 1; i < vis.length; i++) g.lineTo(X(vis[i].x), Y(vis[i].v));
@@ -865,13 +871,17 @@ export class PortfolioChart {
     g.fillStyle = grad; g.fill();
 
     // the line itself: every vertex is a received value
-    g.strokeStyle = col; g.lineWidth = 1.7; g.lineJoin = "round"; g.lineCap = "round";
+    const line = g.createLinearGradient(0, 0, plotW, 0);
+    line.addColorStop(0, col); line.addColorStop(1, col2);
+    g.strokeStyle = line; g.lineWidth = 1.9; g.lineJoin = "round"; g.lineCap = "round";
+    g.shadowColor = withAlpha(col, 0.5); g.shadowBlur = 12;
     g.beginPath();
     for (let i = 0; i < vis.length; i++) {
       const x = X(vis[i].x), y = Y(vis[i].v);
       i ? g.lineTo(x, y) : g.moveTo(x, y);
     }
     g.stroke();
+    g.shadowBlur = 0; g.shadowColor = "transparent";   // the glow is the line's alone
 
     // the newest point
     const last = S[S.length - 1];
