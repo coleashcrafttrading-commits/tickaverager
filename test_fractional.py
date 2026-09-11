@@ -1042,9 +1042,14 @@ def s21_ui_wiring() -> None:
         m = re.search(r'k: "%s"[^}]*step: ([0-9.]+), min: ([0-9.]+)' % k, fields)
         check(f"fields.js {k}: step 0.01, min {mn}", (m and m.group(1), m and m.group(2)), ("0.01", mn))
     check("fields.js: the Fractional shares legend", 'legend: "Fractional shares"' in fields, True)
-    for name in ("views/ticker.js", "views/overview.js", "views/performance.js", "chart.js", "app.js",
-                 "views/risk.js", "views/add.js", "views/backtest.js", "views/tester.js"):
+    # The dashboard's page list moves as the app is reorganised; what this
+    # check is really about is that EVERY view rendering a quantity formats it
+    # through core.qty, so ask the directory rather than a frozen list.
+    for name in sorted(str(f.relative_to(ui)).replace("\\", "/")
+                       for f in [ui / "app.js", ui / "chart.js"] + sorted((ui / "views").glob("*.js"))):
         src = (ui / name).read_text(encoding="utf-8")
+        if not re.search(r"\$\{[^}]*(qty|shares)", src) and "qty(" not in src:
+            continue                      # a view with no quantity in it needs no formatter
         check(f"{name} imports qty", bool(re.search(r"import \{[^}]*\bqty\b[^}]*\} from \"\.\.?/core\.js\"", src)), True)
     ticker = (ui / "views" / "ticker.js").read_text(encoding="utf-8")
     overview = (ui / "views" / "overview.js").read_text(encoding="utf-8")
