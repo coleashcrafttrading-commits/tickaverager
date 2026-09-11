@@ -308,11 +308,20 @@ function paintTop() {
 
   if (!ov) { el("kpis").innerHTML = ""; return; }
   const p = ov.portfolio;
+  /* Two numbers, each the whole truth: realized AND unrealized together.
+     Today is the account against yesterday's close, all time against the
+     equity it opened with. The split sits underneath as the sub-line, so a
+     number on this strip can never disagree with the one beside it. */
+  const todayPl = p.today_pl != null ? p.today_pl : p.made_today;
+  const totalPl = p.total_pl;
+  const uToday = p.unrealized_today != null ? p.unrealized_today : p.open_today;
+  const uTotal = p.unrealized_total != null ? p.unrealized_total : p.open_pl;
   el("kpis").innerHTML = `
-    <div><div class="kpi-k">Realized today</div><div class="kpi-v num">${sgn(p.realized_today)}</div></div>
-    <div><div class="kpi-k">Realized total</div><div class="kpi-v num">${sgn(p.realized_total)}</div></div>
-    <div><div class="kpi-k">Unrealized today</div><div class="kpi-v num">${sgn(p.unrealized_today != null ? p.unrealized_today : p.open_today)}</div></div>
-    <div><div class="kpi-k">Unrealized total</div><div class="kpi-v num">${sgn(p.unrealized_total != null ? p.unrealized_total : p.open_pl)}</div></div>`;
+    <div><div class="kpi-k">Account value</div><div class="kpi-v num">${money(p.account_value)}</div></div>
+    <div><div class="kpi-k">P/L today</div><div class="kpi-v num">${sgn(todayPl)}</div>
+         <div class="kpi-sub num">${sgn(p.realized_today)} booked · ${sgn(uToday)} open</div></div>
+    <div><div class="kpi-k">P/L all time</div><div class="kpi-v num">${sgn(totalPl)}</div>
+         <div class="kpi-sub num">${sgn(p.realized_total)} booked · ${sgn(uTotal)} open</div></div>`;
 }
 
 /* ---------------------------------------------------------------- render */

@@ -49,6 +49,8 @@ class FakeAlpaca:
         return {"is_open": False}
 
     def portfolio_history(self, period="1D", timeframe="1Min", extended=True, date_end=""):
+        if period == "all":
+            return {"timestamp": [1], "equity": [10000.0], "base_value": 10000.0}
         return {"timestamp": [1000, 1060, 1120], "equity": [12300.0, None, 12345.5],
                 "profit_loss": [0.0, None, 45.5], "profit_loss_pct": [0.0, None, 0.0037],
                 "base_value": 12300.0, "timeframe": timeframe}
@@ -283,6 +285,29 @@ def main() -> int:
         check("a chart read never moves the engine's own feed", fl.broker.feed, "boats")
         check("an iex-entitled account reads its own tape", _fleet.Fleet.day_feed(
               type("F", (), {"gcfg": {"feed": "auto"}, "acct": type("A", (), {"feed": "iex"})()})()), "iex")
+
+        print("\n3g. one P/L for today and one for all time, and both pairs add up")
+        fl.account = {"equity": "10500", "last_equity": "10600", "cash": "1000",
+                      "buying_power": "4000"}
+        fl.positions = {"RAM": {"symbol": "RAM", "qty": "10", "avg_entry_price": "10",
+                                "current_price": "9.5", "cost_basis": "100",
+                                "market_value": "95", "unrealized_pl": "-40",
+                                "unrealized_plpc": "-0.04", "unrealized_intraday_pl": "-160"}}
+        fl._bv_cache = None
+        pf = fl.portfolio()
+        check("the account started where Alpaca says it did", pf["base_value"], 10000.0)
+        check("today = equity - yesterday's close", pf["today_pl"], -100.0)
+        check("all time = equity - the starting equity", pf["total_pl"], 500.0)
+        check("today's pair adds up to today",
+              round(pf["realized_today"] + pf["unrealized_today"], 2), pf["today_pl"])
+        check("all time's pair adds up to all time",
+              round(pf["realized_total"] + pf["unrealized_total"], 2), pf["total_pl"])
+        check("unrealized is Alpaca's mark, not a local guess",
+              (pf["unrealized_total"], pf["unrealized_today"]), (-40.0, -160.0))
+        check("the journal figure is kept, and labelled as the ladders' own",
+              "ladder_realized" in pf, True)
+        check("a failed history call never reports the whole account as profit",
+              fl.base_value(max_age=0) > 0, True)
 
         print("\n4. the account gets its own files")
         acc = app_mod.REG.get("glenn-momentum")

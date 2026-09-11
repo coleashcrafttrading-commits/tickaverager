@@ -990,6 +990,36 @@ class Fleet:
         return round(sum(abs(float(p.get("cost_basis") or 0))
                          for p in self.positions.values()), 2)
 
+    def base_value(self, max_age: float = 900.0) -> float:
+        """The equity this account STARTED with, from Alpaca's own history.
+
+        `total_pl` is measured against this, so it must be the broker's number
+        and not a local guess. It only changes when money is paid in or out,
+        so it is re-read a few times an hour and falls back to the last known
+        value (then to today's opening equity) whenever the call fails --
+        never to 0, which would report the whole account as profit.
+        """
+        import time as _time
+        now = _time.time()
+        cache = getattr(self, "_bv_cache", None)
+        if cache and now - cache[0] < max_age:
+            return cache[1]
+        val = 0.0
+        b = self.broker
+        if b:
+            try:
+                raw = b.portfolio_history("all", "1D") or {}
+                val = float(raw.get("base_value") or 0)
+                if not val:
+                    eqs = [e for e in (raw.get("equity") or []) if e]
+                    val = float(eqs[0]) if eqs else 0.0
+            except Exception as e:
+                LOG.warning("base_value: %s", e)
+        if not val:
+            val = (cache[1] if cache else 0.0) or float(self.account.get("last_equity") or 0)
+        self._bv_cache = (now, round(val, 2))
+        return self._bv_cache[1]
+
     def made_today(self) -> float:
         eq = float(self.account.get("equity") or 0)
         last = float(self.account.get("last_equity") or 0)
@@ -1205,18 +1235,29 @@ class Fleet:
         open_pl = round(sum(p["unrealized_pl"] for p in positions), 2)
         intraday = round(sum(p["unrealized_intraday_pl"] for p in positions), 2)
         made = self.made_today()
+        # The two numbers that matter, both straight from the account: what it
+        # made since yesterday's close, and what it has made since it opened.
+        base = self.base_value()
+        total_pl = round(eq - base, 2) if (eq and base) else 0.0
         return {
             "account_value": eq,
             "start_of_day": last_eq,
-            "made_today": made,
-            # today: Alpaca's own numbers (equity vs last_equity, intraday marks)
+            "base_value": base,
+            # ---- headline: realized AND unrealized together ----
+            "today_pl": made,
+            "total_pl": total_pl,
+            "made_today": made,                      # legacy name for today_pl
+            # Each pair adds up to its headline by construction: unrealized is
+            # Alpaca's mark, realized is whatever the rest of the move was.
             "realized_today": round(made - intraday, 2),
             "open_today": intraday,
             "unrealized_today": intraday,
-            # all time: what this account's ladders have actually booked (the journal)
-            "realized_total": self.realized_total(),
+            "realized_total": round(total_pl - open_pl, 2),
             "open_pl": open_pl,
             "unrealized_total": open_pl,
+            # what these LADDERS booked (the journal). A strategy statistic,
+            # not an account one: it starts when the journal file does.
+            "ladder_realized": self.realized_total(),
             "cash": float(acct.get("cash") or 0),
             "buying_power": float(acct.get("buying_power") or 0),
             "deployed": self.deployed(),
