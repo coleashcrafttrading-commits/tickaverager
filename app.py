@@ -1106,6 +1106,45 @@ def indicators_custom_delete(key: str):
     return {"ok": aiwrite.delete(key)}
 
 
+# ================================================================ strategy bank
+# One shelf for both kinds of strategy -- the clicked documents and the coded
+# ones -- because a strategy Claude writes lands in the same place as a
+# strategy built by hand, and neither is any use if the dashboard cannot see it.
+@app.get("/api/bank")
+def bank_list():
+    import bank
+    return {"ok": True, "strategies": bank.listing()}
+
+
+@app.get("/api/bank/{kind}/{slug}")
+def bank_detail(kind: str, slug: str):
+    import bank
+    try:
+        return {"ok": True, **bank.detail(kind, slug)}
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(404, f"{kind} strategy {slug!r}: {e}")
+
+
+@app.post("/api/bank/{kind}/{slug}/params")
+def bank_set_params(kind: str, slug: str, body: dict = Body(default={})):
+    """Turn the numbers a strategy already has. Never changes its shape.
+
+    Adding an indicator or rewriting a rule is a different act with different
+    consequences, and it belongs in the builder; this refuses any path that is
+    not already a tunable on that strategy.
+    """
+    import bank
+    patch = body.get("params") if isinstance(body.get("params"), dict) else body
+    try:
+        return bank.set_params(kind, slug, patch or {})
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"could not save: {e}")
+
+
 @app.get("/api/code")
 def code_list():
     import btcode
