@@ -607,13 +607,57 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
     """
     rows = journal.load(symbol=symbol.upper(), days=days or None, path=f.journal_path)
     inv = journal.open_inventory(journal.load(symbol=symbol.upper(), path=f.journal_path))
+
+    # The open book is what the booked figure hides, so it is valued here at
+    # the same marks the engines trade on. A symbol the fleet no longer holds
+    # has no mark; stats() lists those rather than pretending they are flat.
+    marks = {}
+    for sym in {str(x.get("symbol") or "") for x in inv}:
+        if not sym:
+            continue
+        px = 0.0
+        try:
+            q = f.quote_of(sym) or {}
+            bid, ask = float(q.get("bp") or 0), float(q.get("ap") or 0)
+            px = round((bid + ask) / 2, 4) if (bid and ask) else float(
+                (f.trade_of(sym) or {}).get("p") or 0)
+            if not px:
+                p = f.positions.get(sym) or {}
+                px = float(p.get("current_price") or 0)
+        except Exception:
+            px = 0.0
+        if px > 0:
+            marks[sym] = px
+
+    # Alpaca's own account curve: the only honest total-P/L-over-time series,
+    # since the journal cannot value a past open book. None when the call
+    # fails, and the report then says which curve it is drawing.
+    equity, equity_base = None, None
+    if f.broker:
+        try:
+            per = "1M" if not days else ("1D" if days <= 1 else "1W" if days <= 7 else "1M")
+            raw = f.broker.portfolio_history(per, "1D" if days != 1 else "5Min") or {}
+            base = float(raw.get("base_value") or 0)
+            eq = raw.get("equity") or []
+            ts = raw.get("timestamp") or []
+            equity = [{"t": float(t), "equity": round(float(e), 2),
+                       "pl": round(float(e) - base, 2)}
+                      for t, e in zip(ts, eq) if e is not None]
+            equity_base = round(base, 2)
+        except Exception as e:
+            LOG.warning("performance equity curve: %s", e)
+            equity = None
+
     return {
         "ok": True,
         "account": f.account_id,
         "symbol": symbol.upper() or "ALL",
         "days": days or None,
         "rows": len(rows),
-        "stats": journal.stats(rows),
+        "stats": journal.stats(rows, marks=marks, inventory=inv),
+        "marks": marks,
+        "equity": equity,
+        "equity_base": equity_base,
         "inventory": inv,
         "inventory_cost": round(sum(x["cost"] for x in inv), 2),
         "oldest_days": max([x["age_days"] for x in inv], default=0),

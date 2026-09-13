@@ -478,6 +478,12 @@ class Lot:
     side: str = "long"          # long | short; never mix on one ledger
     entry_latency_ms: float = 0.0   # strategy trigger -> entry order accepted by Alpaca
     tp_latency_ms: float = 0.0      # fill booked -> take-profit accepted by Alpaca
+    # maximum adverse excursion: the worst unrealized DOLLARS this lot has been
+    # down, <= 0. The journal cannot reconstruct this after the fact -- the
+    # price path is gone once the lot closes -- so it is measured on every tick
+    # while the lot is open and travels with it into the close row.
+    mae: float = 0.0
+    mae_at: str = ""                # when that low happened
 
     @property
     def cost(self) -> float:
@@ -910,6 +916,7 @@ class Engine:
         self._roll_session()
         self._session_edge()
         self._refresh_market()
+        self._track_mae()          # how far underwater each open lot has been
         self._book_basket_progress()   # a basket close in flight books its fills HERE,
                                        # before reconcile can mistake them for a gap
         self._reconcile()          # fills, TPs, sync guard
@@ -928,6 +935,27 @@ class Engine:
         if self._maybe_reverse_entry():
             return
         self._maybe_decide()       # entries / adds on a completed bar
+
+    def _track_mae(self) -> None:
+        """The worst each open lot has been down, in dollars.
+
+        Cheap by construction: it reads the mark the tick already fetched and
+        touches only the lots that just got worse, so a quiet tick writes
+        nothing and the ledger is saved only when a new low is actually set.
+        """
+        px = self.last_price or 0.0
+        if px <= 0 or not self.ledger.open_lots:
+            return
+        worse = False
+        for lot in self.ledger.open_lots:
+            d = self._dir(getattr(lot, "side", "long"))
+            pl = (px - float(lot.entry_price)) * qty(lot.shares) * d
+            if pl < float(getattr(lot, "mae", 0.0) or 0.0):
+                lot.mae = round(pl, 4)
+                lot.mae_at = _now_ny().isoformat(timespec="seconds")
+                worse = True
+        if worse:
+            self.ledger.save()
 
     # ---------------- session ----------------
     def _session_edge(self) -> None:

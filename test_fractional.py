@@ -58,7 +58,16 @@ def _subset_eq(got, want, path="") -> list:
                 out += _subset_eq(got[k], v, f"{path}.{k}")
         for k in got:
             if k not in want:
-                print(f"      (status gained {path}.{k} = {got[k]!r}, not in the golden)")
+                print(f"      (gained {path}.{k} = {got[k]!r}, not in the golden)")
+    elif isinstance(want, list) and isinstance(got, list):
+        # a ledger's open_lots, a status's orders: same length, and every
+        # element compared the same way, so a lot gaining a field is allowed
+        # while a lot CHANGING one is not
+        if len(got) != len(want):
+            out.append(f"{path}: {len(got)} items, golden had {len(want)}")
+        else:
+            for i, (g, w) in enumerate(zip(got, want)):
+                out += _subset_eq(g, w, f"{path}[{i}]")
     elif got != want:
         out.append(f"{path}: {got!r} != {want!r}")
     return out
@@ -1115,20 +1124,32 @@ def s17_golden() -> None:
     if got["calls"] != golden["calls"]:
         print("      calls differ " + _first_diff(got["calls"], golden["calls"]))
     check("every broker call is byte-identical", got["calls"] == golden["calls"], True)
-    same = 0
+    # The ledger and the journal are compared the way status() already is:
+    # every value the golden recorded must still be exactly that value, while
+    # a field LATER ADDED to the schema (lot.mae, the close row's mae/mae_at)
+    # is allowed and printed. Byte-equality would have made "record one more
+    # fact about a lot" indistinguishable from "change what a whole-share
+    # ladder does", which is the only thing this capture exists to catch.
+    same, diffs = 0, []
     for g, w in zip(got["ledgers"], golden["ledgers"]):
-        if g == w:
+        d = _subset_eq(json.loads(g["ledger"]), json.loads(w["ledger"]), w["step"])
+        if not d:
             same += 1
         else:
-            print(f"      ledger after {w['step']!r} differs " + _first_diff(g["ledger"], w["ledger"]))
-    check("every ledger dump is byte-identical", (same, len(got["ledgers"])),
+            diffs += d
+            print(f"      ledger after {w['step']!r} differs: {d[:2]}")
+    check("every ledger value the golden recorded is unchanged", (same, len(got["ledgers"])),
           (len(golden["ledgers"]), len(golden["ledgers"])))
-    if got["journal"] != golden["journal"]:
-        for i, (g, w) in enumerate(zip(got["journal"], golden["journal"])):
-            if g != w:
-                print(f"      journal row {i} differs:\n        got  {g}\n        want {w}")
-                break
-    check("every journal row is identical (ts/hold/cfg aside)", got["journal"] == golden["journal"], True)
+    jd: list = []
+    for i, (g, w) in enumerate(zip(got["journal"], golden["journal"])):
+        d = _subset_eq(g, w, f"row{i}")
+        if d:
+            jd += d
+            print(f"      journal row {i} differs: {d[:2]}")
+            break
+    check("every journal value the golden recorded is unchanged", jd, [])
+    check("the journal still has the same number of rows",
+          len(got["journal"]), len(golden["journal"]))
     check("every recorded status value identical", _subset_eq(got["status"], golden["status"], "status"), [])
     check("every recorded summary value identical", _subset_eq(got["summary"], golden["summary"], "summary"), [])
     check("status/summary/next-lot types unchanged", got["types"], golden["types"])

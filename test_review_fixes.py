@@ -53,6 +53,20 @@ from engine import Ledger, Lot                    # noqa: E402
 from broker import AlpacaError                    # noqa: E402
 
 engine.FREEZE_PATH = SCRATCH / "FROZEN"
+
+# Pin the clock to a Monday inside regular hours, the way test_touch_adds
+# does. Without it these checks passed on a weekday and failed every weekend:
+# session_now() answered "closed", block_reason became cancel-class, and a
+# resumed engine retired the very rung that section 3 arms to prove a disarm
+# is REFUSED while one is working. The refusal was fine; the calendar was not.
+from datetime import datetime as _dt                # noqa: E402
+try:
+    from zoneinfo import ZoneInfo as _ZI            # noqa: E402
+    _NY = _ZI("America/New_York")
+except Exception:                                   # pragma: no cover
+    _NY = engine._now_ny().tzinfo
+engine._now_ny = lambda: _dt(2026, 8, 24, 10, 0, tzinfo=_NY)
+
 engine.journal.record_open = lambda *a, **k: None
 engine.journal.record_close = lambda *a, **k: None
 engine.journal.record_event = lambda *a, **k: None

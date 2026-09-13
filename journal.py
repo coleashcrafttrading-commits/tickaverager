@@ -165,6 +165,11 @@ def record_close(engine: Any, lot: Any, shares: float, price: float,
         "realized":    round(float(realized), 4),
         "why":         why,
         "hold_seconds": held,
+        # how far underwater this lot went before it cleared. Absent on lots
+        # opened before the engine began measuring, which is why every figure
+        # derived from it is None rather than 0 when it is missing.
+        "mae":         round(float(getattr(lot, "mae", 0.0) or 0.0), 4),
+        "mae_at":      str(getattr(lot, "mae_at", "") or ""),
         "entry_time":  lot.entry_time,
         "ladder_lots": len(engine.ledger.open_lots),
         "session":     engine._session_now(),
@@ -280,7 +285,8 @@ def real_trades(rows: list[dict]) -> list[dict]:
     return [r for r in rows if not is_bookkeeping(r)]
 
 
-def stats(rows: list[dict]) -> dict:
+def stats(rows: list[dict], marks: dict | None = None,
+          inventory: list[dict] | None = None) -> dict:
     """Performance, sliced the ways that actually inform a settings change.
 
     Note what is deliberately NOT here: a win rate. Every lot exits on its own
@@ -289,6 +295,11 @@ def stats(rows: list[dict]) -> dict:
     losing trades -- it is capital getting stuck in lots that never clear. So
     the metrics are about VELOCITY (how fast capital recycles) and INVENTORY
     (what is still open, and how old).
+
+    `marks` is {SYMBOL: current price} from the live fleet. Without it the open
+    side cannot be valued, so `marked` is False and every figure that depends
+    on a price is None -- deliberately, because rendering 0 for "not measured"
+    is what let a ladder look flat while holding lots it had left far behind.
     """
     closes = [r for r in rows if r.get("event") in ("close", "partial")
               and not r.get("dry_run") and not is_bookkeeping(r)]
@@ -301,6 +312,38 @@ def stats(rows: list[dict]) -> dict:
     deployed = sum(float(r.get("cost") or 0) for r in opens)
 
     days = _distinct_days(rows)
+
+    # ---- the open side, marked ----
+    inv = inventory if inventory is not None else open_inventory(rows)
+    marks = marks or {}
+    marked = bool(marks)
+    unmarked = sorted({x["symbol"] for x in inv if x["symbol"] not in marks})
+    unreal = None
+    mval = None
+    if marked:
+        unreal = 0.0
+        mval = 0.0
+        for x in inv:
+            m = marks.get(x["symbol"])
+            if m is None:
+                continue
+            d = -1 if str(x.get("side") or "long") == "short" else 1
+            sh = qty(x.get("shares"))
+            unreal += (float(m) - float(x.get("entry_price") or 0)) * sh * d
+            mval += float(m) * sh
+        unreal = round(unreal, 2)
+        mval = round(mval, 2)
+    total_pl = round(realized + unreal, 2) if unreal is not None else None
+
+    # ---- the metrics a strategy result carries ----
+    wins = [r for r in closes if float(r.get("realized") or 0) > 0]
+    losses = [r for r in closes if float(r.get("realized") or 0) < 0]
+    gross_w = sum(float(r.get("realized") or 0) for r in wins)
+    gross_l = abs(sum(float(r.get("realized") or 0) for r in losses))
+    maes = [float(r["mae"]) for r in closes if r.get("mae") not in (None, "")]
+    mae_rows = [r for r in rows if r.get("mae") not in (None, "") and r.get("ts")]
+    curve, dd, ddp, peak_cap = _curve(rows, closes, realized, unreal, total_pl, len(inv))
+
     return {
         "opens": len(opens),
         "closes": len(closes),
@@ -320,10 +363,99 @@ def stats(rows: list[dict]) -> dict:
         "realized_per_day": round(realized / days, 2) if days else 0.0,
         "closes_per_day": round(len(closes) / days, 2) if days else 0.0,
         "max_ladder_depth": max([int(r.get("rung") or 0) for r in opens], default=0),
-        "by_rung": _by_rung(opens, closes),
+
+        # ---- the open book, and the headline it completes ----
+        "marked": marked,
+        "unrealized": unreal,
+        "total_pl": total_pl,
+        "open_lots": len(inv),
+        "open_shares": qnum(round(sum(qty(x.get("shares")) for x in inv), 6)),
+        "open_cost": round(sum(float(x.get("cost") or 0) for x in inv), 2),
+        "open_market_value": mval,
+        "unmarked_symbols": unmarked,
+
+        # ---- what a strategy result reports ----
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": round(100 * len(wins) / len(closes), 1) if closes else 0.0,
+        # every lot exits on its own take-profit and nothing stops a loser out,
+        # so with no losses this is ~100% by construction and means nothing
+        "win_rate_meaningful": bool(losses),
+        "avg_win": round(gross_w / len(wins), 2) if wins else 0.0,
+        "avg_loss": round(-gross_l / len(losses), 2) if losses else 0.0,
+        "expectancy": round(realized / len(closes), 2) if closes else 0.0,
+        # None, never infinity: nothing lost is a fact about the window
+        "profit_factor": round(gross_w / gross_l, 3) if gross_l else None,
+        "max_drawdown": dd,
+        "max_drawdown_pct": ddp,
+        "peak_capital": peak_cap,
+        "return_on_peak_capital_pct":
+            round(100 * total_pl / peak_cap, 3) if (peak_cap and total_pl is not None) else None,
+        "avg_mae": round(sum(maes) / len(maes), 2) if maes else None,
+        "worst_mae": round(min(maes), 2) if maes else None,
+        "mae_since": min((str(r["ts"])[:10] for r in mae_rows), default=""),
+        "equity_curve": curve,
+
+        "by_rung": _by_rung(opens, closes, marks, inv),
         "by_config": _by_config(rows),
         "by_session": _by_session(closes),
     }
+
+
+def _curve(rows: list[dict], closes: list[dict], realized: float,
+           unreal, total_pl, open_lots: int):
+    """Cumulative P/L per closed lot, plus where it is now.
+
+    `unrealized` is None on every historical point on purpose: valuing a past
+    open book would mean refetching the price path, and a guess drawn as a
+    line is worse than an honest gap. Only the final point -- the one marked
+    `now` -- carries the real open side.
+    """
+    run = 0.0
+    peak = 0.0
+    dd = 0.0
+    out = []
+    for n, r in enumerate(sorted(closes, key=lambda x: str(x.get("ts") or "")), 1):
+        run = round(run + float(r.get("realized") or 0), 2)
+        peak = max(peak, run)
+        dd = min(dd, round(run - peak, 2))
+        out.append({"t": r.get("ts"), "n": n, "realized": run,
+                    "unrealized": None, "total_pl": None, "open_lots": None})
+    # the open book can only drag the curve below its own peak, so the low
+    # point of the whole record includes where it stands right now
+    if total_pl is not None:
+        dd = min(dd, round(total_pl - peak, 2))
+    out.append({"t": _now_iso(), "n": len(out), "realized": round(realized, 2),
+                "unrealized": unreal, "total_pl": total_pl,
+                "open_lots": open_lots, "now": True})
+    peak_cap = _peak_capital(rows)
+    ddp = round(100 * dd / peak, 2) if peak else 0.0
+    return out, round(dd, 2), ddp, peak_cap
+
+
+def _peak_capital(rows: list[dict]) -> float:
+    """The most cost basis the ladders held at once, walked over the journal."""
+    live: dict[str, float] = {}
+    peak = 0.0
+    for r in sorted(rows, key=lambda x: str(x.get("ts") or "")):
+        if r.get("dry_run"):
+            continue
+        lid = str(r.get("lot_id") or "")
+        ev = r.get("event")
+        if ev == "open":
+            live[lid] = qty(r.get("shares")) * float(r.get("entry_price") or 0)
+        elif ev in ("close", "partial"):
+            if ev == "close":
+                live.pop(lid, None)
+            elif lid in live:
+                live[lid] = max(0.0, live[lid] - qty(r.get("shares")) * float(r.get("entry_price") or 0))
+        peak = max(peak, sum(live.values()))
+    return round(peak, 2)
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _distinct_days(rows: list[dict]) -> int:
@@ -338,7 +470,8 @@ def _median(xs: list[int]) -> int:
     return int(s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2)
 
 
-def _by_rung(opens: list[dict], closes: list[dict]) -> dict:
+def _by_rung(opens: list[dict], closes: list[dict],
+             marks: dict | None = None, inventory: list | None = None) -> dict:
     """Which depths of the ladder get used, and what they pay.
 
     A rung that is opened often but clears slowly is where the capital is
@@ -364,6 +497,43 @@ def _by_rung(opens: list[dict], closes: list[dict]) -> dict:
             holds.setdefault(k, []).append(int(r["hold_seconds"]))
     for k, hs in holds.items():
         by[k]["avg_hold_seconds"] = int(sum(hs) / len(hs))
+
+    # How deep the hole got at each depth of the ladder -- the question
+    # add_distance is really an answer to. Measured live by the engine (a lot
+    # cannot be re-walked after it closes), so a lot opened before that
+    # recording began carries none and the rung reports None, not 0.
+    maes: dict[str, list] = {}
+    for r in closes:
+        k = lot_rung.get(r.get("lot_id"))
+        if k is not None and r.get("mae") not in (None, ""):
+            maes.setdefault(k, []).append(float(r["mae"]))
+    for k, d in by.items():
+        d["drawdown_from"] = len(maes.get(k, []))
+        d["max_drawdown"] = round(min(maes[k]), 2) if maes.get(k) else None
+        d["avg_drawdown"] = round(sum(maes[k]) / len(maes[k]), 2) if maes.get(k) else None
+        d["open"] = 0
+        d["unrealized"] = None
+        d["total_pl"] = None
+
+    # the open lots at each rung, marked
+    if inventory:
+        marks = marks or {}
+        for x in inventory:
+            k = str(x.get("rung") or 0)
+            d = by.setdefault(k, {"opened": 0, "closed": 0, "realized": 0.0,
+                                  "avg_hold_seconds": 0, "drawdown_from": 0,
+                                  "max_drawdown": None, "avg_drawdown": None,
+                                  "open": 0, "unrealized": None, "total_pl": None})
+            d["open"] += 1
+            m = marks.get(x["symbol"])
+            if m is None:
+                continue
+            sd = -1 if str(x.get("side") or "long") == "short" else 1
+            pl = (float(m) - float(x.get("entry_price") or 0)) * qty(x.get("shares")) * sd
+            d["unrealized"] = round((d["unrealized"] or 0.0) + pl, 2)
+        for d in by.values():
+            if d["unrealized"] is not None:
+                d["total_pl"] = round(d["realized"] + d["unrealized"], 2)
     return dict(sorted(by.items(), key=lambda kv: int(kv[0])))
 
 
