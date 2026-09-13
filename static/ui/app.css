@@ -1270,3 +1270,73 @@ input:focus, select:focus, textarea:focus {
 
 /* Stats stacked in a narrow rail rather than spread across a page. */
 .stats.col { grid-template-columns: 1fr; gap: 14px; }
+
+/* ==========================================================================
+   Portfolio -> History (Sept 2026). Total P/L leads; a number that is missing
+   says WHY in the space where it would have been, because a 0 in the open
+   column reads as "nothing is underwater". Used only by views/performance.js.
+   ========================================================================== */
+
+/* The scope picker lives above the grid, not in a card: on a phone the rail
+   (and the hero it carries) is ordered first, and the control that changes
+   the headline figure must not end up underneath it. */
+.pf-scope {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.pf-scope select { width: auto; min-height: 40px; }
+.pf-scope .pf-rows { font-size: 12px; }
+
+/* An absent value. Amber, never blank and never zero -- the reason is the
+   value, and it carries the same text as a title for a narrow column. */
+.pf-none { color: var(--warn); font-size: .92em; white-space: nowrap; }
+.pf-none-lg { font-size: 18px; font-weight: 620; letter-spacing: -.01em; }
+.card.hero .pf-none { color: #ffe3ad; }
+/* In a stat tile the reason takes the number's place but not its weight: a
+   figure that does not exist should not be the loudest thing on the card. */
+.stat-v .pf-none {
+  display: inline-block; font-size: 13.5px; font-weight: 600;
+  line-height: 1.4; white-space: normal;
+}
+
+/* A labelled hairline so one card can carry two blocks of stats. */
+.pf-div {
+  display: flex; align-items: center; gap: 12px;
+  margin: 24px 0 16px; color: var(--faint);
+  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.pf-div::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+
+/* A footnote under a flush table, which has no padding of its own. */
+.pf-foot { padding: 12px 18px 16px; margin-top: 0; }
+
+/* The hero's headline gets a line of context, and each of its two halves a
+   third line (lots, cost, age) under the figure. */
+.hero-x { display: block; font-size: 11.5px; opacity: .78; margin-top: 7px; }
+.hero-lx { display: block; font-size: 11px; opacity: .78; margin-top: 3px; }
+
+/* A report in the list: name, size, open, delete. */
+.pf-rep {
+  display: flex; gap: 9px; align-items: center; padding: 7px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.pf-rep:last-child { border-bottom: 0; }
+.pf-rep-n { flex: 1; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 480px) {
+  .pf-scope { gap: 8px; }
+  .pf-scope select { flex: 1 1 138px; }
+  .pf-scope .pf-rows { flex: 1 0 100%; }
+  .pf-foot { padding: 12px 14px 14px; }
+  .pf-none-lg { font-size: 16px; }
+  /* every tap target on this tab clears 40px */
+  .pf-reps .btn { flex: 1 1 auto; justify-content: center; min-height: 40px; }
+  .pf-rep .btn { min-height: 40px; min-width: 40px; justify-content: center; }
+}
+
+/* Reports sits full width beneath the tables, the way Live puts Activity
+   there; its content stays a readable column rather than four buttons
+   stranded across 1,100px. */
+.pf-repcard .card-b > * { max-width: 760px; }
