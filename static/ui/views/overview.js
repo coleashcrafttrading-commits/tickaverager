@@ -4,7 +4,7 @@
    Three tabs, three questions:
      Live     what is happening right now, and the four fleet-wide actions
      Orders   what Alpaca holds and what is working there -- the broker's view
-     History  what the ladders have booked, and the printable reports
+     History  total P/L for these ladders, the metrics behind it, and the reports
 
    The account's money -- value, P/L today, P/L all time -- is in the strip at
    the top of EVERY page and is not repeated here. This page's own stats are
@@ -95,7 +95,7 @@ const SUB = {
   live: (ov) => ov ? `${ov.totals.count} ticker${ov.totals.count === 1 ? "" : "s"} · `
     + `${ov.totals.running} running · ${ov.totals.armed} armed` : "",
   orders: () => "what Alpaca holds and what is working there",
-  history: () => "what the ladders booked, from the trade journal",
+  history: () => "total P/L for these ladders -- booked and still open",
 };
 
 VIEWS.overview = {
