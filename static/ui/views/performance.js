@@ -108,8 +108,6 @@ export function mountHistory() {
             <button class="btn sm" data-rep="full">Full history</button>
           </div>
           <div id="pfReports"></div>`, "", { cls: "pf-repcard" })}
-        ${card("Open inventory", `<div id="pfInv"></div>`,
-          `<span id="pfInvN"></span>`, { flush: true })}
       </div>
     </div>
     ${card("By ladder rung", `
@@ -224,8 +222,9 @@ function banners(st) {
 function render() {
   if (!perf || !el("pfHero")) return;
   const st = perf.stats || {};
+  // still read for the open-lot COUNT when stats could not be marked; the
+  // per-lot table it used to fill is gone
   const inv = perf.inventory || [];
-  const aged = inv.filter((x) => x.age_days > 3);
   const p = (S.ov && S.ov.portfolio) || {};
   const closes = Number(st.closes) || 0;
   const openLots = st.open_lots != null ? st.open_lots : inv.length;
@@ -366,9 +365,12 @@ function render() {
       : `Recording has not started yet, so no rung can show one —
          <b>Drawdown from</b> will say how many lots carry it once it does.`);
 
-  /* ------------------------------------------------------- rows and inventory
-     Unchanged: the journal rows as they were written, and the open lots with
-     their age beside every P/L figure above (the standing reporting rule). */
+  /* --------------------------------------------------------------- the rows
+     The open-lot table is gone at the owner's request. What it carried that
+     mattered -- how much is still open, and how old the oldest of it is --
+     still rides on the headline's "still open" half, so a P/L figure is never
+     shown without the inventory behind it. The full per-lot list is in the
+     reports. */
   el("pfTrades").innerHTML = tableHTML(
     ["When", "Sym", "Event", "Lot", "Shares", "Entry", "Exit", "Booked", "Held"],
     (perf.recent || []).slice(0, 60).map((r) => `<tr>
@@ -385,17 +387,4 @@ function render() {
       <td class="num faint">${r.hold_seconds ? dur(r.hold_seconds) : "open"}</td>
     </tr>`), "Nothing recorded yet.");
 
-  el("pfInvN").innerHTML = `${inv.length} lots · ${money0(perf.inventory_cost)}`
-    + (aged.length ? ` · <span class="warn">${aged.length} over 3d</span>` : "");
-  el("pfInv").innerHTML = tableHTML(
-    ["Lot", "Age", "Sh", "Entry", "Target", "Cost"],
-    inv.map((x) => `<tr>
-      <td class="faint mono" style="text-align:left">${esc(x.lot_id)}</td>
-      <td class="num ${x.age_days > 3 ? "down" : x.age_days > 1 ? "warn" : "faint"}">
-        ${x.age_days.toFixed(1)}d</td>
-      <td class="num">${qty(x.shares)}</td>
-      <td class="num">${px(x.entry_price)}</td>
-      <td class="num">${px(x.tp_price)}</td>
-      <td class="num">${money0(x.cost)}</td></tr>`),
-    "Nothing open.");
 }
