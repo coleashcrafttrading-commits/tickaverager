@@ -91,6 +91,23 @@ export function mountHistory() {
       </div>
       <div>
         ${card("", `<div id="pfHero"></div>`, "", { cls: "hero" })}
+        ${/* Reports live HERE, high in the rail, because generating one is the
+              most common thing anybody comes to this tab to do. They used to
+              sit last, below the metrics block and a wide rung table -- several
+              screens down on a laptop, which reads as "the reports are gone"
+              rather than "the reports are further down". */ ""}
+        ${card("Reports", `
+          <div class="tip" style="margin-top:0">A full write-up of everything on
+            this tab: total P/L over time, every metric, and the per-rung table.
+            Opens in a tab and prints. An agent can generate these on a schedule
+            through the same endpoint.</div>
+          <div class="row-btns pf-reps" style="margin:12px 0">
+            <button class="btn primary sm" data-rep="daily">Daily</button>
+            <button class="btn sm" data-rep="weekly">Weekly</button>
+            <button class="btn sm" data-rep="inventory">Inventory</button>
+            <button class="btn sm" data-rep="full">Full history</button>
+          </div>
+          <div id="pfReports"></div>`, "", { cls: "pf-repcard" })}
         ${card("Open inventory", `<div id="pfInv"></div>`,
           `<span id="pfInvN"></span>`, { flush: true })}
       </div>
@@ -100,17 +117,7 @@ export function mountHistory() {
       <div class="tip pf-foot" id="pfRungNote"></div>`,
       "where the capital goes, and how deep it went", { flush: true })}
     ${card("Recent trades", `<div id="pfTrades"></div>`,
-      "journal rows, newest first", { flush: true })}
-    ${card("Reports", `
-      <div class="tip" style="margin-top:0">A printable PDF of everything on this
-        tab. An agent can generate these on a schedule too — the same endpoint.</div>
-      <div class="row-btns pf-reps" style="margin:12px 0">
-        <button class="btn primary sm" data-rep="daily">Daily</button>
-        <button class="btn sm" data-rep="weekly">Weekly</button>
-        <button class="btn sm" data-rep="inventory">Inventory</button>
-        <button class="btn sm" data-rep="full">Full history</button>
-      </div>
-      <div id="pfReports"></div>`, "", { cls: "pf-repcard" })}`;
+      "journal rows, newest first", { flush: true })}`;
 
   /* the scope survives leaving the tab and coming back, so the picker has to
      be put back where it was -- otherwise it reads "7 days" over 30-day
