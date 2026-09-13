@@ -1340,3 +1340,191 @@ input:focus, select:focus, textarea:focus {
    there; its content stays a readable column rather than four buttons
    stranded across 1,100px. */
 .pf-repcard .card-b > * { max-width: 760px; }
+
+/* ==========================================================================
+   Research -> Builder: the STRATEGY BANK (Sept 2026). The shelf in the rail
+   beside the builder, and the card that opens over the page when you ask to
+   see one strategy whole. Used only by views/strategies.js.
+
+   The shelf is the Builder tab's ONE gradient panel: there is nothing else on
+   that page competing to be the thing you look at first, and a list of every
+   strategy in the account is exactly that. Everything below is scoped under
+   `.bk` or `.bk-*` so the hero's own rules are not rewritten for the four
+   other pages that carry one.
+   ========================================================================== */
+
+.bk-lede { font-size: 12.5px; line-height: 1.6; color: rgba(255, 255, 255, .84); }
+.bk .card-x { display: flex; align-items: center; gap: 8px; }
+
+/* The rail is 356px and a fleet can hold a dozen strategies; the shelf scrolls
+   inside itself rather than running the rail off the bottom of the page. On a
+   phone it is already the full width of the screen, so it simply flows. */
+.bk-list {
+  margin-top: 14px; max-height: min(52vh, 460px); overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.bk-row {
+  padding: 12px 0; border-top: 1px solid rgba(255, 255, 255, .15);
+}
+.bk-row:first-child { border-top: 0; padding-top: 2px; }
+.bk-row-t { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.bk-name {
+  font-size: 13.5px; font-weight: 620; letter-spacing: -.005em;
+  min-width: 0; overflow-wrap: anywhere;
+}
+/* On the gradient a translucent-white pill reads and the page's own does not.
+   Scoped to the shelf: the card that opens over the page is not on a gradient
+   and keeps the ordinary pill, so "clicked" and "python" look the same there
+   as everywhere else. */
+.bk .pill { background: rgba(255, 255, 255, .2); color: #fff; }
+
+.bk-note {
+  font-size: 12px; line-height: 1.55; margin-top: 5px;
+  color: rgba(255, 255, 255, .82); overflow-wrap: anywhere;
+}
+/* A missing description is not a blank line. Amber, in the space the
+   description would have used, exactly like a missing number elsewhere. */
+.bk-none { color: var(--warn); }
+.bk .bk-none, .card.hero .bk-none { color: #ffe3ad; }
+.bk-err { font-size: 11.5px; line-height: 1.5; margin-top: 5px; color: #ffc4cf; }
+.bk-meta {
+  font-size: 11px; margin-top: 6px; color: rgba(255, 255, 255, .66);
+  font-variant-numeric: tabular-nums;
+}
+.bk-dot { margin: 0 6px; opacity: .6; }
+.bk-acts { margin-top: 9px; }
+.bk-faint { font-size: 12px; line-height: 1.6; color: rgba(255, 255, 255, .74); }
+
+/* ---- the card that opens over the page ---------------------------------
+   Wider than a confirm dialog because it carries a strategy's whole source,
+   and it scrolls in its body so the header and the actions stay put. */
+.bk-veil { align-items: flex-start; padding: 24px 0; overflow-y: auto; }
+.bk-sheet {
+  background: var(--solid); border: 1px solid var(--hairline2);
+  border-radius: 13px; width: min(880px, calc(100% - 32px));
+  max-height: calc(100vh - 48px); margin: auto;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .55);
+}
+.bk-sheet-h {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 16px 18px; border-bottom: 1px solid var(--hairline);
+}
+.bk-sheet-t { flex: 1; min-width: 0; display: flex; gap: 9px;
+              align-items: baseline; flex-wrap: wrap; }
+.bk-sheet-n { font-size: 16px; font-weight: 640; letter-spacing: -.01em;
+              overflow-wrap: anywhere; }
+.bk-sheet-s { flex: 1 0 100%; font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.bk-sheet-b { padding: 16px 18px; overflow-y: auto; }
+.bk-sheet-f {
+  display: flex; gap: 9px; align-items: center; flex-wrap: wrap;
+  padding: 13px 18px; border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.bk-lead { font-size: 13.5px; line-height: 1.65; color: var(--text); }
+.bk-sec { margin-top: 22px; }
+.bk-sec:first-child { margin-top: 0; }
+.bk-sec > h4 {
+  margin: 0 0 9px; color: var(--faint); font-size: 10.5px; font-weight: 650;
+  letter-spacing: .07em; text-transform: uppercase;
+}
+/* Target and stop read as one pair, so both headings sit on the same line:
+   the row carries the spacing, not its first cell. */
+.bk-two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; margin-top: 22px; }
+.bk-two > * { min-width: 0; }
+.bk-two > .bk-sec { margin-top: 0; }
+.bk-foot { color: var(--faint); font-size: 11.5px; line-height: 1.55; margin-top: 8px; }
+
+/* rules, as a sentence: the group is the heading, its children the list */
+.bk-rule { font-size: 13px; line-height: 1.7; }
+.bk-rule code, .bk-sec code {
+  font-family: var(--mono); font-size: .9em; color: var(--accent);
+  background: var(--accent-dim); padding: 1px 5px; border-radius: 5px;
+}
+.bk-grp { font-size: 13px; }
+.bk-grp-h {
+  color: var(--muted); font-size: 11px; font-weight: 650;
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.bk-grp-l {
+  margin: 6px 0 0; padding: 0 0 0 14px; list-style: none;
+  border-left: 2px solid var(--hairline2);
+}
+.bk-grp-l > li { margin: 5px 0; }
+
+.bk-inds { display: flex; flex-direction: column; gap: 7px; }
+.bk-ind { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.bk-ind-n { font-weight: 600; }
+.bk-pills { display: flex; gap: 7px; flex-wrap: wrap; }
+.bk-pills .pill { text-transform: none; letter-spacing: 0; font-size: 11px; }
+.bk-kv { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; }
+.bk-kv .bk-faint { color: var(--faint); margin-right: 7px; }
+
+/* Source and docstring keep their own whitespace -- a coded strategy's notes
+   are laid out in columns and a docstring rewrapped is a docstring destroyed.
+   Each scrolls INSIDE its own box, so the page itself never scrolls sideways. */
+.bk-pre {
+  margin: 0; padding: 12px 14px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--hairline);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+  white-space: pre; overflow: auto; max-width: 100%; tab-size: 4;
+}
+.bk-doc { max-height: 340px; }
+.bk-src { max-height: 420px; }
+.bk-det > summary {
+  cursor: pointer; color: var(--muted); font-size: 12px;
+  margin: 22px 0 10px; min-height: 24px;
+}
+.bk-det > summary:hover { color: var(--text); }
+
+/* ---- settings: values, never shape ------------------------------------- */
+.bk-copy {
+  font-size: 12.5px; line-height: 1.6; color: var(--muted);
+  border-left: 2px solid var(--accent); padding-left: 12px; margin-bottom: 4px;
+}
+.bk-knobs { display: flex; flex-direction: column; }
+.bk-k {
+  display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 12px;
+  align-items: center; padding: 9px 10px; border-radius: 8px;
+  border: 1px solid transparent;
+}
+/* a row that will be written looks like one, so nobody saves a number they
+   nudged with a scroll wheel by accident */
+.bk-k.on { border-color: var(--accent-dim); background: var(--accent-dim); }
+.bk-k-l { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.bk-k-p { display: block; font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+.bk-k-c { min-width: 0; }
+.bk-k-c input[readonly] { color: var(--muted); cursor: default; }
+.bk-hint { font-size: 10.5px; color: var(--faint); margin-top: 4px; }
+.bk-chk { display: flex; align-items: center; gap: 9px; min-height: 40px; cursor: pointer; }
+.bk-chk input { width: auto; min-height: 0; }
+.bk-chk span { font-size: 13px; color: var(--muted); }
+.bk-sheet-b .note { margin-bottom: 14px; }
+
+/* ---- narrow ------------------------------------------------------------
+   The shelf is the rail's last child, so `.grid.main` already drops it under
+   the builder at 1180px -- the bank is a reference, and the builder is the
+   work. Below that it only has to stop being a two-column thing. */
+@media (max-width: 1180px) {
+  .bk-list { max-height: none; }
+}
+@media (max-width: 720px) {
+  .bk-two, .bk-k { grid-template-columns: minmax(0, 1fr); }
+  .bk-k { gap: 6px; align-items: stretch; }
+  .bk-veil { padding: 0; }
+  .bk-sheet {
+    width: 100%; max-height: 100vh; height: 100%; border-radius: 0;
+    border-left: 0; border-right: 0;
+  }
+  .bk-sheet-b { padding: 14px; }
+  .bk-sheet-h, .bk-sheet-f { padding: 12px 14px; }
+  .bk-sheet-f {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    position: sticky; bottom: 0;
+  }
+  .bk-sheet-f .btn { flex: 1 1 auto; justify-content: center; }
+  .bk-sheet-f > span { display: none; }       /* the spacer, with nothing to space */
+  .bk-acts .btn { flex: 1 1 auto; justify-content: center; }
+  .bk-pre { font-size: 11px; }
+}

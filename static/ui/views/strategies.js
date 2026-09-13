@@ -14,10 +14,18 @@
    Rules are a tree. A group (all / any / none) holds conditions and other
    groups, which is exactly the shape strategy.py evaluates, so what you see is
    literally what runs.
+
+   Beside it, in the rail, is the STRATEGY BANK: one shelf holding both kinds
+   of strategy -- the documents built here by clicking, and the coded ones
+   Claude writes, which used to land in a folder the dashboard never showed.
+   The bank is next to the builder rather than on a page of its own because
+   the three things you do with a strategy -- look at it, turn its numbers,
+   change its shape -- are one train of thought, and walking between rooms in
+   the middle of it is how people end up tuning the wrong strategy.
    ========================================================================= */
 "use strict";
 import {
-  S, GET, POST, act, ask, toast, el, esc, card, tableHTML, go,
+  S, GET, POST, act, ask, toast, el, esc, card, tableHTML, go, dur,
 } from "../core.js";
 import { preset as btPreset } from "./backtest.js";
 
@@ -103,6 +111,7 @@ export const BUILDER = {
     if (!spec) spec = BLANK();
     paintShell();
     renderAll();
+    loadBank();          // the shelf fills itself in; the builder never waits
   },
 };
 
@@ -168,6 +177,16 @@ function paintShell() {
       </div>
 
       <div>
+        ${card("Strategy Bank", `
+          <div class="bk-lede">Every strategy there is, on one shelf: the
+            documents built here by clicking, and the Python ones Claude
+            writes. <b>View</b> opens the whole thing; <b>Settings</b> turns
+            its numbers without touching its shape.</div>
+          <div id="stBank" class="bk-list"></div>`,
+          `<span id="stBankN"></span>
+           <button class="btn sm" id="stBankRefresh">Refresh</button>`,
+          { cls: "hero bk", id: "stBankCard" })}
+
         ${card("Actions", `
           <div class="row-btns">
             <button class="btn primary sm" id="stSave">Save</button>
@@ -198,6 +217,7 @@ function paintShell() {
 
   el("stName").oninput = () => { spec.name = el("stName").value; dirty = true; };
   el("stIndAdd").onclick = addIndicator;
+  el("stBankRefresh").onclick = () => { bankLoaded = false; renderBank(); loadBank(); };
   el("stSave").onclick = save;
   el("stNew").onclick = () => act(async () => {
     if (dirty && !(await ask({ title: "Discard changes?",
@@ -247,6 +267,7 @@ function renderAll() {
   renderRules("entry", "stEntry");
   renderRules("exit", "stExit");
   renderList();
+  renderBank();          // paintShell() throws the rail away; the shelf is redrawn
   renderJSON();
   validate();
 }
@@ -578,8 +599,11 @@ async function save() {
     const l = await GET("/api/strategies");
     LIST = l.strategies || [];
     renderList();
-    toast(`Saved as <b>${esc(slug)}</b>. Set that slug on a ticker to trade it.`,
-          "ok", 8000);
+    // a strategy that was just built must be on the shelf without a reload:
+    // the bank is where it is looked at and tuned from now on
+    loadBank();
+    toast(`Saved as <b>${esc(slug)}</b>. It is on the shelf in the Strategy Bank. `
+          + `Set that slug on a ticker to trade it.`, "ok", 8000);
   });
 }
 
@@ -594,14 +618,23 @@ function renderList() {
       <td><button class="btn sm" data-load="${esc(s.slug)}">Open</button></td>
     </tr>`), "None saved yet.");
   host.querySelectorAll("[data-load]").forEach((b) => {
-    b.onclick = () => act(async () => {
-      if (dirty && !(await ask({ title: "Discard changes?",
-        body: "The strategy open now has unsaved edits.", ok: "Discard" }))) return;
-      const r = await GET("/api/strategies/" + encodeURIComponent(b.dataset.load));
-      spec = r.spec; slug = r.slug; dirty = false;
-      paintShell(); renderAll();
-    });
+    b.onclick = () => act(() => openSlug(b.dataset.load));
   });
+}
+
+/* Load a saved document into the builder. ONE path: the Saved list and the
+   bank's "Load into the builder" both come through here, so a change to what
+   loading means cannot land on one of them and not the other.
+   Returns false when the operator kept their unsaved work. */
+async function openSlug(want) {
+  if (dirty && !(await ask({ title: "Discard changes?",
+    body: "The strategy open now has unsaved edits.", ok: "Discard" }))) return false;
+  const r = await GET("/api/strategies/" + encodeURIComponent(want));
+  spec = r.spec;
+  slug = r.slug || want;        // the slug is what it was loaded from, always
+  dirty = false;
+  paintShell(); renderAll();
+  return true;
 }
 
 function renderJSON() {
@@ -612,4 +645,587 @@ function renderJSON() {
   host.innerHTML = `<textarea id="stRaw" rows="18" spellcheck="false"
     style="font-family:var(--mono);font-size:12px">${
       esc(JSON.stringify(spec, null, 2))}</textarea>`;
+}
+
+/* ==========================================================================
+   THE STRATEGY BANK
+
+   Two kinds of strategy share this shelf and the pane never pretends they are
+   the same thing: a "clicked" one is a document (indicators and a rule tree,
+   editable in the builder below), a "python" one is a file with an `on_bar`,
+   which is what every strategy Claude writes is. Both are listed newest
+   first, both open, and both can have their numbers turned -- but only their
+   NUMBERS. `bank.py` refuses a path that is not already a knob on that
+   strategy, so a settings panel can never quietly restructure something you
+   later have to explain. Adding an indicator or rewriting a rule stays in the
+   builder, where it is visibly a change of shape.
+   ========================================================================= */
+let BANK = [];           // GET /api/bank
+let bankErr = "";
+let bankLoaded = false;
+let CUR = null;          // the detail open in the sheet
+let sheet = null;        // the overlay itself, or null
+
+const kindWord = (k) => (k === "doc" ? "clicked" : "python");
+const kindWhat = (k) => (k === "doc"
+  ? "a document: indicators and rules, built by clicking"
+  : "real Python with an on_bar, run in a process of its own");
+
+/* The bank is a SHARED library -- the same shelf whichever account is
+   selected, exactly like /api/strategies and /api/code. core.js's api() only
+   leaves a path unprefixed when it is listed in SHARED_API, and this view may
+   not edit core.js, so these three calls go straight out rather than being
+   rewritten to /api/a/<acct>/bank, which the server does not serve. Same
+   contract as core's req(): a deadline, and the server's own `detail` as the
+   error message. */
+async function bankReq(method, path, body) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), method === "GET" ? 15000 : 30000);
+  let r;
+  try {
+    r = await fetch(path, {
+      method,
+      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+      signal: ctl.signal,
+    });
+  } catch (e) {
+    throw new Error(e.name === "AbortError"
+      ? `${method} ${path} did not answer in time`
+      : (e.message || String(e)));
+  } finally {
+    clearTimeout(t);
+  }
+  const txt = await r.text();
+  if (!r.ok) {
+    let m = txt;
+    try { m = JSON.parse(txt).detail || txt; } catch (e) { /* plain text */ }
+    const err = new Error(m || r.statusText);
+    err.status = r.status;
+    throw err;
+  }
+  return txt ? JSON.parse(txt) : {};
+}
+
+const bankPath = (kind, slug, tail = "") =>
+  `/api/bank/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}${tail}`;
+
+async function loadBank() {
+  try {
+    const r = await bankReq("GET", "/api/bank");
+    BANK = r.strategies || [];
+    bankErr = "";
+  } catch (e) {
+    bankErr = e.message;
+  }
+  bankLoaded = true;
+  renderBank();
+}
+
+/* ------------------------------------------------------------- the shelf */
+function renderBank() {
+  const host = el("stBank");
+  if (!host) return;
+  const n = el("stBankN");
+  if (n) n.textContent = bankLoaded && !bankErr
+    ? `${BANK.length} on the shelf` : "";
+
+  if (!bankLoaded) {
+    host.innerHTML = `<div class="bk-faint">Reading the shelf…</div>`;
+    return;
+  }
+  if (bankErr) {
+    host.innerHTML = `<div class="note bad" style="margin:0">
+      <b>Could not read the bank.</b> ${esc(bankErr)}</div>`;
+    return;
+  }
+  if (!BANK.length) {
+    host.innerHTML = `<div class="bk-faint">Nothing on the shelf yet. Build one
+      below and save it, or ask Claude for one — every strategy it writes
+      lands here.</div>`;
+    return;
+  }
+  host.innerHTML = BANK.map(bankRow).join("");
+  host.querySelectorAll("[data-bkv]").forEach((b) => {
+    b.onclick = () => openView(b.dataset.bkk, b.dataset.bkv);
+  });
+  host.querySelectorAll("[data-bks]").forEach((b) => {
+    b.onclick = () => openSettings(b.dataset.bkk, b.dataset.bks);
+  });
+}
+
+function bankRow(s) {
+  const k = s.kind === "doc" ? "doc" : "code";
+  const n = Number(s.tunable_count) || 0;
+  return `<div class="bk-row">
+    <div class="bk-row-t">
+      <span class="bk-name">${esc(s.name || s.slug)}</span>
+      <span class="pill${k === "doc" ? " acc" : ""}" title="${esc(kindWhat(k))}"
+        >${kindWord(k)}</span>
+    </div>
+    ${s.note
+      ? `<div class="bk-note">${esc(s.note)}</div>`
+      : `<div class="bk-note bk-none">No description — nobody will know what
+           this is in six months.</div>`}
+    ${s.error ? `<div class="bk-err">Will not load: ${esc(s.error)}</div>` : ""}
+    <div class="bk-meta" title="${esc(changedFull(s.modified))}">
+      ${n ? `${n} setting${n === 1 ? "" : "s"}` : "nothing to tune"}
+      <span class="bk-dot">·</span>${esc(changedText(s.modified))}</div>
+    <div class="row-btns bk-acts">
+      <button class="btn sm" data-bkk="${esc(k)}" data-bkv="${esc(s.slug)}">View</button>
+      <button class="btn sm" data-bkk="${esc(k)}" data-bks="${esc(s.slug)}">Settings</button>
+    </div>
+  </div>`;
+}
+
+function changedText(ts) {
+  const t = Number(ts) || 0;
+  if (!t) return "changed — date unknown";
+  const ago = Date.now() / 1000 - t;
+  return ago < 45 ? "changed just now" : `changed ${dur(ago)} ago`;
+}
+function changedFull(ts) {
+  const t = Number(ts) || 0;
+  return t ? new Date(t * 1000).toLocaleString() : "no date on the file";
+}
+
+/* ------------------------------------------------------------- the sheet */
+function onSheetKey(e) { if (e.key === "Escape") closeSheet(); }
+
+function closeSheet() {
+  if (sheet) sheet.remove();
+  sheet = null;
+  CUR = null;
+  document.removeEventListener("keydown", onSheetKey);
+}
+
+/* One overlay, repainted. View and Settings are two faces of the same card,
+   so switching between them must not feel like leaving and arriving. */
+function paintSheet(o) {
+  if (!sheet) {
+    sheet = document.createElement("div");
+    sheet.className = "veil bk-veil";
+    document.body.appendChild(sheet);
+    sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSheet(); });
+    document.addEventListener("keydown", onSheetKey);
+  }
+  sheet.innerHTML = `<div class="bk-sheet" role="dialog" aria-modal="true">
+    <div class="bk-sheet-h">
+      <div class="bk-sheet-t">
+        <span class="bk-sheet-n">${esc(o.title || "")}</span>
+        ${o.kind ? `<span class="pill${o.kind === "doc" ? " acc" : ""}"
+          title="${esc(kindWhat(o.kind))}">${kindWord(o.kind)}</span>` : ""}
+        ${o.sub ? `<div class="bk-sheet-s">${o.sub}</div>` : ""}
+      </div>
+      <button class="btn sm" id="bkX">Close</button>
+    </div>
+    <div class="bk-sheet-b" id="bkBody">${o.body || ""}</div>
+    ${o.foot ? `<div class="bk-sheet-f">${o.foot}</div>` : ""}
+  </div>`;
+  el("bkX").onclick = closeSheet;
+}
+
+function sheetError(kind, slug, msg) {
+  paintSheet({
+    title: slug, kind,
+    body: `<div class="note bad" style="margin:0"><b>Could not open it.</b>
+      ${esc(msg)}</div>`,
+    foot: `<button class="btn" data-bkclose>Close</button>`,
+  });
+  wireFoot();
+}
+
+function wireFoot() {
+  if (!sheet) return;
+  sheet.querySelectorAll("[data-bkclose]").forEach((b) => { b.onclick = closeSheet; });
+}
+
+/* ------------------------------------------------------------------ VIEW */
+async function openView(kind, slug) {
+  paintSheet({ title: slug, kind, body: `<div class="bk-faint">Reading it…</div>` });
+  let d;
+  try { d = await bankReq("GET", bankPath(kind, slug)); }
+  catch (e) { sheetError(kind, slug, e.message); return; }
+  CUR = d;
+  renderView();
+}
+
+function renderView() {
+  const d = CUR;
+  const body = d.kind === "doc" ? viewDoc(d) : viewCode(d);
+  paintSheet({
+    title: d.name || d.slug, kind: d.kind,
+    sub: `<span class="mono">${esc(d.slug)}</span>`,
+    body,
+    foot: `${d.kind === "doc"
+        ? `<button class="btn" id="bkLoad">Load into the builder</button>` : ""}
+      <button class="btn" id="bkTest">Backtest it</button>
+      <button class="btn" id="bkToSet">Settings</button>
+      <span style="flex:1"></span>
+      <button class="btn" data-bkclose>Close</button>`,
+  });
+  wireFoot();
+  if (el("bkLoad")) {
+    el("bkLoad").onclick = () => act(async () => {
+      const slugWanted = d.slug;
+      if (!(await openSlug(slugWanted))) return;   // unsaved work was kept
+      closeSheet();
+      toast(`<b>${esc(d.name || slugWanted)}</b> is open in the builder. `
+          + `Saving writes it back to the same slug.`, "ok");
+    });
+  }
+  el("bkTest").onclick = () => toBacktest(d);
+  el("bkToSet").onclick = () => openSettings(d.kind, d.slug);
+}
+
+const bkSec = (t, body) => `<section class="bk-sec"><h4>${t}</h4>${body}</section>`;
+
+function noteBlock(note) {
+  return note
+    ? `<div class="bk-lead">${esc(note)}</div>`
+    : `<div class="bk-lead bk-none">No description. Nothing in the file says
+        what this is for.</div>`;
+}
+
+function viewDoc(d) {
+  return `${noteBlock(d.note)}
+    ${bkSec("Indicators", indsHTML(d.indicators))}
+    ${bkSec("Entry — open a lot when", ruleHTML(d.entry))}
+    ${bkSec("Exit — close a lot when", ruleHTML(d.exit))}
+    <div class="bk-two">
+      ${bkSec("Target", `<div class="bk-rule">${
+        limitText(d.target, "none — the exit rules decide")}</div>`)}
+      ${bkSec("Stop", `<div class="bk-rule">${limitText(d.stop,
+        `<span class="bk-none">none — nothing here closes a losing lot</span>`)}</div>`)}
+    </div>
+    ${d.sizing && Object.keys(d.sizing).length
+      ? bkSec("Sizing", kvHTML(d.sizing)) : ""}
+    <details class="bk-det"><summary>The document as JSON</summary>
+      <pre class="bk-pre">${esc(d.source || "")}</pre></details>`;
+}
+
+function viewCode(d) {
+  const params = Object.entries(d.params || {});
+  return `${noteBlock(d.note)}
+    ${bkSec("What the file says about itself", d.doc
+      ? `<pre class="bk-pre bk-doc">${esc(d.doc)}</pre>`
+      : `<div class="bk-none">No docstring at all — this file explains
+          nothing about itself.</div>`)}
+    ${bkSec("Parameters it actually runs with", params.length
+      ? `${tableHTML(["Parameter", "Value"], params.map(([k, v]) =>
+          `<tr><td style="text-align:left" class="mono">${esc(k)}</td>
+               <td style="text-align:left" class="num">${esc(fmtVal(v))}</td></tr>`))}
+         <div class="bk-foot">The EFFECTIVE values: where a later
+           <code>PARAMS.update</code> overrides an earlier <code>PARAMS</code>,
+           these are the ones that win.</div>`
+      : `<div class="bk-none">It declares no <code>PARAMS</code>, so there is
+          nothing to turn from outside the file.</div>`)}
+    ${bkSec("Functions it defines", pillsHTML(d.functions,
+      "none — this file defines no functions, which means it has no on_bar"))}
+    ${bkSec("Indicators it calls", pillsHTML(d.indicators,
+      "none — it works straight off the bars"))}
+    ${bkSec("Source", `<pre class="bk-pre bk-src">${esc(d.source || "")}</pre>`)}`;
+}
+
+const fmtVal = (v) => (typeof v === "boolean" ? (v ? "on" : "off")
+  : v === null || v === undefined ? "—" : String(v));
+
+function pillsHTML(list, none) {
+  const a = (list || []).filter(Boolean);
+  if (!a.length) return `<div class="bk-none">${none}</div>`;
+  return `<div class="bk-pills">${a.map((x) =>
+    `<span class="pill mono">${esc(x)}</span>`).join("")}</div>`;
+}
+
+function kvHTML(o) {
+  return `<div class="bk-kv">${Object.entries(o || {}).map(([k, v]) =>
+    `<div><span class="bk-faint">${esc(k)}</span>
+      <b class="num">${esc(fmtVal(v))}</b></div>`).join("")}</div>`;
+}
+
+function indsHTML(inds) {
+  const rows = Object.entries(inds || {});
+  if (!rows.length) {
+    return `<div class="bk-faint">None. It trades off the bar itself — a close
+      below an open, and so on.</div>`;
+  }
+  return `<div class="bk-inds">${rows.map(([name, c]) => {
+    const ps = Object.entries(c || {}).filter(([k]) => k !== "kind")
+      .map(([k, v]) => `${k} ${fmtVal(v)}`).join(" · ");
+    return `<div class="bk-ind">
+      <span class="mono bk-ind-n">${esc(name)}</span>
+      <span class="pill acc">${esc((c || {}).kind || "?")}</span>
+      <span class="bk-faint">${esc(ps || "no parameters")}</span></div>`;
+  }).join("")}</div>`;
+}
+
+/* ---- rules, as a sentence rather than a JSON dump ----------------------
+   The tree is what strategy.py evaluates. Rendering it in the same words the
+   builder's dropdowns use means the card and the editor describe the rule
+   identically; an operator should never have to translate between them. */
+const RULE_OP = {
+  gt: "is above", lt: "is below", gte: "is at or above", lte: "is at or below",
+  eq: "equals", ne: "is not", cross_above: "crosses above",
+  cross_below: "crosses below", rising: "is rising", falling: "is falling",
+};
+const RULE_FLAG = { target_reached: "the target is reached",
+                    stop_hit: "the stop is hit" };
+const RULE_GRP = { all: "ALL of these are true", any: "ANY of these is true",
+                   not: "NONE of these is true", none: "NONE of these is true" };
+
+const operandHTML = (v) => (typeof v === "string"
+  ? `<code>${esc(v)}</code>` : `<b class="num">${esc(fmtVal(v))}</b>`);
+
+function ruleHTML(node) {
+  if (node === null || node === undefined) {
+    return `<div class="bk-none">Nothing set — this side never fires.</div>`;
+  }
+  if (node === true) return `<div class="bk-rule">always</div>`;
+  if (node === false) return `<div class="bk-rule">never</div>`;
+  if (typeof node !== "object") return `<div class="bk-rule">${esc(String(node))}</div>`;
+  const k = Object.keys(node)[0];
+  if (RULE_GRP[k]) {
+    const kids = Array.isArray(node[k]) ? node[k] : [node[k]];
+    if (!kids.length) {
+      return `<div class="bk-none">An empty group. The validator rejects this
+        rather than guess what it meant.</div>`;
+    }
+    return `<div class="bk-grp"><div class="bk-grp-h">${RULE_GRP[k]}</div>
+      <ul class="bk-grp-l">${kids.map((c) =>
+        `<li>${ruleHTML(c)}</li>`).join("")}</ul></div>`;
+  }
+  return `<div class="bk-rule">${condText(node)}</div>`;
+}
+
+function condText(node) {
+  const op = Object.keys(node)[0];
+  const raw = node[op];
+  const a = Array.isArray(raw) ? raw : [raw];
+  if (RULE_FLAG[op]) return RULE_FLAG[op];
+  if (op === "between") {
+    return `${operandHTML(a[0])} is between ${operandHTML(a[1])}
+            and ${operandHTML(a[2])}`;
+  }
+  if (op === "rising" || op === "falling") {
+    return `${operandHTML(a[0])} ${RULE_OP[op]}`;
+  }
+  if (RULE_OP[op]) return `${operandHTML(a[0])} ${RULE_OP[op]} ${operandHTML(a[1])}`;
+  // an operator this page has not met: show it rather than drop the rule
+  return `<code>${esc(op)}</code> ${esc(JSON.stringify(raw))}`;
+}
+
+function limitText(d, none) {
+  if (!d || !Object.keys(d).length) return none;
+  if (d.points != null) return `$${Number(d.points).toFixed(2)} per share`;
+  if (d.percent != null) return `${esc(d.percent)}% of the entry price`;
+  if (d.atr_mult != null) {
+    return `${esc(d.atr_mult)} × <code>${esc(d.indicator || "an ATR")}</code>`;
+  }
+  return `<code>${esc(JSON.stringify(d))}</code>`;
+}
+
+/* -------------------------------------------------------------- SETTINGS */
+async function openSettings(kind, slug) {
+  paintSheet({ title: slug, kind, body: `<div class="bk-faint">Reading it…</div>` });
+  let d;
+  try { d = await bankReq("GET", bankPath(kind, slug)); }
+  catch (e) { sheetError(kind, slug, e.message); return; }
+  CUR = d;
+  renderSettings();
+}
+
+function renderSettings() {
+  const d = CUR;
+  const ts = d.tunables || [];
+  paintSheet({
+    title: d.name || d.slug, kind: d.kind,
+    sub: `<span class="mono">${esc(d.slug)}</span> · settings`,
+    body: `<div id="bkSaveNote"></div>
+      <div class="bk-copy"><b>Values only.</b> This panel changes numbers a
+        strategy already has. Adding an indicator, or rewriting a rule, changes
+        what the strategy <i>is</i> — that happens in the builder, and the
+        server refuses it from here.</div>
+      ${ts.length ? knobsHTML(ts) : nothingToTune(d)}`,
+    foot: `${ts.length
+        ? `<button class="btn primary" id="bkSave" disabled>Save</button>` : ""}
+      <button class="btn" id="bkToView">View details</button>
+      <span style="flex:1"></span>
+      <button class="btn" data-bkclose>Close</button>`,
+  });
+  wireFoot();
+  el("bkToView").onclick = () => openView(d.kind, d.slug);
+  if (el("bkSave")) el("bkSave").onclick = saveKnobs;
+  wireKnobs();
+}
+
+function nothingToTune(d) {
+  return `<div class="note warn" style="margin:0"><b>Nothing to turn here.</b>
+    ${d.kind === "code"
+      ? `This file declares no <code>PARAMS</code>, so every number in it is
+         written into the code itself.`
+      : `Every part of this strategy is shape — an indicator, a reference, a
+         rule — and none of it is a number this panel may change.`}
+    Open it in the builder to change what it does.</div>`;
+}
+
+/* Grouped in the order the server sent them: `group` is the server's own
+   heading ("rsi (rsi)", "Target", "Entry rules"), so a knob never appears
+   under a heading this page invented for it. */
+function knobsHTML(ts) {
+  const order = [];
+  const by = new Map();
+  for (const t of ts) {
+    const g = t.group || "Settings";
+    if (!by.has(g)) { by.set(g, []); order.push(g); }
+    by.get(g).push(t);
+  }
+  let i = 0;
+  return order.map((g) => `<section class="bk-sec">
+    <h4>${esc(g)}</h4>
+    <div class="bk-knobs">${by.get(g).map((t) => knobHTML(t, i++)).join("")}</div>
+  </section>`).join("");
+}
+
+function knobHTML(t, i) {
+  const id = `bkK${i}`;
+  const common = `id="${id}" data-bkp="${esc(t.path)}" data-bkt="${esc(t.type || "text")}"
+    data-bkv="${esc(JSON.stringify(t.value === undefined ? null : t.value))}"`;
+  let control;
+  if (t.type === "bool") {
+    control = `<label class="bk-chk"><input type="checkbox" ${common}
+      ${t.value ? "checked" : ""}><span>${t.value ? "on" : "off"}</span></label>`;
+  } else if (t.type === "int" || t.type === "float") {
+    const step = t.step != null ? t.step : (t.type === "int" ? 1 : "any");
+    control = `<input type="number" ${common} value="${esc(t.value)}"
+      step="${esc(step)}"${t.min != null ? ` min="${esc(t.min)}"` : ""}${
+      t.max != null ? ` max="${esc(t.max)}"` : ""} inputmode="decimal">`;
+  } else {
+    control = `<input type="text" ${common} value="${esc(fmtVal(t.value))}" readonly>`;
+  }
+  return `<div class="bk-k">
+    <label class="bk-k-l" for="${id}">${esc(t.label || t.path)}
+      <span class="bk-k-p mono">${esc(t.path)}</span></label>
+    <div class="bk-k-c">${control}
+      ${t.type === "text" && t.hint ? `<div class="bk-hint">${esc(t.hint)}</div>` : ""}
+      ${(t.type === "int" || t.type === "float") && t.max != null
+        ? `<div class="bk-hint">${esc(t.min)} – ${esc(t.max)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+const knobEls = () => (sheet ? [...sheet.querySelectorAll("[data-bkp]")] : []);
+
+/* Only what actually moved. Sending the whole panel back would rewrite every
+   value in the file on every save, and a save that touches things nobody
+   changed is a save nobody can review. */
+function changedPaths() {
+  const out = {};
+  for (const i of knobEls()) {
+    const type = i.dataset.bkt;
+    if (type === "text") continue;                 // read-only: never sent
+    let was;
+    try { was = JSON.parse(i.dataset.bkv); } catch (e) { continue; }
+    if (type === "bool") {
+      if (i.checked !== !!was) out[i.dataset.bkp] = i.checked;
+      continue;
+    }
+    if (i.value === "") continue;                  // an empty box is not a zero
+    const v = Number(i.value);
+    if (!Number.isFinite(v) || v === Number(was)) continue;
+    out[i.dataset.bkp] = v;
+  }
+  return out;
+}
+
+function wireKnobs() {
+  for (const i of knobEls()) {
+    i.oninput = refreshDirty;
+    i.onchange = refreshDirty;
+  }
+  refreshDirty();
+}
+
+function refreshDirty() {
+  const p = changedPaths();
+  const n = Object.keys(p).length;
+  const b = el("bkSave");
+  if (b) {
+    b.disabled = !n;
+    b.textContent = n ? `Save ${n} change${n === 1 ? "" : "s"}` : "Save";
+  }
+  for (const i of knobEls()) {
+    if (i.dataset.bkt === "bool") {
+      const w = i.parentElement.querySelector("span");
+      if (w) w.textContent = i.checked ? "on" : "off";
+    }
+    const row = i.closest(".bk-k");
+    if (row) row.classList.toggle("on", p[i.dataset.bkp] !== undefined);
+  }
+}
+
+async function saveKnobs() {
+  const patch = changedPaths();
+  const n = Object.keys(patch).length;
+  if (!n) return;
+  const b = el("bkSave");
+  if (b) { b.disabled = true; b.textContent = "Saving…"; }
+  try {
+    const r = await bankReq("POST", bankPath(CUR.kind, CUR.slug, "/params"),
+                            { params: patch });
+    CUR.tunables = r.tunables || CUR.tunables;
+    if (r.params) CUR.params = r.params;
+    // repaint from what came BACK, never from what was sent: the server is
+    // the only thing that knows what the file now says
+    renderSettings();
+    el("bkSaveNote").innerHTML = `<div class="note good">
+      <b>Saved.</b> ${n} value${n === 1 ? "" : "s"} written to
+      <span class="mono">${esc(CUR.slug)}</span>. Its shape is untouched.</div>`;
+    loadBank();                           // the shelf's "changed" line moved
+  } catch (e) {
+    // the server's own words, verbatim: it is the only thing that knows why
+    const note = el("bkSaveNote");
+    if (note) {
+      note.innerHTML = `<div class="note bad"><b>Not saved.</b>
+        ${esc(e.message)}</div>`;
+      note.scrollIntoView({ block: "nearest" });
+    }
+    refreshDirty();                       // the edits are still on screen
+  }
+}
+
+/* --------------------------------------------------------- to the tester */
+function toBacktest(d) {
+  const name = d.name || d.slug;
+  if (d.kind === "doc") {
+    btPreset({
+      mode: "strategy", strategy: d.slug, label: name,
+      from: "the Strategy Bank",
+      note: `Running the saved document "${d.slug}". Pick a symbol and a `
+          + `window, then Run backtest.`,
+    });
+  } else {
+    btPreset({
+      mode: "code", label: name, from: "the Strategy Bank",
+      note: `Loading the coded strategy "${d.slug}" into the editor. Pick a `
+          + `symbol and a window, then Run backtest.`,
+    });
+    selectCodeLater(d.slug);
+  }
+  closeSheet();
+  go({ kind: "research", tab: "backtest" });
+}
+
+/* The Backtest tab fills its code-file list asynchronously and preset() has
+   no field for it, so the file is chosen once the select exists. If it never
+   does, this gives up quietly -- the note above the run box still says which
+   strategy was meant, so nobody runs the wrong one thinking it is this one. */
+function selectCodeLater(want, tries = 12) {
+  const sel = el("btCodeSel");
+  if (sel && [...sel.options].some((o) => o.value === want)) {
+    sel.value = want;
+    sel.dispatchEvent(new Event("change"));
+    return;
+  }
+  if (tries > 0) setTimeout(() => selectCodeLater(want, tries - 1), 150);
 }
