@@ -387,6 +387,8 @@ def stats(rows: list[dict], marks: dict | None = None,
         # None, never infinity: nothing lost is a fact about the window
         "profit_factor": round(gross_w / gross_l, 3) if gross_l else None,
         "max_drawdown": dd,
+        # percent of PEAK CAPITAL (the money actually exposed), not of the
+        # booked peak -- see _curve for why that denominator is wrong here
         "max_drawdown_pct": ddp,
         "peak_capital": peak_cap,
         "return_on_peak_capital_pct":
@@ -429,7 +431,13 @@ def _curve(rows: list[dict], closes: list[dict], realized: float,
                 "unrealized": unreal, "total_pl": total_pl,
                 "open_lots": open_lots, "now": True})
     peak_cap = _peak_capital(rows)
-    ddp = round(100 * dd / peak, 2) if peak else 0.0
+    # As a PERCENT OF CAPITAL AT RISK, not of the booked peak. The drawdown
+    # above includes the open book's drop, while the booked peak is often a
+    # small number early in a window -- dividing one by the other produced
+    # -243%, which reads as a catastrophe rather than "down $243 against
+    # $2,100 of capital". Peak capital is the money that was actually exposed,
+    # so the ratio stays in a range a human can act on.
+    ddp = round(100 * dd / peak_cap, 2) if peak_cap else 0.0
     return out, round(dd, 2), ddp, peak_cap
 
 
