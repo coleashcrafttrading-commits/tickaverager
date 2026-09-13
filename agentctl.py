@@ -229,11 +229,47 @@ def cmd_ticker(a) -> int:
     return _out(_http("GET", f"/api/ticker/{a.symbol.upper()}"))
 
 
+def _marks_quietly() -> dict:
+    """Current prices from the running fleet, or {} if it is not there.
+
+    Deliberately not _http: that one exits the process with a "launch the
+    dashboard" message, which is the right answer for a command that needs
+    the server and the wrong one here -- reading the journal offline must
+    keep working, just without the open side valued.
+    """
+    import urllib.error
+    import urllib.request
+    try:
+        url = API.rstrip("/") + _scoped("/api/overview")
+        with urllib.request.urlopen(url, timeout=5) as r:
+            ov = json.loads(r.read().decode() or "{}")
+    except Exception:
+        return {}
+    out = {}
+    for p in (ov.get("portfolio") or {}).get("positions") or []:
+        try:
+            px = float(p.get("current_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if px > 0:
+            out[str(p.get("symbol"))] = px
+    return out
+
+
 def cmd_stats(a) -> int:
+    """Journal performance, with the OPEN book valued wherever the server can
+    be reached. Booked P/L alone is the number this repo's own rules say not
+    to act on -- a ladder can look profitable while holding lots the price has
+    long left behind -- so the marks come from the running fleet and, when it
+    is not reachable, the open-side figures are None rather than a tempting 0.
+    """
     import journal
     rows = journal.load(symbol=(a.symbol or "").upper(), days=a.days, path=_journal_path())
+    inv = journal.open_inventory(journal.load(symbol=(a.symbol or "").upper(),
+                                              path=_journal_path()))
+    marks = _marks_quietly()
     return _out({"ok": True, "account": ACCOUNT, "symbol": a.symbol or "ALL", "days": a.days,
-                 "rows": len(rows), "stats": journal.stats(rows)})
+                 "rows": len(rows), "stats": journal.stats(rows, marks=marks, inventory=inv)})
 
 
 def cmd_inventory(a) -> int:
