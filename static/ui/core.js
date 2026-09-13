@@ -91,6 +91,9 @@ export const SHARED_API = [
   "/api/accounts", "/api/strategies", "/api/code", "/api/indicators",
   "/api/scanner", "/api/pine", "/api/research", "/api/risk/profiles",
   "/api/risk/bank", "/api/health", "/api/restart", "/api/presets",
+  // the strategy bank is the same shelf as /api/strategies and /api/code --
+  // one library every account draws from, not per-account state
+  "/api/bank",
 ];
 export function api(path) {
   if (!path.startsWith("/api/") || path.startsWith("/api/a/")) return path;

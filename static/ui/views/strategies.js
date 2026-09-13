@@ -672,48 +672,14 @@ const kindWhat = (k) => (k === "doc"
   : "real Python with an on_bar, run in a process of its own");
 
 /* The bank is a SHARED library -- the same shelf whichever account is
-   selected, exactly like /api/strategies and /api/code. core.js's api() only
-   leaves a path unprefixed when it is listed in SHARED_API, and this view may
-   not edit core.js, so these three calls go straight out rather than being
-   rewritten to /api/a/<acct>/bank, which the server does not serve. Same
-   contract as core's req(): a deadline, and the server's own `detail` as the
-   error message. */
-async function bankReq(method, path, body) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), method === "GET" ? 15000 : 30000);
-  let r;
-  try {
-    r = await fetch(path, {
-      method,
-      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      cache: "no-store",
-      signal: ctl.signal,
-    });
-  } catch (e) {
-    throw new Error(e.name === "AbortError"
-      ? `${method} ${path} did not answer in time`
-      : (e.message || String(e)));
-  } finally {
-    clearTimeout(t);
-  }
-  const txt = await r.text();
-  if (!r.ok) {
-    let m = txt;
-    try { m = JSON.parse(txt).detail || txt; } catch (e) { /* plain text */ }
-    const err = new Error(m || r.statusText);
-    err.status = r.status;
-    throw err;
-  }
-  return txt ? JSON.parse(txt) : {};
-}
-
+   selected, exactly like /api/strategies and /api/code, so "/api/bank" is in
+   core.js's SHARED_API and the ordinary GET/POST reach it unprefixed. */
 const bankPath = (kind, slug, tail = "") =>
   `/api/bank/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}${tail}`;
 
 async function loadBank() {
   try {
-    const r = await bankReq("GET", "/api/bank");
+    const r = await GET("/api/bank");
     BANK = r.strategies || [];
     bankErr = "";
   } catch (e) {
@@ -845,7 +811,7 @@ function wireFoot() {
 async function openView(kind, slug) {
   paintSheet({ title: slug, kind, body: `<div class="bk-faint">Reading it…</div>` });
   let d;
-  try { d = await bankReq("GET", bankPath(kind, slug)); }
+  try { d = await GET(bankPath(kind, slug)); }
   catch (e) { sheetError(kind, slug, e.message); return; }
   CUR = d;
   renderView();
@@ -1029,7 +995,7 @@ function limitText(d, none) {
 async function openSettings(kind, slug) {
   paintSheet({ title: slug, kind, body: `<div class="bk-faint">Reading it…</div>` });
   let d;
-  try { d = await bankReq("GET", bankPath(kind, slug)); }
+  try { d = await GET(bankPath(kind, slug)); }
   catch (e) { sheetError(kind, slug, e.message); return; }
   CUR = d;
   renderSettings();
@@ -1171,7 +1137,7 @@ async function saveKnobs() {
   const b = el("bkSave");
   if (b) { b.disabled = true; b.textContent = "Saving…"; }
   try {
-    const r = await bankReq("POST", bankPath(CUR.kind, CUR.slug, "/params"),
+    const r = await POST(bankPath(CUR.kind, CUR.slug, "/params"),
                             { params: patch });
     CUR.tunables = r.tunables || CUR.tunables;
     if (r.params) CUR.params = r.params;
