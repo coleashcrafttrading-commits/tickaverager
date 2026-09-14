@@ -84,6 +84,16 @@ ADD_MAX_DEPTH = 10
 ADD_TERMINAL = ("canceled", "cancelled", "expired", "rejected", "done_for_day", "suspended", "replaced")
 ADD_WASH_HOLD_SECONDS = 15        # a rung Alpaca refused as a wash trade waits this long before it is re-tried
 EXIT_WAIT_SECONDS = 8.0           # per TICK, not per call: every exit wait in one tick shares this budget
+# Flatten: Alpaca refuses to close a position whose shares are still held by a
+# cancelling order, and refuses the WHOLE request rather than the held part.
+FLATTEN_CLOSE_TRIES = 3
+FLATTEN_RETRY_SECONDS = 1.0
+
+
+class FlattenError(Exception):
+    """A flatten that did not flatten. Carries a sentence the operator can act
+    on, so the dashboard shows what happened instead of 'internal server
+    error' -- the position is unchanged and its lots have been re-covered."""
 EXIT_POLL_SECONDS = 1.0           # how often that wait re-reads the open book (it runs under the engine lock)
 ADD_REJECT_BACKOFF = 60           # adds-only; never touches the entry backoff or exits
 ADD_REJECT_MAX_BACKOFF = 900
@@ -4897,20 +4907,76 @@ class Engine:
             return self._flatten_all()
 
     def _flatten_all(self) -> dict:
+        """Cancel everything resting, then sell the position at the market.
+
+        Alpaca will not close a position whose shares are still HELD by an
+        order that is cancelling -- it refuses the whole request, not the held
+        part ("requested: 108, available: 106"). The old code cancelled, slept
+        one second and hoped; when a cancel took longer the close raised, the
+        dashboard showed "internal server error", and the operator was left in
+        the worst state this engine has: exits cancelled, position still open.
+
+        So the cancels are WAITED on rather than slept over, the close is
+        retried while Alpaca is only complaining about held shares, and any
+        failure re-covers the lots before returning -- a flatten that does not
+        flatten must never leave the position naked.
+        """
         b = self.broker
         assert b
         held = self.held
         xside = self.exit_side()
-        n = 0
+        coids, n = [], 0
         for o in b.orders(status="open", symbols=self.symbol):
             # everything this bot placed, whichever side it is on -- a short
             # ladder's exits are BUYs, and a resting entry must go too or
             # close_position races it
             if o.get("side") == xside or self._ours(o.get("client_order_id") or ""):
-                b.cancel(o["id"])
+                try:
+                    b.cancel(o["id"])
+                except AlpacaError as e:
+                    self.ev("WARN", f"FLATTEN: cancel of {o.get('client_order_id') or o['id']} "
+                                    f"was refused ({e.status}); its shares may still be held.")
+                    continue
                 n += 1
-        time.sleep(1.0)
-        res = b.close_position(self.symbol) if held > QTY_EPS else None
+                if o.get("client_order_id"):
+                    coids.append(o["client_order_id"])
+
+        # an operator pressed this: the wait is its own, not a slice of the
+        # tick budget several exits were sharing
+        self._exit_wait_tick = -1
+        settled = self._wait_gone(coids)
+
+        res, last = None, ""
+        if held > QTY_EPS:
+            for attempt in range(FLATTEN_CLOSE_TRIES):
+                try:
+                    res = b.close_position(self.symbol)
+                    last = ""
+                    break
+                except AlpacaError as e:
+                    last = (e.body or str(e))
+                    if "insufficient qty" not in last.lower():
+                        break                    # a different refusal: do not paper over it
+                    if attempt < FLATTEN_CLOSE_TRIES - 1:
+                        time.sleep(FLATTEN_RETRY_SECONDS)
+
+        if last:
+            # NOT flat. Leave the ledger alone -- it still describes what is
+            # held -- and put the exits back before handing the failure up.
+            self.ev("WARN", f"FLATTEN FAILED for {self.symbol}: {last[:160]}. "
+                            f"Cancelled {n} order(s); the position is UNCHANGED. "
+                            f"Re-covering its lots now.")
+            try:
+                self._ensure_tps()
+            except Exception as ex:                       # never mask the real cause
+                self.ev("ERR", f"...and re-covering raised {ex!r}. Check the exits by hand.")
+            raise FlattenError(
+                f"{self.symbol} was not flattened: Alpaca refused the close because some "
+                f"shares are still held by an order that is cancelling"
+                f"{'' if settled else ' (the cancels had not cleared in time)'}. "
+                f"Nothing was sold, the {n} resting order(s) were cancelled and the lots "
+                f"have been re-covered. Try again in a few seconds.")
+
         self.ledger.open_lots = []
         self.ledger.resting_adds = []            # their en- orders were cancelled above
         self.ledger.clear_fill()

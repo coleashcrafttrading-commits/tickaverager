@@ -74,7 +74,7 @@ import journal                                            # noqa: E402
 import scheduler                                          # noqa: E402
 from broker import AlpacaError                            # noqa: E402
 from qty import qty, qnum                                 # noqa: E402
-from engine import TICKER_DEFAULTS, frozen                # noqa: E402
+from engine import TICKER_DEFAULTS, FlattenError, frozen  # noqa: E402
 from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
                    Fleet, get_fleet, supervised)
 
@@ -505,7 +505,12 @@ def ticker_action(sym: str, action: str, body: dict = Body(default={}), f: Fleet
             raise HTTPException(400, "Flatten requires confirm='FLATTEN'.")
         if not e.broker:
             raise HTTPException(503, "Broker not connected.")
-        res = e.flatten_all()
+        try:
+            res = e.flatten_all()
+        except FlattenError as ex:
+            # nothing was sold and the lots were re-covered; say so in words
+            # rather than letting it surface as an internal server error
+            raise HTTPException(409, str(ex))
         f.refresh(force=True)
         return res
 
