@@ -170,7 +170,7 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_engine_strategy test_latency test_refresh_trend test_accounts
   test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
   test_research test_indicators test_touch_adds test_review_fixes
-  test_fractional`, each printing `ALL CHECKS PASSED`, with
+  test_fractional test_report test_bank`, each printing `ALL CHECKS PASSED`, with
   `TICKAVERAGER_JOURNAL` pointed at a scratch file. `deploy/vm_update.sh`
   runs twelve of them on the VM and keeps the old process if one is red.
 - The ticker is **RAM**, not "RAW". Glenn says RAW; RAM is correct.
