@@ -1287,15 +1287,40 @@ def bars(symbol: str, timeframe: str = "1Min", days: float = 2.0,
     engine is trading on right now loses a whole session every evening.
     """
     from datetime import datetime, timedelta, timezone
+    import time as _time
     if not f.broker:
         raise HTTPException(503, "Broker not connected.")
     sym = symbol.upper()
     start = (datetime.now(timezone.utc)
              - timedelta(days=max(0.05, days))).strftime("%Y-%m-%dT%H:%M:%SZ")
-    try:
-        rows = f.bars_history(sym, timeframe, start)
-    except Exception as e:
-        raise HTTPException(502, f"bars for {sym}: {e}")
+
+    # Cached, because this is the dashboard's most expensive route and the
+    # cost is paid to Alpaca, not to us: each call pages BOTH tapes, every
+    # open chart refetches on a timer, and two people watching the same ticker
+    # used to pay for it twice over. The account's whole budget is ~200
+    # requests a minute and the engines need it to place exits -- a browser
+    # tab must never be the reason a share cannot be covered. Five seconds is
+    # shorter than the fastest chart poll, so nothing on screen goes stale.
+    key = (f.account_id, sym, timeframe, round(float(days), 3))
+    now = _time.time()
+    with _BARS_LOCK:
+        hit = _BARS_CACHE.get(key)
+    if hit and now - hit[0] < BARS_CACHE_SECONDS:
+        rows = hit[1]
+    else:
+        try:
+            rows = f.bars_history(sym, timeframe, start)
+        except Exception as e:
+            if hit:                      # rate-limited or down: last good bars
+                rows = hit[1]            # beat an empty chart
+            else:
+                raise HTTPException(502, f"bars for {sym}: {e}")
+        else:
+            with _BARS_LOCK:
+                _BARS_CACHE[key] = (now, rows)
+                if len(_BARS_CACHE) > 200:          # unbounded growth guard
+                    for k in sorted(_BARS_CACHE, key=lambda k: _BARS_CACHE[k][0])[:50]:
+                        _BARS_CACHE.pop(k, None)
     rows = rows[-limit:]
     return {
         "ok": True, "symbol": sym, "timeframe": timeframe, "count": len(rows),
@@ -1328,6 +1353,13 @@ def ticks(symbol: str, since: float = 0.0, limit: int = 2000, f: Fleet = Depends
 
 
 # ========================================================== portfolio history
+# The bars route pages BOTH tapes per call, so an open chart is real Alpaca
+# traffic. Cached per (account, symbol, timeframe, days) for less than one
+# chart poll, so several watchers cost what one does.
+_BARS_CACHE: dict = {}
+_BARS_LOCK = threading.Lock()
+BARS_CACHE_SECONDS = 5.0
+
 _PH_CACHE: dict = {}
 _PH_LOCK = threading.Lock()
 PH_PERIODS = ("1D", "1W", "1M", "3M", "6M", "1A", "all")
