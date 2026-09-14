@@ -97,6 +97,20 @@ legacy bar-close rule. The FIRST lot when flat is still the candle rule.
 Stop, halt, FROZEN, a session switching off and `max_lots` cancel the
 resting adds on the next tick; nothing in that path ever touches an exit.
 
+## Two machines, one fleet
+
+Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
+against this same repo and the same VM. **The interpreter path differs and
+nothing else does**: the examples below say `.venv/Scripts/python` (Windows);
+on macOS and Linux it is `.venv/bin/python`. `deploy/deploy.sh` finds `gcloud`
+wherever the machine keeps it, so the deploy command is identical on both.
+
+Before starting work: `git pull --ff-only origin master`. The other machine may
+have deployed since. A deploy fast-forwards the VM to `origin/master`, so it
+carries the other person's commits too -- never deploy a tree you have not
+pulled into. Setting a new machine up (the GitHub and Google Cloud grants it
+needs, which only Cole can make) is `docs/second_machine.md`.
+
 ## Production is the VM (from 9 Sep 2026)
 
 The fleet runs 24/7 on Google Cloud, not on the desktop: project
