@@ -59,16 +59,34 @@ gcloud config set project cole-and-glenn-trader
 gh auth login                     # GitHub, HTTPS, the account Cole added
 ```
 
-Prove both before going further:
+Prove both before going further.
+
+**The SSH one is interactive on a machine that has never used it**, which is
+where the manual key fiddling everyone remembers comes from: gcloud offers to
+make a key, asks for a passphrase twice, then asks about the host key. Run from
+a chat or a script with no terminal attached, it hangs on the first prompt. So
+make the key yourself, with no passphrase, and then connect with the prompts
+turned off -- the same flags `deploy/deploy.sh` uses, which is why the deploy
+runs unattended:
 
 ```bash
-gcloud compute ssh tickavenger --zone us-east4-a --command 'whoami; sudo -n true && echo "sudo ok"'
+ls -l ~/.ssh/google_compute_engine        # SKIP the next line if this exists
+ssh-keygen -t rsa -b 2048 -f ~/.ssh/google_compute_engine -N "" -C "$(whoami)"
+
+gcloud compute ssh tickavenger --zone us-east4-a --quiet \
+  --strict-host-key-checking=no --command 'whoami; sudo -n true && echo "sudo ok"'
+
 gh repo view coleashcrafttrading-commits/tickaverager --json viewerPermission
 ```
 
-The first should print a username and `sudo ok`. The second should say `WRITE`
-or `ADMIN`. If SSH hangs the first time, that is normal -- it is generating a
-key and writing it to project metadata.
+The empty passphrase is deliberate: an unattended deploy cannot answer a
+passphrase prompt. Treat the key file like any other private key.
+
+The first command should print a username and `sudo ok`; the second `WRITE` or
+`ADMIN`. The very first SSH takes 10-30 seconds while Google writes the public
+key into project metadata and creates the Linux user -- that part is automatic,
+and nothing here needs `authorized_keys` edited by hand. A permissions error
+usually means the IAM grant is still propagating; wait a minute and retry once.
 
 ## 4. Clone and set up
 
@@ -77,6 +95,10 @@ git clone https://github.com/coleashcrafttrading-commits/tickaverager.git
 cd tickaverager
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+
+# per-repo, so two people pushing to one live system stay tellable apart
+git config user.name "<your name>"
+git config user.email "<your email>"
 ```
 
 **`config.json` and `.env` are per-machine and untracked, and a second machine
