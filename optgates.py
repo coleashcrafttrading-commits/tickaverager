@@ -40,7 +40,8 @@ enough rows to argue with). Do not treat an UNCALIBRATED default as evidence.
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Iterable, NamedTuple, Optional
+import math as _math
+from typing import Any, NamedTuple, Optional
 
 # An option contract is 100 shares. Every dollar figure below is per-structure
 # and already multiplied out, because a percentage of a per-share premium and a
@@ -109,12 +110,24 @@ class GateResult(NamedTuple):
 def _field(obj: Any, name: str, default: Any = None) -> Any:
     """Read `name` off a dict or an object. The structure layer is being built
     separately; this is what lets the gates accept either shape without
-    importing it and without the two modules having to agree on a class."""
+    importing it and without the two modules having to agree on a class.
+
+    A CALLABLE attribute is never a field and is reported as absent. Without
+    that rule a bare list handed in where a verdict was expected answers
+    `_field(x, "clear")` with `list.clear`, the built-in METHOD -- which is not
+    None, so a "did the caller say anything?" check passes and an unchecked
+    event window reads as a clear one. Every container in the language
+    (list, dict, set) carries a `clear`, so this is not a contrived case.
+    """
     if obj is None:
         return default
     if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
+        got = obj.get(name, default)
+    else:
+        got = getattr(obj, name, default)
+    if callable(got):
+        return default
+    return got
 
 
 def _num(x: Any) -> Optional[float]:
@@ -129,44 +142,129 @@ def _num(x: Any) -> Optional[float]:
 
 
 def legs(structure: Any) -> list[dict]:
-    """Every leg of the structure, as `{"row":..., "side":..., "qty":...}`.
+    """Every leg of the structure, normalised to
+    `{"row", "side", "qty", "stock", "covered", "ok", "problem"}`.
 
     The legs are the truth about a structure, the way Alpaca is the truth about
     a position: every dollar figure below is recomputed from the quoted rows
     rather than read off a precomputed field, so a stale `credit` attribute
     cannot talk a gate into passing.
+
+    A leg that cannot be read is marked `ok=False` with a `problem` sentence
+    rather than being quietly normalised into something harmless. An earlier
+    version coerced an unusable quantity to zero, which DROPPED the leg: a put
+    credit spread whose long leg carried `qty: None` reported the short leg's
+    $400 alone instead of the $200 it actually collects, halved its own cost
+    to trade, and passed G1 on both. A dropped SHORT leg is worse still --
+    `assignment_notional` then reports $0 against a real obligation, and G3 is
+    the one gate whose failure cannot be undone by closing. So:
+
+      * `side` must be buy/long or sell/short. Anything else is unusable, not
+        a long leg by default -- an unrecognised side silently became a LONG
+        leg before, which reverses the sign of the premium and zeroes the
+        assignment notional at the same time.
+      * `qty` absent means one contract, the ordinary convention. Present but
+        unreadable, zero or negative is unusable. `optstructures.leg` already
+        refuses those at construction; this is the same refusal for structures
+        assembled by hand or read back from a cache.
+      * `stock` marks the synthetic 100-share row `optstructures.stock_row`
+        builds for a covered call or a collar. It is collateral, not premium,
+        and the functions below say individually how they treat it.
     """
     out = []
-    for leg in _field(structure, "legs", None) or []:
+    raw_legs = _field(structure, "legs", None)
+    if not isinstance(raw_legs, (list, tuple)):
+        # Anything that is not a sequence of legs is no legs at all. Iterating
+        # it would raise, and this module never raises: an unreadable structure
+        # has to come back as a refusal, not as an exception that stops the
+        # whole screen on one bad row.
+        return out
+    for leg in raw_legs:
         row = _field(leg, "row", None) or {}
-        side = str(_field(leg, "side", "") or "").lower()
-        qty = _num(_field(leg, "qty", 1)) or 0.0
-        out.append({"row": row, "side": side, "qty": abs(qty)})
+        raw_side = str(_field(leg, "side", "") or "").strip().lower()
+        if raw_side.startswith("sell") or raw_side == "short":
+            side, problem = "sell", None
+        elif raw_side.startswith("buy") or raw_side == "long":
+            side, problem = "buy", None
+        else:
+            side, problem = "", "leg side %r is neither buy nor sell" % (raw_side,)
+
+        # Absent falls through to one contract; present-but-unreadable does NOT
+        # -- an explicit `None` or "two" is a broken record, and guessing at it
+        # is how the dropped-leg bug above happened in the first place.
+        raw_qty = _field(leg, "qty", 1)
+        qty = _num(raw_qty)
+        if qty is None or not _math.isfinite(qty) or qty <= 0:
+            problem = problem or ("leg quantity %r is not a positive number of "
+                                  "contracts" % (raw_qty,))
+            qty = 0.0
+
+        kind = str(row.get("type", "") if isinstance(row, dict) else "").lower()
+        covered = bool(_field(leg, "covered", False) or
+                       _field(row, "covered", False))
+        out.append({"row": row if isinstance(row, dict) else {}, "side": side,
+                    "qty": qty, "stock": kind.startswith("s"),
+                    "covered": covered, "ok": problem is None,
+                    "problem": problem})
     return out
 
 
+def leg_problem(structure: Any) -> Optional[str]:
+    """The first reason the structure cannot be measured, or None.
+
+    Every gate that turns legs into dollars asks this first, because a
+    structure we cannot read is a structure we do not trade -- the same
+    fail-closed rule that applies to a missing quote. If this ever returns None
+    for a malformed structure, the gates go back to measuring a position
+    nobody holds.
+    """
+    lg = legs(structure)
+    if not lg:
+        return "structure has no legs"
+    for leg in lg:
+        if not leg["ok"]:
+            return leg["problem"]
+    return None
+
+
 def _is_short(leg: dict) -> bool:
-    return leg["side"].startswith("sell")
+    return leg["side"] == "sell"
 
 
 def net_premium(structure: Any) -> Optional[float]:
-    """Dollars at MID for the whole structure: positive is a credit received,
-    negative is a debit paid. None when any leg has no mid, because a structure
-    priced off three good legs and one guess is not priced.
+    """OPTION premium in dollars at MID: positive is a credit received,
+    negative is a debit paid. None when the structure cannot be read or any
+    option leg has no mid, because a structure priced off three good legs and
+    one guess is not priced.
+
+    A STOCK leg is excluded. The shares of a covered call or a collar are
+    collateral, not premium, and folding them in breaks two gates at once:
+    G1 divides the give-up by this number, so a $640 share price as the
+    denominator turns a call quoted 0.25 x 0.35 -- 16.7% of its own premium,
+    the RAM-grade quote G1 exists to throw out -- into a 0.01% cost that
+    sails through; and G4 reads the sign of this number to decide whether the
+    structure is selling or buying volatility, so a covered call read as a
+    $63,700 debit gets the test for a volatility BUYER and is refused exactly
+    when the premium it sells is richest. Both were live before this exclusion.
 
     If this is wrong every gate downstream is wrong, since the cost gate, the
     edge gate and the event gate all key off the sign and the size of it.
     """
-    total = 0.0
-    lg = legs(structure)
-    if not lg:
+    if leg_problem(structure) is not None:
         return None
-    for leg in lg:
+    total = 0.0
+    priced = 0
+    for leg in legs(structure):
+        if leg["stock"]:
+            continue
         mid = _num(leg["row"].get("mid"))
         if mid is None:
             return None
         sign = 1.0 if _is_short(leg) else -1.0
         total += sign * mid * leg["qty"] * CONTRACT_MULTIPLIER
+        priced += 1
+    if not priced:
+        return None                    # nothing but stock: no premium to measure
     return round(total, 4)
 
 
@@ -178,12 +276,16 @@ def give_up(structure: Any) -> Optional[float]:
     a seller gives up by hitting the bid rather than resting there. That is the
     same `edge_vs_mid` the chain rows already carry. None if any leg has no
     two-sided quote.
+
+    A stock leg's spread counts when the caller quoted one: it is paid the same
+    way. `optstructures.stock_row` deliberately carries a zero spread, so a
+    covered call built there contributes nothing from its shares and the option
+    leg decides the gate, which is the intended behaviour.
     """
-    total = 0.0
-    lg = legs(structure)
-    if not lg:
+    if leg_problem(structure) is not None:
         return None
-    for leg in lg:
+    total = 0.0
+    for leg in legs(structure):
         spread = _num(leg["row"].get("spread"))
         if spread is None or spread < 0:
             return None
@@ -200,17 +302,49 @@ def assignment_notional(structure: Any) -> float:
     between, the cash is owed in full. Netting here would let a defined-risk
     spread report a tiny obligation and then need the whole strike in the
     morning. A leg the caller marks `covered` (a covered call against shares
-    already held) is excluded, because those shares are the collateral.
+    already held) is excluded, because those shares are the collateral. The
+    mark is honoured on the LEG as well as on the row: the leg is where a
+    caller naturally writes it, and reading only the row meant a covered call
+    reported the whole strike.
+
+    A short CALL is counted at its strike like a short put. That is the
+    conservative reading, not the exact one -- assignment on a call delivers
+    shares rather than demanding cash -- and it can only ever cost the book a
+    trade it could have afforded, never let one through. `G3` reports the
+    figure it used so the rejection log shows the difference.
+
+    Returns 0.0 for a structure that cannot be read, and skips a short leg
+    whose row carries no strike. Neither is a zero obligation, so
+    `assignment_capacity` checks `unpriced_shorts` and refuses instead of
+    trusting this number -- a short leg that reports $0 of assignment risk is
+    the same dropped-leg failure as a short leg that is not counted at all.
     """
     total = 0.0
     for leg in legs(structure):
-        if not _is_short(leg):
+        if not leg["ok"] or leg["stock"] or not _is_short(leg):
             continue
-        if _field(leg["row"], "covered", False):
+        if leg["covered"]:
             continue
         strike = _num(leg["row"].get("strike")) or 0.0
         total += strike * CONTRACT_MULTIPLIER * leg["qty"]
     return round(total, 2)
+
+
+def unpriced_shorts(structure: Any) -> list[str]:
+    """Short option legs whose strike cannot be read, by symbol.
+
+    A short leg with no strike contributes nothing to `assignment_notional`,
+    and $0 there is indistinguishable from having no short leg at all. G3 fails
+    on this list rather than on the silence.
+    """
+    out: list[str] = []
+    for leg in legs(structure):
+        if not leg["ok"] or leg["stock"] or leg["covered"] or not _is_short(leg):
+            continue
+        strike = _num(leg["row"].get("strike"))
+        if strike is None or strike <= 0:
+            out.append(str(leg["row"].get("symbol") or "?"))
+    return out
 
 
 def structure_expiry(structure: Any) -> Optional[_dt.date]:
@@ -266,10 +400,15 @@ def cost_to_trade(structure: Any, *, max_pct: float = MAX_COST_PCT) -> GateResul
     If this is wrong the screen selects for contracts whose spread is wider
     than their entire edge, which is precisely what ranking by premium does.
     """
+    problem = leg_problem(structure)
     net = net_premium(structure)
     cost = give_up(structure)
     value: dict = {"net_premium": net, "give_up": cost, "pct": None,
                    "max_pct": float(max_pct)}
+    if problem is not None:
+        value["problem"] = problem
+        return GateResult(False, "unpriceable: %s, so the cost of trading it "
+                                 "cannot be measured" % problem, value)
     if net is None or cost is None:
         return GateResult(False, "unpriceable: a leg has no two-sided quote, so "
                                  "the cost of trading it cannot be measured", value)
@@ -323,15 +462,23 @@ def liquidity(structure: Any, *, min_oi: float = MIN_OPEN_INTEREST,
     already writes.
 
     Quote size is read from `bid_size`/`ask_size` on the chain row if the
-    recorder captured them. When it did not, the gate FAILS rather than
-    assuming: an unmeasured market is not a liquid one. `allow_unknown_size`
-    opts out explicitly, which is fine for a read-only screen and is recorded
-    in the result so the exemption is never silent.
+    recorder captured them, and must clear BOTH the `min_quote_size` floor and
+    the number of contracts this leg actually trades -- a 10-lot bid is a
+    liquid market for one contract and no market at all for fifty. When the
+    recorder captured no size the gate FAILS rather than assuming: an
+    unmeasured market is not a liquid one. `allow_unknown_size` opts out
+    explicitly, which is fine for a read-only screen and is recorded in the
+    result so the exemption is never silent.
+
+    Stock legs are skipped: shares have neither open interest nor an option
+    quote whose stability could be recorded, and a structure with nothing but
+    stock in it fails for having no option market to measure.
 
     If this is wrong the engine sells into a contract nobody else is quoting,
     and discovers at exit that the resting bid it priced against was one lot.
     """
-    lg = legs(structure)
+    problem = leg_problem(structure)
+    lg = [leg for leg in legs(structure) if not leg["stock"]]
     value: dict = {"min_oi_seen": None, "min_quote_size_seen": None,
                    "observations": None, "median_spread_pct": None,
                    "worst_spread_pct": None, "current_spread_pct": None,
@@ -341,8 +488,16 @@ def liquidity(structure: Any, *, min_oi: float = MIN_OPEN_INTEREST,
                               "min_observations": int(min_observations),
                               "max_spread_ratio": float(max_spread_ratio),
                               "allow_unknown_size": bool(allow_unknown_size)}}
+    if problem is not None:
+        value["problem"] = problem
+        return GateResult(False, "unreadable structure: %s" % problem, value)
     if not lg:
-        return GateResult(False, "structure has no legs to measure liquidity on", value)
+        # Stock legs are skipped above: shares have no open interest and no
+        # option quote to be stable, and the equity ladder is where their
+        # liquidity is judged. A structure with nothing BUT stock has no option
+        # market to measure, which is not the same as a liquid one.
+        return GateResult(False, "structure has no option legs to measure "
+                                 "liquidity on", value)
 
     worst_oi: Optional[float] = None
     worst_size: Optional[float] = None
@@ -368,6 +523,12 @@ def liquidity(structure: Any, *, min_oi: float = MIN_OPEN_INTEREST,
         # is sold onto the bid, a long leg is bought from the offer.
         want = "bid_size" if _is_short(leg) else "ask_size"
         size = _num(row.get(want))
+        # The quote has to cover the order as well as clear the floor. A 10-lot
+        # bid is a liquid market for one contract and no market at all for
+        # fifty: the rest of that order moves the price, which is the exact
+        # discovery this gate exists to make before the position rather than at
+        # the exit.
+        need = max(float(min_quote_size), leg["qty"])
         if size is None:
             if not allow_unknown_size:
                 value["missing"] = want
@@ -376,10 +537,13 @@ def liquidity(structure: Any, *, min_oi: float = MIN_OPEN_INTEREST,
                                          "to screen without it" % (symbol, want), value)
         else:
             worst_size = size if worst_size is None else min(worst_size, size)
-            if size < min_quote_size:
+            if size < need:
                 value["min_quote_size_seen"] = worst_size
-                return GateResult(False, "%s %s is %.0f, under the %.0f minimum"
-                                         % (symbol, want, size, min_quote_size), value)
+                value["contracts"] = leg["qty"]
+                return GateResult(False, "%s %s is %.0f, under the %.0f needed "
+                                         "(%.0f minimum, %.0f contracts here)"
+                                         % (symbol, want, size, need,
+                                            min_quote_size, leg["qty"]), value)
 
         current = _num(row.get("spread_pct"))
         if current is None or current <= 0:
@@ -444,12 +608,26 @@ def assignment_capacity(structure: Any, *, cap: float = 0.0,
     If this is wrong, the account meets a correlated assignment it cannot pay
     for, which is the one failure here that is not recoverable by closing.
     """
+    problem = leg_problem(structure)
     need = assignment_notional(structure)
     already = float(open_notional or 0.0)
     total = round(need + already, 2)
     value = {"structure_notional": need, "open_notional": round(already, 2),
              "total_notional": total, "cap": float(cap or 0.0),
              "headroom": None}
+    if problem is not None:
+        # A structure that cannot be read reports $0 of obligation, and $0 is
+        # indistinguishable here from no short leg at all. Refuse it instead:
+        # an unreadable short leg is the one mistake this gate cannot survive.
+        value["problem"] = problem
+        return GateResult(False, "unreadable structure: %s -- refusing to call its "
+                                 "assignment obligation zero" % problem, value)
+    unpriced = unpriced_shorts(structure)
+    if unpriced:
+        value["unpriced_shorts"] = unpriced
+        return GateResult(False, "short leg(s) %s carry no strike, so the assignment "
+                                 "obligation is unmeasured -- not zero"
+                                 % ", ".join(unpriced), value)
     if not cap or float(cap) <= 0:
         return GateResult(False, "no assignment cap set -- refusing to size blind "
                                  "against $%.0f of new assignment risk" % need, value)
@@ -483,6 +661,9 @@ def edge_exists(structure: Any, *, vol: Any = None,
     A structure that is net LONG premium is buying volatility, so the same
     margin is applied mirrored -- implied must be BELOW realised by it. Paying
     a premium that is already rich is the same mistake as selling a cheap one.
+    Which of the two tests applies is decided by the SIGN of `net_premium`, so
+    a structure that cannot be priced fails: an unknown side means the measured
+    edge cannot be shown to be on ours.
 
     If this is wrong the system sells premium merely because premium is
     available, which is what every blown-up premium book did first.
@@ -493,7 +674,8 @@ def edge_exists(structure: Any, *, vol: Any = None,
         src = vol
     elif vol is not None:
         src = {k: getattr(vol, k) for k in ("iv", "rv", "implied", "realized",
-                                            "implied_vol", "realized_vol")
+                                            "implied_vol", "realized_vol",
+                                            "realised")
                if hasattr(vol, k)}
     for key in ("iv", "implied", "implied_vol"):
         if iv is None:
@@ -502,14 +684,33 @@ def edge_exists(structure: Any, *, vol: Any = None,
         if rv is None:
             rv = _num(src.get(key))
 
+    problem = leg_problem(structure)
     net = net_premium(structure)
     short_premium = True if net is None else net > 0
     value = {"iv": iv, "rv": rv, "gap": None, "ratio": None,
              "short_premium": short_premium,
              "min_ratio": float(min_ratio), "min_points": float(min_points)}
+    if problem is not None:
+        # Which side of the premium the structure is on decides which test
+        # applies, and a structure we cannot read does not tell us. Passing on
+        # a guess would let an unreadable structure clear a gate on the
+        # underlying's volatility alone.
+        value["problem"] = problem
+        return GateResult(False, "unreadable structure: %s -- cannot tell whether it "
+                                 "sells volatility or buys it" % problem, value)
     if iv is None or rv is None or iv <= 0 or rv <= 0:
         return GateResult(False, "no measured volatility edge: implied=%s "
                                  "realised=%s" % (iv, rv), value)
+    if net is None:
+        # The gate applies one test to a seller of volatility and the mirrored
+        # one to a buyer, and the sign of the premium is what chooses. An
+        # unpriced structure does not say which side it is on, so a pass here
+        # would be a coin flip dressed as a measurement.
+        value["short_premium"] = None
+        return GateResult(False, "structure is unpriced, so which side of the "
+                                 "volatility it takes is unknown -- implied %.1f%% "
+                                 "against realised %.1f%% cannot be judged for it"
+                                 % (iv * 100, rv * 100), value)
     gap = round(iv - rv, 6)
     ratio = round(iv / rv, 4)
     value["gap"] = gap
@@ -564,12 +765,19 @@ def no_event(structure: Any, *, calendar: Any = None,
       * a mapping, for callers assembling a verdict by hand or from a cache:
           `blocked`          -- True blocks, with `reason` if supplied
           `clear`            -- True only if the window was checked and is empty
-          `earnings_known`   -- False or missing means the date is UNKNOWN, a fail
+          `earnings_known`   -- anything but True means UNKNOWN, which is a fail
           `events`           -- [{"kind": "earnings", "date": "2026-10-20"}, ...]
+      * a bare list of those event dictionaries, which is how the `events`
+        context key arrives. It is read as `{"events": [...]}`, so it says
+        nothing about whether the earnings date is known and therefore always
+        fails -- an event list is a list of what was found, never evidence
+        that anyone looked for earnings.
 
     No verdict at all is a fail: not knowing is indistinguishable from not
     having looked, and both mean the same thing here. An undated or unparseable
-    event also fails -- fail closed.
+    event also fails, and so does a structure with no parseable expiration,
+    because a verdict covers a window and a structure with no end date has
+    none -- fail closed.
 
     A structure the caller marks `event_trade` is exempt, because an event
     trade is deliberately a bet on the event. The exemption is recorded in the
@@ -579,6 +787,7 @@ def no_event(structure: Any, *, calendar: Any = None,
     If this is wrong the book is systematically short gamma into every binary
     event on the calendar.
     """
+    problem = leg_problem(structure)
     expiry = structure_expiry(structure)
     today = now or _dt.date.today()
     net = net_premium(structure)
@@ -588,6 +797,13 @@ def no_event(structure: Any, *, calendar: Any = None,
                    "event_trade": bool(_field(structure, "event_trade", False)),
                    "blocking": []}
 
+    if problem is not None:
+        # Whether this gate applies at all turns on the sign of the premium,
+        # which an unreadable structure does not give us. Refuse rather than
+        # assume it is the long-premium case the gate ignores.
+        value["problem"] = problem
+        return GateResult(False, "unreadable structure: %s -- cannot tell whether it "
+                                 "is short premium across an event" % problem, value)
     if value["event_trade"]:
         return GateResult(True, "exempt: marked an event trade, so the event is the "
                                 "position rather than a hazard", value)
@@ -597,15 +813,37 @@ def no_event(structure: Any, *, calendar: Any = None,
     if calendar is None:
         return GateResult(False, "no calendar verdict -- an unchecked event window "
                                  "is treated exactly like a known event", value)
+    if expiry is None:
+        # A calendar verdict is always for a WINDOW, `now .. expiration`. With
+        # no expiration parsed off any leg there is no window, so no verdict
+        # can be known to cover the structure's life. `optcal` refuses an
+        # unparseable expiration for the same reason; refusing it here too
+        # means a structure that never says when it ends cannot pass by
+        # borrowing someone else's clear window.
+        return GateResult(False, "no parseable expiration on any leg, so no event "
+                                 "window can be checked against it", value)
 
     # `optcal.EventCalendar.blocks_short_premium` answers (blocked, reason).
     # Its reason is carried through unchanged: it already names the earnings
     # date, the ex-dividend or the missing data source, and rewriting it here
     # would only lose detail from the rejection log.
-    if isinstance(calendar, (tuple, list)) and len(calendar) == 2:
-        blocked, why = bool(calendar[0]), str(calendar[1])
-        value["blocking"] = [{"kind": "calendar", "date": None}] if blocked else []
-        return GateResult(not blocked, why, value)
+    #
+    # The pair is recognised by its SHAPE, not merely by its length. Length
+    # alone read any two-item list as a verdict, so a two-event calendar list
+    # became `(bool(events[0]), str(events[1]))` -- and a list of two empty
+    # dictionaries passed this gate outright.
+    if isinstance(calendar, (tuple, list)):
+        if (len(calendar) == 2 and isinstance(calendar[0], (bool, int))
+                and isinstance(calendar[1], str)):
+            blocked, why = bool(calendar[0]), str(calendar[1])
+            value["blocking"] = ([{"kind": "calendar", "date": None}]
+                                 if blocked else [])
+            return GateResult(not blocked, why, value)
+        # Anything else sequence-shaped is a list of events, which is how the
+        # `events` context key arrives. Wrapping it makes the mapping rules
+        # below apply -- including the unknown-earnings refusal, which a bare
+        # list can never satisfy and therefore never passes.
+        calendar = {"events": list(calendar)}
     blocked = _field(calendar, "blocked", None)
     if blocked is not None:
         why = str(_field(calendar, "reason", "") or
@@ -624,7 +862,13 @@ def no_event(structure: Any, *, calendar: Any = None,
     if known is None and clear is None and events is None:
         return GateResult(False, "calendar verdict says nothing about earnings, "
                                  "dividends or the window: %r" % (calendar,), value)
-    if known is False:
+    # Anything other than an explicit True is UNKNOWN, missing included. That
+    # is what the shape above documents and what `optcal.blocks_short_premium`
+    # does -- it blocks outright when the earnings schedule cannot be read.
+    # Testing `known is False` instead let a verdict that simply never
+    # mentioned earnings (an events list, a partial cache row) pass as though
+    # the date had been checked and found clear.
+    if known is not True:
         return GateResult(False, "earnings date is unknown, which is a fail in its "
                                  "own right -- premium cannot be priced around a "
                                  "date nobody has", value)

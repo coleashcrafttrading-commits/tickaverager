@@ -77,10 +77,33 @@ check("a flat series realises zero volatility",
 check("20 bars will not answer a 20-return window",
       optvol.realized_vol(alt[:20], 20) is None)
 check("21 bars will", optvol.realized_vol(alt[:21], 20) is not None)
-check("long-form bar keys work too",
-      optvol.realized_vol([{"close": c} for c in closes], 20) is not None)
-check("only the most recent bars are used",
-      optvol.realized_vol(alt + [bar(c) for c in closes], 20) is not None)
+# Not "is not None" -- the long and short key spellings must produce the SAME
+# number. A version that fell back to some other field would still be non-None.
+check("long-form bar keys give the identical number",
+      optvol.realized_vol([{"close": c} for c in closes], 20) == rv,
+      optvol.realized_vol([{"close": c} for c in closes], 20))
+
+# THE RECENCY CHECK, WITH TEETH. "is not None" here was satisfied by a function
+# that read the OLDEST bars, which is the whole failure this guards against.
+# A calm run in front of the alternating series must not change the answer;
+# the same calm run behind it must drive the answer to zero.
+calm = [bar(100.0) for _ in range(30)]
+check("a calm prefix does not change the answer",
+      optvol.realized_vol(calm + alt, 20) == rv,
+      optvol.realized_vol(calm + alt, 20))
+check("a calm suffix does -- the window is the RECENT bars",
+      optvol.realized_vol(alt + calm, 20) == 0.0,
+      optvol.realized_vol(alt + calm, 20))
+
+# Log returns, so a redenomination of the price cannot move volatility. A
+# version differencing prices instead of logs fails this.
+check("volatility is scale invariant",
+      optvol.realized_vol([bar(c * 1e6) for c in closes], 20) == rv)
+
+check("a junk annualisation factor is None, not a TypeError",
+      optvol.realized_vol(alt, 20, trading_days=None) is None
+      and optvol.realized_vol(alt, 20, trading_days="many") is None
+      and optvol.parkinson_vol(alt, 20, trading_days=None) is None)
 
 # --------------------------------------------------------------------------
 print("2. realised volatility refuses bad input instead of guessing")
@@ -169,6 +192,24 @@ check("one spike guts the rank", (optvol.iv_rank(0.18, spiked) or 0) < 5,
 check("the percentile survives it",
       (optvol.iv_percentile(0.18, spiked) or 0) > 75,
       optvol.iv_percentile(0.18, spiked))
+
+# REGRESSION. Classifying "below" strictly and "ties" inside a tolerance let an
+# observation a hair under today's value be counted in BOTH buckets, and the
+# percentile then left its own documented range: this history measured 150.0.
+# A percentile above 100 sorts to the top of anything built on it.
+near_tie = optvol.iv_percentile(0.2, [0.2 - 1e-13] * 30)
+check("a near-tie history cannot leave the 0-100 range",
+      near_tie is not None and 0.0 <= near_tie <= 100.0, near_tie)
+check("and it reads as the tie it is", abs((near_tie or -1) - 50.0) < 0.02,
+      near_tie)
+mixed = optvol.iv_percentile(0.2, [0.2 - 1e-13] * 15 + [0.2] * 15)
+check("half exact ties, half near ties, still 50",
+      abs((mixed or -1) - 50.0) < 0.02, mixed)
+check("every rank and percentile stays inside 0-100",
+      all(v is None or 0.0 <= v <= 100.0
+          for h in ([0.1] * 20, [0.1] * 19 + [0.9], hist, spiked)
+          for c in (0.0, 0.1, 0.5, 0.9, 5.0)
+          for v in (optvol.iv_rank(c, h), optvol.iv_percentile(c, h))))
 
 check("Nones in the history are dropped, not counted as zero",
       abs((optvol.iv_rank(hist[10], hist + [None, None]) or -1) - 50.0) < 0.02)
@@ -317,6 +358,51 @@ level = [prow(90, 0.25, exp="2026-10-16", dte=35),
          prow(110, 0.251, exp="2026-10-16", dte=35)]
 check("a level smile is flat, not a direction",
       optvol.skew(level)["shape"] == "flat", optvol.skew(level)["shape"])
+
+# ---- REGRESSIONS: a real chain quotes a call AND a put at every strike ----
+# Both of these were live defects. Both produced a confident wrong number
+# rather than a refusal, which is the failure mode this module exists to avoid.
+
+# (a) ORDER DEPENDENCE. The call and the put at the same strike are each solved
+# from their own mid, so they disagree. Picking "the row nearest the money" out
+# of the list returned whichever arrived first: the same chain shuffled gave an
+# at-the-money implied volatility of 0.25 one way and 0.27 the other.
+pair = [prow(100, 0.25, exp="2026-10-16", dte=35, delta=-0.50),
+        prow(100, 0.27, exp="2026-10-16", dte=35, kind="call", delta=0.50),
+        prow(90, 0.35, exp="2026-10-16", dte=35, delta=-0.25)]
+shuffled = [pair[1], pair[2], pair[0]]
+one, two = optvol.skew(pair), optvol.skew(shuffled)
+check("shuffling the chain cannot change a single number",
+      one == two, (one, two))
+check("the money pools both quotes rather than picking one",
+      abs(one["atm_iv"] - 0.26) < 1e-9, one["atm_iv"])
+check("the put skew is anchored on the at-the-money PUT",
+      abs(one["put_skew"] - 0.10) < 1e-9, one["put_skew"])
+
+# (b) A DEEP IN-THE-MONEY CALL IS NOT THE PUT WING. It is the widest quote in
+# the chain -- a large price with almost no extrinsic in it -- so its solved
+# implied volatility is the least trustworthy number there is. Taking simply
+# the lowest in-band strike reported this 82 call's 0.55 as 0.30 of put skew.
+itm = [prow(82, 0.55, exp="2026-10-16", dte=35, kind="call", delta=0.95),
+       prow(100, 0.25, exp="2026-10-16", dte=35, delta=-0.50),
+       prow(118, 0.20, exp="2026-10-16", dte=35, delta=-0.95)]
+si = optvol.skew(itm)
+check("the downside wing is a PUT, not an in-the-money call",
+      abs(si["put_wing_iv"] - 0.25) < 1e-9, si["put_wing_iv"])
+check("a chain with no put below the money has no put skew",
+      abs(si["put_skew"]) < 1e-9, si["put_skew"])
+check("and it is not reported as a skew regime", si["shape"] == "flat",
+      si["shape"])
+
+# (c) NEAREST IS NOT NEAR. A chain whose only puts sit at 0.47 and 0.50 delta
+# has no 25-delta risk reversal in it; returning their difference under that
+# name is a number about the money wearing the name of a number about the wing.
+no25 = [prow(98, 0.26, exp="2026-10-16", dte=35, delta=-0.47),
+        prow(100, 0.25, exp="2026-10-16", dte=35, delta=-0.50)]
+check("no put near 25 delta means no 25-delta risk reversal",
+      optvol.skew(no25)["skew_25d"] is None, optvol.skew(no25)["skew_25d"])
+check("but a chain that does quote one still reports it",
+      abs(optvol.skew(smile, "2026-10-16")["skew_25d"] - 0.10) < 1e-9)
 
 print("   ... and the refusals")
 check("an expiration that is not there is None",

@@ -58,11 +58,21 @@ fields the structure layer computes, per section 3 of the design document:
                         an `optgates.GateResult`, or the dictionary
                         `optgates.run_gates()` returns.
     name or symbol      something to call it in the evidence record
-    credit              net credit received, in dollars, positive
-    cost_to_trade       round-trip give-up as a PERCENT of the credit
-                        (the design document defines it that way: the sum of
-                        the half-spreads across the legs, as a percent of the
-                        credit)
+    credit              net credit received, in dollars, positive.
+                        `credit_mid` is accepted under the same meaning,
+                        because that is the name `optstructures.Structure`
+                        actually uses and the mid is the basis
+                        `cost_to_trade_pct` is a percent OF.
+    cost_to_trade_pct   round-trip give-up as a PERCENT of the credit -- the
+                        sum of the half-spreads across the legs. THIS is the
+                        percent.
+    cost_to_trade       the same give-up in DOLLARS, which is what
+                        `optstructures.Structure.cost_to_trade` carries
+                        ("sum of half-spreads, dollars"). It is converted
+                        against the credit here, never read as a percent: a
+                        $5 give-up on a $50 credit is 10%, and reading the 5
+                        as "5%" flatters every structure whose credit is
+                        under $100 -- which is most of them.
     max_loss            worst case in dollars, positive; None or infinity
                         means undefined risk
     capital_at_risk     dollars the position ties up
@@ -183,6 +193,56 @@ def _num(structure: Mapping[str, Any], *names: str) -> Optional[float]:
     return None
 
 
+#: Where the net credit lives on a structure summary, in order of preference.
+#: `credit_mid` is on the list because that is the name
+#: `optstructures.Structure` actually uses -- it has no `credit` field at all,
+#: and without this alias every structure the built layer produces would score
+#: band zero on score two and grade F, which is the safe direction to be broken
+#: in but is still broken.
+CREDIT_KEYS: tuple[str, ...] = ("credit", "net_credit", "credit_mid")
+
+
+def round_trip_cost_pct(structure: Mapping[str, Any],
+                        credit: float) -> tuple[Optional[float], str]:
+    """The round-trip give-up as a PERCENT of the credit, and how it was read.
+
+    Two field names carry this number upstream and THEY ARE IN DIFFERENT
+    UNITS. `optstructures.Structure` documents them as:
+
+        cost_to_trade      sum of half-spreads, DOLLARS
+        cost_to_trade_pct  percent of |credit_mid|  -- this is what gate one
+                           measures
+
+    So the percent field is preferred, and a bare `cost_to_trade` is converted
+    against the credit rather than read as though it were already a percent.
+
+    What breaks if this is wrong: everything score two decides. Reading a $5
+    give-up on a $50 credit as "5%" instead of 10% leaves $47.50 of net credit
+    where $45.00 is the truth -- and the error runs in the FLATTERING
+    direction for every credit under $100, which is most of a retail chain.
+
+    Returns (None, why) when no cost is on the summary. Guessing zero there
+    would flatter every structure by exactly the amount that decides most of
+    them, so the caller must refuse to rank it.
+    """
+    pct = _num(structure, "cost_to_trade_pct", "cost_to_trade_percent")
+    if pct is not None:
+        return pct, ("round-trip cost %.2f%% of the credit, read as a percent"
+                     % pct)
+    dollars = _num(structure, "cost_to_trade", "give_up")
+    if dollars is not None:
+        if credit <= 0:
+            return None, ("a $%.2f give-up cannot be expressed against a"
+                          " non-positive credit" % dollars)
+        pct = 100.0 * dollars / credit
+        return pct, ("round-trip cost $%.2f on a $%.2f credit = %.2f%%, read"
+                     " as dollars per the structure layer's own units"
+                     % (dollars, credit, pct))
+    return None, ("round-trip cost is missing from the structure summary, so"
+                  " the credit cannot be discounted and the structure cannot"
+                  " be ranked")
+
+
 def structure_name(structure: Mapping[str, Any]) -> str:
     """A stable label for the evidence record.
 
@@ -271,6 +331,59 @@ def gate_failures(structure: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+#: The only structure kinds whose April-2025 loss may be estimated from ONE
+#: short strike. Everything else -- every spread, every condor, every calendar,
+#: anything with more than one leg that matters -- falls through to the
+#: structure layer's own `max_loss`, and then to infinity.
+#:
+#: This list is explicit rather than a prefix test on purpose. A one-character
+#: prefix match reads `cash_secured_put` as a short CALL, because it starts
+#: with a "c", and a short call loses nothing in a FALL -- so the flagship
+#: premium-selling structure, the one this whole veto exists to catch, came
+#: back with a tail loss of exactly $0.00 and sailed through. `covered_call`,
+#: `condor`, `calendar`, `call_credit_spread` and `credit spread` did the same.
+#: Those are the names `optstructures` actually builds.
+_SHORT_PUT_KINDS: frozenset[str] = frozenset((
+    "put", "p", "short put", "short_put", "naked put", "naked_put",
+    "cash secured put", "cash_secured_put", "csp",
+))
+_SHORT_CALL_KINDS: frozenset[str] = frozenset((
+    "call", "c", "short call", "short_call", "naked call", "naked_call",
+))
+
+
+def _single_short_leg_kind(structure: Mapping[str, Any]) -> Optional[str]:
+    """"put", "call", or None when the one-strike estimate does not apply.
+
+    None is the safe answer and the common one: it sends `tail_loss` to the
+    structure layer's computed maximum loss, and then to infinity, which
+    vetoes. Returning a side this function is not certain of would produce a
+    confident number for a payoff nobody computed.
+    """
+    # `kind` and `type` are the names a caller assembling a summary by hand
+    # uses. `name` and `structure` are what the two modules upstream actually
+    # write: `optstructures.Structure` calls the field `name` and puts
+    # "cash_secured_put" in it, and `optbook.Position` calls it `structure`.
+    # Reading only the first two meant the flagship premium-selling structure
+    # arrived here anonymous, fell through to its maximum loss -- a cash
+    # secured put's is the whole strike -- and was vetoed on a tail it does
+    # not have. The safe direction, but wrong, and wrong often enough that the
+    # veto would have been quietly relaxed to compensate.
+    raw = None
+    for key in ("kind", "type", "name", "structure"):
+        if structure.get(key):
+            raw = structure.get(key)
+            break
+    name = str(raw or "").strip().lower()
+    if not name:
+        return None
+    if name in _SHORT_PUT_KINDS:
+        return "put"
+    if name in _SHORT_CALL_KINDS:
+        return "call"
+    return None
+
+
 # ------------------------------------------------------- score one: edge --
 def edge_quality(structure: Mapping[str, Any]) -> tuple[int, float, list[str]]:
     """Score one: how far implied volatility exceeds realized, and how stable
@@ -306,7 +419,16 @@ def edge_quality(structure: Mapping[str, Any]) -> tuple[int, float, list[str]]:
         return 0, 0.0, reasoning
 
     edge = implied - realized
-    band = int(edge // margin)
+    # The multiple is nudged by one part in a billion before it is floored.
+    # Without that, an edge of exactly two margins lands in band ONE: 0.30
+    # minus 0.20 is 0.09999999999999998 in binary floating point, and
+    # 0.09999999999999998 // 0.05 is 1.0. Every exact multiple was landing a
+    # band low. The nudge is a floating-point tolerance, not a threshold --
+    # it is far smaller than any real difference in a volatility solved out of
+    # a quoted mid, so it moves nothing except the boundary cases it exists
+    # for.
+    multiples = edge / margin
+    band = int(math.floor(multiples + 1e-9))
     band = max(0, min(S1_MAX_TIER, band))
     reasoning.append(
         "edge %.4f volatility points = %.2f x the %.4f margin gate four"
@@ -355,21 +477,20 @@ def risk_adjusted(structure: Mapping[str, Any]) -> tuple[int, float, list[str]]:
     with the capital figure.
     """
     reasoning: list[str] = []
-    credit = _num(structure, "credit", "net_credit")
+    credit = _num(structure, *CREDIT_KEYS)
     if credit is None or credit <= 0:
         reasoning.append("no net credit to rank: %s" % credit)
         return 0, 0.0, reasoning
 
-    cost_pct = _num(structure, "cost_to_trade", "cost_to_trade_pct")
+    cost_pct, cost_why = round_trip_cost_pct(structure, credit)
     if cost_pct is None:
         # Gate one is the cost-to-trade gate, so this number exists upstream.
         # Missing here means the summary is incomplete, and guessing zero
         # would flatter every structure by exactly the amount that decides
         # most of them.
-        reasoning.append(
-            "round-trip cost is missing from the structure summary, so the"
-            " credit cannot be discounted and the structure cannot be ranked")
+        reasoning.append(cost_why)
         return 0, 0.0, reasoning
+    reasoning.append(cost_why)
     net = credit * (1.0 - cost_pct / 100.0)
     if net <= 0:
         reasoning.append(
@@ -378,6 +499,28 @@ def risk_adjusted(structure: Mapping[str, Any]) -> tuple[int, float, list[str]]:
 
     max_loss = _num(structure, "max_loss")
     capital = _num(structure, "capital_at_risk")
+    # `optstructures.Structure.to_dict()` cannot write a bare Infinity into
+    # JSON, so it replaces an unbounded maximum loss with None and sets
+    # `max_loss_unbounded`. Read that flag, or an unbounded short call arrives
+    # here looking like a structure whose risk simply was not filled in.
+    if structure.get("max_loss_unbounded") or structure.get("defined_risk") is False:
+        reasoning.append(
+            "the structure layer marked this loss unbounded, so profit per"
+            " dollar of drawdown is zero by construction")
+        return 0, 0.0, reasoning
+    if max_loss is None:
+        # Promised by this function's own docstring, and the safe direction:
+        # a missing maximum loss is not an invitation to rank the structure on
+        # capital alone. `optstructures` computes a real maximum loss for every
+        # structure it can price -- a cash-secured put's is strike x 100 x qty
+        # minus the credit, not "unknown" -- so a missing one means either an
+        # unpriceable structure or genuinely unbounded risk. Neither is
+        # rankable, and substituting capital at risk would quietly rank both.
+        reasoning.append(
+            "no maximum loss on the structure summary (capital at risk %s):"
+            " undefined risk cannot be ranked, and capital at risk is not a"
+            " substitute for it" % capital)
+        return 0, 0.0, reasoning
     denominators = [d for d in (max_loss, capital) if d is not None and d > 0]
     if not denominators:
         reasoning.append(
@@ -435,6 +578,14 @@ def tail_loss(structure: Mapping[str, Any],
     because the failure this guards against is an account-ending week, not a
     missed trade.
     """
+    if drop >= 0.0:
+        # The stress scenario is a FALL -- both of the design document's
+        # numbers are negative. A positive `drop` would silently shock the
+        # underlying upward and report a short put's tail as zero, which is
+        # the veto answering the wrong question with total confidence.
+        raise ValueError("drop must be a negative fraction (a fall); got %r"
+                         % (drop,))
+
     explicit = _num(structure, "tail_loss", "stress_loss")
     if explicit is not None:
         return abs(explicit), "supplied by the structure layer"
@@ -443,12 +594,12 @@ def tail_loss(structure: Mapping[str, Any],
     spot = _num(structure, "spot")
     strike = _num(structure, "short_strike")
     contracts = _num(structure, "contracts", "qty") or 1.0
-    credit = _num(structure, "credit", "net_credit") or 0.0
-    kind = str(structure.get("kind") or structure.get("type") or "").lower()
+    credit = _num(structure, *CREDIT_KEYS) or 0.0
+    single = _single_short_leg_kind(structure)
 
-    if spot is not None and strike is not None and kind[:1] in ("p", "c"):
+    if spot is not None and strike is not None and single is not None:
         shocked = spot * (1.0 + drop)
-        if kind.startswith("p"):
+        if single == "put":
             intrinsic = max(0.0, strike - shocked)
         else:
             intrinsic = max(0.0, shocked - strike)
@@ -456,8 +607,7 @@ def tail_loss(structure: Mapping[str, Any],
         loss = max(0.0, loss)
         how = ("expiry payoff of the short %s strike %.2f at a spot of %.2f"
                " after a %.1f%% fall"
-               % ("put" if kind.startswith("p") else "call",
-                  strike, shocked, 100.0 * drop))
+               % (single, strike, shocked, 100.0 * drop))
         if max_loss is not None and not math.isinf(max_loss):
             if loss > max_loss:
                 return abs(max_loss), how + ", clamped at maximum loss"

@@ -336,8 +336,9 @@ check("the reference structure passes all five", res["passed"],
 check("five results, always", len(res["results"]) == 5, len(res["results"]))
 check("results are in gate order",
       [r["gate"] for r in res["results"]] == ["G1", "G2", "G3", "G4", "G5"])
+# Hand arithmetic, not a recomputation from the module: $200,000 x 10 / 19.
 check("the cap was derived from equity, not left unset",
-      res["results"][2]["value"]["cap"] == optgates.default_assignment_cap(200_000.0),
+      abs(res["results"][2]["value"]["cap"] - 105_263.16) < 0.01,
       res["results"][2]["value"])
 check("the whole record is JSON-serialisable for the rejection log",
       isinstance(json.dumps(res), str))
@@ -401,10 +402,16 @@ print("9. nothing raises, whatever is handed to it")
 for bad in ({}, {"legs": []}, {"legs": [{"row": {}, "side": "sell", "qty": 1}]},
             {"legs": [{"row": {"mid": "n/a", "spread": None}, "side": "",
                        "qty": None}]},
-            {"legs": None}, None):
+            {"legs": None}, {"legs": 5}, {"legs": "abc"}, 7, None):
     out = optgates.run_gates(bad, CTX)
     check("garbage in -> five recorded failures, no exception: %r" % (bad,),
           out["passed"] is False and len(out["results"]) == 5)
+    # EVERY gate, not just the two that happen to notice. A structure that
+    # cannot be read is not a structure with no assignment risk and no event
+    # exposure; three of these used to report a pass on `None`.
+    check("   ... and all five refuse it, none of them passing on a guess: %r"
+          % (bad,), all(not r["passed"] for r in out["results"]),
+          [r["gate"] for r in out["results"] if r["passed"]])
 
 # A gate that raises must be recorded as a FAILURE, never allowed to escape --
 # one malformed row must not stop a screen, and an unknown verdict is not a pass.
@@ -427,6 +434,159 @@ check("GATES restored", len(optgates.GATES) == 5)
 passed, reason, value = optgates.cost_to_trade(GOOD)
 check("a gate unpacks as (passed, reason, value)",
       passed is True and isinstance(reason, str) and isinstance(value, dict))
+
+print("10. regressions -- every one of these was live and let something through")
+
+# 10a. A leg whose quantity cannot be read used to become qty 0, which DROPPED
+# it. The reference spread with the long leg dropped reports the short leg
+# alone: $400 instead of $200 of credit and $1 instead of $2 of give-up, so its
+# cost to trade reads 0.25% where the truth is 1.00% -- a confident wrong
+# number, twice over, in the direction that passes.
+dropped = {"legs": [{"row": SHORT, "side": "sell", "qty": 1},
+                    {"row": LONG, "side": "buy", "qty": None}]}
+check("an unreadable quantity does not silently drop the leg",
+      optgates.net_premium(dropped) is None, optgates.net_premium(dropped))
+res = optgates.cost_to_trade(dropped)
+check("it fails G1 outright rather than measuring $400 of credit",
+      not res.passed and res.value["net_premium"] is None, res.value)
+check("and the reason names the leg, not the quote",
+      "quantity" in res.reason, res.reason)
+# The dangerous direction is a dropped SHORT leg: $64,000 of real assignment
+# risk reported as $0 and waved through by the one gate that cannot be undone
+# by closing.
+dropped_short = {"legs": [{"row": SHORT, "side": "sell", "qty": "two"},
+                          {"row": LONG, "side": "buy", "qty": 1}]}
+res = optgates.assignment_capacity(dropped_short, cap=1_000_000.0)
+check("G3 refuses an unreadable structure instead of calling it $0 of risk",
+      not res.passed, res.reason)
+check("a quantity given as 0 or a negative is refused, not taken as one contract",
+      optgates.net_premium({"legs": [{"row": SHORT, "side": "sell", "qty": 0}]})
+      is None and
+      optgates.net_premium({"legs": [{"row": SHORT, "side": "sell", "qty": -1}]})
+      is None)
+check("a leg with no qty key at all is still one contract",
+      optgates.net_premium({"legs": [{"row": SHORT, "side": "sell"}]}) == 400.0)
+
+# 10b. An unrecognised side used to fall through to LONG, which reverses the
+# sign of the premium and zeroes the assignment notional in the same step.
+check("an unrecognised side fails instead of becoming a long leg",
+      not optgates.cost_to_trade(
+          {"legs": [{"row": SHORT, "side": "hold", "qty": 1}]}).passed)
+check("'short' and 'long' are read as the sides they are",
+      optgates.assignment_notional(
+          {"legs": [{"row": SHORT, "side": "short", "qty": 1}]}) == 64000.0 and
+      optgates.assignment_notional(
+          {"legs": [{"row": SHORT, "side": "long", "qty": 1}]}) == 0.0)
+
+# 10c. `covered` belongs on the leg as readily as on the row.
+check("a covered mark on the LEG is honoured, not only on the row",
+      optgates.assignment_notional(
+          {"legs": [{"row": row("C", 650, 3.0, 0.02, kind="call"),
+                     "side": "sell", "qty": 1, "covered": True}]}) == 0.0)
+
+# 10d. A 10-lot bid is a liquid market for one contract and no market for
+# fifty. The floor alone could not tell those apart.
+fifty = {"legs": [{"row": row("A", 640, 4.0, 0.02, bid_size=10), "side": "sell",
+                   "qty": 50}]}
+res = optgates.liquidity(fifty, spread_history={"A": [0.5, 0.5, 0.5]})
+check("50 contracts into a 10-lot bid is excluded", not res.passed, res.reason)
+check("one contract into the same bid is fine",
+      optgates.liquidity({"legs": [{"row": row("A", 640, 4.0, 0.02, bid_size=10),
+                                    "side": "sell", "qty": 1}]},
+                         spread_history={"A": [0.5, 0.5, 0.5]}).passed)
+
+# 10e. A STOCK leg is collateral, not premium. Folding a $640 share price into
+# the premium defeated G1 entirely and inverted G4.
+#   covered call: long 100 shares at 640, short the 650 call at 0.30, 0.10 wide
+#   option premium   0.30 x 100                 = $30 credit
+#   give-up          0.05 x 100                 = $5   -> 16.67% of $30
+# That is the RAM-grade quote G1 exists to exclude. With the shares in the
+# denominator it measured 0.008% and passed.
+STOCK = {"symbol": "SPY", "type": "stock", "strike": 0.0, "expiration": None,
+         "spot": 640.0, "bid": 640.0, "ask": 640.0, "mid": 640.0, "spread": 0.0,
+         "spread_pct": 0.0, "oi": None}
+WIDE_CALL = row("SPY261016C00650000", 650, 0.30, 0.10, kind="call")
+cc = {"legs": [{"row": STOCK, "side": "buy", "qty": 1},
+               {"row": WIDE_CALL, "side": "sell", "qty": 1}]}
+check("the premium of a covered call is the option's $30, not a $63,970 debit",
+      optgates.net_premium(cc) == 30.0, optgates.net_premium(cc))
+res = optgates.cost_to_trade(cc)
+check("so its cost to trade is the option's 16.67%, and it is EXCLUDED",
+      not res.passed and abs(res.value["pct"] - 16.667) < 0.01, res.value)
+TIGHT_CALL = row("SPY261016C00650000", 650, 3.00, 0.02, kind="call")
+tight = {"legs": [{"row": STOCK, "side": "buy", "qty": 1},
+                  {"row": TIGHT_CALL, "side": "sell", "qty": 1}]}
+# give-up 0.01 x 100 = $1 on $300 of premium = 0.333%
+check("a tightly quoted covered call still passes at 0.333%",
+      optgates.cost_to_trade(tight).passed and
+      abs(optgates.cost_to_trade(tight).value["pct"] - 0.333) < 0.001,
+      optgates.cost_to_trade(tight).value)
+# G4 reads the SIGN of the premium to pick which test applies. A covered call
+# sells volatility; read as a debit it got the volatility BUYER's test and was
+# refused exactly when the call it sells was richest.
+res = optgates.edge_exists(tight, vol={"iv": 0.30, "rv": 0.16})
+check("a covered call is short premium, so rich implied is its edge",
+      res.passed and res.value["short_premium"] is True, res.value)
+check("and implied at realised is not an edge for it",
+      not optgates.edge_exists(tight, vol={"iv": 0.16, "rv": 0.16}).passed)
+check("G2 does not reject the shares for having no open interest",
+      optgates.liquidity(tight, spread_history={
+          "SPY261016C00650000": [0.66, 0.70, 0.65]}).passed,
+      optgates.liquidity(tight, spread_history={
+          "SPY261016C00650000": [0.66, 0.70, 0.65]}).reason)
+check("a structure of nothing but stock has no option market to measure",
+      not optgates.liquidity({"legs": [{"row": STOCK, "side": "buy", "qty": 1}]},
+                             spread_history={"SPY": [0.0, 0.0, 0.0]}).passed)
+
+# 10f. G5's calendar parsing. Three separate ways an unchecked window used to
+# read as a clear one.
+noexp = {"legs": [{"row": row("S", 640, 4.0, 0.02, expiration=None),
+                   "side": "sell", "qty": 1}]}
+check("a structure with no parseable expiration fails G5 -- a verdict covers a "
+      "window, and it has none",
+      not optgates.no_event(noexp, calendar=CLEAR, now=TODAY).passed)
+# A list has a `.clear` METHOD, so "did the caller say the window was clear?"
+# answered yes for any list handed in.
+res = optgates.no_event(GOOD, calendar=[{}, {}], now=TODAY)
+check("a two-item list is not mistaken for a (blocked, reason) verdict",
+      not res.passed, res.reason)
+res = optgates.no_event(GOOD, calendar=[{"kind": "earnings",
+                                         "date": "2026-10-01"}] * 3, now=TODAY)
+check("a bare list of events is not a clear window", not res.passed, res.reason)
+check("a verdict that never mentions earnings is UNKNOWN, which is a fail",
+      not optgates.no_event(GOOD, calendar={"events": []}, now=TODAY).passed)
+check("earnings_known is only satisfied by an explicit True",
+      not optgates.no_event(GOOD, calendar={"earnings_known": "yes",
+                                            "events": []}, now=TODAY).passed)
+# The `events` context key routes to the same gate, so the same list must be
+# refused when it arrives through run_gates.
+out = optgates.run_gates(GOOD, {"spread_history": HISTORY, "vol": VOL,
+                                "equity": 200_000.0, "now": TODAY,
+                                "events": [{"kind": "earnings",
+                                            "date": "2026-10-01"}]})
+check("a short leg with no strike is an UNMEASURED obligation, not a zero one",
+      not optgates.assignment_capacity(
+          {"legs": [{"row": {"symbol": "A", "type": "put", "mid": 4.0,
+                             "spread": 0.02}, "side": "sell", "qty": 1}]},
+          cap=1_000_000.0).passed)
+check("an unpriced structure cannot be judged by G4 either -- which side of the "
+      "volatility it takes is unknown",
+      not optgates.edge_exists(
+          {"legs": [{"row": {"symbol": "A", "type": "put", "strike": 640.0},
+                     "side": "sell", "qty": 1}]}, vol=VOL).passed)
+
+# The gates take a dict or an object. An object whose `legs` is an attribute
+# must still work now that a callable attribute is ignored.
+class _Struct:
+    def __init__(self, legs):
+        self.legs = legs
+check("a structure given as an object still measures the same",
+      optgates.net_premium(_Struct(GOOD["legs"])) == 200.0,
+      optgates.net_premium(_Struct(GOOD["legs"])))
+
+check("an events list handed to run_gates rejects on G5",
+      out["passed"] is False and [f["gate"] for f in out["failed"]] == ["G5"],
+      [f["gate"] for f in out["failed"]])
 
 print()
 if fails:

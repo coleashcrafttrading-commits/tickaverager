@@ -606,11 +606,19 @@ def skew(rows: Sequence[dict], expiration: Optional[str] = None, *,
     Returned dict:
       `expiration`, `dte`, `n`
       `points`      [{strike, moneyness, iv, delta, type}, ...] by strike
-      `atm_iv`      implied volatility at the strike nearest spot
-      `put_wing_iv` / `call_wing_iv`   the lowest / highest in-band strike
-      `put_skew`    put_wing_iv - atm_iv. POSITIVE is the ordinary state:
+      `atm_iv`      implied volatility at the strike nearest spot -- the
+                    MEDIAN of every in-band row at that strike, so a chain
+                    that quotes both a call and a put there gives the same
+                    answer whatever order the rows arrive in
+      `put_wing_iv` the lowest-strike PUT at or below the money
+      `call_wing_iv` the highest-strike CALL at or above the money. Each falls
+                    back to any in-band strike on that side only when the
+                    chain carries no option of that type there, in which case
+                    the wing collapses onto the money and the skew reads zero
+      `put_skew`    put_wing_iv minus the money, anchored on the at-the-money
+                    PUT where one exists. POSITIVE is the ordinary state:
                     downside strikes imply more volatility than the money.
-      `call_skew`   call_wing_iv - atm_iv.
+      `call_skew`   the same on the call side.
       `put_slope_per_10pct`  least-squares steepness over the PUT side, signed
                     so that positive means implied volatility RISES as the
                     strike falls, expressed per 10% of spot. Read it as "this
@@ -618,12 +626,20 @@ def skew(rows: Sequence[dict], expiration: Optional[str] = None, *,
                     the money".
       `skew_25d`    the standard 25-delta risk reversal on the put side --
                     implied volatility of the put nearest 0.25 delta minus that
-                    of the put nearest 0.50 -- or None when deltas are missing.
+                    of the put nearest 0.50. None when deltas are missing, and
+                    also when the nearest contract is further than
+                    DELTA_TOLERANCE from its nominal delta: "nearest to 0.25"
+                    out of a chain whose closest put is 0.47 delta is not a
+                    25-delta anything.
       `shape`       "put skew", "call skew" or "flat" (inside FLAT_BAND).
 
     Returns None for empty input, for an expiration that is not present, or
-    when fewer than two usable strikes survive -- a smile through one point is
-    a point.
+    when fewer than two usable rows survive -- a smile through one point is a
+    point.
+
+    The whole answer is ORDER-INDEPENDENT: rows are pooled by strike (and, for
+    the wings and the anchors, by type) with a median before anything is
+    compared, so shuffling the chain cannot change a single number here.
 
     IF THIS IS WRONG: the screener sells the cheap wing believing it is the
     rich one, collecting less premium for the same assignment risk, and gate G4

@@ -60,7 +60,7 @@ def structure(name, **kw):
         "name": name, "gates": dict(PASS),
         "implied_vol": 0.30, "realized_vol": 0.20,
         "edge_margin_required": 0.04, "edge_stability": 0.80,
-        "credit": 120.0, "cost_to_trade": 4.0,
+        "credit": 120.0, "cost_to_trade_pct": 4.0,
         "max_loss": 380.0, "capital_at_risk": 380.0,
         "tail_loss": 380.0,
     }
@@ -206,27 +206,27 @@ mediocre = [
     # a real but thin edge, and a credit the round trip mostly eats
     structure("thin edge, dear to trade", implied_vol=0.22, realized_vol=0.20,
               edge_margin_required=0.02, edge_stability=0.55,
-              credit=30.0, cost_to_trade=12.0, max_loss=470.0,
+              credit=30.0, cost_to_trade_pct=12.0, max_loss=470.0,
               capital_at_risk=470.0, tail_loss=470.0),
     # respectable return per dollar of drawdown, but the gap is a coin flip
     structure("edge no better than a coin flip", implied_vol=0.40,
               realized_vol=0.20, edge_margin_required=0.04,
-              edge_stability=0.31, credit=90.0, cost_to_trade=5.0,
+              edge_stability=0.31, credit=90.0, cost_to_trade_pct=5.0,
               max_loss=600.0, capital_at_risk=600.0, tail_loss=600.0),
     # a wide gap, and nothing to show for it once the risk is counted
     structure("wide gap, poor pay", implied_vol=0.45, realized_vol=0.20,
               edge_margin_required=0.05, edge_stability=0.90,
-              credit=60.0, cost_to_trade=6.0, max_loss=900.0,
+              credit=60.0, cost_to_trade_pct=6.0, max_loss=900.0,
               capital_at_risk=900.0, tail_loss=900.0),
     # the edge has never been measured, because the recorder is young
     structure("stability never measured", edge_stability=None,
-              credit=80.0, cost_to_trade=5.0, max_loss=650.0,
+              credit=80.0, cost_to_trade_pct=5.0, max_loss=650.0,
               capital_at_risk=650.0, tail_loss=650.0),
     # undefined risk: no denominator, so no ranking
     structure("naked, undefined risk", max_loss=None, capital_at_risk=None,
               tail_loss=None),
     # capital-efficient but the round trip takes the lot
-    structure("the spread eats it", credit=45.0, cost_to_trade=105.0,
+    structure("the spread eats it", credit=45.0, cost_to_trade_pct=105.0,
               max_loss=200.0, capital_at_risk=200.0, tail_loss=200.0),
 ]
 mid = optgrade.grade(mediocre, account_equity=EQUITY,
@@ -385,7 +385,7 @@ check("it grades F", res.rejected[0].grade == "F", res.rejected[0].grade)
 check("nothing accepted", res.accepted == [])
 
 no_cost = structure("cost to trade missing")
-no_cost.pop("cost_to_trade")
+no_cost.pop("cost_to_trade_pct")
 band, ratio, why = optgrade.risk_adjusted(no_cost)
 check("a missing round-trip cost is not treated as zero cost", band == 0, band)
 check("and says so", any("cost" in w for w in why), why)
@@ -420,6 +420,166 @@ check("band two at twice it", optgrade.S2_BAND_HIGH == 0.20)
 check("a D is not tradable", "D" not in optgrade.ACCEPT_GRADES)
 check("an F is not tradable", "F" not in optgrade.ACCEPT_GRADES)
 check("A, B and C are", set(optgrade.ACCEPT_GRADES) == {"A", "B", "C"})
+
+
+print()
+print("12. the cost of trading is read in the unit it was written in")
+# optstructures.Structure documents `cost_to_trade` as "sum of half-spreads,
+# DOLLARS" and `cost_to_trade_pct` as "percent of |credit_mid|". Reading the
+# dollar figure as a percent is silent and it flatters every credit under
+# $100: a $5 give-up on a $50 credit is 10%, not 5%.
+dollars = {"credit": 50.0, "cost_to_trade": 5.0,
+           "max_loss": 400.0, "capital_at_risk": 400.0}
+percent = {"credit": 50.0, "cost_to_trade_pct": 10.0,
+           "max_loss": 400.0, "capital_at_risk": 400.0}
+b_d, r_d, why_d = optgrade.risk_adjusted(dollars)
+b_p, r_p, _ = optgrade.risk_adjusted(percent)
+# $50 credit less a $5 round trip is $45; $45 over $400 at risk is 0.1125.
+check("a dollar give-up is converted, not read as a percent",
+      abs(r_d - 0.1125) < 1e-12, r_d)
+check("and it agrees with the same cost stated as a percent",
+      abs(r_d - r_p) < 1e-12, (r_d, r_p))
+check("reading $5 as '5%' would have said 0.11875 -- it does not",
+      abs(r_d - 0.11875) > 1e-6, r_d)
+check("the reasoning says which unit it read",
+      any("dollars" in w for w in why_d), why_d)
+# When BOTH are present the percent wins, because that is the number gate one
+# actually measured.
+both = dict(dollars, cost_to_trade_pct=20.0)
+_, r_both, _ = optgrade.risk_adjusted(both)
+check("the percent field wins when both are present",
+      abs(r_both - (50.0 * 0.8) / 400.0) < 1e-12, r_both)
+
+# A Structure has no `credit` field at all -- it has `credit_mid`. Without
+# that alias every structure the built layer produces scores band zero.
+mid = {"credit_mid": 120.0, "cost_to_trade": 4.8,
+       "max_loss": 380.0, "capital_at_risk": 380.0}
+b_m, r_m, _ = optgrade.risk_adjusted(mid)
+check("credit_mid is understood as the net credit", b_m == 2, b_m)
+check("and priced exactly: (120 - 4.80) / 380",
+      abs(r_m - (115.2 / 380.0)) < 1e-12, r_m)
+check("credit_mid is on the list of credit fields",
+      "credit_mid" in optgrade.CREDIT_KEYS, optgrade.CREDIT_KEYS)
+
+# An exact score-two ratio, so a stub returning zero -- or any change to the
+# 100 multiplier or the percent arithmetic -- cannot pass this file.
+top_ratio = optgrade.grade([structure("pinned", implied_vol=0.34)],
+                           account_equity=EQUITY,
+                           tail_veto_fraction=VETO_FRACTION).best
+check("score two's ratio is pinned to an arithmetic fact",
+      abs(top_ratio.s2_ratio - (120.0 * 0.96 / 380.0)) < 1e-12,
+      top_ratio.s2_ratio)
+
+
+print()
+print("13. a missing maximum loss is not papered over with capital at risk")
+# risk_adjusted's own docstring promises band zero for a missing maximum loss
+# "rather than quietly replaced with the capital figure".
+band, ratio, why = optgrade.risk_adjusted(
+    {"credit": 120.0, "cost_to_trade_pct": 4.0, "max_loss": None,
+     "capital_at_risk": 380.0})
+check("a missing max loss is unrankable even with capital at risk present",
+      band == 0 and ratio == 0.0, (band, ratio))
+check("and says capital at risk is not a substitute",
+      any("substitute" in w for w in why), why)
+
+# optstructures.to_dict() cannot write Infinity into JSON, so it nulls an
+# unbounded max loss and sets `max_loss_unbounded`. The flag must be read, or
+# unbounded risk arrives looking merely incomplete.
+band, _, why = optgrade.risk_adjusted(
+    {"credit": 120.0, "cost_to_trade_pct": 4.0, "max_loss": 380.0,
+     "capital_at_risk": 380.0, "max_loss_unbounded": True})
+check("max_loss_unbounded is honoured even when a number is present",
+      band == 0, band)
+band, _, _ = optgrade.risk_adjusted(
+    {"credit": 120.0, "cost_to_trade_pct": 4.0, "max_loss": 380.0,
+     "capital_at_risk": 380.0, "defined_risk": False})
+check("defined_risk=False is honoured too", band == 0, band)
+
+
+print()
+print("14. the tail estimate refuses any structure it cannot price from one strike")
+# A one-character prefix test reads `cash_secured_put` as a short CALL, and a
+# short call loses nothing in a FALL -- so the flagship premium-selling
+# structure came back with a $0.00 April-2025 tail and sailed through the one
+# veto built to catch it.
+one_strike = {"short_strike": 100.0, "spot": 105.0, "contracts": 1,
+              "credit": 200.0}
+dollars, how = optgrade.tail_loss(dict(one_strike, kind="cash_secured_put"))
+check("a cash-secured put is priced as a PUT, not as a call",
+      abs(dollars - 1295.0) < 1e-6, (dollars, how))
+check("and it says put", "short put" in how, how)
+dollars, _ = optgrade.tail_loss(dict(one_strike, kind="put"))
+check("the bare name agrees", abs(dollars - 1295.0) < 1e-6, dollars)
+
+# Everything with more than one leg that matters must fall through, not
+# invent a payoff from a single strike.
+for kind in ("iron_condor", "condor", "calendar", "diagonal",
+             "call_credit_spread", "put_credit_spread", "covered_call",
+             "call_debit_spread", "broken_wing_butterfly", "strangle"):
+    dollars, how = optgrade.tail_loss(dict(one_strike, kind=kind))
+    check("%s is not guessed from one strike" % kind,
+          math.isinf(dollars), (kind, dollars, how))
+
+# ... but the structure layer's own max loss is used the moment it exists.
+dollars, how = optgrade.tail_loss(
+    dict(one_strike, kind="iron_condor", max_loss=430.0))
+check("a multi-leg structure uses the computed max loss", dollars == 430.0,
+      dollars)
+check("and says where that came from", "maximum loss" in how, how)
+
+# Grading a condor with no computed tail must VETO, never accept.
+condor = structure("condor with no computed tail", implied_vol=0.34,
+                   kind="iron_condor", short_strike=100.0, spot=105.0)
+condor.pop("tail_loss")
+condor.pop("max_loss")
+condor.pop("capital_at_risk")
+res = optgrade.grade([condor], account_equity=EQUITY,
+                     tail_veto_fraction=VETO_FRACTION)
+check("an unpriceable tail is vetoed, not accepted", res.accepted == [])
+check("and it is recorded as a veto", res.rejected[0].vetoed)
+
+# The contract multiplier is applied once, and once per contract.
+three, _ = optgrade.tail_loss(dict(one_strike, kind="put", contracts=3))
+check("three contracts cost three times the intrinsic, less one credit",
+      abs(three - (14.95 * 100 * 3 - 200.0)) < 1e-6, three)
+
+# The stress scenario is a FALL. A positive drop would shock upward and hand
+# every short put a tail of zero.
+ok, msg = raises(lambda: optgrade.tail_loss({"max_loss": 10.0}, drop=0.19))
+check("a positive drop is refused rather than silently inverting S3", ok, msg)
+ok, _ = raises(lambda: optgrade.tail_veto(
+    structure("x"), account_equity=EQUITY, tail_veto_fraction=0.05, drop=0.19))
+check("the veto refuses it too", ok)
+
+
+print()
+print("15. the edge band is exact at its own boundaries")
+# The band is "how many multiples of gate four's margin". An edge of exactly
+# two margins is band two. In binary floating point 0.30 - 0.20 is
+# 0.09999999999999998, and flooring that against 0.05 gave band ONE.
+for iv, rv, margin, want in ((0.30, 0.20, 0.05, 2),
+                             (0.25, 0.20, 0.05, 1),
+                             (0.24, 0.20, 0.02, 2),
+                             (0.35, 0.20, 0.05, 3),
+                             (0.30, 0.20, 0.04, 2),
+                             (0.20, 0.20, 0.02, 0)):
+    band, _, _ = optgrade.edge_quality(
+        {"implied_vol": iv, "realized_vol": rv,
+         "edge_margin_required": margin, "edge_stability": 0.9})
+    check("implied %.2f, realized %.2f, margin %.2f -> band %d"
+          % (iv, rv, margin, want), band == want, band)
+
+# A NEGATIVE edge -- implied below realized -- is band zero, never a negative
+# band that a clamp might rescue.
+band, _, _ = optgrade.edge_quality(
+    {"implied_vol": 0.15, "realized_vol": 0.30, "edge_margin_required": 0.02,
+     "edge_stability": 0.95})
+check("implied below realized is band zero", band == 0, band)
+check("gate four's margin is two volatility points upstream, and this module"
+      " never invents one of its own",
+      optgrade.edge_quality({"implied_vol": 0.30, "realized_vol": 0.20,
+                             "edge_stability": 0.9})[0] == 0)
 
 
 print()

@@ -129,6 +129,22 @@ STRUCTURE_SPECS: dict[str, dict[str, Any]] = {
     "iron_butterfly":     {"legs": 4, "shorts": 2, "equal_qty": True,  "defined_risk": True},
     "short_strangle":     {"legs": 2, "shorts": 2, "equal_qty": True,  "defined_risk": False},
     "short_straddle":     {"legs": 2, "shorts": 2, "equal_qty": True,  "defined_risk": False},
+    # The BOUGHT versions. Without these two rows a long strangle -- a debit
+    # paid, the most bounded risk on this table -- came back "unknown
+    # structure, cannot judge whether it is intact", which `is_broken()` reads
+    # as an emergency and `review_book` reports as one. An alarm that fires on
+    # a healthy position is an alarm everybody learns to ignore.
+    "long_strangle":      {"legs": 2, "shorts": 0, "equal_qty": True,  "defined_risk": True},
+    "long_straddle":      {"legs": 2, "shorts": 0, "equal_qty": True,  "defined_risk": True},
+    # Three legs, one of them short at twice the quantity -- so `equal_qty` is
+    # false, exactly as for a ratio spread. `defined_risk` is FALSE on purpose
+    # even though the put-side butterfly's loss is in fact bounded: the wider
+    # wing is where the risk hides, a call-side broken wing loses without limit
+    # above the upper strike, and this table cannot tell the two apart from the
+    # name alone. False here sends `buying_power_required` down the "no reserve
+    # can be computed" path, which refuses to size it rather than sizing it
+    # wrong.
+    "broken_wing_butterfly": {"legs": 3, "shorts": 1, "equal_qty": False, "defined_risk": False},
     "calendar":           {"legs": 2, "shorts": 1, "equal_qty": True,  "defined_risk": False},
     "diagonal":           {"legs": 2, "shorts": 1, "equal_qty": True,  "defined_risk": False},
     "ratio_spread":       {"legs": 2, "shorts": 1, "equal_qty": False, "defined_risk": False},
@@ -424,6 +440,15 @@ def resting_exit_for(leg: dict, *, entry_credit: Optional[float] = None,
     if qty <= 0:
         return {"ok": False, "symbol": sym, "order": None,
                 "reason": "leg holds no contracts"}
+    if not sym:
+        # An order needs a contract to name. Returning parameters with an
+        # empty symbol produces a rejection at the broker at best, and at
+        # worst a caller that believes a short leg is covered when no order
+        # could ever have been placed -- which is the naked case wearing a
+        # success flag.
+        return {"ok": False, "symbol": sym, "order": None, "naked": True,
+                "reason": "the leg carries no contract symbol -- no resting "
+                          "exit can be placed and this short is UNPROTECTED"}
 
     credit = _f(entry_credit)
     if credit is None:
@@ -536,7 +561,12 @@ def portfolio_greeks(positions: Iterable[Any]) -> dict:
     """
     by: dict[str, dict] = {}
     unpriced: list[dict] = []
-    for p in positions:
+    # Positions are numbered by their place in the input, NOT by id(). A
+    # position supplied as a plain dictionary becomes a temporary Position
+    # that dies at the end of its iteration, and CPython hands the next one
+    # the same address -- which made five separate short puts count as two
+    # structures on one line of the concentration report.
+    for index, p in enumerate(positions):
         pos = _as_position(p)
         for leg in pos.legs:
             row = leg_row(leg)
@@ -554,7 +584,7 @@ def portfolio_greeks(positions: Iterable[Any]) -> dict:
             spot = _f(row.get("spot"))
             if spot:
                 b["spot"] = spot
-            b["structures"].add(id(pos))
+            b["structures"].add(index)
             delta = _f(row.get("delta"))
             if delta is None:
                 b["unpriced_legs"] += 1
@@ -648,12 +678,30 @@ def max_loss(position: Any) -> Optional[float]:
     None is a real answer and must be handled as one. A short call's loss is
     unbounded; returning a large number instead would let a sizing routine
     treat the unbounded case as merely expensive.
+
+    TWO WAYS A BOUND STOPS EXISTING, both of which return None:
+
+      * the structure has more shorts than longs by construction -- a ratio
+        spread's extra short is naked, so the wing width between its two
+        strikes describes only the hedged part. Quoting that width as the
+        max loss understates a 2x1 ratio by the whole strike value of the
+        unhedged short (measured: $820 quoted against $54,820 real on a
+        545/540 put ratio), and a buying-power check reading it would wave
+        the position through;
+      * the structure is BROKEN. The wing width is the bound only while the
+        protective long is open in matching size. A put credit spread that
+        has had one of two longs closed is two shorts against one long: the
+        same understatement, arriving quietly. Alpaca is ground truth for
+        what is open, and when what is open no longer matches the structure
+        the arithmetic below describes a position that does not exist.
     """
     pos = _as_position(position)
     kind = pos.structure
     n = max([leg_contracts(l) for l in pos.legs] or [0])
     credit = float(pos.entry_credit or 0.0)
     if kind in UNBOUNDED:
+        return None
+    if pos.is_broken():
         return None
     if kind == "covered_call":
         return None          # bounded only by the stock going to zero
@@ -673,7 +721,10 @@ def max_loss(position: Any) -> Optional[float]:
         # wing, not their sum. Adding them would reserve twice the capital and
         # halve the book for no reason.
         return round(max(widths) * CONTRACT_MULTIPLIER * n - credit, 2)
-    if kind.endswith("_spread"):
+    if kind.endswith("_spread") and pos.spec.get("defined_risk"):
+        # `defined_risk` is what excludes the ratio spread here: it ends in
+        # "_spread" and has two strikes, but its extra short leg is naked and
+        # no width bounds it.
         width = _wing_width(pos, kind.startswith("call"))
         if width is None:
             return None
@@ -729,12 +780,21 @@ def buying_power_required(structure: Any, account: Optional[dict] = None) -> dic
         basis = "debit_paid"
         warnings.append("a calendar's short leg can be assigned early; the "
                         "debit is the reserve, not the whole risk")
+    elif not pos.spec.get("defined_risk"):
+        # A ratio spread, or a structure name this module does not know. Both
+        # have a short leg that nothing offsets, so there is no reserve to
+        # compute -- and calling it "defined_risk_max_loss" because it happens
+        # to have two strikes is how an unhedged short gets sized like a
+        # spread.
+        required, basis = None, "unbounded"
     else:
         required = max_loss(pos)
         basis = "defined_risk_max_loss"
         if required is None:
-            warnings.append("strikes missing -- the structure cannot be "
-                            "proven to be defined-risk")
+            warnings.append("the loss is not bounded by anything still open: "
+                            "either a strike is missing or the protective leg "
+                            "is gone -- the structure cannot be proven to be "
+                            "defined-risk")
 
     avail = None if account is None else _f(account.get("options_buying_power"))
     out = {"structure": kind, "contracts": n, "required": required,
@@ -976,8 +1036,14 @@ def roll_candidates(position: Any, chain: list[dict], *, now: Any = None,
     repository has a standing rule against adding to a loser. So a candidate
     is rejected unless it satisfies all of:
 
-      * it collects a NET CREDIT after buying the current leg back. Paying a
-        debit to postpone is the definition of the thing being banned;
+      * it collects a NET CREDIT after buying the current leg back, with BOTH
+        sides priced at what they would actually trade at: the old leg bought
+        back at the offer, the new leg sold at the bid. Pricing the new leg at
+        its mid while the old one crosses to the ask drops half a spread on
+        one side only, and on a wide quote that is the whole decision -- a
+        1.80 x 2.30 candidate against a 2.00 offer reads as a $5 credit at the
+        mid and is a $20 DEBIT at the prices on the screen. Paying a debit to
+        postpone is the definition of the thing being banned;
       * it does not move the strike toward the money, and does not increase
         assignment notional;
       * it does not roll closer to expiry, and does not run more than
@@ -1076,6 +1142,13 @@ def roll_candidates(position: Any, chain: list[dict], *, now: Any = None,
             cdte = days_to_expiry(cand.get("expiration"), now)
             if cmid is None or cstrike is None or cdte is None:
                 continue                # no two-sided quote: the common case
+            # Opening the new short means SELLING, and selling hits the bid --
+            # the mirror of the ask used to close the old leg. Only where no
+            # bid is quoted does the mid stand in, and the row says so.
+            cprice = _f(cand.get("bid"))
+            price_basis = "bid"
+            if cprice is None or cprice <= 0:
+                cprice, price_basis = cmid, "mid"
             extra = cdte - cur_dte
             further = (cstrike > strike) if is_call else (cstrike < strike)
             same_strike = abs(cstrike - strike) < 1e-9
@@ -1084,12 +1157,13 @@ def roll_candidates(position: Any, chain: list[dict], *, now: Any = None,
                 kinds.append("out_in_time")
             if further:
                 kinds.append("up_in_strike" if is_call else "down_in_strike")
-            new_credit = cmid * CONTRACT_MULTIPLIER * contracts
+            new_credit = cprice * CONTRACT_MULTIPLIER * contracts
             roll_net = round(new_credit - cost * CONTRACT_MULTIPLIER * contracts, 2)
             new_assign = _row_assignment(cand, contracts, sp)
             rec = {"symbol": csym, "strike": cstrike, "expiration":
                    cand.get("expiration"), "dte": cdte, "extra_days": extra,
-                   "kinds": kinds, "mid": cmid,
+                   "kinds": kinds, "mid": cmid, "credit_price": cprice,
+                   "credit_basis": price_basis,
                    "new_credit": round(new_credit, 2), "roll_net": roll_net,
                    "assignment_notional": round(new_assign, 2),
                    "cost_to_trade_pct": _f(cand.get("edge_vs_mid")),

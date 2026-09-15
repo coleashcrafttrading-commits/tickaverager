@@ -36,8 +36,8 @@ unexpected report can cost many multiples of the credit on a short leg that has
 no floor. "No trade" is a normal output of this system. A silent "clear"
 produced by missing data is not.
 
-NOTHING HERE PLACES AN ORDER. This module is pure computation plus two
-read-only HTTP GETs.
+NOTHING HERE PLACES AN ORDER. This module is pure computation plus one
+read-only HTTP GET per symbol per cache window.
 """
 from __future__ import annotations
 
@@ -703,7 +703,7 @@ def early_assignment_risk(leg: dict, dividend_amount: Optional[float],
     Use `EventCalendar.dividends_known` to decide which to pass.
 
     Returns a dict, never raises: `{at_risk, severity, extrinsic, intrinsic,
-    price, price_source, dividend, days_to_div, dividend_cost, reason}`.
+    price, price_source, dividend, days_to_div, dividend_cost, qty, reason}`.
     `severity` is one of `none`, `watch`, `critical`, `unknown`.
 
     `conservative=True` (the default) values the option at the BID when one is
@@ -724,7 +724,8 @@ def early_assignment_risk(leg: dict, dividend_amount: Optional[float],
     side = str(leg.get("side", "")).lower()
     # `_i` rather than `int`: a quantity arriving as "1" or 1.0 from JSON must
     # not crash a risk check, and this function promises never to raise.
-    qty = _i(leg.get("qty")) or 0
+    qty_raw = leg.get("qty")
+    qty = _i(qty_raw)
     kind = str(row.get("type", "")).lower()
     div = _f(dividend_amount)
     dtd = _i(days_to_div)
@@ -733,12 +734,23 @@ def early_assignment_risk(leg: dict, dividend_amount: Optional[float],
         "at_risk": False, "severity": "none", "extrinsic": None,
         "intrinsic": None, "price": None, "price_source": None,
         "dividend": div, "days_to_div": dtd, "dividend_cost": None,
-        "reason": "",
+        "qty": None, "reason": "",
     }
 
-    if side != "sell" or qty <= 0:
+    if side != "sell":
         out["reason"] = "not a short leg -- a long option is never assigned"
         return out
+    if qty is None and qty_raw is not None:
+        # A quantity that will not parse is not a reason to declare a short leg
+        # safe; we simply do not know how much of it there is.
+        out.update(at_risk=True, severity="unknown",
+                   reason="short leg quantity %r is unreadable -- treated as at "
+                          "risk" % (qty_raw,))
+        return out
+    if not qty or qty <= 0:
+        out["reason"] = "not a short leg -- a long option is never assigned"
+        return out
+    out["qty"] = qty
     if kind.startswith("p"):
         # A dividend makes early exercise of a PUT less attractive, not more:
         # the holder would be giving up a stock that is about to go ex. Short

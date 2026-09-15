@@ -187,7 +187,9 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_engine_strategy test_latency test_refresh_trend test_accounts
   test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
   test_research test_indicators test_touch_adds test_review_fixes
-  test_fractional test_report test_bank test_supertrend test_options`,
+  test_fractional test_report test_bank test_supertrend test_options
+  test_optstructures test_optvol test_optcal test_optgates test_optgrade
+  test_optbook test_optengine`,
   each printing
   `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a scratch file.
   `deploy/vm_update.sh` runs thirteen of them on the VM and keeps the old

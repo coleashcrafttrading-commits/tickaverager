@@ -176,6 +176,19 @@ naked = optbook.resting_exit_for(leg(bare, "sell"))
 check("an unpriceable short leg refuses and says it is UNPROTECTED",
       naked["ok"] is False and naked.get("naked") is True, naked)
 
+nameless = optbook.resting_exit_for({"side": "sell", "qty": 1},
+                                    entry_credit=1.20)
+check("a leg with no contract symbol refuses rather than returning an order "
+      "nobody can place",
+      nameless["ok"] is False and nameless.get("naked") is True and
+      nameless["order"] is None, nameless)
+check("a short leg with no contracts produces no order",
+      optbook.resting_exit_for(leg(SHORT_PUT, "sell", 0),
+                               entry_credit=1.20)["order"] is None)
+check("a zero credit is refused, not priced at zero",
+      optbook.resting_exit_for(leg(SHORT_PUT, "sell"),
+                               entry_credit=0.0)["naked"] is True)
+
 # the book-level alarm
 book_pos = optbook.Position(
     structure="iron_condor",
@@ -245,6 +258,17 @@ check("and the caveat travels with the total", "1 leg" in g["caveat"],
       g["caveat"])
 check("greeks on an empty book do not raise",
       optbook.portfolio_greeks([])["total"]["delta_shares"] == 0.0)
+
+# Positions may arrive as plain dictionaries, and five of them are five
+# structures -- not however many distinct memory addresses the interpreter
+# happened to hand out while converting them one at a time.
+as_dicts = [{"structure": "cash_secured_put", "legs": [leg(SHORT_PUT, "sell")],
+             "entry_credit": 150.0} for _ in range(5)]
+gd = optbook.portfolio_greeks(as_dicts)["by_underlying"]["SPY"]
+check("five separate positions count as five structures, not fewer",
+      gd["structures"] == 5, gd["structures"])
+check("and their deltas add up (+150 shares)",
+      abs(gd["delta_shares"] - 150.0) < 1e-6, gd["delta_shares"])
 
 
 # --------------------------------------------------------------------------
@@ -426,6 +450,49 @@ check("a broken structure is never ok to commit capital to",
       bp7["ok"] is False and bp7["warnings"], bp7)
 
 
+# ---- max loss: the bound must exist before it is quoted -------------------
+# Hand-checked: 545/540 put credit spread, one contract, $120 credit.
+# 5.00 wide * 100 shares = $500 at risk, less the $120 collected = $380.
+check("a put credit spread's max loss is width minus credit ($380)",
+      abs(optbook.max_loss(spread_pos) - 380.0) < 1e-6,
+      optbook.max_loss(spread_pos))
+check("a naked call has NO max loss, not a big one",
+      optbook.max_loss(naked_call_pos) is None)
+check("a long call's max loss is the debit paid ($820)",
+      abs(optbook.max_loss(pltr_call) - 820.0) < 1e-6,
+      optbook.max_loss(pltr_call))
+
+# A ratio spread ends in "_spread" and has two strikes, and neither fact
+# bounds it: the second short is naked. Hand-checked, stock to zero, two
+# short 545 puts against one long 540 with $180 collected:
+#   2 * 545 * 100 - 1 * 540 * 100 - 180 = $54,820 at risk.
+# The wing width would have said $820 -- out by a factor of 67.
+ratio = optbook.Position(
+    structure="ratio_spread",
+    legs=[leg(SHORT_PUT, "sell", 2), leg(LONG_PUT, "buy", 1)],
+    entry_credit=180.0)
+check("a ratio spread is not broken -- unequal legs are the point",
+      not ratio.is_broken(), ratio.break_reasons())
+check("but its loss is UNBOUNDED, not the $820 wing width",
+      optbook.max_loss(ratio) is None, optbook.max_loss(ratio))
+bpr = optbook.buying_power_required(ratio, ACCOUNT)
+check("so it cannot be sized, and is not called defined-risk",
+      bpr["required"] is None and bpr["basis"] == "unbounded" and
+      bpr["ok"] is False, bpr)
+
+# The same understatement arriving quietly: one long of two was closed, so
+# what is open is two shorts against one long -- $54,760 at risk, not $760.
+check("a spread that has lost half its protection has NO bounded loss",
+      optbook.max_loss(partial) is None, optbook.max_loss(partial))
+bpp = optbook.buying_power_required(partial, ACCOUNT)
+check("and it refuses to reserve the wing width for it",
+      bpp["required"] is None and bpp["ok"] is False, bpp)
+risk_view = optbook.concentration([partial], basis="risk")
+check("the risk view falls back to assignment ($109,000) and says unbounded",
+      abs(risk_view["total_exposure"] - 109000.0) < 1e-6 and
+      risk_view["unbounded"] == ["SPY"], risk_view)
+
+
 # --------------------------------------------------------------------------
 print()
 print("7. I3 -- rolling, and the check that a roll is not a disguised loss")
@@ -447,7 +514,7 @@ CHAIN = [
         spot=543.0, edge_vs_mid=1.0),                       # far too long
     row("SPY260925P00545000", "put", 545.0, "2026-09-25", bid=1.45, ask=1.55,
         spot=543.0, edge_vs_mid=1.0),                       # a net debit
-    row("SPY261016P00535000", "put", 535.0, "2026-10-16", bid=1.90, ask=2.30,
+    row("SPY261016P00535000", "put", 535.0, "2026-10-16", bid=2.10, ask=2.94,
         spot=543.0, edge_vs_mid=16.7),                      # too costly
     row("SPY261016C00560000", "call", 560.0, "2026-10-16", bid=2.0, ask=2.1,
         spot=543.0, edge_vs_mid=1.0),                       # wrong type
@@ -464,8 +531,29 @@ check("two candidates survive every check", len(lg["candidates"]) == 2,
 best = lg["candidates"][0]
 check("ranked by credit per dollar of exposure, not by fattest credit",
       best["symbol"] == "SPY261016P00545000", best)
-check("the roll collects a net credit of $100",
-      abs(best["roll_net"] - 100.0) < 1e-6, best["roll_net"])
+# Both sides at the price they would actually trade at: buy the 2.00 offer
+# back, sell the new leg into the 2.95 bid. $295 - $200 = $95, NOT the $100
+# the two mids would have flattered it into.
+check("the new leg is sold at the BID, not the mid",
+      best["credit_basis"] == "bid" and abs(best["credit_price"] - 2.95) < 1e-9,
+      best)
+check("the roll collects a net credit of $95",
+      abs(best["roll_net"] - 95.0) < 1e-6, best["roll_net"])
+
+# the case the asymmetry used to hide: mid says credit, the screen says debit
+WIDE = row("SPY260918P00545000", "put", 545.0, "2026-09-18",
+           bid=1.60, ask=2.00, spot=543.0)
+wide_pos = optbook.Position(structure="cash_secured_put",
+                            legs=[leg(WIDE, "sell")], entry_credit=150.0)
+half_spread = optbook.roll_candidates(
+    wide_pos,
+    [row("SPY261016P00545000", "put", 545.0, "2026-10-16", bid=1.80, ask=2.30,
+         spot=543.0, edge_vs_mid=6.1)], now=NOW)
+hs = half_spread["legs"][0]
+check("a roll that is a credit at the mids and a debit on the screen is "
+      "REJECTED", hs["candidates"] == [] and
+      "net debit of $20.00" in (hs["rejected"][0]["why"] if hs["rejected"] else ""),
+      hs)
 
 rej = {r["symbol"]: r["why"] for r in lg["rejected"]}
 check("a strike moved toward the money is rejected",

@@ -12,10 +12,13 @@ score second", and three of the four gates are arithmetic on a structure
 rather than on a contract:
 
   * G1 cost to trade  -- `cost_to_trade_pct`, the sum of half-spreads across
-    every leg as a percent of the credit. Measured live on 15 Sep 2026 this
-    single number separates SPY (0.3-0.4%) from RAM (16.7%), and the
-    volatility risk premium being harvested is worth perhaps 10% of an
-    option's value. A structure that pays 15% to get filled has already lost.
+    every leg as a percent of the net OPTION premium (`premium_mid`, NOT the
+    net cash flow: a covered call's cash flow is mostly the shares, and
+    dividing by that understates the give-up by a factor of spot/premium).
+    Measured live on 15 Sep 2026 this single number separates SPY (0.3-0.4%)
+    from RAM (16.7%), and the volatility risk premium being harvested is worth
+    perhaps 10% of an option's value. A structure that pays 15% to get filled
+    has already lost.
   * G3 assignment capacity -- `assignment_notional`, the sum over SHORT PUTS
     of strike x 100 x quantity. SPY fell 11.5% in the week ending 8 Apr 2025;
     every short put open that week assigns together, so the cap is on the
@@ -39,6 +42,12 @@ THE TWO THINGS THIS FILE REFUSES TO DO.
 2. **It never raises on a missing quote.** Out of the money, no two-sided
    quote is the COMMON case, not an error. Such a structure comes back with
    `unpriceable=True` and `reasons` saying which leg, and the caller drops it.
+   A quote that is present but IMPOSSIBLE -- a crossed book, or quotes that
+   imply a riskless profit -- is excluded the same way, because the only
+   alternative is a negative cost or a negative drawdown, and this repository
+   ranks by profit per dollar of drawdown. `blocking_reason()` is the single
+   place all of that is reported, and a caller must consult it before reading
+   any number here.
 
 A LEG is `{"row": <chain row from options.chain()>, "side": "sell"|"buy",
 "qty": int}`. Sign convention throughout: buying is a POSITIVE signed
@@ -48,6 +57,7 @@ quantity, selling is NEGATIVE, and every dollar figure is multiplied by the
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
@@ -174,6 +184,43 @@ def _dollars(signed: float, price: float) -> float:
     return signed * MULTIPLIER * price
 
 
+# An Alpaca option symbol is OCC: root, YYMMDD, C or P, then the strike in
+# thousandths -- "SPY260918P00600000". The leading letters are the underlying.
+_OCC = re.compile(r"^([A-Z]{1,6})\d{6}[CP]\d{8}$")
+
+# How far two legs' `spot` may disagree and still be the same underlying.
+# Rows from one `options.chain()` call carry the IDENTICAL spot float, so any
+# gap at all comes from two fetches at different moments; 5% is generous slack
+# for that, and anything past it is two different names.
+_SPOT_TOLERANCE = 0.05
+
+
+def _one_underlying(views: list[_LegView]) -> None:
+    """Refuse a structure whose legs are not on the same underlying.
+
+    WHY THIS RAISES. Every payoff in this file evaluates one price axis `s`.
+    Hand it a SPY put and a QQQ put and the arithmetic still runs and still
+    returns a confident max loss, a credit and a probability of profit -- for
+    a position that does not exist and could never be hedged. That is exactly
+    the "grading system will always produce a winner" failure the design
+    document opens with, so it is a caller error like an inverted vertical,
+    not a fact about the market, and it raises rather than returning a number.
+    """
+    roots = {m.group(1) for m in
+             (_OCC.match(v.symbol.upper()) for v in views if v.kind != "stock")
+             if m}
+    if len(roots) > 1:
+        raise ValueError("a structure's legs must share one underlying, got %s"
+                         % ", ".join(sorted(roots)))
+    # The symbol check only fires on well-formed OCC symbols. The spot carried
+    # on the rows catches the rest, including any symbol scheme we do not know.
+    spots = [_num(v.row.get("spot")) for v in views if v.kind != "stock"]
+    spots = [x for x in spots if x and x > 0]
+    if spots and max(spots) > min(spots) * (1.0 + _SPOT_TOLERANCE):
+        raise ValueError("a structure's legs must share one underlying: their "
+                         "spot prices disagree (%s)" % sorted(set(spots)))
+
+
 # ------------------------------------------------------------ payoff ----
 def _intrinsic(v: _LegView, s: float) -> float:
     if v.kind == "stock":
@@ -195,13 +242,25 @@ def _terminal_value(v: _LegView, s: float, horizon: float, rate: float) -> float
     so. A calendar's entire profit lives in that residual value, so pricing
     the far leg at intrinsic instead would report every long calendar as a
     guaranteed loss of the debit paid.
+
+    THE INTRINSIC FLOOR IS NOT OPTIONAL. `options.bs_price` is the EUROPEAN
+    formula, and a European option can be worth LESS than intrinsic: a
+    100-strike put with 28 days left prices at 99.69 with the underlying at
+    zero, because the strike is only collected at expiry. These are AMERICAN
+    options -- the whole of the design document's C3 is about early exercise
+    -- so the holder can take intrinsic today and intrinsic is a hard lower
+    bound on the value. Without this floor a 100/100 put calendar taken for a
+    $153.43 debit reports a max loss of $184.07: a $30.64 loss that cannot
+    happen, invented by discounting a strike the holder could collect now.
+    Measured 15 Sep 2026.
     """
     if v.kind == "stock":
         return s
     remaining = v.t_years - horizon
     if remaining <= 0 or not v.iv or v.iv <= 0 or s <= 0:
         return _intrinsic(v, s)
-    return options.bs_price(s, v.strike, remaining, v.iv, rate, v.kind == "call")
+    model = options.bs_price(s, v.strike, remaining, v.iv, rate, v.kind == "call")
+    return max(model, _intrinsic(v, s))
 
 
 # ----------------------------------------------------------- lognormal ----
@@ -241,8 +300,9 @@ class Structure:
     credit_natural: Optional[float] = None    # crossing every leg
     net_price_mid: Optional[float] = None     # per structure, in price points
     net_price_natural: Optional[float] = None
+    premium_mid: Optional[float] = None       # net OPTION premium, dollars
     cost_to_trade: Optional[float] = None     # sum of half-spreads, dollars
-    cost_to_trade_pct: Optional[float] = None  # percent of |credit_mid| -- G1
+    cost_to_trade_pct: Optional[float] = None  # percent of |premium_mid| -- G1
 
     # ---- risk ----
     max_profit: Optional[float] = None        # math.inf when unbounded
@@ -267,6 +327,8 @@ class Structure:
     dte: Optional[float] = None               # to the NEAREST expiry
     multi_expiry: bool = False
     payoff_model: str = "expiry"              # "expiry" | "bs_at_near_expiry"
+    rate: float = RATE                        # the risk-free rate it was priced at
+    horizon: Optional[float] = None           # years to the NEAREST expiry
 
     # ---- shape ----
     is_credit: Optional[bool] = None
@@ -286,6 +348,21 @@ class Structure:
             return "max loss could not be computed"
         if self.max_loss == math.inf:
             return "loss is unbounded (a short call with no long call above it)"
+        if self.max_loss <= 0:
+            # The quotes say this position cannot lose -- a vertical taken for
+            # more than its own width, say. Real arbitrage does not sit in a
+            # retail option chain; a stale, wide or crossed quote does. Worse,
+            # this repository ranks by profit per dollar of drawdown, so a
+            # zero or negative drawdown would put the bad quote at the TOP of
+            # the board. Excluded, not scored.
+            return ("quotes imply a riskless profit (max loss %.2f) -- a stale "
+                    "or crossed quote, not a trade" % self.max_loss)
+        if self.cost_to_trade_pct is None:
+            # G1 has no number to read. A gate that cannot run is not a gate
+            # that passed, so refuse here rather than letting the caller
+            # compare None against a threshold.
+            return ("cost to trade could not be measured: the net option "
+                    "premium is zero, so there is no credit to compare it to")
         return None
 
     def to_dict(self) -> dict:
@@ -322,6 +399,7 @@ def build(name: str, legs: Iterable[dict], *, rate: float = RATE,
     if not legs:
         raise ValueError("a structure needs at least one leg")
     views = [_view(l) for l in legs]
+    _one_underlying(views)
     st = Structure(name=name, legs=legs)
 
     # --- context that does not need a quote -------------------------------
@@ -332,6 +410,12 @@ def build(name: str, legs: Iterable[dict], *, rate: float = RATE,
     st.payoff_model = "bs_at_near_expiry" if st.multi_expiry else "expiry"
     horizon = min([v.t_years for v in opt_views], default=0.0)
     st.dte = round(horizon * 365.0, 2) if opt_views else None
+    # Kept so the payoff can be re-evaluated later at a shocked price without
+    # the caller having to remember which rate and which horizon were used.
+    # Re-deriving either at the far end would silently re-price the structure
+    # against a different curve than the one every number above came from.
+    st.rate = float(rate)
+    st.horizon = horizon
     if spot is None:
         spot = next((_num(v.row.get("spot")) for v in views
                      if _num(v.row.get("spot"))), None)
@@ -364,11 +448,20 @@ def build(name: str, legs: Iterable[dict], *, rate: float = RATE,
         else:
             st.reasons.append("net %s unavailable: a leg has no %s" % (g, g))
 
-    # --- is every leg quoted? --------------------------------------------
+    # --- is every leg quoted, and is the quote sane? ----------------------
+    # A CROSSED book (bid above ask) is the dangerous one. It is a data error
+    # or a momentarily locked market, and taken at face value it produces a
+    # NEGATIVE `cost_to_trade` -- G1 then reads "crossing the market pays us
+    # 3.3%" and waves the structure through. Excluded here, in the same place
+    # a missing quote is, because a gate cannot un-know a bad number.
     for v in views:
         if v.mid is None or v.bid is None or v.ask is None:
             st.unpriceable = True
             st.reasons.append("%s has no two-sided quote" % v.symbol)
+        elif v.bid > v.ask + _EPS:
+            st.unpriceable = True
+            st.reasons.append("%s is quoted crossed: bid %s above ask %s"
+                              % (v.symbol, v.bid, v.ask))
     if st.unpriceable:
         # Deliberately leaves credit, max loss and capital at risk as None.
         # `blocking_reason()` is what callers check; the numbers are absent
@@ -384,6 +477,11 @@ def build(name: str, legs: Iterable[dict], *, rate: float = RATE,
     st.credit_mid = round(-debit_mid, 4)
     st.credit_natural = round(-debit_nat, 4)
     st.is_credit = st.credit_mid > 0
+    # The net OPTION premium, which is what G1 measures the give-up against.
+    # It is `credit_mid` for every all-option structure and differs only when
+    # a stock leg is present -- see the G1 block below for why that matters.
+    st.premium_mid = round(-sum(_dollars(v.signed, v.mid or 0.0)
+                                for v in views if v.kind != "stock"), 4)
     denom = MULTIPLIER * max(st.units, 1)
     st.net_price_mid = round(st.credit_mid / denom, 6)
     st.net_price_natural = round(st.credit_natural / denom, 6)
@@ -395,13 +493,22 @@ def build(name: str, legs: Iterable[dict], *, rate: float = RATE,
     # cost_to_trade always, and `test_optstructures.py` asserts it.
     st.cost_to_trade = round(
         sum(v.qty * MULTIPLIER * ((v.spread or 0.0) / 2.0) for v in views), 4)
-    if abs(st.credit_mid) > _EPS:
+    # THE DENOMINATOR IS THE OPTION PREMIUM, NOT THE NET CASH FLOW. On a
+    # covered call the net cash flow includes the shares: buying 100 shares at
+    # $100 against a $2.00 call quoted 1.50 x 2.50 makes `credit_mid` -$9,800,
+    # and $50 of give-up against that reads 0.51% -- SPY-class liquidity for a
+    # call that costs a QUARTER of its own premium to trade. Measured against
+    # the $200 of premium it is 25.0%, which is what it is, and G1 (the gate
+    # that separates SPY at 0.3-0.4% from RAM at 16.7%) then excludes it. The
+    # two numbers are identical for every structure with no stock leg.
+    if abs(st.premium_mid) > _EPS:
         st.cost_to_trade_pct = round(
-            100.0 * st.cost_to_trade / abs(st.credit_mid), 4)
+            100.0 * st.cost_to_trade / abs(st.premium_mid), 4)
     else:
-        # A structure worth nothing at the mid has no meaningful percentage,
-        # and returning 0 would sail through G1. None fails a numeric gate.
-        st.reasons.append("cost_to_trade_pct undefined: net mid value is zero")
+        # A structure whose options are worth nothing at the mid has no
+        # meaningful percentage, and returning 0 would sail through G1. It is
+        # left None and `blocking_reason()` refuses it outright.
+        st.reasons.append("cost_to_trade_pct undefined: net option premium is zero")
 
     # --- payoff: max profit, max loss, breakevens -------------------------
     credit = st.credit_mid
@@ -617,6 +724,86 @@ def probability_of_profit(breakevens: list[float], pl, spot: Optional[float],
     return round(min(1.0, max(0.0, total)), 6)
 
 
+
+# ------------------------------------------------------------- stress ----
+def payoff_at(structure: Structure, price: float) -> Optional[float]:
+    """Profit or loss in DOLLARS if the underlying is at `price` at this
+    structure's evaluation horizon. Positive is profit.
+
+    This is the same payoff `build()` used to find the maximum profit, the
+    maximum loss and the breakevens, re-evaluated at one price -- the structure
+    remembers the rate and the horizon precisely so that it is the same curve
+    and not a second opinion.
+
+    Returns None for a structure that could not be priced, because a payoff
+    measured from a missing credit is a number with no meaning attached.
+
+    WHAT BREAKS IF THIS IS WRONG: `shock_loss` below, and through it the tail
+    veto in `optgrade` -- the one check whose whole job is to keep a repeat of
+    April 2025 from ending the account.
+    """
+    if structure.unpriceable or structure.credit_mid is None:
+        return None
+    views = [_view(l) for l in structure.legs]
+    horizon = structure.horizon
+    if horizon is None:
+        opt = [v for v in views if v.kind != "stock"]
+        horizon = min([v.t_years for v in opt], default=0.0)
+    return sum(_dollars(v.signed, _terminal_value(v, float(price), horizon,
+                                                  structure.rate))
+               for v in views) + structure.credit_mid
+
+
+def shock_loss(structure: Structure, drop: float,
+               *, both_ways: bool = True) -> Optional[float]:
+    """Dollars lost (a POSITIVE magnitude) in a move of `abs(drop)`, or None.
+
+    `drop` is a negative fraction: -0.19 is the 19% peak-to-trough fall of
+    April 2025 and -0.115 the 11.5% fall in the single week ending 8 April
+    2025. Both numbers are the design document's.
+
+    `both_ways` also shocks the underlying UP by the same amount and returns
+    the worse of the two. A one-sided fall reports a call credit spread's tail
+    as zero -- its loss is entirely on the upside -- and a tail of zero passes
+    every veto there is. The design document's scenario is a fall, so the fall
+    is what the reasoning quotes; taking the worse of the two directions can
+    only ever refuse a trade, never admit one.
+
+    **None, never zero, when the loss is unbounded or unknown.** This is the
+    dangerous case and the reason the rule is written down here: a short call
+    LOSES NOTHING in a 19% fall, so a downward shock of a naked short call
+    returns a profit, and reporting that as a tail loss of $0.00 would hand
+    `optgrade.tail_loss` its most trusted input and wave through the one
+    structure on the list that can lose more than the account holds. None sends
+    that function to its `max_loss` fallback, which is infinite, which vetoes.
+
+    The number is clamped at the structure's own maximum loss where that is
+    finite. It is still an UNDERSTATEMENT for anything held past the shock,
+    because it prices the move with no expansion in implied volatility, and a
+    fall of this size always comes with one.
+    """
+    if drop >= 0.0:
+        raise ValueError("drop must be a negative fraction (a fall); got %r"
+                         % (drop,))
+    spot = structure.spot
+    if spot is None or spot <= 0:
+        return None
+    if structure.max_loss is None or structure.max_loss == math.inf:
+        return None
+    prices = [spot * (1.0 + drop)]
+    if both_ways:
+        prices.append(spot * (1.0 - drop))
+    worst = None
+    for px in prices:
+        pl = payoff_at(structure, px)
+        if pl is None:
+            return None
+        loss = max(0.0, -pl)
+        worst = loss if worst is None else max(worst, loss)
+    if worst is None:
+        return None
+    return round(min(worst, structure.max_loss), 4)
+
 # ----------------------------------------------------- named structures ----
 # Each of these only assembles legs; all of the arithmetic is in `build`.
 # The strike-ordering checks RAISE, because an inverted vertical is a
@@ -631,6 +818,22 @@ def _same_kind(rows: Iterable[dict], want: str, what: str) -> None:
 
 def _k(row: dict) -> float:
     return float(_num(row.get("strike")) or 0.0)
+
+
+def _side_word(side: str) -> str:
+    """"short" or "long" for a leg side, for naming a structure.
+
+    THE NAME IS AN INTERFACE, not a label. `optbook.STRUCTURE_SPECS` is keyed
+    by exactly these names and is how an open position is checked against the
+    shape it is meant to have -- a position whose name is not in that table
+    reports "unknown structure, cannot judge whether it is intact", which reads
+    as a BROKEN position and raises an emergency on a perfectly healthy book.
+    These built "sell_strangle" and "buy_strangle" while that table has only
+    said "short_strangle" and "short_straddle", so every strangle and straddle
+    this module built was unrecognisable to the book layer. If this drifts
+    again the same false emergency comes back.
+    """
+    return "short" if str(side).lower() == "sell" else "long"
 
 
 def cash_secured_put(put: dict, qty: int = 1) -> Structure:
@@ -772,7 +975,7 @@ def strangle(put: dict, call: dict, qty: int = 1, *, side: str = "sell") -> Stru
     _same_kind([call], "call", "strangle")
     if _k(put) >= _k(call):
         raise ValueError("a strangle's put strike sits below its call strike")
-    return build("%s_strangle" % side,
+    return build("%s_strangle" % _side_word(side),
                  [leg(put, side, qty), leg(call, side, qty)])
 
 
@@ -782,7 +985,7 @@ def straddle(put: dict, call: dict, qty: int = 1, *, side: str = "sell") -> Stru
     _same_kind([call], "call", "straddle")
     if _k(put) != _k(call):
         raise ValueError("a straddle shares one strike; use strangle otherwise")
-    return build("%s_straddle" % side,
+    return build("%s_straddle" % _side_word(side),
                  [leg(put, side, qty), leg(call, side, qty)])
 
 

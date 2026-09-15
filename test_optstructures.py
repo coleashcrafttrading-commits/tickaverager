@@ -256,6 +256,30 @@ naked = S.covered_call(c105, include_stock=False)
 check("without the shares it is a naked call with infinite loss",
       naked.max_loss == math.inf, naked.max_loss)
 
+# G1 measures the give-up against the PREMIUM, never against the net cash
+# flow. A covered call's cash flow is dominated by the shares, so charging the
+# option's spread against it divides by the wrong number by a factor of
+# spot/premium -- here 49x -- and a call that costs a quarter of its own value
+# to trade reports SPY-class liquidity and passes the gate that exists
+# specifically to exclude it.
+awful = qrow("call", 105, 1.50, 2.50)          # $1.00 wide on a $2.00 mid
+cc_bad = S.covered_call(awful)
+check("covered call still nets out to a debit of the shares less the premium",
+      near(cc_bad.credit_mid, -9800.0), cc_bad.credit_mid)
+check("its net OPTION premium is the $200 collected",
+      near(cc_bad.premium_mid, 200.0), cc_bad.premium_mid)
+check("its cost to trade is one half-spread, $50",
+      near(cc_bad.cost_to_trade, 50.0), cc_bad.cost_to_trade)
+check("G1 reads 25% of the premium, not 0.51% of the share notional",
+      near(cc_bad.cost_to_trade_pct, 25.0, 1e-3), cc_bad.cost_to_trade_pct)
+check("a 10%-of-credit G1 threshold therefore EXCLUDES it",
+      cc_bad.cost_to_trade_pct > 10.0, cc_bad.cost_to_trade_pct)
+check("the same call alone reads the same 25%",
+      near(S.covered_call(awful, include_stock=False).cost_to_trade_pct, 25.0, 1e-3))
+check("premium_mid equals credit_mid when there is no stock leg",
+      near(pcs.premium_mid, pcs.credit_mid) and near(csp.premium_mid, csp.credit_mid),
+      (pcs.premium_mid, csp.premium_mid))
+
 # --------------------------------------------------------------------------
 print()
 print("6. net greeks -- sign, quantity and the 100 multiplier")
@@ -319,6 +343,11 @@ for nm, st in built.items():
     check("%s: max_loss is never None" % nm, st.max_loss is not None, nm)
     check("%s: max_loss is never negative-infinite" % nm,
           st.max_loss != -math.inf, st.max_loss)
+    # A negative cost to trade would mean crossing the market PAYS us, which
+    # sails through any "cost must be under X" gate with room to spare.
+    check("%s: cost_to_trade_pct is never negative" % nm,
+          st.cost_to_trade_pct is not None and st.cost_to_trade_pct >= 0.0,
+          st.cost_to_trade_pct)
 
 # --------------------------------------------------------------------------
 print()
@@ -377,9 +406,21 @@ check("calendar is a debit", cal.credit_mid < 0, cal.credit_mid)
 # certain loss of the debit. The model is what makes a calendar a structure.
 check("calendar has a real maximum profit", cal.max_profit > 0, cal.max_profit)
 check("calendar profit is bounded", cal.max_profit != math.inf, cal.max_profit)
-check("calendar loss is bounded and near the debit",
-      abs(cal.credit_mid) < cal.max_loss < abs(cal.credit_mid) * 1.5,
-      (cal.max_loss, cal.credit_mid))
+# A same-strike calendar CANNOT lose more than the debit, and this is a
+# requirement, not an observation: at the near expiry the short leg is worth
+# its intrinsic value and the surviving long leg -- an AMERICAN option at the
+# same strike -- is worth at least intrinsic, so the spread is never negative.
+# Priced with the European formula and no intrinsic floor the far leg comes
+# out at 99.69 against a spot of zero, and this reported a $184.07 max loss on
+# a $153.43 debit: a $30.64 loss that cannot happen.
+check("a calendar cannot lose more than the debit paid",
+      near(cal.max_loss, abs(cal.credit_mid), 1e-6), (cal.max_loss, cal.credit_mid))
+# The floor itself, checked directly rather than through the structure.
+_far = S._view(S.leg(mrow("put", 100, 35, 0.28), "buy"))
+check("a deep-in-the-money American leg is never valued below intrinsic",
+      near(S._terminal_value(_far, 1e-9, options.years_to_expiry(exp_in(7)), RATE),
+           100.0, 1e-6),
+      S._terminal_value(_far, 1e-9, options.years_to_expiry(exp_in(7)), RATE))
 check("calendar has two breakevens", len(cal.breakevens) == 2, cal.breakevens)
 check("single-expiry structures are labelled exactly", ic.payoff_model == "expiry")
 
@@ -439,6 +480,93 @@ check("it round-trips through json", isinstance(json.loads(json.dumps(d)), dict)
 d2 = ic.to_dict()
 check("a defined-risk condor keeps its numbers",
       near(d2["max_loss"], 300.0) and d2["max_loss_unbounded"] is False, d2["max_loss"])
+
+# --------------------------------------------------------------------------
+print()
+print("14. a bad quote must be excluded, never scored around")
+# A CROSSED book -- bid above ask. Taken at face value the half-spread is
+# NEGATIVE, so cost_to_trade comes out at -$10 and G1 reads "crossing the
+# market pays us 3.3%", which passes every "cost under X" threshold there is.
+crossed = qrow("put", 100, 3.10, 2.90)
+xs = S.cash_secured_put(crossed)
+check("a crossed quote is unpriceable", xs.unpriceable is True, xs.unpriceable)
+check("and says which leg and why",
+      any("crossed" in r for r in xs.reasons), xs.reasons)
+check("and is blocked outright", xs.blocking_reason() is not None, xs.blocking_reason())
+check("no invented cost to trade", xs.cost_to_trade is None, xs.cost_to_trade)
+
+# A structure whose options net to nothing at the mid. There is no credit to
+# measure the give-up against, so G1 has no number -- and a gate with no
+# number is not a gate that passed.
+z = S.call_credit_spread(qrow("call", 105, 0.95, 1.05),
+                         qrow("call", 110, 0.95, 1.05))
+check("zero net premium leaves cost_to_trade_pct None, never 0",
+      z.cost_to_trade_pct is None, z.cost_to_trade_pct)
+check("and the structure is blocked rather than graded",
+      z.blocking_reason() is not None, z.blocking_reason())
+
+# Quotes that imply free money. Credit $595 on a $500-wide spread is a stale
+# or crossed quote, and left alone it ranks FIRST: this repository orders by
+# profit per dollar of drawdown, and the drawdown here is negative.
+arb = S.put_credit_spread(qrow("put", 100, 5.90, 6.10), qrow("put", 95, 0.00, 0.10))
+check("a credit wider than the spread is reported honestly, not clipped",
+      arb.max_loss < 0, arb.max_loss)
+check("and refused, so it can never top the leaderboard",
+      "riskless" in (arb.blocking_reason() or ""), arb.blocking_reason())
+
+# --------------------------------------------------------------------------
+print()
+print("15. a structure is one underlying, and the arithmetic cannot tell")
+# Both legs price, both are puts, the strikes are ordered -- and the answer is
+# a confident $350 max loss for a position nobody can hold or hedge.
+other = qrow("put", 95, 1.40, 1.60, spot=400.0)
+other["symbol"] = "QQQ260101P00095000"
+mine = qrow("put", 100, 2.90, 3.10, spot=100.0)
+mine["symbol"] = "SPY260101P00100000"
+check("legs on two underlyings are refused",
+      raises(lambda: S.put_credit_spread(mine, other), "two-underlyings"))
+same_spot = qrow("put", 95, 1.40, 1.60, spot=100.0)
+same_spot["symbol"] = "QQQ260101P00095000"
+check("caught by the symbol root even when the spots happen to match",
+      raises(lambda: S.put_credit_spread(mine, same_spot), "two-roots"))
+unknown = qrow("put", 95, 1.40, 1.60, spot=400.0)   # no OCC symbol to read
+check("and by the spot when the symbols mean nothing to us",
+      raises(lambda: S.put_credit_spread(p100, unknown), "two-spots"))
+check("one underlying still builds", isinstance(S.put_credit_spread(p100, p95),
+                                                S.Structure))
+
+# --------------------------------------------------------------------------
+print()
+print("16. nothing here raises on a missing number")
+# Every one of these is a normal chain row on a quiet day, and every one of
+# them must come back as a Structure with an honest None rather than an
+# exception or a confident zero.
+edge = qrow("put", 100, 2.90, 3.10)
+edge["expiration"] = None
+check("a row with no expiration prices to its intrinsic payoff",
+      near(S.cash_secured_put(edge).max_loss, 9700.0),
+      S.cash_secured_put(edge).max_loss)
+edge2 = qrow("put", 100, 2.90, 3.10)
+edge2["expiration"] = "not-a-date"
+check("an unparseable expiration does not raise",
+      near(S.cash_secured_put(edge2).max_loss, 9700.0))
+edge3 = qrow("put", 100, 2.90, 3.10, iv=0.0)
+edge3["spot"] = None                        # the chain gives None when unknown
+e3 = S.cash_secured_put(edge3)
+check("zero spot and zero volatility give no probability, not a guess",
+      e3.probability_of_profit is None and e3.iv is None, (e3.probability_of_profit, e3.iv))
+check("but the max loss is still real", near(e3.max_loss, 9700.0), e3.max_loss)
+part = qrow("put", 100, 2.90, 3.10, delta=-0.40, gamma=0.03, theta=-0.05,
+            rho=-0.04)                          # vega missing, the rest present
+pg = S.cash_secured_put(part)
+check("one missing greek blanks only that greek",
+      pg.vega is None and near(pg.delta, 40.0) and near(pg.theta, 5.0),
+      (pg.vega, pg.delta, pg.theta))
+check("a structure with no breakevens at all still gives a probability",
+      S.probability_of_profit([], lambda s: 1.0, 100.0, 0.25, 0.08) == 1.0,
+      S.probability_of_profit([], lambda s: 1.0, 100.0, 0.25, 0.08))
+check("and zero when it can never profit",
+      S.probability_of_profit([], lambda s: -1.0, 100.0, 0.25, 0.08) == 0.0)
 
 print()
 if fails:
