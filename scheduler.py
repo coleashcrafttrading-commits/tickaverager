@@ -84,7 +84,7 @@ JOBS: dict[str, dict] = {
                     "market_hours_only": True, "time": "10:00", "weekday": 0,
                     "weekdays_only": True},
         "prompt": (
-            "Run a safety check on the TickAverager trading fleet. Use the "
+            "Run a safety check on the Tick Avenger trading fleet. Use the "
             "risk-watchdog subagent's rules from .claude/agents/risk-watchdog.md "
             "and the standing brief in CLAUDE.md.\n\n"
             "Start with:\n"
@@ -112,7 +112,7 @@ JOBS: dict[str, dict] = {
                     "weekdays_only": True, "interval_minutes": 60,
                     "market_hours_only": False, "weekday": 0},
         "prompt": (
-            "Write the evening review of the TickAverager fleet, following "
+            "Write the evening review of the Tick Avenger fleet, following "
             ".claude/agents/performance-analyst.md and CLAUDE.md.\n\n"
             "Gather:\n"
             "  .venv/Scripts/python agentctl.py health --actor scheduled-review\n"
@@ -140,7 +140,7 @@ JOBS: dict[str, dict] = {
                     "weekdays_only": True, "interval_minutes": 60,
                     "market_hours_only": False, "weekday": 0},
         "prompt": (
-            "Run the operating loop for the TickAverager fleet, following "
+            "Run the operating loop for the Tick Avenger fleet, following "
             ".claude/agents/fleet-manager.md and CLAUDE.md. Glenn has authorised you "
             "to arm and manage ladders autonomously on this PAPER account.\n\n"
             "  .venv/Scripts/python agentctl.py health --actor fleet-manager\n"

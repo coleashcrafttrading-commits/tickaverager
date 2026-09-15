@@ -1,4 +1,4 @@
-# Operating rules — TickAverager fleet
+# Operating rules — Tick Avenger fleet
 
 This file loads into every session in this repo. It is the standing brief for
 any agent, human-driven or scheduled.

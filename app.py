@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-app.py -- dashboard + control API for the Alpaca TickAverager fleet.
+app.py -- dashboard + control API for the Alpaca Tick Avenger fleet.
 
     .venv/Scripts/python -m uvicorn app:app --port 8010
 
@@ -78,7 +78,7 @@ from engine import TICKER_DEFAULTS, FlattenError, frozen  # noqa: E402
 from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
                    Fleet, get_fleet, supervised)
 
-app = FastAPI(title="TickAverager Fleet / Alpaca")
+app = FastAPI(title="Tick Avenger Fleet / Alpaca")
 
 
 # Remote access needs a key; anything from this machine does not. The dashboard

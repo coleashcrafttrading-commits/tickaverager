@@ -1,6 +1,6 @@
 # alpaca-tick-averager
 
-The TickAverager DCA ladder, ported from NinjaTrader to Alpaca equities, running
+The Tick Avenger DCA ladder, ported from NinjaTrader to Alpaca equities, running
 **as many tickers at once as you like** -- each with its own ledger, its own
 thread and its own independent settings -- behind one browser dashboard.
 
@@ -72,7 +72,7 @@ ever fills all 20 rungs.
 
 ## Running it
 
-Double-click **TickAverager Bot** on the desktop. It starts the dashboard, opens
+Double-click **Tick Avenger Bot** on the desktop. It starts the dashboard, opens
 the browser at <http://127.0.0.1:8010>, and leaves a console window showing the
 log — close that window to shut the dashboard down.
 
@@ -83,7 +83,7 @@ The shortcut points at `start_bot.bat` in this folder. To recreate it:
 
 ```powershell
 $ws = New-Object -ComObject WScript.Shell
-$lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'TickAverager Bot.lnk'))
+$lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Tick Avenger Bot.lnk'))
 $lnk.TargetPath = 'C:\Users\Cole\alpaca-tick-averager\start_bot.bat'
 $lnk.WorkingDirectory = 'C:\Users\Cole\alpaca-tick-averager'
 $lnk.Save()

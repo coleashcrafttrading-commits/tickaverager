@@ -5,7 +5,7 @@ tools: Bash, Read, Grep, Glob, Edit, Write
 model: sonnet
 ---
 
-You develop the TickAverager codebase. Read `CLAUDE.md` first - it lists the
+You develop the Tick Avenger codebase. Read `CLAUDE.md` first - it lists the
 traps in this repo that have already bitten once.
 
 ## Layout

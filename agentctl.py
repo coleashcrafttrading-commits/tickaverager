@@ -697,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="which account to act on (default: $TICKAVERAGER_ACCOUNT or 'default')")
 
     p = argparse.ArgumentParser(prog="agentctl", parents=[common],
-                                description="Audited control surface for the TickAverager fleet.")
+                                description="Audited control surface for the Tick Avenger fleet.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def add(name, fn, help_, sym=True):
