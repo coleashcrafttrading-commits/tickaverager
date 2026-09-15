@@ -711,6 +711,7 @@ class Engine:
         self._strat_slug = ""
         self._strat_bars: list = []
         self._strat_at = 0.0
+        self._strat_force = False                  # a bar just closed: refetch
         self._reconcile_streak = 0
         self._reconcile_last = 0.0
         self._entry_backoff_until = 0.0
@@ -2692,6 +2693,8 @@ class Engine:
             # this bar again next tick rather than open lot 1 over it
             return
         self.last_bar_ts = bar["t"]
+        if self.cfg.get("strategy_entries") or self.cfg.get("strategy_exits"):
+            self._strat_force = True               # judge THIS bar, not a cached one
 
         if self.block_reason():
             return
@@ -3884,14 +3887,25 @@ class Engine:
         span = {"1Min": 5, "5Min": 12, "15Min": 25,
                 "1Hour": 90, "1Day": 500}.get(tf, 7)
         period = BAR_SECONDS.get(tf, 60)
-        if self._strat_bars and time.time() - self._strat_at < max(20, period / 2):
+        # Two timers, and both are older than one bar: this method's own gate
+        # (half a bar) and the shared BarCache's (a whole bar). A strategy asked
+        # on a bar close therefore reads a window that can END at the previous
+        # bar -- so it judges a bar it has already judged, and the bar that just
+        # closed is never looked at. On a 1-minute signal that is a SKIPPED
+        # trade, not a late one. `_strat_force`, set the moment a new bar
+        # completes, is what makes the signal bar the bar we judge. It costs
+        # one bars request per bar per symbol, which is what this already cost.
+        force, self._strat_force = self._strat_force, False
+        if not force and self._strat_bars                 and time.time() - self._strat_at < max(20, period / 2):
             return self._strat_bars
         try:
             import btjobs
             self._strat_bars = btjobs.CACHE.get(self.fleet.broker, self.symbol,
-                                                tf, span, max_age=period)
+                                                tf, span,
+                                                max_age=0 if force else period)
             self._strat_at = time.time()
         except Exception as e:
+            self._strat_force = force              # nothing fetched: still owed
             LOG.warning("%s indicator bars: %s", self.symbol, e)
         return self._strat_bars
 

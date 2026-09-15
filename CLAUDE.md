@@ -87,6 +87,23 @@ limit, any hour -- the DEFAULT for new tickers), `ladder_v3`, and
 one; `agentctl preset SYM basic` does the same from the CLI. Editing any
 setting by hand stamps the ticker `custom`.
 
+**Indicator strategies** are the other way a ticker can decide: set
+`strategy` to a slug from `strategies/`, plus `strategy_entries` and/or
+`strategy_exits`, and that document replaces the first-entry rule, the add rule
+and (for exits) the resting take-profit. Both switches are OFF everywhere by
+default and the ladder is untouched until one is turned on. `SuperTrend SPY
+1min` (`supertrend-spy-1min`) is TradingView's SuperTrend ported exactly --
+ATR 12, multiplier 4.0, hl2, simple-mean true range, in
+`indicators.supertrend_pine`, with a matching `ind.js` so the chart draws the
+same line. It buys the bar the trend flips up and sells the bar it flips down:
+one lot per leg, no adds, and **the flip is the only exit the document has**,
+so the ticker's own `take_profit` still rests at Alpaca and whichever comes
+first wins. Set `take_profit` wide to run it as the study is written.
+Measured on 20 days of SPY 1-minute bars it is **not an edge**: gross of costs
+the long and short legs cancel (-$2.86 and +$2.84 per share over 156 legs
+each), and $0.01 a side turns that into -$3.15. Long-only, which is what the
+engine trades, was -$4.42 per share.
+
 **Touch-mode adds** (from 10 Sep 2026, the default for every ticker):
 the ADDS are GTC limit entries (DAY for a fractional rung) resting at Alpaca at the next `add_depth`
 rungs (`basic` rests three), exactly the way the take-profits rest, so an
@@ -170,9 +187,10 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_engine_strategy test_latency test_refresh_trend test_accounts
   test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
   test_research test_indicators test_touch_adds test_review_fixes
-  test_fractional test_report test_bank`, each printing `ALL CHECKS PASSED`, with
-  `TICKAVERAGER_JOURNAL` pointed at a scratch file. `deploy/vm_update.sh`
-  runs twelve of them on the VM and keeps the old process if one is red.
+  test_fractional test_report test_bank test_supertrend`, each printing
+  `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a scratch file.
+  `deploy/vm_update.sh` runs thirteen of them on the VM and keeps the old
+  process if one is red.
 - The ticker is **RAM**, not "RAW". Glenn says RAW; RAM is correct.
 
 ## How to act

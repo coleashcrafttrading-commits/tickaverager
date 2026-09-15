@@ -1,0 +1,19 @@
+{
+  "name": "SuperTrend SPY 1min",
+  "note": "TradingView's SuperTrend, ported exactly: ATR 12, multiplier 4.0, source hl2, simple-mean true range. Buys the bar the trend flips up and sells the bar it flips down -- one lot per leg, no adds, and the flip is the stop as well as the target.",
+  "indicators": {
+    "st": {
+      "kind": "supertrend_pine",
+      "period": 12,
+      "mult": 4.0,
+      "src": "hl2",
+      "change_atr": false
+    }
+  },
+  "entry": {
+    "rising": "st.dir"
+  },
+  "exit": {
+    "falling": "st.dir"
+  }
+}

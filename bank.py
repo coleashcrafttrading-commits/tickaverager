@@ -213,7 +213,12 @@ def tunables(kind: str, slug: str) -> list[dict]:
     spec = sdoc.load(slug)
     for name, cfg in (spec.get("indicators") or {}).items():
         for p, v in (cfg or {}).items():
-            if p == "kind" or not isinstance(v, (int, float)) or isinstance(v, bool):
+            # numbers and on/off switches only. A STRING input (a source, a
+            # mode) is left to the builder: `set_params` re-validates the
+            # shape but cannot know that "typical" is not a price source, so
+            # a free-text box here would write a strategy that only fails
+            # later, live, when the indicator is asked to compute.
+            if p == "kind" or not isinstance(v, (int, float, bool)):
                 continue
             out.append(_knob(f"indicators.{name}.{p}", p, v,
                              group=f"{name} ({cfg.get('kind', '?')})"))

@@ -179,6 +179,51 @@ export function supertrend(h, l, c, period = 10, mult = 3) {
   return { line, dir };
 }
 
+/* The TradingView study. Not the same numbers as supertrend() above: its ATR
+   is a SIMPLE mean of true range, not Wilder's, which flips it on different
+   bars. Mirrors indicators.supertrend_pine. */
+export function supertrendPine(o, h, l, c, period = 12, mult = 4,
+                               src = "hl2", changeAtr = false) {
+  const n = c.length;
+  const tr = trueRange(h, l, c);
+  const a = changeAtr ? wilder(tr, period) : sma(tr, period);
+  const at = (i) => {
+    switch (String(src).toLowerCase()) {
+      case "close": return c[i];
+      case "open": return o[i];
+      case "high": return h[i];
+      case "low": return l[i];
+      case "hlc3": return (h[i] + l[i] + c[i]) / 3;
+      case "ohlc4": return (o[i] + h[i] + l[i] + c[i]) / 4;
+      default: return (h[i] + l[i]) / 2;
+    }
+  };
+  const line = new Array(n).fill(null), dir = new Array(n).fill(null);
+  const up = new Array(n).fill(null), dn = new Array(n).fill(null);
+  const buy = new Array(n).fill(null), sell = new Array(n).fill(null);
+  let pu = null, pd = null, trend = 1;
+  for (let i = 0; i < n; i++) {
+    const was = trend;
+    if (a[i] != null) {
+      const s = at(i);
+      const ru = s - mult * a[i], rd = s + mult * a[i];
+      const up1 = pu == null ? ru : pu, dn1 = pd == null ? rd : pd;
+      const cp = i ? c[i - 1] : null;
+      const cu = (cp != null && cp > up1) ? Math.max(ru, up1) : ru;
+      const cd = (cp != null && cp < dn1) ? Math.min(rd, dn1) : rd;
+      if (trend === -1 && c[i] > dn1) trend = 1;
+      else if (trend === 1 && c[i] < up1) trend = -1;
+      pu = cu; pd = cd;
+      up[i] = cu; dn[i] = cd;
+      line[i] = trend === 1 ? cu : cd;
+    }
+    dir[i] = trend;
+    buy[i] = (i && trend === 1 && was === -1) ? 1 : 0;
+    sell[i] = (i && trend === -1 && was === 1) ? 1 : 0;
+  }
+  return { line, dir, up, dn, buy, sell };
+}
+
 export function vwap(h, l, c, v, keys) {
   const out = new Array(c.length).fill(null);
   let pv = 0, vol = 0, prev = null;
@@ -420,6 +465,9 @@ export const CATALOG = {
                 run: (b, p) => donchian(b.h, b.l, p.period) },
   supertrend: { label: "SuperTrend", params: { period: 10, mult: 3 }, panel: false,
                 run: (b, p) => ({ ST: supertrend(b.h, b.l, b.c, p.period, p.mult).line }) },
+  supertrend_pine: { label: "SuperTrend (TradingView)", params: { period: 12, mult: 4 },
+                panel: false,
+                run: (b, p) => ({ "ST-TV": supertrendPine(b.o, b.h, b.l, b.c, p.period, p.mult).line }) },
   psar:       { label: "Parabolic SAR", params: { step: 0.02, max: 0.2 }, panel: false,
                 run: (b, p) => ({ PSAR: psar(b.h, b.l, p.step, p.max) }) },
   rsi:        { label: "RSI", params: { period: 14 }, panel: true,
