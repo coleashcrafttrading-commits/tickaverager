@@ -501,6 +501,19 @@ def summarise(structure: Any, gates: dict, config: EngineConfig, *,
     summary["realized_vol"] = rv
     summary["structure_iv"] = structure.iv       # the blended, per-leg number
     summary["edge_margin_required"] = config.edge_margin
+    # These live on the VOLATILITY VERDICT, not on gate four's value -- `measured`
+    # above is G4's own record and carries only the iv/rv pair it compared.
+    # Reading them from the wrong object is why a live spread kept grading C on
+    # "edge stability has never been measured" while the verdict beside it held
+    # a stability computed from sixty recorded readings.
+    _vol = vol if isinstance(vol, dict) else {}
+    for key in ("edge_stability", "edge_stability_n",
+                "iv_rank_0_100", "iv_percentile_0_100"):
+        val = _vol.get(key)
+        if val is None:
+            val = (measured or {}).get(key)
+        if val is not None:
+            summary[key] = val
 
     # The tail, from the structure's own payoff, at the grader's own drop.
     tail = optstructures.shock_loss(structure, config.drop)
@@ -556,6 +569,30 @@ def volatility(chain_rows: Sequence[dict], bars: Sequence[Any], *,
     if iv_history:
         out["iv_rank_0_100"] = optvol.iv_rank(iv, iv_history)
         out["iv_percentile_0_100"] = optvol.iv_percentile(iv, iv_history)
+        # EDGE STABILITY. optgrade documents and consumes `edge_stability` --
+        # "fraction, 0 to 1, of the recorded observations in which implied
+        # volatility exceeded realized volatility" -- and nothing produced it,
+        # so every graded structure fell into the `stability is None` branch and
+        # had its first score band capped at one. Measured live: an IWM spread
+        # whose edge was 4.96x the required margin, a band-three number, graded
+        # C on "edge stability has never been measured".
+        #
+        # A dangling contract, not a missing feature: the consumer, the units
+        # and the meaning were all already written down. It is computed here
+        # because this is the only layer that holds the recorded history and the
+        # realized volatility at the same time.
+        #
+        # Computed as DOCUMENTED -- plainly exceeded, not exceeded by the
+        # margin. The stricter reading is defensible and would be a different
+        # number; redefining a documented field silently is how the credit /
+        # credit_mid mismatch happened.
+        rvv = out.get("realized")
+        if rvv is not None and iv_history:
+            seen = [float(x) for x in iv_history if x is not None]
+            if seen:
+                out["edge_stability"] = round(
+                    sum(1 for x in seen if x > rvv) / float(len(seen)), 4)
+                out["edge_stability_n"] = len(seen)
     return out
 
 

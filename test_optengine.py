@@ -426,6 +426,28 @@ check("and gate four then fails closed",
       run(rows, vol=optengine.volatility(rows, [])).candidates == [])
 
 
+print("N. edge stability is PRODUCED, not just consumed")
+# optgrade documents and reads `edge_stability`; nothing produced it, so every
+# graded structure fell into the "never been measured" branch and had its first
+# band capped at one -- measured live on a spread whose edge was 4.96x the
+# required margin. A dangling contract between two layers.
+_bars = bars
+_rows = rows
+v = optengine.volatility(_rows, _bars, iv_history=[0.30, 0.31, 0.29, 0.05])
+check("volatility reports stability when a history exists",
+      v is not None and v.get("edge_stability") is not None, v)
+if v and v.get("edge_stability") is not None:
+    rv = v["realized"]
+    want = sum(1 for x in (0.30, 0.31, 0.29, 0.05) if x > rv) / 4.0
+    check("it is the fraction of readings that exceeded realized volatility",
+          abs(v["edge_stability"] - round(want, 4)) < 1e-9,
+          (v["edge_stability"], want, rv))
+    check("and it reports how many readings that was",
+          v.get("edge_stability_n") == 4, v.get("edge_stability_n"))
+v2 = optengine.volatility(_rows, _bars, iv_history=None)
+check("no history means no stability claim, not a stability of zero",
+      (v2 or {}).get("edge_stability") is None, v2)
+
 print()
 if fails:
     print("FAILED: %s" % ", ".join(fails))
