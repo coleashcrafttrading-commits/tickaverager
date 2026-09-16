@@ -185,11 +185,11 @@ If two disagree, say so loudly rather than picking the convenient one.
 - **The full test loop** after any change: `test_accounts test_app_accounts test_bank test_btcode
   test_engine_strategy test_entry_rule test_fractional test_indicators
   test_latency test_optbook test_optcal test_optengine test_optgates
-  test_optgrade test_options test_optquotes test_optstructures
-  test_optvol test_presets test_reconcile test_refresh_trend test_report
-  test_research test_reverse test_review_fixes test_rules test_short
-  test_strategy test_supertrend test_touch_adds test_trail test_trend
-  test_trend_v2 test_unwind`,
+  test_optgrade test_options test_optquotes test_optrun
+  test_optstructures test_optvol test_presets test_reconcile
+  test_refresh_trend test_report test_research test_reverse
+  test_review_fixes test_rules test_short test_strategy test_supertrend
+  test_touch_adds test_trail test_trend test_trend_v2 test_unwind`,
   each printing
   `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a scratch file.
   `deploy/vm_update.sh` runs thirteen of them on the VM and keeps the old
