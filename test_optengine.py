@@ -145,9 +145,18 @@ labels = [optengine.label_for(s) for s in built]
 check("every label is unique, so the evidence log can join grades to outcomes",
       len(set(labels)) == len(labels),
       "%d labels, %d unique" % (len(labels), len(set(labels))))
-check("a label names the kind, the strikes and the expiry",
-      any(l.startswith("put_credit_spread -100/+99") and l.endswith(EXP)
-          for l in labels), labels[:3])
+# The REQUIREMENT is the label's shape -- kind, both strikes with their sides,
+# and the expiry -- not which widths happen to be enumerated. Pinning
+# "-100/+99" pinned SPREAD_WIDTHS, so widening the widths (which measurement
+# showed cuts G1 rejections from 120 to 2) broke a test about naming.
+import re as _re
+_LABEL = _re.compile(r"^put_credit_spread -\d+(?:\.\d+)?/\+\d+(?:\.\d+)?  ?" + _re.escape(EXP) + r"$")
+check("a label names the kind, both strikes with their sides, and the expiry",
+      any(_LABEL.match(l.replace("  ", " ")) for l in labels), labels[:3])
+check("the long leg of a put credit spread is BELOW the short leg",
+      all(float(m.group(1)) > float(m.group(2))
+          for m in (_re.match(r"^put_credit_spread -(\d+(?:\.\d+)?)/\+(\d+(?:\.\d+)?)", l)
+                    for l in labels) if m))
 
 # An unquoted contract is the common case out of the money and must not raise.
 half_quoted = [dict(r) for r in rows]

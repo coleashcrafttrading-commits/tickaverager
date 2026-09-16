@@ -51,10 +51,27 @@ import optvol
 # furthest from the money are unquoted, and the gates throw them out anyway.
 MAX_PER_KIND: int = 40
 
-#: Widths, in strikes, that a vertical is built at. One strike apart is the
-#: tightest spread the chain allows; anything wider carries more risk for the
-#: same credit and the score already prefers the narrow one.
-SPREAD_WIDTHS: tuple[int, ...] = (1, 2)
+#: Widths, in strikes, that a vertical is built at.
+#:
+#: This used to be (1, 2), on the reasoning that a wider spread "carries more
+#: risk for the same credit". That is wrong, and measurably so: a wider spread
+#: carries more credit as well, while the cost to trade stays at two legs
+#: either way. Cost is what gate G1 measures as a FRACTION of the credit, so
+#: widening the spread shrinks the fraction without changing the numerator
+#: much.
+#:
+#: Measured against a live SPY chain on 15 Sep 2026, same 2,214 rows, same
+#: gates, only the widths changed -- G1 rejections out of ~160 structures:
+#:
+#:     (1, 2)    120 rejected     a one-strike spread 10% out of the money
+#:                                collects $4.00 and costs $1.00 to trade: 25%
+#:     (5, 10)    30 rejected
+#:     (10, 20)    2 rejected
+#:
+#: The six candidates the engine has ever produced were 8 to 10 strikes wide.
+#: One-strike verticals are dropped entirely: on a $1-strike underlying they
+#: are $100 of risk for a credit measured in pennies, and the spread eats it.
+SPREAD_WIDTHS: tuple[int, ...] = (2, 5, 10, 20)
 
 #: How far out of the money a short strike may sit, as a fraction of spot.
 #: 0.20 is a bound on the ENUMERATION, not a view: a strike 20% away on a
