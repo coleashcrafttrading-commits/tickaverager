@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tick Avenger — Options</title>
+<style>
+/* Same tokens as the fleet dashboard (static/ui/app.css), so this reads as one
+   product rather than a second one bolted on. */
+:root{
+  --bg:#05100d; --bg-2:#071613;
+  --haze-a:rgba(46,230,168,.10); --haze-b:rgba(139,108,255,.09);
+  --surface:rgba(255,255,255,.035); --surface-2:rgba(255,255,255,.055);
+  --raised:rgba(255,255,255,.075); --solid:#0d1c18;
+  --hairline:rgba(255,255,255,.075); --hairline2:rgba(255,255,255,.13);
+  --text:#e9f3ef; --muted:#93a9a1; --faint:#5f746c;
+  --accent:#2ee6a8; --accent-2:#8b6cff;
+  --warn:#ffc061; --bad:#ff6b8a; --good:#2ee6a8;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; min-height:100vh; color:var(--text);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  background:
+    radial-gradient(900px 600px at 5% -10%,var(--haze-a),transparent 60%),
+    radial-gradient(800px 600px at 100% 105%,var(--haze-b),transparent 58%),
+    linear-gradient(170deg,var(--bg-2),var(--bg) 45%) fixed;
+  background-color:var(--bg);
+}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 18px 70px}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+h1{font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em}
+.sub{color:var(--faint);font-size:13px}
+.readonly{
+  margin-left:auto;font:600 10.5px/1 var(--mono);letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);
+  background:rgba(46,230,168,.10);border:1px solid rgba(46,230,168,.30);
+  border-radius:999px;padding:6px 11px;
+}
+.card{
+  background:var(--surface);border:1px solid var(--hairline);
+  border-radius:14px;padding:16px 18px;margin:14px 0;
+}
+.card h2{
+  font:600 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin:0 0 12px;
+}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button,select{
+  font:inherit;color:var(--text);background:var(--surface-2);
+  border:1px solid var(--hairline2);border-radius:9px;padding:8px 13px;cursor:pointer;
+}
+button:hover,select:hover{background:var(--raised)}
+button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim,rgba(46,230,168,.14))}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{background:var(--surface-2);border:1px solid var(--hairline);border-radius:11px;padding:11px 13px}
+.stat .k{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.stat .v{font:600 21px/1.25 var(--mono);margin-top:6px}
+.stat .n{font-size:11.5px;color:var(--muted);margin-top:3px}
+.good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{
+  text-align:left;font:600 10px/1 var(--mono);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);padding:8px 10px;
+  border-bottom:1px solid var(--hairline);
+}
+td{padding:9px 10px;border-bottom:1px solid var(--hairline);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.mono{font-family:var(--mono)}
+.grade{
+  display:inline-grid;place-items:center;width:25px;height:25px;border-radius:7px;
+  font:700 12px/1 var(--mono);border:1px solid var(--hairline2);
+}
+.gA,.gB{color:#05100d;background:var(--accent);border-color:transparent}
+.gC{color:var(--warn);border-color:rgba(255,192,97,.45)}
+.gD,.gF{color:var(--bad);border-color:rgba(255,107,138,.45)}
+.why{margin:9px 0 0;padding-left:16px;color:var(--muted);font-size:12.5px}
+.why li{margin:3px 0}
+.empty{
+  border-left:3px solid var(--accent);background:rgba(46,230,168,.06);
+  border-radius:0 11px 11px 0;padding:13px 16px;
+}
+.empty b{color:var(--accent)}
+.note{border-left:3px solid var(--warn);background:rgba(255,192,97,.06);
+  border-radius:0 11px 11px 0;padding:11px 15px;color:var(--muted);font-size:13.5px;margin-top:10px}
+.bar{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin-top:8px}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.err{color:var(--bad);font-family:var(--mono);font-size:12.5px;white-space:pre-wrap}
+@media(max-width:620px){.wrap{padding:18px 13px 50px} .stat .v{font-size:18px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Options</h1>
+    <span class="sub">screen · grade · evidence</span>
+    <span class="readonly">read only · places no orders</span>
+  </header>
+
+  <div class="card">
+    <h2>Recorder</h2>
+    <div id="cov">loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>Screen</h2>
+    <div class="row">
+      <span id="syms"></span>
+      <button id="go">Run screen</button>
+      <span id="busy" class="sub"></span>
+    </div>
+    <div id="vol" class="grid" style="margin-top:14px"></div>
+    <div id="out" style="margin-top:14px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Why things were rejected</h2>
+    <div id="rej">run a screen</div>
+  </div>
+</div>
+
+<script>
+const SYMS = ["IWM","SPY","QQQ"];
+let sym = "IWM";
+const $ = s => document.querySelector(s);
+const fmt = (v,d=2) => (v===null||v===undefined||Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
+const money = v => (v===null||v===undefined) ? "—" : "$"+Number(v).toLocaleString(undefined,{maximumFractionDigits:0});
+
+function symBar(){
+  $("#syms").innerHTML = SYMS.map(s =>
+    `<button data-s="${s}" class="${s===sym?"on":""}">${s}</button>`).join(" ");
+  $("#syms").querySelectorAll("button").forEach(b =>
+    b.onclick = () => { sym = b.dataset.s; symBar(); run(); });
+}
+
+async function get(u){
+  const r = await fetch(u,{headers:{"accept":"application/json"}});
+  if(!r.ok) throw new Error(await r.text() || ("HTTP "+r.status));
+  return r.json();
+}
+
+async function coverage(){
+  try{
+    const c = await get("/api/options/coverage");
+    const enough = c.enough_for_stability;
+    $("#cov").innerHTML = `
+      <div class="grid">
+        <div class="stat"><div class="k">rows</div><div class="v">${(c.rows||0).toLocaleString()}</div></div>
+        <div class="stat"><div class="k">samples</div>
+          <div class="v ${enough?"good":"warn"}">${c.samples||0}</div>
+          <div class="n">${enough?"enough to judge stability":"not enough yet"}</div></div>
+        <div class="stat"><div class="k">contracts</div><div class="v">${(c.contracts||0).toLocaleString()}</div></div>
+        <div class="stat"><div class="k">span</div><div class="v">${fmt(c.span_hours,1)}h</div></div>
+      </div>
+      ${enough?"":`<div class="note"><b>The recorder is still filling.</b> Historical option
+        quotes are unavailable from the broker, so spread stability has to be measured
+        forward. Until there are enough samples, gate G2 refuses and the grading layer
+        caps its stability band — an empty board below is that, not the market.</div>`}`;
+  }catch(e){ $("#cov").innerHTML = `<div class="err">${e.message}</div>`; }
+}
+
+function volPanel(v, spot, extra){
+  if(!v){ $("#vol").innerHTML = `<div class="stat"><div class="k">volatility</div>
+    <div class="v warn">—</div><div class="n">no measured edge; gate four refuses</div></div>`; return; }
+  const ratio = v.ratio;
+  $("#vol").innerHTML = `
+    <div class="stat"><div class="k">spot</div><div class="v">${money(spot)}</div></div>
+    <div class="stat"><div class="k">implied</div><div class="v">${fmt(v.implied*100,1)}%</div></div>
+    <div class="stat"><div class="k">realized</div><div class="v">${fmt(v.realized*100,1)}%</div></div>
+    <div class="stat"><div class="k">ratio</div>
+      <div class="v ${ratio>=1.3?"good":ratio>=1.1?"warn":"bad"}">${fmt(ratio,2)}</div>
+      <div class="n">the premium being harvested</div></div>
+    <div class="stat"><div class="k">history</div><div class="v">${extra.iv_history_len||0}</div>
+      <div class="n">iv readings recorded</div></div>`;
+}
+
+function candidates(d){
+  if(!d.candidates.length){
+    return `<div class="empty"><b>No candidates — and that is a successful screen.</b>
+      ${d.considered} structures were considered and none cleared every gate.
+      ${d.why?("<br>"+d.why):""}</div>`;
+  }
+  return `<table><thead><tr>
+      <th>grade</th><th>structure</th><th>credit</th><th>max loss</th>
+      <th>cost</th><th>tail</th></tr></thead><tbody>` +
+    d.candidates.map(c => `<tr>
+      <td><span class="grade g${(c.grade||"F")}">${c.grade||"?"}</span></td>
+      <td><div class="mono">${c.label||""}</div>
+        ${(c.reasoning||[]).length?`<ul class="why">${c.reasoning.slice(0,4)
+          .map(r=>`<li>${String(r).replace(/[<>&]/g,"")}</li>`).join("")}</ul>`:""}</td>
+      <td class="mono">${c.credit==null?"—":"$"+fmt(c.credit)}</td>
+      <td class="mono">${money(c.max_loss)}</td>
+      <td class="mono">${c.cost_to_trade_pct==null?"—":fmt(c.cost_to_trade_pct)+"%"}</td>
+      <td class="mono">${money(c.tail_loss)}</td></tr>`).join("") + `</tbody></table>`;
+}
+
+const GATE = {G1:"cost to trade",G2:"liquidity / spread stability",
+  G3:"assignment capacity",G4:"a measured edge",G5:"no event in the window"};
+
+function rejections(d){
+  const e = Object.entries(d.rejected_by_gate||{}).sort((a,b)=>b[1]-a[1]);
+  if(!e.length) return "nothing was rejected";
+  const max = e[0][1];
+  return `<table><thead><tr><th>gate</th><th>what it checks</th><th>rejected</th><th></th></tr></thead><tbody>`
+    + e.map(([g,n])=>`<tr><td class="mono">${g}</td><td>${GATE[g]||""}</td>
+        <td class="mono">${n}</td>
+        <td style="width:34%"><div class="bar"><i style="width:${(100*n/max).toFixed(0)}%"></i></div></td>
+      </tr>`).join("")
+    + `</tbody></table>
+       <div class="note">A gate is a hard exclusion, never a score penalty. A structure
+       that fails one is not ranked at all, however good it looks elsewhere.</div>`;
+}
+
+async function run(){
+  $("#busy").textContent = "screening " + sym + "…";
+  $("#out").innerHTML = ""; $("#rej").textContent = "…";
+  try{
+    const d = await get(`/api/options/screen/${sym}`);
+    volPanel(d.vol, d.spot, d);
+    $("#out").innerHTML = candidates(d);
+    $("#rej").innerHTML = rejections(d);
+  }catch(e){
+    $("#out").innerHTML = `<div class="err">${e.message}</div>`;
+    $("#rej").textContent = "—";
+  }finally{ $("#busy").textContent = ""; }
+}
+
+symBar(); coverage(); run();
+$("#go").onclick = run;
+</script>
+</body>
+</html>
