@@ -259,6 +259,14 @@ class OptionData:
             snap = snaps.get(sym) or {}
             q = snap.get("latestQuote") or {}
             bid, ask = q.get("bp"), q.get("ap")
+            # Quote SIZE is the liquidity evidence that survives when open
+            # interest does not. Measured 15 Sep 2026: of 1,107 quoted SPY put
+            # rows, 339 carried NO open interest figure at all -- absent even on
+            # a direct single-contract fetch, while the contract was still
+            # tradable and quoting two-sided. Gate G2 accepts a quote size in
+            # place of open interest precisely for that case, and could not,
+            # because this function was discarding it.
+            bsz, asz = q.get("bs"), q.get("as")
             strike = _f(c.get("strike_price")) or 0.0
             expiry = c.get("expiration_date")
             is_call = str(c.get("type", "")).lower().startswith("c")
@@ -272,6 +280,8 @@ class OptionData:
                 "style": c.get("style"),
                 "spot": spot or None,
                 "bid": _f(bid), "ask": _f(ask),
+                "bid_size": _f(bsz), "ask_size": _f(asz),
+                "quote_size": min(_f(bsz) or 0.0, _f(asz) or 0.0) or None,
                 "mid": None, "spread": None, "spread_pct": None, "edge_vs_mid": None,
                 "iv": None, "delta": None, "gamma": None, "theta": None,
                 "vega": None, "rho": None,

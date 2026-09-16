@@ -159,9 +159,40 @@ res = optgates.liquidity(thin, spread_history={"A": [0.5, 0.5, 0.5]})
 check("40 open interest is excluded", not res.passed, res.reason)
 check("and the reason names the number", "40" in res.reason, res.reason)
 
-nooi = {"legs": [{"row": row("A", 640, 4.0, 0.02, oi=None), "side": "sell", "qty": 1}]}
-check("a missing open interest figure fails, it is not assumed",
-      not optgates.liquidity(nooi, spread_history={"A": [0.5, 0.5, 0.5]}).passed)
+# A MISSING open interest figure is a vendor gap, not a verdict -- measured
+# 15 Sep 2026, 339 of 1,107 quoted SPY put rows carried none, while tradable and
+# quoting two-sided. It may be carried by LIVE QUOTE SIZE alone, and only at
+# OI_ABSENT_SIZE_MULT times the bar size normally clears. Three cases, because
+# the interesting one is the boundary:
+hist = {"A": [0.5, 0.5, 0.5]}
+need_alone = max(optgates.MIN_QUOTE_SIZE, 1) * optgates.OI_ABSENT_SIZE_MULT
+
+nooi_nosize = {"legs": [{"row": row("A", 640, 4.0, 0.02, oi=None, bid_size=None),
+                         "side": "sell", "qty": 1}]}
+res = optgates.liquidity(nooi_nosize, spread_history=hist)
+check("no open interest AND no quote size is excluded", not res.passed, res.reason)
+
+nooi_small = {"legs": [{"row": row("A", 640, 4.0, 0.02, oi=None,
+                                   bid_size=need_alone - 1), "side": "sell", "qty": 1}]}
+res = optgates.liquidity(nooi_small, spread_history=hist)
+check("no open interest and a quote one lot under the bar is excluded",
+      not res.passed, res.reason)
+check("and the reason says size could not stand in for it",
+      "stand in" in res.reason, res.reason)
+
+nooi_big = {"legs": [{"row": row("A", 640, 4.0, 0.02, oi=None,
+                                 bid_size=need_alone), "side": "sell", "qty": 1}]}
+res = optgates.liquidity(nooi_big, spread_history=hist)
+check("a live quote at the higher bar carries a missing open interest",
+      res.passed, res.reason)
+check("and the substitution is RECORDED, not silent",
+      "A" in (res.value.get("oi_absent_carried_by_size") or []), res.value)
+
+# the substitute bar really is higher than the ordinary one
+ordinary = {"legs": [{"row": row("A", 640, 4.0, 0.02, oi=5000.0,
+                                 bid_size=need_alone - 1), "side": "sell", "qty": 1}]}
+check("that same size passes when open interest IS present",
+      optgates.liquidity(ordinary, spread_history=hist).passed)
 
 small = {"legs": [{"row": row("A", 640, 4.0, 0.02, bid_size=2), "side": "sell",
                    "qty": 1}]}

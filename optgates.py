@@ -65,6 +65,10 @@ MAX_COST_PCT = 5.0
 # yet. These are conventions, and the rejection log is how they get replaced.
 MIN_OPEN_INTEREST = 100.0
 MIN_QUOTE_SIZE = 10.0
+# How much bigger a live quote must be to stand in for a missing open interest
+# figure. Two, not one: the substitute is a single instant of the book, where
+# open interest is a settled count, so it buys its way in at twice the price.
+OI_ABSENT_SIZE_MULT = 2.0
 # Stability, not level. How WIDE a quote is belongs to G1, which measures it in
 # the only unit that matters (percent of the credit). G2 asks a different
 # question -- is the quote G1 just priced the same market that was there a
@@ -512,12 +516,37 @@ def liquidity(structure: Any, *, min_oi: float = MIN_OPEN_INTEREST,
 
         oi = _num(row.get("oi"))
         if oi is None:
-            return GateResult(False, "%s has no open interest figure" % symbol, value)
-        worst_oi = oi if worst_oi is None else min(worst_oi, oi)
-        if oi < min_oi:
-            value["min_oi_seen"] = worst_oi
-            return GateResult(False, "%s open interest %.0f is under the %.0f "
-                                     "minimum" % (symbol, oi, min_oi), value)
+            # A MISSING open interest figure is a vendor gap, not a verdict.
+            # Measured 15 Sep 2026: of 1,107 quoted SPY put rows, 339 carried no
+            # open interest at all -- absent even on a direct single-contract
+            # fetch, while the contract was tradable and quoting two-sided. A
+            # gate that rejects a third of the most liquid option chain on earth
+            # for a missing field is not measuring liquidity.
+            #
+            # This is NOT the gate relaxing. Open interest and quote size are
+            # two independent pieces of evidence for the same property, and the
+            # live one is the better one: open interest is yesterday's
+            # settlement count, while a two-sided quote with real size on the
+            # side we trade into is the market saying it will take the order
+            # now. So a missing figure may be carried by size ALONE, and only at
+            # a HIGHER bar than size normally has to clear -- never by assuming
+            # the market is fine because nobody said otherwise.
+            live = _num(row.get("bid_size" if _is_short(leg) else "ask_size"))
+            need_alone = max(float(min_quote_size), leg["qty"]) * OI_ABSENT_SIZE_MULT
+            if live is None or live < need_alone:
+                return GateResult(
+                    False,
+                    "%s has no open interest figure and its live quote size "
+                    "(%s) does not reach the %.0f needed to stand in for it"
+                    % (symbol, "unmeasured" if live is None else "%.0f" % live,
+                       need_alone), value)
+            value.setdefault("oi_absent_carried_by_size", []).append(symbol)
+        else:
+            worst_oi = oi if worst_oi is None else min(worst_oi, oi)
+            if oi < min_oi:
+                value["min_oi_seen"] = worst_oi
+                return GateResult(False, "%s open interest %.0f is under the %.0f "
+                                         "minimum" % (symbol, oi, min_oi), value)
 
         # The side that has to be there is the side we trade INTO: a short leg
         # is sold onto the bid, a long leg is bought from the offer.
