@@ -182,14 +182,14 @@ If two disagree, say so loudly rather than picking the convenient one.
   share. The health check reports an off-book fractional exit as `medium`,
   not `critical`. Whole-share tickers are byte-identical
   (`test_fractional.py` section 17 replays the golden capture).
-- **The full test loop** after any change: `test_rules test_reconcile
-  test_reverse test_unwind test_short test_trail test_entry_rule test_presets
-  test_engine_strategy test_latency test_refresh_trend test_accounts
-  test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
-  test_research test_indicators test_touch_adds test_review_fixes
-  test_fractional test_report test_bank test_supertrend test_options
-  test_optstructures test_optvol test_optcal test_optgates test_optgrade
-  test_optbook test_optengine`,
+- **The full test loop** after any change: `test_accounts test_app_accounts test_bank test_btcode
+  test_engine_strategy test_entry_rule test_fractional test_indicators
+  test_latency test_optbook test_optcal test_optengine test_optgates
+  test_optgrade test_options test_optquotes test_optstructures
+  test_optvol test_presets test_reconcile test_refresh_trend test_report
+  test_research test_reverse test_review_fixes test_rules test_short
+  test_strategy test_supertrend test_touch_adds test_trail test_trend
+  test_trend_v2 test_unwind`,
   each printing
   `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a scratch file.
   `deploy/vm_update.sh` runs thirteen of them on the VM and keeps the old
