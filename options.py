@@ -171,7 +171,7 @@ class OptionData:
     def contracts(self, underlying: str, *, kind: str = "", status: str = "active",
                   exp_from: str = "", exp_to: str = "",
                   strike_min: Optional[float] = None, strike_max: Optional[float] = None,
-                  limit: int = 200) -> list[dict]:
+                  limit: int = 1000, max_pages: int = 20) -> list[dict]:
         """The tradable universe. `status='inactive'` lists EXPIRED contracts,
         which is the only way to reach anything historical."""
         p: dict[str, Any] = {"underlying_symbols": underlying, "status": status,
@@ -186,14 +186,46 @@ class OptionData:
             p["strike_price_gte"] = strike_min
         if strike_max is not None:
             p["strike_price_lte"] = strike_max
-        d = self._trade("GET", "/options/contracts", params=p) or {}
-        return d.get("option_contracts") or []
+        # PAGINATE. Alpaca caps a page at 10,000 but defaults far lower, and a
+        # truncated chain is worse than no chain: a partial read is
+        # indistinguishable from "these are all the contracts there are", and
+        # the slice it returns is not representative. Measured 15 Sep 2026 --
+        # an unpaginated 200-contract read of SPY over a 12% band came back as
+        # 200 rows that were ALL 5-6 days out and 12% out of the money, none of
+        # them quoted, so the chain looked empty and the engine reported "no
+        # candidates" for a reason that had nothing to do with the market.
+        out: list[dict] = []
+        token = ""
+        for _ in range(max_pages):
+            q = dict(p)
+            if token:
+                q["page_token"] = token
+            d = self._trade("GET", "/options/contracts", params=q) or {}
+            out.extend(d.get("option_contracts") or [])
+            token = d.get("next_page_token") or ""
+            if not token:
+                return out
+        LOG.warning("options.contracts: hit max_pages=%d for %s with a page "
+                    "token still outstanding -- the chain is TRUNCATED",
+                    max_pages, underlying)
+        return out
 
     def snapshots(self, underlying: str, feed: str = "opra",
-                  limit: int = 1000) -> dict:
-        d = self._data(f"/snapshots/{underlying}",
-                       params={"feed": feed, "limit": limit}) or {}
-        return d.get("snapshots") or {}
+                  limit: int = 1000, max_pages: int = 20) -> dict:
+        # Same pagination argument as contracts(): a partial snapshot map joins
+        # to nothing and silently empties the chain.
+        out: dict = {}
+        token = ""
+        for _ in range(max_pages):
+            q = {"feed": feed, "limit": limit}
+            if token:
+                q["page_token"] = token
+            d = self._data(f"/snapshots/{underlying}", params=q) or {}
+            out.update(d.get("snapshots") or {})
+            token = d.get("next_page_token") or ""
+            if not token:
+                break
+        return out
 
     def bars(self, symbol: str, timeframe: str = "1Day", start: str = "",
              limit: int = 1000) -> list[dict]:
