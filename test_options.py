@@ -96,6 +96,21 @@ with tempfile.TemporaryDirectory() as td:
     lines2 = p.read_text(encoding="utf-8").splitlines()
     check("append-only, never rewritten", len(lines2) == 4, len(lines2))
 
+    # ONE stamp per SAMPLE. A sample is two calls -- puts then calls -- and
+    # stamping them separately makes one market instant look like two
+    # independent observations, which double-counts every sample downstream.
+    # Measured on the first real recorded file: two recorder runs reported
+    # twelve samples and four at-the-money readings where there were two.
+    p2 = Path(td) / "stamped.jsonl"
+    od.record_chain("RAM", path=p2, ts=1234.5, spot=11.55)
+    od.record_chain("RAM", path=p2, ts=1234.5, spot=11.55)
+    stamps = {json.loads(x)["ts"] for x in p2.read_text(encoding="utf-8").splitlines()}
+    check("a caller-supplied stamp is used verbatim", stamps == {1234.5}, stamps)
+    p3 = Path(td) / "auto.jsonl"
+    od.record_chain("RAM", path=p3, spot=11.55)
+    auto = {json.loads(x)["ts"] for x in p3.read_text(encoding="utf-8").splitlines()}
+    check("and without one it still stamps itself", len(auto) == 1 and auto != {1234.5}, auto)
+
 print("3. the trader refuses every unsafe order")
 with tempfile.TemporaryDirectory() as td:
     sd = Path(td)

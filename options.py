@@ -307,14 +307,22 @@ class OptionData:
         out.sort(key=lambda r: (str(r["expiration"]), r["strike"] or 0))
         return out
 
-    def record_chain(self, underlying: str, *, path: Path = QUOTE_LOG, **kw) -> int:
+    def record_chain(self, underlying: str, *, path: Path = QUOTE_LOG,
+                     ts: Optional[float] = None, **kw) -> int:
         """Append a timestamped snapshot of the chain. Append-only, like the
         journal: a quote history that can be edited afterwards is not evidence.
+        Pass `ts` to stamp several calls as ONE sample; see the note below.
         Returns how many rows carried a real two-sided quote."""
         rows = self.chain(underlying, **kw)
         quoted = [r for r in rows if r["mid"] is not None]
         path.parent.mkdir(parents=True, exist_ok=True)
-        stamp = time.time()
+        # ONE stamp per SAMPLE, not per call. A sample is usually two calls --
+        # puts then calls -- and stamping them separately makes a single market
+        # instant look like two independent observations of it. Anything that
+        # counts samples then double-counts: measured on the first real file,
+        # two recorder runs produced twelve "samples" and four at-the-money
+        # implied-volatility readings where there were two of each.
+        stamp = time.time() if ts is None else float(ts)
         with path.open("a", encoding="utf-8") as fh:
             for r in rows:
                 fh.write(json.dumps({"ts": stamp, "underlying": underlying, **r}) + "\n")
