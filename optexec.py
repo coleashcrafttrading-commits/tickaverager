@@ -471,14 +471,23 @@ class Executor:
                    limit_price: float, contracts: int = 1) -> dict:
         """The Alpaca order body for one multi-leg open.
 
-        *** THE PRICE CONVENTION HERE IS UNVERIFIED AND MUST BE CHECKED ON A
-        SINGLE ONE-CONTRACT ORDER BEFORE ANY SIZE. *** A multi-leg limit can be
-        expressed as a positive credit or as a negative number depending on the
-        venue, and getting it backwards turns a credit into a debit at a price
-        nobody intended. This is exactly the kind of thing that must not be
-        guessed at from memory, so `dry_run` exists to print this body for a
-        human to read against Alpaca's own documentation, and the first live
-        order should be one contract whose fill is checked by hand.
+        THE SIGN CONVENTION, VERIFIED. From Alpaca's own SDK reference for
+        LimitOrderRequest: "For the mleg order class, this is specified such
+        that a positive value indicates a DEBIT (representing a cost or payment
+        to be made) while a negative value signifies a CREDIT (reflecting an
+        amount to be received)."
+
+        So a credit spread is submitted at a NEGATIVE limit price. An earlier
+        version of this method sent abs(credit) -- a positive number -- which
+        Alpaca would have read as a debit: instead of receiving the premium it
+        would have tried to pay it, at a price nobody intended. It was flagged
+        as unverified rather than guessed at, and the guess would have been
+        wrong in the expensive direction.
+
+        Note the docs pages themselves do NOT state this; only the SDK
+        reference does. If that ever conflicts with observed behaviour, believe
+        the fill and not this comment, and the first live order of any new
+        structure should still be one contract read by hand.
         """
         legs = []
         for o in orders:
@@ -495,6 +504,7 @@ class Executor:
             "qty": str(int(contracts)),
             "type": "limit",
             "time_in_force": "day",
+            # "%.2f" keeps the sign; a credit submits as e.g. "-0.52".
             "limit_price": "%.2f" % float(limit_price),
             "legs": legs,
         }
@@ -536,8 +546,11 @@ class Executor:
             return out
 
         credit = p.credit_requoted if p.credit_requoted is not None else 0.0
-        body = self.order_body(opens, limit_price=abs(credit) / 100.0 / max(1, contracts),
-                               contracts=contracts)
+        # p.credit_requoted is POSITIVE dollars for a net credit. Alpaca wants a
+        # NEGATIVE limit price for a credit and a positive one for a debit, so
+        # the sign flips here and nowhere else. Per contract, per share.
+        limit = -credit / (100.0 * max(1, contracts))
+        body = self.order_body(opens, limit_price=limit, contracts=contracts)
         self._record("order_body", {"label": p.label, "body": body,
                                     "plan": p.as_dict()})
         if self.dry_run:
