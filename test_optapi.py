@@ -125,6 +125,38 @@ check("an empty board is presented as success",
 check("it explains the recorder still filling", "recorder is still filling" in html)
 check("no external requests", "http://" not in html and "https://" not in html)
 
+print("8. mounted on a REAL FastAPI app, the routes actually answer")
+# Inspecting app.routes after include_router is misleading: newer FastAPI wraps
+# an included router in a single _IncludedRouter object rather than flattening
+# its paths, so a list of app.routes looks empty and suggests the mount failed.
+# The only check worth trusting is a request.
+try:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+except ImportError:
+    print("  --   fastapi test client unavailable, skipped")
+else:
+    with tempfile.TemporaryDirectory() as d:
+        q = Path(d) / "q.jsonl"
+        q.write_text("\n".join(json.dumps(
+            {"ts": float(i), "underlying": "IWM", "symbol": "A", "spread": 0.02,
+             "iv": 0.2, "moneyness": 1.0, "mid": 1.0}) for i in range(3)) + "\n",
+            encoding="utf-8")
+        optapi.QUOTE_LOG = q
+        app = FastAPI()
+        optapi.mount(app)
+        cl = TestClient(app)
+        r = cl.get("/api/options/coverage")
+        check("coverage answers 200", r.status_code == 200, r.status_code)
+        check("and reports what was recorded", r.json()["samples"] == 3, r.json())
+        r2 = cl.get("/options")
+        check("the page is served", r2.status_code == 200, r2.status_code)
+        check("and it is the options page",
+              "places no orders" in r2.text, r2.text[:120])
+        # a route that needs credentials must fail cleanly, not 500
+        r3 = cl.get("/api/options/evidence")
+        check("evidence answers without a broker", r3.status_code == 200, r3.status_code)
+
 print()
 if fails:
     print("FAILED: %s" % ", ".join(fails))
