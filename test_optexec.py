@@ -228,6 +228,18 @@ with tempfile.TemporaryDirectory() as d:
     check("two legs in the body", len(r["body"]["legs"]) == 2, r["body"])
     check("both open", all(l["position_intent"].endswith("_to_open") for l in r["body"]["legs"]))
     check("it is a LIMIT", r["body"]["type"] == "limit", r["body"])
+    # THE SIGN. Alpaca's SDK reference: "for the mleg order class ... a positive
+    # value indicates a DEBIT ... while a negative value signifies a CREDIT".
+    # An earlier version sent abs(credit), a positive number, which would have
+    # been read as a debit -- paying the premium instead of receiving it. This
+    # check exists so that can never silently come back.
+    lp = float(r["body"]["limit_price"])
+    check("a CREDIT submits as a NEGATIVE limit price", lp < 0, lp)
+    check("and its magnitude is the per-contract credit",
+          abs(abs(lp) - abs((p2.credit_requoted or 0) / 100.0)) < 0.01,
+          (lp, p2.credit_requoted))
+    check("the sign survives formatting", r["body"]["limit_price"].startswith("-"),
+          r["body"]["limit_price"])
     check("the body was recorded for a human to read",
           "order_body" in log.read_text(encoding="utf-8"))
     chutes = ex.rest_parachutes(p2)
