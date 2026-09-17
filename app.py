@@ -80,6 +80,20 @@ from fleet import (GLOBAL_DEFAULTS, RESTART_EXIT_CODE,    # noqa: E402
 
 app = FastAPI(title="Tick Avenger Fleet / Alpaca")
 
+# The options engine's HTTP surface, as a mounted router rather than routes in
+# this file. Everything it exposes is a GET and none of it can place an order --
+# optapi has no OptionTrader, no /v2/orders and no POST route, and test_optapi
+# greps its source to keep it that way. Mounted here rather than before
+# remoteauth so it sits behind the dashboard's own access control like every
+# other route. Import failure is never fatal: a broken options module must not
+# stop the ladder from running.
+try:
+    import optapi
+    optapi.mount(app)
+except Exception as _opt_e:                    # pragma: no cover
+    logging.getLogger("app").warning(
+        "options API not mounted (%s) -- the fleet is unaffected", _opt_e)
+
 
 # Remote access needs a key; anything from this machine does not. The dashboard
 # arms engines and transmits orders, and it has no other authentication -- see
