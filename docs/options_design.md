@@ -292,3 +292,25 @@ If a directional signal is ever found, this engine is how it gets expressed.
 Until then, it earns from the volatility risk premium and from being the one
 resting the order rather than crossing the spread — the only two things that
 measured positive all day.
+
+---
+
+## Operating the earnings gate
+
+`state/earnings.json` is per-machine and untracked, like `config.json`.
+`earnings.example.json` is the template.
+
+**Presence of the key is the assertion.** A symbol listed with an empty `dates`
+list is KNOWN to have no earnings -- that is how index funds are declared safe.
+A symbol that is ABSENT is UNKNOWN, and unknown blocks short premium. There is
+no third state and no default-to-clear.
+
+Measured 17 Sep 2026: without this file every structure on every symbol was
+refused by gate G5, 165 of 165 on IWM. With IWM, SPY and QQQ declared as funds
+(which is simply true -- a fund does not report earnings), IWM returned 13
+A-graded candidates from the same chain. The gate was not wrong; it had not been
+told anything.
+
+Past dates are ignored rather than trusted, so a stale file reads as "known,
+nothing upcoming". Keeping it current is an operational duty, not a code
+property. For a real company, put the date in.
