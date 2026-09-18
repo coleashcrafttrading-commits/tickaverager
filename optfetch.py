@@ -304,13 +304,48 @@ def collect_underlying(under: str, start: dt.date, end: dt.date) -> None:
     print(f"{under} underlying: {len(uniq):,} minute bars, {sz/1024/1024:.1f} MB")
 
 
+# --------------------------------------------------------------------- verify
+def verify(delete: bool = False) -> int:
+    """Read every cached file and report the ones that will not open.
+
+    Worth having as a command rather than a one-off script, because the failure
+    is silent by nature: a corrupt day makes the backtester skip a session, and
+    a backtest that quietly covers 60% of its window still prints a confident
+    number. This found 617 of 1,584 files damaged after two collectors were
+    accidentally left running against the same paths at once -- which is also
+    why write() now writes beside the target and renames.
+    """
+    root = OUT
+    bad, n = [], 0
+    for path in sorted(root.rglob("*.json.gz")):
+        n += 1
+        try:
+            with gzip.open(path, "rb") as f:
+                json.loads(f.read())
+        except Exception as e:                # BadGzipFile, zlib.error, EOFError
+            bad.append((path, type(e).__name__))
+    print(f"{n} cached files, {len(bad)} unreadable")
+    for path, err in bad:
+        print(f"  {path.relative_to(root)}  ({err})")
+        if delete:
+            path.unlink()
+    if bad and delete:
+        print(f"\ndeleted {len(bad)}; re-run the collector to refetch them")
+    elif bad:
+        print("\nre-run with --delete to remove them, then collect again")
+    return 1 if bad else 0
+
+
 # ---------------------------------------------------------------------- main
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("kind", choices=("intraday", "daily", "underlying", "all"))
-    ap.add_argument("symbols", nargs="+")
-    ap.add_argument("--start", required=True)
+    ap.add_argument("kind", choices=("intraday", "daily", "underlying", "all",
+                                    "verify"))
+    ap.add_argument("symbols", nargs="*")
+    ap.add_argument("--start", default="")
+    ap.add_argument("--delete", action="store_true",
+                    help="verify: remove the unreadable files")
     ap.add_argument("--end", default="")
     ap.add_argument("--band", type=float, default=BAND,
                     help="strike grid half-width as a fraction of spot")
@@ -320,6 +355,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="daily mode: only expiries on this weekday (4 = Friday)")
     ap.add_argument("--force", action="store_true", help="refetch what is cached")
     a = ap.parse_args(argv)
+    if a.kind == "verify":
+        return verify(a.delete)
+    if not a.start or not a.symbols:
+        sys.exit("--start and at least one symbol are required")
 
     _auth()
     start = dt.date.fromisoformat(a.start)
