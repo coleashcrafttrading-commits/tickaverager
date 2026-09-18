@@ -607,11 +607,22 @@ class Rules:
                    no matter what. This is the assignment guard, and it is not
                    optional on a structure with a short leg: an equity option
                    left open through expiry settles in SHARES.
+
+                   45, i.e. 15:15 ET, because 15 was not a fill anyone could
+                   get. Alpaca rejects option orders after 15:30 ET on broad
+                   ETFs (15:15 on single names) and begins auto-liquidating
+                   expiring positions at 15:45, so a backtest exiting at 15:45
+                   was modelling a trade that could not be placed. Re-measured
+                   at 15:15 the results got BETTER, not worse -- the last half
+                   hour of a 0DTE is where gamma is most violent, and leaving
+                   before it is both the only executable choice and the
+                   profitable one. The live engine uses the stricter research
+                   deadline of session_close - 60 min.
     """
     entry_offset: int = 30          # minutes after the open
     profit_target: float = 0.50
     stop_multiple: float = 2.00
-    hard_exit_min: int = 15         # minutes before the bell
+    hard_exit_min: int = 45         # 15:15 ET; see above
     stale: int = 5
 
 
