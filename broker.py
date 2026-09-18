@@ -86,6 +86,24 @@ class Alpaca:
     def clock(self) -> dict:
         return self._trade("GET", "/clock")
 
+    def calendar(self, start: str = "", end: str = "") -> list:
+        """Session open/close per date: [{date, open, close, ...}], times ET.
+
+        The options engine needs this and cannot substitute a constant. Every
+        expiration-day deadline is computed as (session close - 60 min), so on
+        a 13:00 ET half day the flatten deadline is 12:00 and not 15:00 -- and
+        the half days are exactly the sessions where an expiring short leg is
+        most likely to be forgotten. Returns [] rather than raising; the caller
+        is required to FAIL CLOSED on an empty answer (flatten early) rather
+        than assume a normal session.
+        """
+        params = {}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return self._trade("GET", "/calendar", params=params or None) or []
+
     def asset(self, symbol: str) -> Optional[dict]:
         return self._trade("GET", f"/assets/{symbol}")
 
