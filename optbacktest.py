@@ -204,12 +204,37 @@ class Trade:
     max_adverse: float = 0.0
 
 
+@dataclass
+class Chain:
+    """A solved snapshot, split by what each use actually needs.
+
+    `solved` are the rows whose implied vol came back, and they are the only
+    rows a DELTA can be read off. `priced` is every row that had a usable
+    price, solved or not.
+
+    The split is not tidiness, it is a bug fix. A 0DTE wing ten points out is
+    worth a penny or two, and at that premium the vol genuinely is not in the
+    price, so implied_vol correctly returns None. An earlier version selected
+    every leg from `solved` alone, so those wings did not exist and 72% of
+    sessions failed with "could not find its strikes". Worse than the loss of
+    data: the days that DID survive were the higher-volatility ones where the
+    wings were expensive enough to solve, which is a selection bias that
+    flatters every short-premium result in the sweep.
+
+    A long wing needs a PRICE, not a delta. Only the short strike is chosen by
+    delta, and it is near the money where vol solves fine.
+    """
+    solved: list
+    priced: list
+
+
 def _chain_with_greeks(tape: DayTape, minute: int, spot: float,
-                       now: dt.datetime, stale: int = 5) -> list:
+                       now: dt.datetime, stale: int = 5):
     rows = tape.snapshot(minute, stale)
     if len(rows) < 8:
-        return []
-    return [r for r in G.chain_greeks(rows, spot, RATE, now=now) if r.solved]
+        return Chain([], [])
+    full = G.chain_greeks(rows, spot, RATE, now=now)
+    return Chain([r for r in full if r.solved], list(full))
 
 
 def pick_by_delta(rows: Sequence, right: str, target: float,
@@ -222,7 +247,7 @@ def pick_by_delta(rows: Sequence, right: str, target: float,
     """
     ex = set(round(float(x), 4) for x in exclude)
     best, gap = None, 9e9
-    for r in rows:
+    for r in (rows.solved if isinstance(rows, Chain) else rows):
         if r.right != right or r.delta is None:
             continue
         if round(r.strike, 4) in ex:
@@ -233,8 +258,14 @@ def pick_by_delta(rows: Sequence, right: str, target: float,
     return best
 
 
-def pick_by_offset(rows: Sequence, right: str, strike: float) -> Optional[object]:
-    for r in rows:
+def pick_by_offset(rows, right: str, strike: float) -> Optional[object]:
+    """A strike named by distance, not by delta -- so it needs only a PRICE.
+
+    Searches `priced`, not `solved`: see Chain. A wing whose vol did not solve
+    is still perfectly tradable, and refusing it here was silently throwing
+    away three sessions in four.
+    """
+    for r in (rows.priced if isinstance(rows, Chain) else rows):
         if r.right == right and abs(r.strike - strike) < 1e-6:
             return r
     return None
