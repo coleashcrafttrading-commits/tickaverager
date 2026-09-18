@@ -1,0 +1,78 @@
+{
+  "name": "Call Spread Overwrite",
+  "slug": "call-spread-overwrite",
+  "aliases": [
+    "covered call spread",
+    "overwrite with upside re-entry",
+    "short call + long call overlay"
+  ],
+  "summary": "Long stock with a short call against it plus a further-OTM long call, so the position is capped between the two strikes but participates again in a large rally - a covered call that gives the right tail back.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing 100 shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.25-0.35 (the cap)",
+      "dte_rule": "30-60 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "call delta 0.08-0.12, at least 5% above the short call (the upside re-entry)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "UNLIMITED above the long call strike; between the strikes it is capped at (short strike - basis + net credit) x 100",
+  "max_loss": "(basis - net credit) x 100 if the shares go to zero - the same downside as owning the stock, less the credit",
+  "breakevens": "basis - net credit per share",
+  "greeks": {
+    "delta": "+60 to +75 per unit, rising back toward +100 above the long call",
+    "gamma": "negative between the strikes, positive above the long strike",
+    "theta": "positive while spot is below the short strike",
+    "vega": "slightly negative"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "When a covered call is wanted for income but the name has a real melt-up or takeover tail you refuse to give away - high-beta single names, or ETFs in a strong uptrend where a plain overwrite has been repeatedly run over.",
+  "entry_rules": [
+    "Shares already held, 100 per unit, unencumbered (not pledged to another structure).",
+    "Short call delta 0.25-0.35; long call delta 0.08-0.12; distance between strikes >= 5% of spot.",
+    "Net credit > 0 after paying for the long call - if the long call costs more than the short brings in, use a plain covered call instead.",
+    "Short strike >= basis x 1.02 so assignment cannot lock in a loss on the shares.",
+    "Both option legs same expiry, OI >= 250 each, submitted as one 2-leg MLeg order against the existing shares.",
+    "No entry with an ex-dividend date inside 5 trading days of expiration."
+  ],
+  "management_rules": [
+    "Buy back the short call at 50-70% of its premium and re-write on the next cycle.",
+    "If spot exceeds the short strike by more than 1 x ATR(14), roll the short call up and out for a credit once; leave the long call alone.",
+    "Sell the long call and revert to a plain covered call if its delta falls below 0.03 with more than 21 DTE left - it has stopped being worth the capital.",
+    "Close both option legs together when the shares are sold."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: buy the short call back by 15:30 ET on expiration day whenever it is ITM - assignment would sell the shares and leave a naked long call plus an unwanted flat position.",
+    "Close the short call immediately when its extrinsic value < $0.10 or delta >= 0.85.",
+    "Ex-dividend guard: close the short call the session before any ex-dividend date while it is ITM.",
+    "Close the long call rather than letting it auto-exercise; exercise would buy 100 more shares."
+  ],
+  "assignment_risk": "One short call, fully covered by shares. Early assignment sells the shares at the short strike, which is not a loss but is an unplanned liquidation that also strands the long call. The extrinsic and ex-dividend guards exist to prevent it.",
+  "buying_power": "Shares plus the long call's debit; the short call is share-covered, so no additional requirement. Level 3 (level 2 would cover the short call; the long call adds nothing).",
+  "liquidity_needs": "A chain that still quotes tightly at 0.10 delta - ETFs and liquid mega-caps; the long call is the leg most likely to be a wide market.",
+  "common_mistakes": "Buying the upper call so far out that it is lottery-ticket junk and never pays; paying a net debit and calling it income; forgetting the long call exists when the shares are sold.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Pointless at 0DTE - the whole value of the structure is the multi-week upside tail.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,77 @@
+{
+  "name": "Principal-Protected Note Replication",
+  "slug": "principal-protected-note-replication",
+  "aliases": [
+    "PPN replication",
+    "structured note build",
+    "zero-coupon plus call spread"
+  ],
+  "summary": "The desk build of a structured note: a zero-coupon-equivalent bond position sized to return full principal at the horizon, with the discount spent on a call spread that defines the participation band.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "Treasury sleeve (SGOV/BIL, or a specific-maturity Treasury ETF matching the horizon) sized so sleeve x (1 + yield x years) = the principal to be protected",
+      "dte_rule": "held to the horizon"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM on SPY or QQQ, call delta 0.50",
+      "dte_rule": "matched to the horizon, 180-365 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM at the participation cap, call delta 0.20-0.30; strike solved so the spread's cost equals the bond discount",
+      "dte_rule": "same expiry as the long call"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "(cap strike - long strike - net debit) x 100 per unit, plus full principal returned by the sleeve",
+  "max_loss": "The net debit only - i.e. the interest forgone. Principal is returned by the bond sleeve at the horizon.",
+  "breakevens": "long call strike + net debit per share on the option sleeve; the portfolio itself breaks even flat",
+  "greeks": {
+    "delta": "+20 to +30 per unit",
+    "gamma": "small, positive near the long strike",
+    "theta": "negative on the spread, offset by bond accrual",
+    "vega": "slightly positive"
+  },
+  "typical_dte": "180-365 DTE, matched to the protection horizon",
+  "when_to_use": "When a fixed horizon and a hard capital floor are both required - the exact thing a bank sells as a principal-protected note, built for the cost of two option legs instead of a 2% structuring fee. Requires a yield environment where the discount actually buys a meaningful spread; at sub-2% yields the cap is too low to bother.",
+  "entry_rules": [
+    "Define the horizon H in days and the principal P to protect before anything is bought.",
+    "Sleeve size = P / (1 + y x H/365) where y is the current yield on the matching Treasury maturity. The residual (P minus sleeve size) is the entire option budget.",
+    "Option budget must buy a call spread whose cap is at least 8% above spot; if it cannot, the environment does not support this structure - do not compromise the floor to widen the cap.",
+    "Both call legs same expiry, expiry >= H, on SPY or QQQ only, OI >= 250 each, single MLeg order.",
+    "Short call strike must be above the long call strike by design; the short is fully covered by the long, which keeps this at level 3.",
+    "Re-check that total option debit <= the bond discount before submission; a debit larger than the discount breaks the protection."
+  ],
+  "management_rules": [
+    "Hold the spread to within 10 days of the horizon; this is not a trade to manage, it is a payoff to deliver.",
+    "Optional early monetization: if the spread reaches 80% of its maximum value with more than 60 days left, close it and move the proceeds to the sleeve - the structure has delivered its cap early.",
+    "Never sell the bond sleeve to add to the option spread.",
+    "Reconstitute annually with the new yield, which sets the new cap."
+  ],
+  "exit_rules": [
+    "Close both call legs at least 2 trading days before expiration; never allow the long call to auto-exercise into shares or the short call to be assigned.",
+    "Close the short call immediately if its extrinsic < $0.10 or delta >= 0.85 (leaving the long call alone), and before any ex-dividend date while it is ITM.",
+    "At the horizon, redeem the sleeve to cash and report the realized participation against the cap."
+  ],
+  "assignment_risk": "One short call, covered by a long call at a lower strike, so any assignment is defined - but assignment delivers a 100-share short position that must be closed by exercising the long. The pre-expiry close rule is what prevents it.",
+  "buying_power": "Sleeve cash plus the spread's net debit; the short call is covered by the long, so no separate requirement.",
+  "liquidity_needs": "Treasury ETFs are penny-wide; the long-dated SPY/QQQ spread must be closeable as one ticket.",
+  "common_mistakes": "Sizing the sleeve off today's principal instead of the discounted value, which leaves the floor short; buying an uncapped long call with the discount and calling it protected when the premium exceeds the discount; mismatching the option expiry to the horizon.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,67 @@
+{
+  "name": "Ratio (Unbalanced) Strangle, 1x2",
+  "slug": "ratio-strangle-1x2",
+  "aliases": [
+    "unbalanced strangle",
+    "lopsided strangle",
+    "1x2 short strangle"
+  ],
+  "summary": "A short strangle with unequal contract counts on each side - e.g. 1 short call against 2 short puts - to lean the delta and the tail toward the side you believe is safer.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.15-0.20",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "|put delta| 0.10-0.12; put-heavy version shown, invert the ratios for the call-heavy version",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "total net credit x 100 if the underlying settles between the two strikes",
+  "max_loss": "UNDEFINED on both sides: 2 x $100 per point below the put strike (to zero) and unlimited above the call strike",
+  "breakevens": "lower = put strike - total credit per share / 2; upper = call strike + total credit per share",
+  "greeks": {
+    "delta": "deliberately non-zero, typically +0.05 to +0.15 per unit for the put-heavy version",
+    "gamma": "negative and asymmetric - twice as fast on the doubled side",
+    "theta": "positive, higher than a balanced strangle for the same strikes",
+    "vega": "negative"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS ONLY - NOT TRADEABLE AT LEVEL 3. Used when skew makes one side pay far more per unit of delta, or to express a mild directional lean inside a premium-selling program.",
+  "entry_rules": [
+    "BLOCKED: every leg is uncovered; requires Alpaca options level 4.",
+    "LEVEL 3 SUBSTITUTE: build it as a quantity-unbalanced iron condor (see slug unbalanced-iron-condor-2x1), which is the same delta and theta shape with defined wings.",
+    "If enabled at level 4: IVR >= 40, the doubled side's strike must be >= 1.5 standard deviations away, total naked notional <= 40% of equity."
+  ],
+  "management_rules": [
+    "Take profit at 50% of total credit.",
+    "Close the doubled side first if its strike delta reaches 0.30.",
+    "Never add contracts to the untested side to re-balance delta - that raises gross naked exposure.",
+    "Time stop 21 DTE."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: every short leg flat by 15:30 ET on expiration day.",
+    "Close any short at extrinsic < $0.10 or |delta| >= 0.85; short calls also close before any ex-dividend date while ITM.",
+    "Close the whole unit if the underlying closes beyond either short strike."
+  ],
+  "assignment_risk": "Three naked shorts per unit. Put-side assignment delivers 200 shares; call-side assignment creates a 100-share naked short. Both violate the never-be-assigned rule outright.",
+  "buying_power": "Naked margin on all three contracts, computed per side with the larger side governing; recomputed daily.",
+  "liquidity_needs": "Liquid ETF chains only; both strikes must be closeable in one MLeg order.",
+  "common_mistakes": "Believing the extra credit on the doubled side compensates for double the gamma; it does not at the tail.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

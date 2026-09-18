@@ -1,0 +1,86 @@
+{
+  "name": "Index Rebalance / Inclusion Positioning via Options",
+  "slug": "index-rebalance-options-positioning",
+  "aliases": [
+    "index inclusion trade",
+    "rebalance front-run",
+    "S&P add/delete options play"
+  ],
+  "summary": "Use defined-risk options to position for the forced buying and selling around index additions, deletions and scheduled rebalances, instead of carrying the share risk through the effective date.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ADD candidate: long call debit spread - buy delta 0.40-0.50, sell delta 0.15-0.20 - expiring after the effective date",
+      "dte_rule": "expiry >= effective date + 7 days"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the short leg of that debit spread, which caps cost and keeps the structure level 3",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "DELETE candidate: long put debit spread - buy |delta| 0.40-0.50, sell |delta| 0.15-0.20",
+      "dte_rule": "expiry >= effective date + 7 days"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the short leg of that put debit spread",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "either",
+  "net": "debit",
+  "max_profit": "(spread width - net debit) x 100 per unit",
+  "max_loss": "the net debit paid",
+  "breakevens": "long strike +/- net debit per share",
+  "greeks": {
+    "delta": "+0.25 to +0.35 per add unit; the mirror for deletes",
+    "gamma": "positive",
+    "theta": "negative",
+    "vega": "slightly positive, and index-event IV is often already elevated"
+  },
+  "typical_dte": "14-45 DTE, always spanning the effective date",
+  "when_to_use": "Announcement-to-effective windows for S&P, Nasdaq-100 and Russell reconstitution, where index funds must transact at the close on a known date. The effect has decayed as it became well known - the discipline is to trade only the largest, most mechanical flows and to be out before the reversal.",
+  "entry_rules": [
+    "Only announced, dated changes. No speculation on rumored candidates, and no positions entered before an official announcement.",
+    "Enter between announcement and 3 trading days before the effective date; never enter on the effective date itself, when the flow is already in the price.",
+    "Estimated forced flow (index AUM tracking the benchmark x target weight) must exceed 5 days of the name's average dollar volume; below that the effect is noise.",
+    "Debit spreads only - never outright long calls on a name that has already gapped on the announcement, and never short legs that are not covered by a long of the same right.",
+    "Net debit <= 0.75% of equity per name; at most 2 index-event positions at once.",
+    "OI >= 250 per leg; reject any name where the post-announcement bid/ask exceeds 10% of the option's mid.",
+    "Both legs same expiry, one MLeg order."
+  ],
+  "management_rules": [
+    "Take profit at 50-70% of the spread's maximum value, or on the effective-date close, whichever comes first.",
+    "Hard rule: close on or before the first trading day AFTER the effective date. The documented pattern is a partial reversal once the forced flow is done, and holding through it gives back the gain.",
+    "Do not add on an adverse move; index events are one-shot, and a spread that has not worked by the effective date has failed.",
+    "If the index provider amends or delays the change, close immediately - the entire thesis was the dated flow."
+  ],
+  "exit_rules": [
+    "Close both legs at least 2 trading days before expiration; never hold to expiry on a single name.",
+    "Close the short leg at extrinsic < $0.10 or |delta| >= 0.85, and before any ex-dividend date while a short call is ITM.",
+    "Close, do not exercise, any ITM long leg.",
+    "Halt and review if a position is still open 2 sessions after the effective date."
+  ],
+  "assignment_risk": "One short leg per spread, covered by a long of the same right and expiry, so the loss is defined - but single-name assignment delivers 100 shares of a stock in the middle of an index-flow event, which is exactly when the price is least predictable. The pre-expiry close and extrinsic guards are what keep the structure clean.",
+  "buying_power": "Spread width x 100 minus credit, or simply the debit - defined either way.",
+  "liquidity_needs": "Index candidates are usually liquid by the time they are added; deletions frequently are not, and that is where the structure most often fails on execution.",
+  "common_mistakes": "Trading rumors instead of announcements; holding past the effective date into the reversal; using outright long options after the announcement gap has already repriced IV; ignoring that deletion candidates are often illiquid and hard to exit.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - the event window is days, and 0DTE on a single name in an index event is pure gap risk.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "directional-either",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

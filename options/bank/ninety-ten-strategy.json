@@ -1,0 +1,70 @@
+{
+  "name": "90/10 Strategy (T-Bills Plus Long Calls)",
+  "slug": "ninety-ten-strategy",
+  "aliases": [
+    "fiduciary call",
+    "90/10 portfolio",
+    "cash plus calls",
+    "capital-protected call allocation"
+  ],
+  "summary": "Put roughly 90% of capital in short-dated Treasuries and spend the interest (and only the interest) on long calls - a whole-portfolio allocation whose worst case is a small, known haircut.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "90-95% of capital into SGOV or BIL (the T-bill sleeve; share counts vary with price)",
+      "dte_rule": "held continuously, rolled by the fund"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM to slightly OTM, call delta 0.45-0.60, on SPY or QQQ; contract count set so total premium <= the sleeve's expected interest over the option's life",
+      "dte_rule": "90-365 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "UNLIMITED - full delta participation above the call strike, plus the T-bill interest",
+  "max_loss": "The call premium spent, i.e. approximately one period's interest; the T-bill sleeve itself is not at market risk beyond a few days of duration",
+  "breakevens": "call strike + premium per share, ignoring the interest offset; with the interest counted, the portfolio breaks even flat",
+  "greeks": {
+    "delta": "+45 to +60 per call contract; the T-bill sleeve is delta-flat",
+    "gamma": "positive",
+    "theta": "negative on the calls, positive from the bill sleeve's accrual",
+    "vega": "positive"
+  },
+  "typical_dte": "90-365 DTE per call cycle",
+  "when_to_use": "When the mandate is capital preservation with optional upside - after a large drawdown, during a period the system is not permitted to carry equity risk, or as the default parking structure between strategies. It is the cleanest expression of 'risk only the carry'.",
+  "entry_rules": [
+    "Sleeve instrument must be SGOV, BIL or an equivalent sub-1-year Treasury ETF - not an intermediate bond fund, whose duration would break the capital guarantee.",
+    "Call premium budget = sleeve value x current 3-month T-bill yield x (DTE/365). Never exceed it; if the budget buys less than one contract, buy a call debit spread or wait.",
+    "Call delta 0.45-0.60, DTE 90-365, on SPY or QQQ only. IV rank <= 50 at purchase - do not spend the whole year's carry on expensive vol.",
+    "Total premium at risk per year <= 5% of equity.",
+    "Long calls only: no short legs anywhere in this structure, which is what makes it level 2."
+  ],
+  "management_rules": [
+    "Take profit at 100% gain on a call by selling it and returning the proceeds to the sleeve; buy the next cycle's call from the next period's interest, never from principal.",
+    "Roll the call at 45 DTE if it is still OTM and the remaining premium is more than 25% of the original - otherwise let it expire worthless, which is the budgeted outcome.",
+    "Rebalance the sleeve back to 90-95% of equity monthly.",
+    "Never average down by buying more calls after a loss; the budget is per period, not per view."
+  ],
+  "exit_rules": [
+    "Close every long call at least 2 trading days before expiration - never allow auto-exercise, which would buy 100 shares of SPY (about $60k) against a cash sleeve.",
+    "Sell the call immediately if it goes deep ITM with delta >= 0.90 and extrinsic < $0.20 - at that point it is a share proxy, not an option, and carries exercise risk.",
+    "Liquidate the sleeve only to meet a real cash need, never to fund an option purchase."
+  ],
+  "assignment_risk": "None from short legs - there are none. The only stock-delivery risk is auto-exercise of a long ITM call at expiry, which the two-day close rule eliminates.",
+  "buying_power": "Cash for the sleeve plus the call premium. No margin, no short-option requirement.",
+  "liquidity_needs": "SGOV/BIL are penny-wide; SPY and QQQ LEAPS are the most liquid long-dated options available.",
+  "common_mistakes": "Funding the calls from principal after a losing cycle, which destroys the whole premise; using an intermediate-duration bond fund as the sleeve; letting an ITM call auto-exercise into a stock position the account cannot carry.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - the structure is an allocation, not a trade.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

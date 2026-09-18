@@ -1,0 +1,73 @@
+{
+  "name": "Options Pairs / Relative-Value Trade",
+  "slug": "options-pairs-relative-value",
+  "aliases": [
+    "cross-underlying pair trade",
+    "convex pair",
+    "long A calls vs long B puts"
+  ],
+  "summary": "Express a relative view between two related underlyings with options rather than shares - long calls (or a call spread) on the favored name against long puts (or a put spread) on the disfavored one - so the pair has convexity and a capped loss instead of two open equity legs.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "underlying A (the favored name): call delta 0.35-0.45, or a call debit spread with the short at 0.15-0.20 delta to cut cost",
+      "dte_rule": "45-90 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "underlying B (the disfavored name): |put delta| 0.35-0.45, or a put debit spread; contract count beta- and notional-adjusted so both legs carry equal dollar delta",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "either",
+  "net": "debit",
+  "max_profit": "Large and asymmetric: both legs can pay if A rises and B falls; capped only if debit spreads are used, unbounded on the call side if outright",
+  "max_loss": "The total debit paid - which is the whole reason to use options rather than a long/short share pair",
+  "breakevens": "Each leg has its own; the pair breaks even when the summed intrinsic values at expiry equal the total debit",
+  "greeks": {
+    "delta": "positive on A, negative on B, dollar-matched to roughly zero net market delta",
+    "gamma": "positive on both legs",
+    "theta": "negative on both legs - the pair pays rent every day",
+    "vega": "positive on both legs, so the pair is implicitly long vol"
+  },
+  "typical_dte": "45-90 DTE",
+  "when_to_use": "A spread view with a catalyst and a deadline - one name reporting into a sector others have already guided down, an index-inclusion candidate versus its sector, a merger's acquirer versus a clean comparable. Prefer this over a share pair when the account cannot or should not carry a short stock leg, which on this account is always.",
+  "entry_rules": [
+    "Both underlyings must be genuinely related: same sector or an established correlation >= 0.6 over 120 days. A pair without a linkage is two unrelated bets.",
+    "Dollar-delta match at entry within 10%: contracts_A x delta_A x spot_A approximately equals contracts_B x |delta_B| x spot_B.",
+    "Total debit <= 1.5% of equity per pair; at most 3 pairs open at once.",
+    "Use debit spreads rather than outrights whenever the outright package costs more than 1.5% of equity - the short leg of each spread is covered by the long, keeping the structure at level 3.",
+    "Both legs same expiry; expiry must be at least 14 days beyond the catalyst date.",
+    "OI >= 250 on every leg; no leg whose bid/ask exceeds 10% of its mid.",
+    "Never build the B leg as a short call - the bearish leg is always a long put or a put debit spread on this account."
+  ],
+  "management_rules": [
+    "Take profit at 60% of the maximum modeled pair value, or when the spread between A and B reaches the target ratio, whichever comes first.",
+    "Close both legs together. A pair that has become a single outright position is no longer the trade that was entered - if one leg is closed, close the other within the session.",
+    "Re-match dollar delta if the ratio drifts more than 25% from entry, by adjusting contracts on the cheaper side only.",
+    "Time stop: close at 21 DTE regardless of P/L; the theta on two long legs compounds.",
+    "Cut the pair immediately if the correlation that justified it breaks (120-day correlation falls below 0.4)."
+  ],
+  "exit_rules": [
+    "Close all legs at least 2 trading days before expiration; never allow auto-exercise on either side.",
+    "If debit spreads are used, close each short leg at extrinsic < $0.10 or |delta| >= 0.85, and short calls before any ex-dividend date while ITM.",
+    "Close, do not exercise, any ITM long leg.",
+    "Log the pair as one position throughout; partial closes must be recorded as a structure change, not a new trade."
+  ],
+  "assignment_risk": "None in the outright version (all legs long). In the debit-spread version each short leg is covered by a long of the same right and expiry, so assignment is defined but still delivers shares in two different underlyings - the pre-expiry close rule is what keeps the account clean.",
+  "buying_power": "The net debit only; spread versions hold nothing beyond their debit because every short is long-covered.",
+  "liquidity_needs": "Both chains must be liquid at the same expiry - the binding constraint is usually the smaller of the two names.",
+  "common_mistakes": "Matching contract counts instead of dollar delta; letting the winning leg run while the losing leg expires, which converts a pair into an outright; building the bearish leg as a short call and discovering it is naked.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - a relative-value view needs weeks, and two 0DTE long legs is just paying double theta.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "directional-either",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

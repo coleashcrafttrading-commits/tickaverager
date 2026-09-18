@@ -1,0 +1,73 @@
+{
+  "name": "Event-Day 0DTE Long Straddle / Strangle",
+  "slug": "event-day-0dte-long-straddle",
+  "aliases": [
+    "FOMC day straddle",
+    "CPI day gamma buy",
+    "event-day long gamma",
+    "0DTE long vol"
+  ],
+  "summary": "Buying a same-day straddle or strangle immediately before a scheduled macro release to own gamma through the print - the long-vol mirror of every other 0DTE structure in the bank.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "the strike nearest spot at 5 minutes before the release (straddle), or delta 0.25-0.35 for the cheaper strangle version",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "the same strike as the call (straddle) or |delta| 0.25-0.35 (strangle)",
+      "dte_rule": "expires today"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "UNLIMITED in principle - $100 per point beyond the breakevens on whichever side moves",
+  "max_loss": "the full debit paid, and at 0DTE that is the likely outcome if the release is a non-event",
+  "breakevens": "strike +/- total debit per share (straddle); call strike + debit and put strike - debit (strangle)",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "the largest positive gamma available anywhere - this is what is being bought",
+    "theta": "very large and negative; the position bleeds by the minute",
+    "vega": "positive, but 0DTE vega is small - the payoff comes from realized movement, not from IV"
+  },
+  "typical_dte": "0 DTE only, held for minutes to a few hours",
+  "when_to_use": "Scheduled, binary-ish macro releases with a history of large same-day index moves: FOMC statement (14:00 ET) and press conference (14:30 ET), CPI (08:30 ET), NFP (08:30 ET). The edge, when it exists, is that 0DTE implied moves sometimes underprice event days - it must be measured, not assumed.",
+  "entry_rules": [
+    "SPY or QQQ only. Locally computed greeks and implied move required (Alpaca supplies neither at 0DTE).",
+    "Enter no earlier than 10 minutes and no later than 2 minutes before the scheduled release. Never enter after the print - the vol is already paid for by then.",
+    "PRICING GATE: the 0DTE straddle's implied move (total debit / spot) must be BELOW the median absolute same-day move for that release type over the last 12 occurrences. If it is at or above, skip the day. This is the only rule that separates the trade from a coin flip with negative carry.",
+    "Total debit per unit <= 0.5% of equity ($250 on $50k); at most 1 event trade per day; counts against the 3%-per-day 0DTE budget.",
+    "Prefer the strangle over the straddle when the straddle's debit fails the pricing gate but the 0.30-delta strangle passes.",
+    "Both legs OI >= 1000, one MLeg order, no chasing beyond $0.03.",
+    "No other 0DTE short-premium position may be open in the same underlying at the moment of the release."
+  ],
+  "management_rules": [
+    "Take profit at 50-75% gain on the package, or close the profitable leg and let the loser run only if the remaining leg's value is under 10% of the original debit.",
+    "Hard time stop: if the position is not profitable 20 minutes after the release, close it. The event has happened; from here it is pure theta.",
+    "Never add to a losing event straddle.",
+    "Do not convert it into a short position by selling a further strike after the print - that creates a naked leg intraday."
+  ],
+  "exit_rules": [
+    "Flatten by 15:30 ET without exception, and in practice within an hour of the release.",
+    "Never allow an ITM long leg to reach expiry: auto-exercise buys or sells 100 shares of SPY (about $60k) overnight. Close any long leg whose delta exceeds 0.90 immediately.",
+    "If the release is cancelled, delayed or leaked early, close at once - the pricing gate no longer applies.",
+    "Log the realized move versus the implied move for every occurrence; the pricing gate's 12-observation window depends on it."
+  ],
+  "assignment_risk": "No short legs, so no assignment risk. The only stock-delivery path is auto-exercise of an ITM long leg at expiry, eliminated by the delta-0.90 close rule and the 15:30 flatten.",
+  "buying_power": "The debit only.",
+  "liquidity_needs": "SPY/QQQ 0DTE around a release are liquid but the spread widens materially in the 60 seconds either side of the print - fill before the release, not during it.",
+  "common_mistakes": "Buying the straddle after the number is out; ignoring the pricing gate and paying an implied move larger than anything the release has ever delivered; holding for hours hoping the trend continues while theta takes the whole debit.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "0DTE is the entire point - the same trade at 7 DTE is a vega trade, not a gamma trade, and has completely different rules.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,86 @@
+{
+  "name": "Quantity-Unbalanced Iron Condor (2x1 sides)",
+  "slug": "unbalanced-iron-condor-2x1",
+  "aliases": [
+    "ratio iron condor",
+    "contract-unbalanced condor",
+    "lopsided iron condor"
+  ],
+  "summary": "An iron condor with different contract counts on each side - e.g. 2 put spreads against 1 call spread - so the credit and the defined loss are deliberately skewed, unlike the broken-wing version which skews strikes instead.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "|put delta| 0.12-0.16",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "short put strike - W_put (W_put $2-$5 on ETFs)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.12-0.16",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short call strike + W_call",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "total net credit x 100 when the underlying settles between the short strikes",
+  "max_loss": "per-side and defined: put side = (2 x W_put x 100) - total credit; call side = (1 x W_call x 100) - total credit. Size on the larger of the two.",
+  "breakevens": "lower = short put - total credit per share / 2 (the doubled side dilutes the cushion); upper = short call + total credit per share",
+  "greeks": {
+    "delta": "non-zero by design, roughly +0.08 to +0.20 per unit for the put-heavy build",
+    "gamma": "negative, twice as fast on the doubled side",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "IV rank >= 30 with a mild directional lean you can state as a rule, or when one side's premium is structurally richer (equity put skew). Prefer this over a broken-wing condor when you want more credit without pushing a wing strike out into illiquidity.",
+  "entry_rules": [
+    "All standard iron condor filters: IVR >= 30, 30-60 DTE, no earnings or macro event inside the life, both shorts >= 1 standard deviation away.",
+    "Ratio capped at 2:1. Never 3:1 - beyond 2:1 the structure is a ratio spread with wings, not a condor.",
+    "Directional gate for the heavy side: put-heavy only when the 20-day SMA slope is positive and spot > 50-day SMA; call-heavy only when both are negative.",
+    "Total credit >= 30% of the LARGER side's aggregate width (2 x W_put for the put-heavy build).",
+    "Max defined loss on the larger side <= 2% of equity ($1,000 on $50k).",
+    "All four legs OI >= 250, submitted as a single MLeg order; if the broker will not accept unequal ratios in one ticket, submit the doubled credit spread and the single credit spread as two orders and treat the unit as open only when both fill."
+  ],
+  "management_rules": [
+    "Take profit at 50% of total credit.",
+    "Time stop at 21 DTE.",
+    "Loss stop at 2x total credit.",
+    "If the DOUBLED side is tested (its short delta >= 0.30), close that side entirely - do not roll it; the whole risk of this variant lives there.",
+    "If the SINGLE side is tested, roll it out and away for a credit once, or close it."
+  ],
+  "exit_rules": [
+    "Force-close the entire structure by 15:45 ET on expiration day, always.",
+    "Close any short leg when it is ITM by more than 0.25 x its own wing width, when |delta| >= 0.85, or when extrinsic < $0.10.",
+    "Ex-dividend guard: close the short call side before any ex-dividend date while the short call is ITM.",
+    "Never leave the doubled short side open after the single side has been closed - that is a naked-equivalent ratio position with wings too far away to matter."
+  ],
+  "assignment_risk": "Three short legs per unit, all covered by longs of the same right and expiry, so every assignment is defined - but put-side assignment still delivers 200 shares that must be disposed of by exercising the long puts. The 15:45 ET flatten is what keeps the account from ever getting there.",
+  "buying_power": "Held per side: max(2 x W_put x 100, 1 x W_call x 100) minus the credit, per unit.",
+  "liquidity_needs": "Liquid ETF or mega-cap chains; four strikes with OI >= 250 and combined bid/ask <= 12% of the credit.",
+  "common_mistakes": "Sizing off total credit instead of the doubled side's aggregate width; letting the ratio drift above 2:1 after a roll; calling this a broken-wing condor in logs - they are different risk objects and must stay separate slugs.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Usable on SPY/QQQ with the standard 0DTE rules (entry 09:45-14:00 ET, locally computed greeks, unconditional 15:30 ET flatten), but the doubled side's gamma at 0DTE is brutal - cap the ratio at 2:1 and the total defined risk at 1% of equity.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

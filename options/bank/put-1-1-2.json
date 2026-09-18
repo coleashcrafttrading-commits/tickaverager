@@ -1,0 +1,77 @@
+{
+  "name": "1-1-2 (Put 1-1-2, \"One-Twelve\")",
+  "slug": "put-1-1-2",
+  "aliases": [
+    "112",
+    "one-twelve",
+    "Tom King 112",
+    "ratio-financed put debit spread"
+  ],
+  "summary": "A long put debit spread financed by two further-OTM naked short puts; a net-credit short-vol trade that wants a slow grind higher or sideways and is destroyed by a gap down.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "put delta 0.35-0.45 (upper leg of the debit spread)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta 0.25-0.30, 2-4% below the long put; completes the debit spread",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "put delta 0.05-0.10, at least 10% below spot - the two NAKED financing puts",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "net credit + full debit-spread width x 100, at settlement on the debit spread's lower strike with both naked puts worthless",
+  "max_loss": "UNDEFINED - below the naked strike the structure loses 2 x $100 per point all the way to zero",
+  "breakevens": "lower BE approximately = naked strike - [net credit + debit-spread max value] / 2 per share; no upside loss",
+  "greeks": {
+    "delta": "positive, roughly +0.10 to +0.25 per unit at entry",
+    "gamma": "strongly negative below the naked strike",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "90-120 DTE in futures practice; 45-90 DTE on ETFs",
+  "when_to_use": "INCLUDED FOR COMPLETENESS ONLY - NOT TRADEABLE AT LEVEL 3. The dominant retail futures-options structure on /ES and /CL, used in high put-skew regimes where the far-OTM puts are rich relative to the near ones.",
+  "entry_rules": [
+    "BLOCKED: the 2 financing puts are uncovered; requires Alpaca options level 4. The order router must reject this slug at submission.",
+    "LEVEL 3 SUBSTITUTE: replace each naked put with a put credit spread of width W (long put at naked strike - W). That is a 6-leg structure and exceeds the bank's 4-leg scope cap - it must be legged as one debit spread order plus one 2x credit spread order, with both fills confirmed before the position counts as open.",
+    "If ever enabled at level 4: IV rank >= 40, put skew (25-delta put IV minus ATM IV) >= 3 vol points, naked strike delta <= 0.10, net credit >= 0.",
+    "Naked notional cap: 2 x naked strike x 100 <= 40% of equity, i.e. no naked strike above $100 on a $50k account."
+  ],
+  "management_rules": [
+    "Take profit at 50% of the maximum structure value, or at any point the whole thing can be bought back for a debit smaller than the opening credit.",
+    "Hard defense trigger: if the naked strike's delta reaches 0.20, close the two naked puts first and leave the debit spread on.",
+    "Never roll the naked puts down and out to avoid a loss; that doubles the same exposure.",
+    "Time stop at 21 DTE regardless of P/L."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: flatten every short put by 15:30 ET on expiration day, unconditionally.",
+    "Close any short put when its extrinsic value < $0.10 or |delta| >= 0.85 - American-style share settlement means early assignment of 200 shares per unit.",
+    "Close the whole unit if the underlying trades within 1 x ATR(14) of the naked strike.",
+    "Never carry the naked legs through an ex-dividend date or a scheduled macro event."
+  ],
+  "assignment_risk": "Severe. Three short puts per unit, two of them uncovered. Assignment delivers 200 unhedged long shares at the naked strike plus 100 more from the spread's short leg if it is also ITM - up to $30k of stock on a $50k account, at the worst possible moment.",
+  "buying_power": "Naked put margin on 2 contracts (roughly 20% of underlying value less OTM amount, minimum 10% of strike, recomputed daily) plus the debit spread's cost.",
+  "liquidity_needs": "Deep chain with real size at 0.05-0.10 delta; on ETFs those strikes are penny-wide, on single names they are not.",
+  "common_mistakes": "Treating the net credit as the risk; sizing off the debit spread instead of the naked notional; rolling the tested naked puts instead of closing them.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Absolutely not - naked short puts at 0DTE on a share-settled ETF is the fastest route to an unplanned assignment.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

@@ -1,0 +1,77 @@
+{
+  "name": "Hard-to-Borrow Reversal (Borrow-Income Trade)",
+  "slug": "hard-to-borrow-reversal",
+  "aliases": [
+    "borrow harvest reversal",
+    "short synthetic against stock",
+    "HTB reverse conversion",
+    "rebate capture"
+  ],
+  "summary": "Short the stock and buy a synthetic long (long call, short put, same strike and expiry) so the price exposure cancels, leaving the stock-loan rebate on the short position as the income - the trade market makers actually run, as distinct from the pricing arbitrage the bank already lists as a Reversal.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "short 100 shares of a hard-to-borrow name",
+      "dte_rule": "held for the life of the options"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike K, typically ATM",
+      "dte_rule": "30-90 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the same strike K, same expiry - together with the long call this is a synthetic long share position",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "The borrow rebate earned over the holding period, less the options' net cost and any dividends owed - a carry, not a payoff",
+  "max_loss": "In principle small and defined, because the synthetic long exactly offsets the short shares. In practice: an early assignment on the short put, a borrow recall and forced buy-in, a dividend surprise, or a rebate rate cut - each of which can exceed the entire expected income.",
+  "breakevens": "None in price terms; the trade breaks even when the accrued rebate equals the options' net cost plus financing",
+  "greeks": {
+    "delta": "zero by construction",
+    "gamma": "zero",
+    "theta": "approximately zero",
+    "vega": "approximately zero"
+  },
+  "typical_dte": "30-90 DTE, rolled while the borrow stays special",
+  "when_to_use": "INCLUDED FOR COMPLETENESS - NOT TRADEABLE ON THIS ACCOUNT. Documented so the distinction between the bank's pricing-arbitrage Reversal and the market maker's income trade is explicit: the first harvests a mispriced put-call parity, the second harvests the stock-loan market.",
+  "entry_rules": [
+    "BLOCKED, for two independent reasons. First, the short put alongside a short stock position requires level 4 approval. Second, and decisively: retail brokerage accounts including Alpaca do not pass stock-loan rebates through to the customer, so the income this trade exists to capture does not reach this account at all.",
+    "If it were ever enabled: borrow rebate must exceed 10% annualized and be contractually confirmed for a stated term, not quoted intraday.",
+    "Options must price at or better than parity, so the structure is not paying away the rebate in option edge.",
+    "No ex-dividend date inside the holding period - the short seller owes every dividend in cash.",
+    "Name must not be on a threshold or hard-to-borrow recall watchlist."
+  ],
+  "management_rules": [
+    "Monitor the borrow rate daily; unwind the moment the rebate falls below the cost of carrying the options.",
+    "Never let the synthetic drift from the share count - 100 shares per 1 call / 1 put, exactly.",
+    "Unwind all three legs as a single package, never piecemeal."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the short put is assignable at any time; flatten it by 15:30 ET on expiration day and immediately at extrinsic < $0.10 or |delta| >= 0.85. Assignment buys 100 shares and closes the short, ending the rebate stream without warning.",
+    "Close the long call rather than exercising it.",
+    "Unwind immediately on any borrow recall notice - a forced buy-in in a hard-to-borrow name is the most expensive event in this structure.",
+    "Never carry the position through an ex-dividend date."
+  ],
+  "assignment_risk": "Two ways to lose the position involuntarily: early assignment on the short put, and a stock-loan recall forcing a buy-in of the short shares. Both terminate the trade at the counterparty's choosing, which is the opposite of what a carry trade needs.",
+  "buying_power": "Reg-T short stock margin (150% of proceeds) plus the option requirements. Level 4.",
+  "liquidity_needs": "Hard-to-borrow names are by definition thin in both the share and option markets - the least liquid setting in the bank.",
+  "common_mistakes": "Confusing it with the listed Reversal (a pricing arb, closed the moment parity restores) when this one is held for weeks to accrue carry; assuming a retail account receives any part of the lending revenue; ignoring the dividend obligation.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

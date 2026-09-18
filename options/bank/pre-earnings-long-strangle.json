@@ -1,0 +1,74 @@
+{
+  "name": "Pre-Earnings Long Straddle / Strangle (IV Expansion Buy)",
+  "slug": "pre-earnings-long-strangle",
+  "aliases": [
+    "IV ramp buy",
+    "pre-earnings vol purchase",
+    "two-sided earnings long",
+    "vol run-up trade"
+  ],
+  "summary": "Buy a straddle or strangle days before an earnings date and close it BEFORE the announcement, harvesting the pre-event rise in implied volatility rather than the move itself - the two-sided version the bank was missing alongside its directional earnings entries.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM call, delta 0.45-0.55 (straddle); or delta 0.25-0.35 for the cheaper strangle version",
+      "dte_rule": "first expiry AFTER the earnings date, 14-45 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "same strike as the call (straddle), or |delta| 0.25-0.35 (strangle)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "Bounded in practice by the size of the IV ramp - typically 20-60% of the debit if the trade is exited before the print; unbounded only if held through, which these rules forbid",
+  "max_loss": "The full debit, and the realistic bad case is a slow bleed as theta outruns the vol ramp",
+  "breakevens": "Not price-based when traded correctly: the position wins if ATM IV rises more than theta costs over the holding period",
+  "greeks": {
+    "delta": "near zero at entry, rehedged or re-centered if it drifts",
+    "gamma": "positive",
+    "theta": "negative - the enemy, and the reason the holding window is short",
+    "vega": "positive, and the entire source of the intended return"
+  },
+  "typical_dte": "Enter 5-10 trading days before earnings, expiry the first one after the event",
+  "when_to_use": "Names with a documented pattern of implied volatility rising into the print and a chain liquid enough to exit at a fair price. This is a vega trade, not an event bet - the bank's long-call-into-earnings and long-put-into-earnings entries are the directional versions, and this is the neutral one.",
+  "entry_rules": [
+    "Confirmed earnings date from two sources; if the date is 'estimated', skip the name.",
+    "Enter 5-10 trading days before the announcement. Earlier and theta dominates; later and the IV ramp is already paid for.",
+    "IV GATE: current ATM IV for the post-earnings expiry must be below the median level it reached in the 2 days before the last 4 announcements. If IV is already at or above that level, there is nothing left to buy.",
+    "Debit <= 0.75% of equity per name; at most 3 pre-earnings positions at once and never more than 1 in the same sector.",
+    "Prefer the strangle when the straddle debit exceeds the budget, but only when both strikes have OI >= 250.",
+    "Both legs same expiry, one MLeg order, no chasing beyond $0.05.",
+    "Underlying price >= $30 and average daily option volume >= 1,000 contracts - cheap stocks have chains too coarse to exit."
+  ],
+  "management_rules": [
+    "Take profit at 30% gain on the package; the vol ramp rarely pays more than that without the event.",
+    "Hard time stop: close by the market close on the day BEFORE the announcement, without exception, profitable or not.",
+    "Re-center by rolling to the new ATM strike only if the underlying moves more than 1.5 x ATR(14) and more than 3 days remain before the print; otherwise close.",
+    "Never hold through the print. Holding converts a vega trade into an event bet with a guaranteed IV crush working against both legs.",
+    "Do not average down."
+  ],
+  "exit_rules": [
+    "MANDATORY: flat before the announcement. For a post-close reporter, flat by 15:45 ET that day; for a pre-open reporter, flat by 15:45 ET the prior session.",
+    "No leg may be held into the event 'because it is cheap' - a residual long leg is a lottery ticket funded by a failed thesis.",
+    "Close, never exercise, any ITM long leg.",
+    "If the earnings date moves, re-evaluate from scratch: either exit or reset the window."
+  ],
+  "assignment_risk": "None - both legs are long. The only stock-delivery path is auto-exercise of an ITM long leg at expiry, which cannot occur because the position is always closed before the event, well ahead of expiry.",
+  "buying_power": "The debit only.",
+  "liquidity_needs": "Liquid single-name chains; the exit is the hard part, and it happens on the busiest possible day for that name's options.",
+  "common_mistakes": "Holding through the print and eating the IV crush on both legs; entering when IV has already ramped; buying the weekly expiry that includes the event at the widest spreads of the cycle; treating a gain from an underlying move as evidence the vega thesis worked.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - the trade is explicitly about the days before the event.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

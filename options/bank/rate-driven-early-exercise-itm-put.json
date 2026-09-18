@@ -1,0 +1,71 @@
+{
+  "name": "Interest-Rate-Driven Early Exercise of a Deep ITM Long Put",
+  "slug": "rate-driven-early-exercise-itm-put",
+  "aliases": [
+    "early exercise for interest",
+    "rates analogue of dividend arb",
+    "put exercise decision rule"
+  ],
+  "summary": "A decision rule rather than a position: exercise a long deep-in-the-money put early, against shares already held, when the interest earnable on the strike proceeds exceeds the put's remaining extrinsic value - the interest-rate counterpart to the bank's dividend arbitrage.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares already held (the put must be exercised against shares, never naked - exercising without shares creates a short position)",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "an existing long put with |delta| >= 0.95 and strike well above spot, from a married put, protective put or collar already on the books",
+      "dte_rule": "any remaining DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "none",
+  "max_profit": "The interest earned on (strike x 100) between the exercise date and expiry, minus the extrinsic value surrendered - typically tens of dollars per contract, and larger the higher rates are and the deeper the put is",
+  "max_loss": "The forfeited extrinsic value plus the upside given up if the shares rally after the early sale - which is why the delta and extrinsic thresholds must both be met",
+  "breakevens": "Exercise is correct when: strike x 100 x r x (days to expiry / 365) > put extrinsic x 100, with r the current risk-free rate",
+  "greeks": {
+    "delta": "the exercise converts a -0.95+ delta put plus +1.00 delta shares into flat cash",
+    "gamma": "eliminated by the exercise",
+    "theta": "the surrendered extrinsic is precisely what the decision weighs",
+    "vega": "eliminated"
+  },
+  "typical_dte": "Applies most often at 7-45 DTE on puts that are 15%+ in the money",
+  "when_to_use": "Whenever the account holds a deep ITM long put against shares. The rule should run daily as a scan over existing positions, not be traded into deliberately - the bank's dividend arbitrage entry answers 'when do I get assigned early on a short call'; this answers 'when should I exercise my own long put'.",
+  "entry_rules": [
+    "This is a position-management rule. It creates no new position and requires no new order beyond the exercise instruction.",
+    "SCAN DAILY over all long puts held: flag any with |delta| >= 0.95 AND extrinsic value < strike x r x (DTE/365), where r is the current 3-month T-bill yield.",
+    "MANDATORY PRECONDITION: the account must hold >= 100 shares per contract to be exercised. Exercising a long put without shares creates a 100-share SHORT position, which this system must never do.",
+    "Compare against the alternative: selling the put and selling the shares separately in the market. If that combination nets more after spreads and commissions, do that instead and skip the exercise - usually true when the put's bid/ask is tight.",
+    "Do not exercise if an ex-dividend date falls before expiry and the shares are held for the dividend - holding the shares to capture it may beat the interest.",
+    "Submit the exercise through Alpaca's exercise endpoint before the broker's cutoff (typically 17:30 ET, but use the broker's stated time minus a 60-minute safety margin)."
+  ],
+  "management_rules": [
+    "Re-run the scan every session at 14:30 ET so there is time to act before the cutoff.",
+    "Recompute with the live T-bill yield, not a hard-coded rate - the rule is worthless at 0% rates and material at 5%.",
+    "Log every exercise with the extrinsic forfeited and the interest captured, so the rule can be audited for whether it is actually adding value.",
+    "After the exercise, the shares are gone: cancel any covered call or other overlay that depended on them in the same session."
+  ],
+  "exit_rules": [
+    "The exercise IS the exit for both legs simultaneously - shares sold at the strike, put extinguished.",
+    "Never exercise into a position the account cannot hold; verify share count programmatically immediately before submitting.",
+    "If the exercise instruction fails or is rejected, close the put and sell the shares in the market before the close rather than carrying an unresolved state overnight.",
+    "Never exercise on the final trading day as a substitute for closing - at that point the interest captured is a single night and the operational risk dominates."
+  ],
+  "assignment_risk": "None created by this rule - it exercises the account's own long option. The related risk it does create is downstream: any short call written against those shares becomes uncovered the instant the shares are delivered away, so overlays must be cancelled in the same session.",
+  "buying_power": "Frees capital: the shares convert to cash at the strike.",
+  "liquidity_needs": "None for the exercise itself; the comparison against a market close does need a quotable put.",
+  "common_mistakes": "Exercising a long put with no shares behind it and creating a short stock position; using a stale interest rate; ignoring a covered call still written against the shares; exercising when simply selling both legs in the market would net more.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - with hours left there is no interest to capture.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

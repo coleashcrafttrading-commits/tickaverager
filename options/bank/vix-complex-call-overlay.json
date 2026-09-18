@@ -1,0 +1,72 @@
+{
+  "name": "VIX-Complex Call Spread / 1x2 Call Ratio Tail Hedge",
+  "slug": "vix-complex-call-overlay",
+  "aliases": [
+    "VIX call spread hedge",
+    "vol-of-vol tail hedge",
+    "VXX call ratio",
+    "volatility ETP overlay"
+  ],
+  "summary": "A tail hedge bought on the volatility complex rather than on the index itself - a call spread (or a financed 1x2 call ratio) that pays when volatility spikes, sized so the ongoing cost is a known annual drag.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "VXX or UVXY call, delta 0.30-0.40 (VIX options themselves are index options and are NOT available on Alpaca; the volatility ETPs are the share-settled proxy)",
+      "dte_rule": "30-90 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "further OTM call, delta 0.10-0.15, financing the long; the RATIO version sells 2 of these and is a different, blocked structure",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "(short strike - long strike - net debit) x 100 per unit for the spread version; the 1x2 ratio's profit peaks at the short strike and then reverses",
+  "max_loss": "The net debit for the call spread version. For the 1x2 ratio version: UNLIMITED above the short strike, which on a volatility ETP that can triple in a week is a genuine ruin risk.",
+  "breakevens": "long strike + net debit per share; the ratio version adds an upper breakeven above which it loses",
+  "greeks": {
+    "delta": "positive on a product that is itself negatively correlated to equities - this is the hedge's whole purpose",
+    "gamma": "positive",
+    "theta": "negative, and compounded by the ETP's own roll decay",
+    "vega": "positive vol-of-vol exposure"
+  },
+  "typical_dte": "30-90 DTE, rolled quarterly",
+  "when_to_use": "As a portfolio tail hedge when index put protection is expensive relative to volatility-complex calls - typically in calm markets with a steep VIX futures contango. It complements, and does not replace, the bank's OTM index put hedge: the put hedges price, this hedges the volatility repricing.",
+  "entry_rules": [
+    "VIX index options are European, cash-settled and NOT tradeable on Alpaca. Only VXX, UVXY, VIXY and similar share-settled ETP options may be used, and their decay characteristics are materially worse than VIX futures options - document the proxy in every log line.",
+    "CALL SPREAD VERSION ONLY at level 3. The 1x2 call ratio (buy 1, sell 2) leaves one uncovered short call on a product that can double overnight - BLOCKED, level 4, and it should be rejected at the router even if approval is later raised.",
+    "Entry only when VIX spot is below 16 and the VIX futures term structure is in contango - buying vol-of-vol after the spike is how this hedge loses money.",
+    "Annual budget cap: total premium spent on volatility-complex hedges <= 1.5% of equity per year, tracked cumulatively across rolls.",
+    "Long strike delta 0.30-0.40, short strike delta 0.10-0.15, both legs same expiry, OI >= 250.",
+    "Position sized so a VIX move from 15 to 35 produces a hedge gain of 3-6% of equity - model it before entry, do not guess."
+  ],
+  "management_rules": [
+    "Monetize on a spike: sell the spread when it reaches 4x the debit paid, or when VIX spot exceeds 30, whichever comes first. A tail hedge that is never monetized is just a fee.",
+    "Roll quarterly at 30 DTE, resetting strikes to the current delta targets; count each roll against the annual budget.",
+    "Do not roll strikes up during a spike to 'keep the hedge on' - take the money, then re-establish after the term structure returns to contango.",
+    "Halve the position if the ETP has undergone a reverse split within the last 30 days; strike continuity after a split is a frequent source of sizing errors."
+  ],
+  "exit_rules": [
+    "Close both legs at least 2 trading days before expiry; never allow auto-exercise on a leveraged volatility ETP.",
+    "Close the short call at extrinsic < $0.10 or delta >= 0.85 - assignment creates a naked short position in a product that can gap 40% overnight.",
+    "Close the entire hedge immediately if the ETP announces a reverse split, a change in index methodology, or a suspension of creations.",
+    "Never hold a short ETP call leg through a spike on the theory that the long leg covers it - it does, for money, but assignment still delivers a short share position."
+  ],
+  "assignment_risk": "One short call, covered by a long call at a lower strike, so the money loss is defined. The delivery is not benign: assignment on a leveraged volatility ETP creates a short share position in the single most gap-prone instrument available, on the exact day the hedge is meant to be working.",
+  "buying_power": "Spread width x 100 minus the credit, per unit - defined.",
+  "liquidity_needs": "VXX options are liquid; UVXY less so and its splits complicate strike history. Avoid the thinner VIXY chain.",
+  "common_mistakes": "Assuming a VXX call is a VIX call - the ETP's roll decay means it underperforms the index badly in contango; running the 1x2 ratio for zero cost and carrying an uncovered short call on a product that can triple; never monetizing the hedge.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - a tail hedge needs months of standing exposure.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

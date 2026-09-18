@@ -1,0 +1,87 @@
+{
+  "name": "Volatility Surface Triangle (ATM Straddle vs 25-Delta Risk Reversal vs 25-Delta Butterfly)",
+  "slug": "vol-surface-triangle-trade",
+  "aliases": [
+    "FX-convention vol triangle",
+    "trading the surface parameters",
+    "level-skew-smile trade",
+    "RR and fly as instruments"
+  ],
+  "summary": "Trade the three FX-convention surface quantities as separate instruments - level (ATM straddle), skew (25-delta risk reversal) and curvature (25-delta butterfly) - isolating whichever one is mispriced while neutralizing the other two.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "LEVEL leg: ATM straddle, delta 0.50 call, traded when ATM IV is cheap or rich versus its own history",
+      "dte_rule": "30-60 DTE, one expiry for the whole triangle"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "LEVEL leg: the matching ATM put at the same strike",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "SKEW leg: 25-delta call, bought (or sold) against the 25-delta put to trade the risk reversal - RR = IV(25d call) - IV(25d put)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SKEW leg: 25-delta put; sold in the long-RR direction. MUST be cash-secured or wrapped in a put spread to stay at level 3",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "either",
+  "max_profit": "Depends on which parameter is traded: skew and curvature trades are bounded by the strike geometry; the level trade is unbounded on the upside of a straddle",
+  "max_loss": "Bounded by the debit for long-only expressions; for the short side of any parameter, bounded only if the short is cash-secured or spread-wrapped - which this system requires",
+  "breakevens": "Expressed in vol points, not price: the trade wins when the quoted parameter (ATM IV, RR, or fly) converges toward the modeled fair value",
+  "greeks": {
+    "delta": "hedged to zero and rebalanced daily; the trade is about the surface, not the price",
+    "gamma": "depends on the leg - the ATM straddle carries the most",
+    "theta": "negative for long-parameter expressions",
+    "vega": "the point of the trade: ATM vega for level, skew vega (vanna) for the RR, curvature vega (volga) for the fly"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "When the mispricing is in the SHAPE of the surface rather than in a direction: skew steeper than any point in its two-year range, or the 25-delta fly (smile curvature) collapsed after a calm stretch. The bank's existing butterfly and risk-reversal entries are payoff shapes; this entry trades them as quoted surface parameters, which is a different decision rule entirely.",
+  "entry_rules": [
+    "Compute and store the three parameters daily for SPY and QQQ: ATM IV at 30 days, RR_25 = IV(25d call) - IV(25d put), FLY_25 = (IV(25d call) + IV(25d put))/2 - ATM IV. Two years of history is required before any trade.",
+    "Trade ONE parameter per position. Neutralize the others by construction (e.g. a pure fly trade must be vega-neutral to ATM at entry within 10%).",
+    "Entry threshold: the traded parameter must be beyond its 10th or 90th percentile over 2 years. Nothing inside that band is a trade.",
+    "LEVEL 3 CONSTRAINT: any short option in the expression must be either cash-secured or converted to a spread. A 25-delta short put in a long-RR expression becomes a 25-delta/15-delta put credit spread.",
+    "Delta-hedge daily; without the hedge the position's P/L is dominated by direction and the surface view is unobservable.",
+    "Total defined risk <= 2% of equity per parameter trade; at most 2 open at once.",
+    "SPY/QQQ only; all legs one expiry; OI >= 250 per leg."
+  ],
+  "management_rules": [
+    "Take profit when the traded parameter reverts to its median, or at 50% of modeled maximum gain.",
+    "Stop when the parameter moves 1 further standard deviation against the entry - surfaces trend, and a rich skew can get richer.",
+    "Re-hedge delta daily at 15:45 ET; re-check that the non-traded parameters are still neutralized weekly and rebuild if the drift exceeds 25%.",
+    "Roll the whole expression at 21 DTE or close it; never let the 25-delta strikes drift into 40-delta strikes and keep calling it a 25-delta trade."
+  ],
+  "exit_rules": [
+    "Close all legs at least 2 trading days before expiry.",
+    "Close any short leg at extrinsic < $0.10 or |delta| >= 0.85; short calls close before every ex-dividend date while ITM.",
+    "Flatten the share hedge in the same session as the options.",
+    "If the parameter history pipeline goes stale (no update for 2 sessions), close - the trade cannot be evaluated without it."
+  ],
+  "assignment_risk": "Only from short legs, and every short leg here is required to be cash-secured or spread-wrapped, so assignment is defined. The practical risk is that a 25-delta short put drifts to 60 delta while the position is held for a vol-point reason rather than a price reason - the delta and extrinsic guards override the surface view every time.",
+  "buying_power": "Debits plus the cash or spread width behind any short leg, plus share-hedge margin.",
+  "liquidity_needs": "Reliable 25-delta quotes on both sides in one expiry; SPY and QQQ only.",
+  "common_mistakes": "Trading two parameters at once and being unable to attribute P/L; using a payoff-shaped butterfly (equal strike widths) when the surface fly is defined by equal deltas; skipping the delta hedge; treating the bank's existing risk-reversal entry as the same trade - it is not, it is the payoff, not the parameter.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - 0DTE surface parameters are not stable enough to trade as parameters.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

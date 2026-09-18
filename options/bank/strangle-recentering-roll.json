@@ -1,0 +1,88 @@
+{
+  "name": "Straddle / Strangle Recentering Roll (Rolling the Untested Side In)",
+  "slug": "strangle-recentering-roll",
+  "aliases": [
+    "rolling the untested side",
+    "recentering a short strangle",
+    "delta-rebalancing roll",
+    "untested side adjustment"
+  ],
+  "summary": "When one side of a short premium structure is tested, close the untested side and re-sell it closer to the money in the same expiry, collecting extra credit and pulling the position's delta back toward neutral - the primary short-premium adjustment in the standard references.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "CLOSE the untested short call (buy to close) - shown for a put-side-tested position",
+      "dte_rule": "the current expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "RE-SELL a call at delta 0.25-0.30 in the SAME expiry, closer to spot than the one just closed",
+      "dte_rule": "the same expiry - recentering never changes the expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "If the base structure is defined-risk, also roll its long wing to (new short strike + W) so the wing stays attached",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "The tested short put is LEFT ALONE by this adjustment - recentering does not touch the tested side",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "Original credit plus the recentering credit, if the underlying finishes between the new strikes",
+  "max_loss": "Unchanged on the tested side; INCREASED on the recentered side, because the new short is closer to spot. For a defined-risk base: (width x 100) - cumulative credit on either side.",
+  "breakevens": "Tested side unchanged; the other side moves in to the new short strike + cumulative credit per share",
+  "greeks": {
+    "delta": "pulled back toward zero - the purpose of the adjustment",
+    "gamma": "more negative than before; the position is now tighter around spot",
+    "theta": "higher",
+    "vega": "more negative"
+  },
+  "typical_dte": "Applied with 14-35 DTE remaining; never inside 10 DTE",
+  "when_to_use": "A short strangle, iron condor or iron butterfly has been tested on one side, the thesis is still range-bound, and the untested side has decayed to almost nothing. Recentering converts that dead premium into new credit and reduces directional exposure - but it narrows the profit range at exactly the moment the market is proving it can move.",
+  "entry_rules": [
+    "ELIGIBILITY GATE - all must hold: (1) the untested short has lost >= 70% of its original premium; (2) the tested short's |delta| is between 0.25 and 0.40 (below that, do nothing; above that, defend the tested side instead); (3) >= 14 DTE remain; (4) the recentering can be done for a net credit.",
+    "ONE RECENTERING PER POSITION. Repeated recentering is how a neutral position becomes a naked directional one.",
+    "The new short strike must remain OUTSIDE the underlying's remaining expected move to expiry, and no closer than 0.30 delta.",
+    "The new short strikes must not cross: for a strangle the call strike must stay above the put strike (crossing them creates a short guts with a completely different risk profile, which is a separate structure and a separate decision).",
+    "DEFINED-RISK REQUIREMENT: if the base structure is an iron condor or butterfly, the long wing on the recentered side MUST be rolled with it in the same order. A short moved without its wing is a naked leg, which this account cannot carry.",
+    "Never recenter into an earnings date or a scheduled macro event inside the remaining life.",
+    "Execute as one MLeg order; if it must be legged, close the old short first and confirm before selling the new one."
+  ],
+  "management_rules": [
+    "Treat the recentered structure as a new position: profit target 50% of CUMULATIVE credit, loss stop 2x cumulative credit, time stop at 21 DTE or the original time stop, whichever is sooner.",
+    "Do NOT also roll the tested side in the same action - defending the tested side and recentering the untested side are two different decisions and doing both at once produces an unanalyzable position.",
+    "If the underlying reverses after recentering and now tests the NEW short, close the whole structure. It has been given its one adjustment.",
+    "Log the recentering with the cumulative credit and the new, narrower profit range; the narrowed range is the cost and must be visible in the record."
+  ],
+  "exit_rules": [
+    "Force-close the whole structure by 15:45 ET on expiration day.",
+    "Close any short at extrinsic < $0.10, |delta| >= 0.85, or ITM by more than 0.25 x its wing width.",
+    "Ex-dividend guard on any short call before every ex-date while ITM.",
+    "Abort mid-adjustment if the new short cannot be sold within 5 minutes of the old one being closed - a one-sided position with a live wing is acceptable for minutes, not for a session.",
+    "If both sides end up tested, close everything; a recentered position that is tested on both sides has no good outcome left."
+  ],
+  "assignment_risk": "The adjustment itself briefly changes which legs are live, and on a defined-risk base a short can exist without its wing if the order is legged carelessly. After recentering, the closer short strike means a higher probability of finishing ITM, so the assignment probability of the whole structure has gone UP, not down - the delta improvement is not a safety improvement.",
+  "buying_power": "For a defined-risk base, the requirement may rise if the recentered side's width changes; for a naked base (level 4, not permitted here) the margin is recomputed at the new strike.",
+  "liquidity_needs": "Same expiry, two or three strikes, OI >= 250 each; recentering usually happens on a day the chain is already moving.",
+  "common_mistakes": "Recentering for extra credit when the real problem is the tested side; recentering more than once; crossing the strikes into an inverted position without recognizing it as a different structure; moving a short without its wing; treating the improved delta as reduced risk when the profit range has narrowed.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - at 0DTE the correct response to a tested side is to close, not to adjust.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

@@ -1,0 +1,84 @@
+{
+  "name": "0DTE Broken-Wing Butterfly (Income Trade)",
+  "slug": "zero-dte-broken-wing-butterfly",
+  "aliases": [
+    "0DTE BWB",
+    "BWB income trade",
+    "skip-strike fly 0DTE",
+    "1-3-2 style same-day fly"
+  ],
+  "summary": "An out-of-the-money put butterfly with an intentionally wider far wing, opened for a net credit so the upside is riskless - the dominant systematic 0DTE/1DTE structure on index products, rendered here on SPY.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "the near wing: |delta| 0.25-0.35, above the body",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "the body: |delta| 0.12-0.18, W1 below the near wing (W1 typically $5-$10 on SPY)",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "the far wing: body - W2, where W2 > W1 (typically 1.5x to 2x W1) - the broken wing",
+      "dte_rule": "expires today"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit + (W1 x 100), realized at the body strike",
+  "max_loss": "(W2 - W1) x 100 - net credit, entirely below the far wing; ZERO risk above the near wing because the structure was opened for a credit",
+  "breakevens": "only one, on the downside: body - [(W1 x 100 + credit) / 100] adjusted for the wing ratio; there is no upside breakeven",
+  "greeks": {
+    "delta": "small and positive at entry, +0.05 to +0.15",
+    "gamma": "negative around the body, positive below the far wing",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "0 DTE (and 1 DTE, where the same rules apply with an overnight gap check)",
+  "when_to_use": "The workhorse systematic 0DTE structure: it pays if the market goes up, sideways, or down slightly, and only loses on a sustained move down through the body. Run it on days with no macro catalyst, and never on a day whose expected move exceeds the distance from spot to the body.",
+  "entry_rules": [
+    "SPY or QQQ only (SPX would be the institutional venue but index options are not available on Alpaca; SPY is share-settled, which is exactly why the exit rules below are non-negotiable).",
+    "Locally computed greeks mandatory at 0DTE; refresh every 30 seconds.",
+    "MUST be opened for a net credit. If the combination prices at a debit, the no-upside-risk property is gone and the trade is rejected.",
+    "Entry window 09:45-13:00 ET. The structure needs time for the body to decay.",
+    "Body strike at least 1.0 x the remaining-day expected move below spot, and below the session low.",
+    "W2 <= 2.5 x W1 - beyond that the tail is not worth the credit.",
+    "Max loss ((W2 - W1) x 100 - credit) <= 1% of equity; at most 2 concurrent; counts against the 3%-per-day 0DTE budget.",
+    "No entry within 15 minutes of a scheduled release or before 14:30 ET on FOMC days.",
+    "All four contracts OI >= 1000; one MLeg limit order."
+  ],
+  "management_rules": [
+    "Take profit at 50% of the structure's maximum value, or close any time the whole thing can be bought back for a debit smaller than the opening credit.",
+    "Stop: close if spot trades below the body strike, regardless of mark - below the body the payoff turns and the short 2x dominates.",
+    "Delta stop: close if the body's locally computed |delta| reaches 0.30.",
+    "Do not 'ride it through' the body on the theory that the far wing catches it; the far wing is 1 contract against 2 shorts.",
+    "Never roll; never add a second BWB below a losing one."
+  ],
+  "exit_rules": [
+    "UNCONDITIONAL FLATTEN AT 15:30 ET.",
+    "Two short puts per unit: if either is ITM after 15:00 ET, close the structure immediately. Assignment delivers 200 shares (about $120k of SPY) into a $50k account.",
+    "Close any short with extrinsic < $0.10 or |delta| >= 0.85 at any hour.",
+    "If unfilled by 15:40 ET, reprice to the natural every 10 seconds, accept the slippage, and log a critical incident.",
+    "Never exercise the long wings to cover an assignment as a plan - that is an incident response, not a strategy."
+  ],
+  "assignment_risk": "Two short puts at the body against two long wings. If spot sits at the body into the close, the shorts can be assigned for 200 shares while only one long wing is meaningfully ITM, leaving a large unhedged overnight equity position. This is the specific disaster the 15:30 flatten and the body-touch stop exist to prevent.",
+  "buying_power": "((W2 - W1) x 100) - credit per unit, the defined downside only.",
+  "liquidity_needs": "SPY/QQQ 0DTE strikes with four-figure OI and penny markets; W1 and W2 must both land on listed $1 or $5 strikes.",
+  "common_mistakes": "Opening it for a debit and losing the free upside; setting W2 too wide for extra credit; treating the 2x body as one contract when sizing; assuming 'no upside risk' means 'no risk'.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This structure is defined by its 0DTE use. Credit-only entry, body below the expected move, 09:45-13:00 ET window, 50% profit target, body-touch stop, 15:30 ET flatten.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

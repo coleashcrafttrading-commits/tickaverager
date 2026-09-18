@@ -1,0 +1,87 @@
+{
+  "name": "Dispersion Trade (Short Index Vol vs Long Single-Name Vol)",
+  "slug": "dispersion-trade",
+  "aliases": [
+    "correlation trade",
+    "short correlation",
+    "index vs constituents vol"
+  ],
+  "summary": "Sell index volatility and buy volatility on the index's largest constituents, betting that realized correlation falls short of the correlation implied by the spread between index and single-name option prices.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "index leg, defined-risk wrapper: short SPY strangle or iron condor at 0.15-0.20 delta per side (the short index vol)",
+      "dte_rule": "30-60 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "index leg, the matching put side of the same wrapper, each short covered by a long wing",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "single-name leg: long strangles on 5-10 of the largest index constituents, delta 0.25-0.35, vega-weighted to the index short",
+      "dte_rule": "same expiry as the index leg"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "single-name leg: the matching long puts, same names and expiry",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "either",
+  "max_profit": "Unbounded in principle - realized dispersion accrues as the single-name gammas pay more than the index gamma costs",
+  "max_loss": "Bounded by construction only if the index short is wrapped in wings: index-side defined loss plus the entire single-name debit. In its pure (naked index strangle) form the loss is UNDEFINED.",
+  "breakevens": "Not expressible as a price level - the trade breaks even when realized index vol squared equals the weighted sum of realized single-name vols squared times the entry implied correlation",
+  "greeks": {
+    "delta": "targeted to zero across the book and rehedged daily",
+    "gamma": "positive in the names, negative in the index - the entire P/L is the difference",
+    "theta": "negative overall; the single-name premium usually costs more than the index premium collected",
+    "vega": "roughly flat by construction, which is the point"
+  },
+  "typical_dte": "30-60 DTE, rolled monthly",
+  "when_to_use": "When implied correlation (derivable from index IV versus the cap-weighted single-name IVs) sits in the top decile of its two-year range - typically right after an index-level shock, when index puts are bid and single names are not. It is the canonical volatility-surface trade and has no representative anywhere else in the bank.",
+  "entry_rules": [
+    "CAPITAL GATE - READ FIRST: a minimally diversified dispersion book needs 5-10 single-name strangles plus a wrapped index position. At realistic option prices that is $15k-$30k of premium and 12-24 legs. On a $50k account this is not runnable at meaningful size; document it, and require explicit authorization before any live version.",
+    "Index short MUST be wrapped (iron condor, not naked strangle) to stay inside level 3 - every short leg needs a long leg of the same right and expiry.",
+    "Implied correlation at entry >= its 80th percentile over 2 years, computed from SPY IV and the cap-weighted IVs of the top 10 holdings.",
+    "Single-name basket: 5-10 names, each >= 2% of index weight, each with OI >= 250 at the chosen strikes, none with earnings inside the expiry.",
+    "Vega-weight the basket to 1.0-1.3x the index short's vega; below 1.0 the trade is just short vol with extra steps.",
+    "Total defined risk (index wing loss + single-name debit) <= 6% of equity.",
+    "All legs same expiry."
+  ],
+  "management_rules": [
+    "Delta-hedge the whole book daily to within +/-0.10 net delta per $10k of notional, using shares of the index or the names.",
+    "Take profit when implied correlation falls below its 50th percentile, or at 40% of maximum modeled gain.",
+    "Cut the entire book if implied correlation rises 10 percentile points above entry - the thesis is measurably wrong.",
+    "Replace any single name that announces a merger or is added to an acquisition rumor list; deal-driven names stop behaving like index constituents.",
+    "Roll the whole book together at 21 DTE, never leg by leg."
+  ],
+  "exit_rules": [
+    "Flatten all index short legs by 15:45 ET on expiration day; flatten the single-name shorts (if any wrapper shorts exist) at the same time.",
+    "Close any short leg at extrinsic < $0.10 or |delta| >= 0.85, and short calls before every ex-dividend date while ITM - with 5-10 names this is a daily calendar check, not an occasional one.",
+    "Close long single-name legs rather than exercising them; an exercised long call buys 100 shares of a single name.",
+    "If any single-name leg becomes unquotable (no two-sided market for a full session), close the entire book - the hedge ratios are no longer measurable."
+  ],
+  "assignment_risk": "Multiplied by the number of names. Every wrapper short on the index and every short in a name is separately assignable, and the single-name legs carry their own ex-dividend calendars. An account that must never be assigned should treat this structure as a research object rather than a position.",
+  "buying_power": "Index condor width x 100 per unit, plus the full single-name debit, plus daily hedging cash.",
+  "liquidity_needs": "The most demanding in the bank: SPY plus 5-10 mega-cap chains, all needing tight two-sided markets at roll time.",
+  "common_mistakes": "Running it naked on the index side; equal-weighting the basket instead of vega-weighting; ignoring the daily delta hedge, which is where dispersion P/L is actually realized; sizing it as if the single-name debit were the only cost.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - correlation is realized over weeks, not hours.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

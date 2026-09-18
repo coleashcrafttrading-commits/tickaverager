@@ -1,0 +1,87 @@
+{
+  "name": "Systematic Index Volatility Premium Capture Program (VPD/VPN-style)",
+  "slug": "systematic-vol-premium-program",
+  "aliases": [
+    "VPD/VPN-style program",
+    "systematic short-vol overlay",
+    "benchmark premium capture",
+    "rules-based short premium"
+  ],
+  "summary": "A rules-based, calendar-driven program that sells index volatility on a fixed schedule in fixed size - the retail, defined-risk analogue of the CBOE VPD and VPN benchmark indices - rather than a single discretionary trade.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "monthly cycle: short SPY put at |delta| 0.15-0.20, opened on a fixed calendar day",
+      "dte_rule": "30-45 DTE, one cycle per month"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "long SPY put at short strike - W (W = $5 on SPY), making every cycle defined-risk",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "optional second side for the strangle version: short SPY call at delta 0.15-0.20",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "long SPY call at short call strike + W",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "Total credit per cycle; the program's return is the compounded sum of cycles, not any single trade",
+  "max_loss": "Per cycle: (W x 100) - credit per side. Program-level: the cumulative drawdown from consecutive losing cycles, which is the number that actually matters and must be simulated before launch.",
+  "breakevens": "Per cycle, short strike -/+ credit per share; program-level breakeven is a hit rate, not a price",
+  "greeks": {
+    "delta": "small and mean-reverting around zero across cycles",
+    "gamma": "negative, concentrated in the final week of each cycle",
+    "theta": "positive and steady - the program's entire return source",
+    "vega": "negative; the program is implicitly short the variance risk premium"
+  },
+  "typical_dte": "30-45 DTE per cycle, 12 cycles per year",
+  "when_to_use": "When the objective is a benchmark-like exposure to the equity variance risk premium rather than trade selection - the systematic complement to the bank's discretionary short-premium entries. The named CBOE benchmarks (VPD, VPN) trade VIX futures options, which are not available on Alpaca, so this is a documented equivalent on SPY, not a replication.",
+  "entry_rules": [
+    "Fixed schedule: open one cycle on the first trading day after monthly opex, every month, without a market-view gate. The absence of discretion is the strategy.",
+    "Defined risk always: every short leg must carry a long wing. The naked benchmark versions are level 4 and are not permitted here.",
+    "Size per cycle: total defined risk <= 2% of equity. Twelve cycles a year at 2% is the program's risk budget; it must not be scaled up after winning months.",
+    "Skip rule (the only discretion allowed): skip the cycle entirely if VIX spot > 35 at the scheduled open, and resume the next month. Log every skip.",
+    "Strangle version only when IV rank >= 30; otherwise run the put side alone.",
+    "SPY only. OI >= 1000 per leg. One MLeg order per side.",
+    "Program-level circuit breaker: if trailing 6-cycle cumulative P/L is worse than -6% of equity, halt the program and require a review before restarting."
+  ],
+  "management_rules": [
+    "Per cycle: take profit at 50% of credit, time stop at 21 DTE, loss stop at 2x credit.",
+    "Never roll a losing cycle into the next one - each cycle is independent by design, and rolling destroys the benchmark property.",
+    "Never add a second cycle in the same month to make back a loss.",
+    "Record per-cycle credit, realized P/L, and the SPY move, so the program's realized premium capture can be compared to the variance risk premium it is supposed to harvest."
+  ],
+  "exit_rules": [
+    "Force-close every cycle by 15:45 ET on its expiration day.",
+    "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x its wing width.",
+    "Ex-dividend guard on any short call side before every SPY ex-dividend date while ITM.",
+    "A cycle that hits the loss stop is closed in full, both sides, not just the tested side."
+  ],
+  "assignment_risk": "One or two short legs per cycle, each covered by a wing of the same right and expiry, so every assignment is defined - but SPY is share-settled and a 100-share assignment is about $60k against a $50k account. The expiration-day flatten is what makes the program safe to run unattended.",
+  "buying_power": "(W x 100) - credit per side, per cycle; at 2% of equity per cycle that is $1,000 held on $50k.",
+  "liquidity_needs": "SPY monthlies - the deepest options market available.",
+  "common_mistakes": "Adding discretion once losses appear, which turns a benchmark program into a discretionary book with worse selection; scaling up after good months; skipping the program-level circuit breaker; claiming it replicates VPD/VPN when the underlying exposure (SPY vs VIX futures) is fundamentally different.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - the program is defined by its monthly cadence. A daily 0DTE version is a completely different risk object with far worse tails.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

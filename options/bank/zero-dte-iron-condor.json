@@ -1,0 +1,91 @@
+{
+  "name": "0DTE Iron Condor",
+  "slug": "zero-dte-iron-condor",
+  "aliases": [
+    "same-day iron condor",
+    "0DTE IC",
+    "daily condor income trade"
+  ],
+  "summary": "A four-leg defined-risk iron condor opened and closed inside a single session on SPY or QQQ - the flagship 0DTE income structure, and the four-leg version the bank was missing.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short put strike - width W ($1-$5 on SPY/QQQ)",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "|delta| 0.08-0.15 computed LOCALLY - Alpaca returns no greeks or IV for 0DTE at any tier",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "delta 0.08-0.15, locally computed, with |put delta - call delta| <= 0.04 so the structure starts near delta-neutral",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short call strike + the same width W",
+      "dte_rule": "expires today"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit x 100 if the underlying settles between the short strikes",
+  "max_loss": "(W x 100) - net credit, one side only - the two sides cannot both lose",
+  "breakevens": "lower = short put - credit per share; upper = short call + credit per share",
+  "greeks": {
+    "delta": "near zero at entry, but a 0.10-delta short strike can be 0.60 delta within twenty minutes",
+    "gamma": "extremely negative in the final two hours",
+    "theta": "very large and positive per hour - the entire reason the trade exists",
+    "vega": "negative but small in absolute terms"
+  },
+  "typical_dte": "0 DTE only; SPY, QQQ and IWM list daily expirations",
+  "when_to_use": "Range-bound intraday tape with no scheduled macro release inside the holding window. Choose the condor over a single 0DTE vertical when the day has no directional signal at all - the condor pays for the range, the vertical pays for the drift.",
+  "entry_rules": [
+    "Underlyings restricted to SPY, QQQ, IWM. No single names.",
+    "LOCAL GREEKS MANDATORY: invert Black-Scholes on the option mid with T = seconds to 16:00 ET / (252 x 23400) to get IV, then delta. Refresh every 30 seconds. Do not open or hold if the greeks pipeline is stale by more than 60 seconds.",
+    "Entry window 09:45-13:30 ET. Nothing in the opening 15 minutes; nothing after 13:30 because a condor needs decay on both sides.",
+    "Both short strikes >= 1.25 x the session's realized 30-minute range from spot, and >= the option-implied expected move for the remainder of the day.",
+    "Net credit >= 18% of width (a condor collects from two sides, so the per-side hurdle is lower than the single vertical's 20%).",
+    "Range gate: open only when the 30-minute realized range is below its 10-day median for the same time of day, and spot is within 0.3% of VWAP.",
+    "Max loss per position <= 1% of equity ($500 on $50k); at most 2 concurrent 0DTE condors; total 0DTE defined risk <= 3% of equity per day.",
+    "No entry on FOMC statement days before 14:30 ET, or within 15 minutes either side of an 08:30/10:00/14:00 ET release.",
+    "All four legs OI >= 1000, one MLeg limit order at the mid, chase no more than $0.02."
+  ],
+  "management_rules": [
+    "Take profit at 50% of credit, or any time after 15:00 ET the whole structure closes for <= $0.05.",
+    "Stop loss at 2.0x the credit received on the structure.",
+    "Delta stop: close the tested side when its short strike's locally computed delta reaches 0.30; the untested side may be left to decay only if its own delta is below 0.05.",
+    "Touch stop: close immediately if the underlying trades through either short strike.",
+    "After 15:00 ET tighten the profit target to 35% of credit.",
+    "Never roll a 0DTE structure and never add a second condor to average a loser.",
+    "Daily circuit breaker: after 2 stopped 0DTE trades or a cumulative 0DTE loss of 2% of equity, stop opening for the session."
+  ],
+  "exit_rules": [
+    "UNCONDITIONAL FLATTEN AT 15:30 ET - every leg, winner or loser, ITM or OTM.",
+    "If a short leg is ITM at any time after 15:00 ET, close that side immediately rather than waiting for the sweep.",
+    "An option that finishes $0.01 ITM is auto-exercised by the OCC; a short 0DTE SPY put delivers roughly $60,000 of stock into a $50k account.",
+    "If a closing order is unfilled by 15:40 ET, reprice to the natural every 10 seconds until filled and log a critical incident; halt new 0DTE entries until reviewed."
+  ],
+  "assignment_risk": "Two short legs, both American-style and share-settled, both with effectively zero extrinsic in the last hour and therefore assignable on the spot. Pin risk concentrates at round strikes where 0DTE flow sits. The long wings define the loss but do not prevent the delivery. SPX/XSP would be European and cash-settled but are not available on Alpaca.",
+  "buying_power": "(W x 100) - credit per contract, held on one side only.",
+  "liquidity_needs": "SPY/QQQ 0DTE are the most liquid options in the world; never run this anywhere those conditions do not hold.",
+  "common_mistakes": "Trading it without locally computed greeks; entering after 13:30 for 'easy decay'; managing only the tested side and forgetting the untested short is still live; holding past 15:30 to save the closing spread.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This entry IS the 0DTE profile: entry 09:45-13:30 ET, shorts at 0.08-0.15 locally computed delta, credit >= 18% of width, target 50% (35% after 15:00), stop 2x credit or 0.30 short delta or a strike touch, unconditional flatten 15:30 ET.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

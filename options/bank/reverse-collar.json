@@ -1,0 +1,76 @@
+{
+  "name": "Reverse Collar (short stock + long call + short put)",
+  "slug": "reverse-collar",
+  "aliases": [
+    "short collar",
+    "bear collar",
+    "short-side risk reversal overlay"
+  ],
+  "summary": "The mirror image of a collar built on a short stock position: a long call caps the unlimited upside risk and a short put below finances it, capping the downside gain.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "100 shares short already held",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "call delta 0.20-0.30, above the short entry (the ceiling)",
+      "dte_rule": "30-90 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "|put delta| 0.20-0.30, below the short entry (the funding leg and the floor)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "either",
+  "max_profit": "(short entry - put strike + net credit) x 100",
+  "max_loss": "(call strike - short entry + net debit) x 100 - defined on the upside by the long call",
+  "breakevens": "short entry + net debit per share (or minus the net credit)",
+  "greeks": {
+    "delta": "-50 to -75 per unit",
+    "gamma": "positive near the long call strike, negative near the short put",
+    "theta": "near zero when built for zero cost",
+    "vega": "near zero"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS - NOT TRADEABLE AT LEVEL 3 IN THIS SYSTEM. The combined three-leg overlay on a short position; the bank has the protective call and the covered put separately but never both on the same short.",
+  "entry_rules": [
+    "BLOCKED: requires a short stock position plus a short put, which most brokers including Alpaca treat as needing level 4 short-option approval. Assume level 4 and reject at the router.",
+    "If ever enabled: confirmed borrow, borrow rate < 3% annualized, no ex-dividend date inside the option's life (the short seller owes the dividend).",
+    "Call strike <= short entry x 1.10 so the defined upside loss is <= 10% of notional.",
+    "Put strike >= the bearish price target; the structure gives up everything below it.",
+    "Net cost <= 0.3% of share notional; both option legs same expiry, OI >= 250."
+  ],
+  "management_rules": [
+    "Roll both option legs together at 21-30 DTE.",
+    "Roll the whole structure down after a decline of more than 2 x ATR(14) to re-center the band.",
+    "If the short put's delta exceeds 0.60, close it and accept the unfinanced long call - the trade has already made its money."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the short put is the only assignable leg; flatten it by 15:30 ET on expiration day whenever it is ITM. Assignment buys 100 shares, which closes the short position at the strike - the intended max-profit outcome, but at the counterparty's timing, not yours.",
+    "Close the short put at extrinsic < $0.10 or |delta| >= 0.85.",
+    "Close the long call rather than exercising it; exercise would buy shares and flatten the short at the ceiling.",
+    "Unwind all three legs as one combo whenever the share leg is covered."
+  ],
+  "assignment_risk": "One assignable leg (the short put). Unlike the long-side collar, assignment here is convergent - it closes the short stock - but it is still an unplanned, un-timed position change, and the borrow and dividend obligations on the short shares run the whole time.",
+  "buying_power": "Reg-T short stock margin (150% of proceeds) plus the put requirement, less the long call's protection. Level 4.",
+  "liquidity_needs": "Borrowable name with a two-sided liquid chain at both strikes.",
+  "common_mistakes": "Assuming it is the symmetric twin of a collar - the borrow cost, the dividend obligation and the hard-to-borrow buy-in risk have no analogue on the long side.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

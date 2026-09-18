@@ -1,0 +1,72 @@
+{
+  "name": "Merger-Arb Deal-Break Protective Put",
+  "slug": "merger-arb-deal-break-put",
+  "aliases": [
+    "deal break hedge",
+    "downside insurance on an arb position",
+    "break-price put"
+  ],
+  "summary": "Buy an out-of-the-money put on an announced acquisition target to cap the loss if the deal collapses - the arbitrageur's insurance leg, converting an open-ended binary risk into a known cost.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares of an announced target, held as the arbitrage position",
+      "dte_rule": "held to close"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike at or slightly above the estimated undisturbed (pre-announcement) price - this is the price the stock reverts to on a break, not a delta-selected strike",
+      "dte_rule": "expiry at or beyond the expected close date, 60-180 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "(deal price - basis - put premium) x 100 - the deal spread, less the cost of insurance",
+  "max_loss": "(basis - put strike + put premium) x 100 - defined, and that definition is the entire purpose of the leg",
+  "breakevens": "basis + put premium per share",
+  "greeks": {
+    "delta": "+100 from the shares less the put's delta, typically +80 to +95 per unit",
+    "gamma": "positive, and the only convexity in an otherwise linear arb position",
+    "theta": "negative - the premium is a running insurance cost against the deal spread",
+    "vega": "positive, which matters because deal-stock IV spikes on the first hint of trouble"
+  },
+  "typical_dte": "60-180 DTE, sized to outlast the expected close",
+  "when_to_use": "Any merger-arb position where the deal spread is thin and the break gap is large - which is most of them. The bank has speculative takeover call buying but nothing that hedges an arb book, and this is the leg that makes the arb survivable.",
+  "entry_rules": [
+    "Only on announced deals with a definitive agreement; the undisturbed price must be observable from the pre-announcement chart.",
+    "Strike selection is fundamental, not delta-based: strike >= the 20-day VWAP ending the day before the announcement. Delta will typically be 0.05-0.15 and that is expected.",
+    "Put premium <= 40% of the gross deal spread ((deal price - basis) x 100). If insurance costs more than 40% of the return, the arb is not worth doing.",
+    "Expiry at or beyond the expected close date plus 30 days, to survive a routine timeline slip.",
+    "Long put only. Never finance it by selling a put below (that reintroduces exactly the break risk being hedged) and never by selling a call below the deal price.",
+    "OI >= 100 at the chosen strike; if no listed strike sits near the undisturbed price, the deal cannot be hedged this way - size the position down instead.",
+    "Position size <= 5% of equity per deal even when hedged."
+  ],
+  "management_rules": [
+    "Hold the put to the deal close; it is insurance, not a trade, and selling it because it has lost value is selling the hedge at exactly the wrong time.",
+    "Roll the put out if the close date slips beyond its expiry, paying the additional premium out of the deal spread.",
+    "If the put's value doubles on deal-risk news, do NOT monetize it while the shares are still held - that is the moment it is needed.",
+    "Reassess the whole position, shares and put together, on any regulatory challenge; the correct response is usually to exit both, not to trade the hedge."
+  ],
+  "exit_rules": [
+    "On a completed deal: the put expires worthless or is sold for scrap; close it rather than leaving a stub position on a delisting security.",
+    "On a deal break: sell the shares and the put in the same session; the put will be deep ITM and must be SOLD, never exercised, unless the market is too wide to trade - exercising is acceptable here only because the shares are held, and it must be logged as an incident response.",
+    "Close all legs before the underlying's delisting date in a cash-out close.",
+    "Never hold a long put on a security after its shares have been cashed out."
+  ],
+  "assignment_risk": "None - the only option leg is long. The stock-delivery path is exercising the long put, which is a deliberate act against shares already held, and is the intended response only in a broken-deal scenario with an untradeable option market.",
+  "buying_power": "Shares plus the put's debit; no short-option requirement.",
+  "liquidity_needs": "Far-OTM puts on deal stocks are among the thinnest options listed - expect wide markets and treat the quoted premium as the real cost, not the mid.",
+  "common_mistakes": "Choosing the strike by delta instead of by the undisturbed price; financing the put by selling something (which reinstates the risk); monetizing the hedge on the first scare; letting the put expire before the deal actually closes.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,73 @@
+{
+  "name": "Post-Earnings Short Straddle / Strangle (IV Crush Sale)",
+  "slug": "post-earnings-short-strangle",
+  "aliases": [
+    "IV crush sale",
+    "post-print premium sale",
+    "earnings vol collapse trade"
+  ],
+  "summary": "Sell a straddle or strangle immediately after an earnings announcement to capture the collapse in implied volatility once the uncertainty is resolved - the two-sided companion to the bank's post-earnings short put.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "delta 0.20-0.30 measured AFTER the print, or ATM for the straddle version",
+      "dte_rule": "the first monthly expiry after the event, 21-45 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "|delta| 0.20-0.30 after the print (or the same ATM strike for the straddle)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "The net credit received, if the underlying settles between the strikes",
+  "max_loss": "UNDEFINED in the naked form: unlimited above the call strike and (strike x 100 - credit) below the put strike",
+  "breakevens": "lower = put strike - credit per share; upper = call strike + credit per share",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "negative, and post-earnings drift is a real phenomenon",
+    "theta": "positive",
+    "vega": "negative - the crush is the trade"
+  },
+  "typical_dte": "21-45 DTE, entered the session after the announcement",
+  "when_to_use": "INCLUDED FOR COMPLETENESS - THE NAKED FORM IS NOT TRADEABLE AT LEVEL 3. The crush is real and immediate, but it is also the most-competed trade on the tape: most of it is priced into the first fifteen minutes of the following session.",
+  "entry_rules": [
+    "BLOCKED in its naked form: both legs uncovered, requires Alpaca options level 4.",
+    "LEVEL 3 SUBSTITUTE (the only permitted version): sell the same two strikes wrapped as a SHORT IRON CONDOR - add a long call above and a long put below, each $5-$10 wide. Credit falls by roughly a third; the loss becomes defined and the structure becomes tradeable here. Use the bank's iron-condor entry with these earnings-specific gates layered on top.",
+    "Enter no earlier than 15 minutes after the open on the session following the announcement - the first minutes are where the crush already happened and where the spreads are widest.",
+    "IV gate: post-print ATM IV must still be >= the 60th percentile of the name's 1-year IV range. If IV has already normalized, the trade is gone.",
+    "Strikes must sit outside the actual post-earnings move: both shorts at least 1.0 x the realized gap away from the new spot.",
+    "No entry in a name that gapped more than 12% - post-earnings drift in violent movers overwhelms the premium.",
+    "Defined risk per name <= 1% of equity; at most 2 post-earnings positions at once."
+  ],
+  "management_rules": [
+    "Take profit at 50% of credit - and expect to reach it fast; most of the crush is realized within 2 sessions.",
+    "Time stop at 21 DTE or 10 calendar days after entry, whichever comes first. This trade has no reason to be held for a month.",
+    "Loss stop at 2x credit.",
+    "Close the tested side when its short delta reaches 0.30; do not roll it into the drift.",
+    "Never re-enter the same name in the same earnings cycle after a stop."
+  ],
+  "exit_rules": [
+    "Force-close every leg by 15:45 ET on expiration day.",
+    "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x its wing width.",
+    "Ex-dividend guard on the short call before every ex-date while it is ITM.",
+    "If the naked version is ever enabled at level 4, all of the above still applies plus a hard close at the first touch of either short strike."
+  ],
+  "assignment_risk": "Two short legs in a single name immediately after its most volatile event of the quarter. In the permitted iron-condor form each short is covered by a long wing, so the loss is defined - but assignment still delivers 100 shares of a name that just gapped, and post-earnings drift means the tested side keeps being tested.",
+  "buying_power": "Naked form: full naked margin on both sides (level 4). Permitted form: (wing width x 100) - credit, held on one side.",
+  "liquidity_needs": "Single-name chains are at their widest the morning after earnings; require OI >= 500 per leg and be willing to skip on spread alone.",
+  "common_mistakes": "Selling into the print instead of after it; expecting the crush when IV has already normalized; running it naked; holding for the full credit when 90% of the crush arrived in 48 hours.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - single-name 0DTE after earnings is pure gap risk with no premium to justify it.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

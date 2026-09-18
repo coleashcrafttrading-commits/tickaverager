@@ -1,0 +1,70 @@
+{
+  "name": "Synthetic Convertible Bond",
+  "slug": "synthetic-convertible-bond",
+  "aliases": [
+    "poor man's convertible",
+    "bond plus call",
+    "credit-equity hybrid replication"
+  ],
+  "summary": "A corporate bond position plus a long call on the issuer's equity, reproducing a convertible bond's payoff - coupon and principal from the bond, equity upside from the call - without the issuer's embedded conversion terms.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "corporate bond sleeve: LQD (investment grade) or an individual issue if accessible; 85-95% of the allocation",
+      "dte_rule": "held through the call's life"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "the issuer's (or the sector proxy's) equity, call delta 0.30-0.45",
+      "dte_rule": "180-730 DTE, LEAPS preferred"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "UNLIMITED above the call strike, plus bond coupons",
+  "max_loss": "call premium + any credit loss on the bond sleeve; unlike the 90/10 structure the bond leg carries real credit and duration risk",
+  "breakevens": "call strike + premium per share, net of coupons received over the holding period",
+  "greeks": {
+    "delta": "+30 to +45 per call; the bond sleeve adds rate duration, not equity delta",
+    "gamma": "positive",
+    "theta": "negative on the call, positive from coupon accrual",
+    "vega": "positive"
+  },
+  "typical_dte": "180-730 DTE per call cycle",
+  "when_to_use": "When the system wants convertible-like exposure but the actual convertible is illiquid, expensively structured, or unavailable to a retail account - or to express 'this credit is fine and the equity is cheap' as two separable positions that can be managed independently.",
+  "entry_rules": [
+    "Bond sleeve must be a liquid ETF (LQD, VCIT, or HYG for the high-yield version) unless a specific issue is genuinely tradeable in the account; single-issue corporate bonds are not reliably accessible on Alpaca.",
+    "Call premium <= the sleeve's expected coupon income over the call's life. Same discipline as the 90/10: spend the carry, not the principal.",
+    "Call delta 0.30-0.45, DTE >= 180, IV rank <= 50 at purchase, OI >= 250.",
+    "If using a single-name call, the issuer's equity must have no going-concern flag, and the credit and the equity must be the same entity - otherwise this is just a bond plus an unrelated call.",
+    "Total equity-option premium at risk <= 4% of equity per year.",
+    "Long call only, no short legs."
+  ],
+  "management_rules": [
+    "Roll the call at 90 DTE or take profit at 100% gain, funding the next cycle only from accumulated coupons.",
+    "Sell the call and hold the bond sleeve alone if the credit deteriorates (ETF price down more than 2 x its 12-month standard deviation) - the equity leg is the first thing to cut.",
+    "Rebalance the sleeve to target weight quarterly.",
+    "Never lever the bond sleeve to buy more calls."
+  ],
+  "exit_rules": [
+    "Close the long call at least 2 trading days before expiration; never auto-exercise into shares.",
+    "Sell the call if delta >= 0.90 with extrinsic < $0.20 - it has become a share proxy with exercise risk.",
+    "Unwind the whole hybrid if the call's remaining value plus the sleeve's mark falls below the floor the structure was built to protect."
+  ],
+  "assignment_risk": "No short legs, therefore no assignment risk. The only share-delivery path is auto-exercise of a long ITM call, eliminated by the pre-expiry close rule.",
+  "buying_power": "Cash for the bond sleeve plus the call premium; no margin required.",
+  "liquidity_needs": "LQD/HYG are liquid; the equity call must have OI >= 250 at the chosen LEAPS strike.",
+  "common_mistakes": "Treating the bond sleeve as risk-free (it is not - credit and duration both bite); buying the call with principal after coupons fail to cover it; pairing a credit ETF with a call on an unrelated index and calling it a convertible.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

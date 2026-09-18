@@ -1,0 +1,73 @@
+{
+  "name": "Call-Side 1-1-2 (Reverse 112)",
+  "slug": "call-1-1-2-reverse-112",
+  "aliases": [
+    "reverse 112",
+    "call 112",
+    "upside one-twelve"
+  ],
+  "summary": "The 112 built on calls: a long call debit spread financed by two further-OTM naked short calls, harvesting rich call skew in commodities and squeeze-prone names.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "call delta 0.35-0.45",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.25-0.30, completing the debit spread",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "call delta 0.05-0.10, >= 10% above spot - the two NAKED calls",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "net credit + debit-spread width x 100 at the spread's upper strike with both naked calls worthless",
+  "max_loss": "UNDEFINED and unlimited above the naked strike - 2 x $100 per point with no upper bound",
+  "breakevens": "upper BE approximately = naked strike + [net credit + debit-spread max value] / 2 per share",
+  "greeks": {
+    "delta": "negative above the debit spread, roughly -0.10 to -0.25 per unit",
+    "gamma": "strongly negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "45-90 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS ONLY - NOT TRADEABLE AT LEVEL 3. Used in energy and softs where call skew is rich; on equity ETFs the call skew is usually too flat to pay for the tail.",
+  "entry_rules": [
+    "BLOCKED: two uncovered short calls, theoretically unlimited loss; requires Alpaca options level 4.",
+    "LEVEL 3 SUBSTITUTE: convert both naked calls into call credit spreads (6 legs, outside the scope cap) or cover them with 200 shares, which turns the structure into a ratio-covered write.",
+    "If ever enabled: IV rank >= 40, call skew positive, hard buy-stop in the underlying at the upper breakeven, no entry on any name with short interest > 10% of float."
+  ],
+  "management_rules": [
+    "Take profit at 50% of max structure value.",
+    "Close the naked calls if their delta reaches 0.20.",
+    "Unconditional close on any halt-for-volatility or takeover headline in the underlying."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: all short calls flat by 15:30 ET on expiration day.",
+    "Close any short call at extrinsic < $0.10 or delta >= 0.85, and before every ex-dividend date while ITM.",
+    "Naked call assignment creates 200 short shares with no long stock behind them - an unbounded liability on an account that must never be assigned."
+  ],
+  "assignment_risk": "Catastrophic. Three short calls, two uncovered; assignment is a 200-share naked short at the strike and can be exercised early for the dividend.",
+  "buying_power": "Uncovered call margin on 2 contracts (roughly 20% of underlying value plus premium) recomputed daily.",
+  "liquidity_needs": "Irrelevant here - not tradeable at level 3.",
+  "common_mistakes": "Assuming upside gaps are smaller than downside gaps; they are not in single names.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

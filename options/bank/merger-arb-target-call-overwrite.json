@@ -1,0 +1,72 @@
+{
+  "name": "Merger-Arb Target Call Overwrite",
+  "slug": "merger-arb-target-call-overwrite",
+  "aliases": [
+    "deal spread overwrite",
+    "covered call on an acquisition target",
+    "arb overlay call sale"
+  ],
+  "summary": "Hold shares of an announced acquisition target and sell calls at or just above the deal price, converting the last cents of the deal spread into premium collected today - the arbitrageur's income overlay, as opposed to the bank's speculative takeover call buying.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares of an announced, definitive-agreement target, bought below the deal price",
+      "dte_rule": "held to close or to the overwrite's expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the listed strike at or just above the announced cash deal price; delta will be low if the deal is trading near terms",
+      "dte_rule": "30-60 DTE, and STRICTLY shorter than the expected deal close date"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - share basis + credit) x 100; in a cash deal the shares cannot exceed the deal price, so the credit is close to the whole return",
+  "max_loss": "(basis - credit) x 100 on a deal break, when the target typically gaps back to its undisturbed price or below - the call premium is a rounding error against that",
+  "breakevens": "basis - credit per share",
+  "greeks": {
+    "delta": "+85 to +100 per unit; a deal-pinned stock has almost no optionality",
+    "gamma": "near zero while the deal holds, violently negative on a break",
+    "theta": "positive",
+    "vega": "negative, and deal-stock IV is usually very low until it is suddenly not"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "An all-cash deal with a signed definitive agreement, trading at a small discount to terms, where the residual spread is too thin to justify the capital on its own. Selling the call at the deal price monetizes the time premium the market still attaches to a nearly-certain outcome.",
+  "entry_rules": [
+    "Definitive agreement signed and all-cash consideration only. No stock-for-stock deals (the payoff is a ratio, not a price) and no rumored or preliminary approaches.",
+    "Short call strike >= the announced deal price per share. Never sell a strike below the deal price - that caps the position below its contractual value.",
+    "Option expiry must be BEFORE the expected close date. A call still open when the deal closes and the shares are cashed out leaves a naked short call on a delisted underlying, which is an operational incident, not a trade.",
+    "Share basis must be at or below the deal price; the overwrite is an overlay on an existing arb position, never a reason to buy the shares.",
+    "Credit >= 0.3% of the deal price - below that the assignment and delisting risk is not paid for.",
+    "OI >= 100 (deal-stock chains are thin) and a bid/ask no wider than 15% of mid.",
+    "Position size <= 5% of equity per deal; deal breaks are correlated with nothing and arrive without warning."
+  ],
+  "management_rules": [
+    "Buy the call back at 75% of the premium - the remaining decay is not worth carrying the delisting risk.",
+    "Close the call immediately on any regulatory second request, financing wobble, shareholder-vote delay or competing bid; a competing bid is the one scenario where the stock moves above the deal price and the short call becomes a real loss.",
+    "Re-write only if the close date slips and the new expiry still precedes the revised expected close.",
+    "Never roll the call out past the expected close date to collect more premium."
+  ],
+  "exit_rules": [
+    "Close the short call at least 5 trading days before the expected deal close, regardless of P/L - the delisting mechanics around a cash-out are where unresolved short options become genuinely dangerous.",
+    "ASSIGNMENT GUARD: close by 15:30 ET on expiration day if ITM, and at extrinsic < $0.10 or delta >= 0.85 at any time.",
+    "Ex-dividend guard: targets sometimes pay a final dividend; close the short call before the ex-date while it is ITM.",
+    "If the deal breaks, close the call first (it will have collapsed in value, which is a gain) and then decide on the shares as a separate, now-unhedged position."
+  ],
+  "assignment_risk": "One share-covered short call. Assignment simply sells the shares at or above the deal price, which is a benign outcome - the real hazard is a short call still open when the underlying is cashed out and delisted, leaving an obligation on a security that no longer trades. The five-day pre-close rule exists solely for that.",
+  "buying_power": "Shares plus nothing extra; the call is share-covered.",
+  "liquidity_needs": "Deal-stock option chains are thin and quotes go stale for hours. Treat any name whose options do not quote two-sided daily as untradeable.",
+  "common_mistakes": "Selling a strike below the deal price; letting the option outlive the deal close; treating the low IV as evidence of safety when the distribution is binary; sizing as if a deal break were a normal drawdown.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate - deal stocks barely move day to day until they gap.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

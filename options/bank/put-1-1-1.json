@@ -1,0 +1,74 @@
+{
+  "name": "1-1-1 (Put 1-1-1)",
+  "slug": "put-1-1-1",
+  "aliases": [
+    "one-one-one",
+    "half-112",
+    "single-naked 112"
+  ],
+  "summary": "The step-down from the 112: a long put debit spread plus a single naked short put, halving the tail exposure and most of the credit.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "put delta 0.35-0.45",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta 0.25-0.30, completing the debit spread",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta 0.05-0.10, >= 10% below spot - the NAKED financing put",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "either",
+  "max_profit": "net credit (or debit-spread width minus debit) + debit-spread width x 100 at the lower spread strike",
+  "max_loss": "UNDEFINED - 1 x $100 per point below the naked strike, to zero",
+  "breakevens": "naked strike - (net credit + debit-spread max value) per share",
+  "greeks": {
+    "delta": "positive, +0.05 to +0.15 per unit",
+    "gamma": "negative below the naked strike",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "45-90 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS ONLY - NOT TRADEABLE AT LEVEL 3. The standard de-risked version of the 112 when the account cannot carry 2x naked notional, or when the trader wants the same skew harvest at half size.",
+  "entry_rules": [
+    "BLOCKED: one uncovered short put; requires Alpaca options level 4.",
+    "LEVEL 3 SUBSTITUTE: replace the naked put with a put credit spread (4 legs total, inside the scope cap) or cash-secure it - cash securing needs strike x 100 in cash, which caps the underlying price at about $150 on a $50k account if nothing else is held.",
+    "If enabled at level 4: IV rank >= 35, naked strike delta <= 0.10, and total structure risk measured to zero <= 30% of equity."
+  ],
+  "management_rules": [
+    "Take profit at 50% of max structure value.",
+    "Close the naked put alone if its delta reaches 0.20.",
+    "Time stop 21 DTE.",
+    "No rolling the naked leg down and out."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: all short puts flat by 15:30 ET on expiration day.",
+    "Close any short put at extrinsic < $0.10 or |delta| >= 0.85.",
+    "Close the unit on a close below the naked strike."
+  ],
+  "assignment_risk": "Two short puts, one uncovered; assignment delivers up to 200 shares, 100 of them unhedged.",
+  "buying_power": "Naked put margin on 1 contract plus the debit spread cost, or strike x 100 cash if secured.",
+  "liquidity_needs": "Same as the 112; the 0.05-0.10 delta strike must be closeable.",
+  "common_mistakes": "Assuming half the naked puts means half the risk of ruin - the gap risk is the same shape, just smaller.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

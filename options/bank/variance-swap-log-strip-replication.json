@@ -1,0 +1,81 @@
+{
+  "name": "Variance / Volatility Swap Replication (Log-Contract Strip)",
+  "slug": "variance-swap-log-strip-replication",
+  "aliases": [
+    "log contract",
+    "1/K-squared strip",
+    "static variance replication",
+    "poor man's variance swap"
+  ],
+  "summary": "Replicate a variance swap by holding a strip of out-of-the-money puts and calls across every listed strike, each weighted by 1/K-squared, delta-hedged daily - the standard desk method for trading pure realized-versus-implied variance.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "every listed OTM put from the lowest liquid strike up to spot, contracts proportional to (delta-K) / K-squared, normalized so the cheapest strike gets 1 contract",
+      "dte_rule": "single expiry, 30-60 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "every listed OTM call from spot up to the highest liquid strike, same 1/K-squared weighting",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "delta hedge: short (or long) shares each day equal to minus the strip's aggregate delta, rebalanced at the close",
+      "dte_rule": "held and rebalanced daily to expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "Realized variance minus implied variance, times the strip's vega notional - unbounded, and convex in a crash",
+  "max_loss": "The full strip debit if realized variance is below implied for the whole life; bounded, because every option leg is long",
+  "breakevens": "Realized volatility over the life equal to the strip's implied volatility, adjusted for hedging slippage",
+  "greeks": {
+    "delta": "hedged to zero daily - the hedge P/L IS the trade",
+    "gamma": "positive and, by construction, constant in dollar terms across spot levels",
+    "theta": "negative every day the underlying does not move",
+    "vega": "positive and approximately constant in spot - the defining property of the log contract"
+  },
+  "typical_dte": "30-60 DTE, single expiry",
+  "when_to_use": "When implied variance is rich or cheap relative to a forecast of realized variance and the goal is exposure to variance itself rather than to a direction or a single strike. It is the only structure in the bank whose payoff is a statistic rather than a price.",
+  "entry_rules": [
+    "SCOPE NOTE: this structure requires 20-60 legs and therefore sits outside the bank's four-leg design cap. It is documented for completeness and must be modeled before it is ever submitted.",
+    "Long-only version only. The short-variance version (selling the strip) is a naked short across every strike and is BLOCKED - it would require level 4 and would carry unbounded loss in a crash.",
+    "SPY or QQQ only; the strip must span at least +/-15% around spot with every strike quoted OI >= 250.",
+    "Weight each strike by delta-K / K-squared, then round to whole contracts and re-verify that the rounded strip's vega profile is flat in spot to within 15% - if it is not, widen the strike increment rather than accepting a lumpy strip.",
+    "Total debit <= 5% of equity. On $50k that buys a very small variance notional; report the implied variance notional explicitly so the position is not mistaken for a large one.",
+    "Daily delta-hedge capability is mandatory. Without the hedge this is not a variance trade, it is an expensive long strangle.",
+    "Entry only when 30-day implied variance is below the 25th percentile of the 2-year realized-variance distribution (for the long side)."
+  ],
+  "management_rules": [
+    "Rebalance the share hedge every day at 15:45 ET to the strip's aggregate delta; log the hedge P/L separately, because it is the realized-variance accrual.",
+    "Do not adjust individual strikes. The replication is static by design; touching strikes destroys the flat-vega property.",
+    "Take profit when cumulative hedge P/L plus mark-to-market reaches 50% of the debit, or when implied variance rises above its 75th percentile.",
+    "Cut the position if two consecutive weeks of realized variance come in below 60% of implied - the forecast was wrong and theta will finish the job.",
+    "Never roll the strip; close it and rebuild at the new expiry if the view persists."
+  ],
+  "exit_rules": [
+    "Close every option leg at least 3 trading days before expiration - a strip of 20-60 legs cannot be unwound in the final session, and any ITM long leg would auto-exercise into shares.",
+    "Flatten the share hedge in the same session the strip is closed, not before and not after.",
+    "Never exercise a leg; always sell it.",
+    "If any strike becomes unquotable for a full session, close the whole strip - a strip with a hole no longer replicates anything."
+  ],
+  "assignment_risk": "No short legs, therefore no assignment risk. The real operational risk is auto-exercise of several ITM long legs at once, which the three-day close rule prevents, and the share hedge itself, which must be flattened in step with the options.",
+  "buying_power": "The strip's debit plus margin on the share hedge (which can be short shares, requiring a borrow).",
+  "liquidity_needs": "Extreme: dozens of strikes in one expiry, all closeable. SPY is the only realistic candidate on this account.",
+  "common_mistakes": "Skipping the daily hedge and calling a strangle a variance swap; weighting by 1/K instead of 1/K-squared; trying to sell the strip; ignoring that the far wings dominate the weighting and are the least liquid part of the chain.",
+  "alpaca_level": 2,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - variance is measured over the life of the strip.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

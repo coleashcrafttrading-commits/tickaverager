@@ -1,0 +1,63 @@
+{
+  "name": "Put Christmas Tree Spread (1x3, uncovered)",
+  "slug": "put-christmas-tree-spread-1x3",
+  "aliases": [
+    "1x3 put ratio",
+    "put ladder write",
+    "put christmas tree spread"
+  ],
+  "summary": "Buy 1 ATM put and sell 3 further-OTM puts at one lower strike; the put mirror of the uncovered call christmas tree, with two naked short puts and a catastrophic-but-bounded downside.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM, |put delta| 0.45-0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 3,
+      "strike_rule": "one OTM strike at |put delta| 0.15-0.20",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "net credit + (long strike - short strike) x 100, realized exactly at the short strike",
+  "max_loss": "Bounded only by a zero underlying: (3 x short strike - long strike - credit per share) x 100. On a $100 stock with shorts at $90 that is roughly $17,000 per unit.",
+  "breakevens": "upper = long strike + credit per share (none, it profits above); lower = short strike - [(long - short) + credit per share] / 2",
+  "greeks": {
+    "delta": "negative at entry, flips sharply positive below the short strike",
+    "gamma": "strongly negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "21-45 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS ONLY - DO NOT TRADE IN THIS SYSTEM. The symmetric partner of the call 1x3 already in the bank; retained so the router has a slug to reject rather than an unknown structure.",
+  "entry_rules": [
+    "BLOCKED: 2 of the 3 short puts are uncovered; requires Alpaca options level 4. Reject at the order-router layer.",
+    "If ever enabled: IV rank > 70, short strike |delta| <= 0.15, and a sell-stop hedge in the underlying below the lower breakeven.",
+    "Never confuse with put-christmas-tree-butterfly (1-3-2, defined risk, level 3) - the slugs must stay strictly separate."
+  ],
+  "management_rules": [
+    "N/A at level 3. If enabled: close at 50% of credit; close unconditionally if spot trades within 0.5 x (long strike - short strike) of the short strike."
+  ],
+  "exit_rules": [
+    "N/A - not tradeable here.",
+    "If ever enabled: flatten by 15:45 ET on expiration day and immediately on any ITM short put with extrinsic < $0.10."
+  ],
+  "assignment_risk": "Three short puts, two of them naked: assignment buys 300 shares while the single long put hedges only 100. On a $50k account that is an immediate margin event.",
+  "buying_power": "Naked put margin on 2 contracts plus the long put's cost; a single SPY unit would consume most of the account.",
+  "liquidity_needs": "Irrelevant - not tradeable here.",
+  "common_mistakes": "Reading '1x3' as defined risk because the loss is technically bounded at a zero underlying.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

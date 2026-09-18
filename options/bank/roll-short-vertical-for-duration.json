@@ -1,0 +1,86 @@
+{
+  "name": "Rolling a Tested Short Vertical for Duration",
+  "slug": "roll-short-vertical-for-duration",
+  "aliases": [
+    "rolling for duration",
+    "spread roll out and away",
+    "defined-risk credit spread roll"
+  ],
+  "summary": "Close a tested credit spread and simultaneously open a wider and/or later one at strikes further from the money, for a net credit - the defined-risk analogue of the bank's put and covered-call rolls, treated here as a structure with its own rules rather than as an ad-hoc reaction.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "CLOSE the tested short put of the existing credit spread (buy to close)",
+      "dte_rule": "the current, tested expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "CLOSE the existing long put (sell to close) - legs 1 and 2 together retire the old spread",
+      "dte_rule": "the current expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OPEN a new short put at |delta| <= 0.20 in the new expiry, and at a strike at least as far OTM as the original entry strike",
+      "dte_rule": "the NEW expiry, 21-45 DTE further out"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OPEN the new long put at the new short strike - W_new, where W_new may exceed the original width",
+      "dte_rule": "same new expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "The original credit plus the roll credit, if the new spread expires worthless",
+  "max_loss": "(W_new x 100) - total credits collected across the original and the roll. Note that a wider new spread INCREASES the maximum loss even though the roll was taken in for a credit.",
+  "breakevens": "new short strike - total cumulative credit per share",
+  "greeks": {
+    "delta": "reset to the new short strike's delta, typically 0.15-0.20",
+    "gamma": "negative, and reduced by the extra time purchased",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "Roll to 21-45 DTE beyond the current expiry",
+  "when_to_use": "A short vertical is tested but the original thesis is intact and the underlying has not broken structure. Rolling buys time and distance for a credit; it does not reduce risk, it defers and enlarges it, and the rules below exist to stop it becoming an endless deferral.",
+  "entry_rules": [
+    "ROLL ELIGIBILITY GATE - all four must hold, or the position is simply closed: (1) the tested short's |delta| is between 0.30 and 0.50 (below 0.30 there is nothing to fix, above 0.50 the roll is a rescue, not a roll); (2) the original directional thesis is still valid by its own rule (e.g. the moving-average condition that triggered entry still holds); (3) the roll can be executed for a NET CREDIT; (4) this position has not been rolled before.",
+    "ONE ROLL PER POSITION, EVER. A second roll is forbidden - it is the single most reliable way a small defined loss becomes a large one.",
+    "New short strike |delta| <= 0.20 and at least as far OTM, in percentage terms, as the original entry.",
+    "New width W_new <= 1.5 x the original width, and the NEW max loss ((W_new x 100) - cumulative credits) must still be <= 2% of equity. If widening breaches that cap, do not widen.",
+    "New expiry <= 45 days beyond the current one. Rolling to a distant expiry to manufacture a credit is deferral, not management.",
+    "Execute as a single 4-leg MLeg order where the broker supports it; otherwise close the old spread completely and confirm the fill BEFORE opening the new one. Never open the new spread first.",
+    "Do not roll across an earnings date or a scheduled macro event into the new expiry."
+  ],
+  "management_rules": [
+    "The rolled position is a NEW position with its own rules: 50% profit target on the cumulative credit, 21-DTE time stop, 2x cumulative credit loss stop.",
+    "Log the roll as a single linked trade with cumulative credit and cumulative max loss; never report the roll credit as a profit.",
+    "If the new short is tested again, CLOSE - the one-roll limit is absolute.",
+    "Do not roll the untested side of a condor 'to help pay for' this roll; that is a separate decision with its own gate (see the recentering roll)."
+  ],
+  "exit_rules": [
+    "Force-close the rolled spread by 15:45 ET on its expiration day.",
+    "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x the width.",
+    "Ex-dividend guard on a short call leg before every ex-date while ITM.",
+    "Abort the roll entirely if the old spread closes but the new one cannot be filled at a credit within 5 minutes - being flat is an acceptable outcome; being half-rolled is not."
+  ],
+  "assignment_risk": "Elevated during the roll itself: for the seconds or minutes between closing the old spread and opening the new one the account may be unhedged, and if the legs are worked separately a short can be live without its long. Always close before opening, and never let the tested short sit alone.",
+  "buying_power": "The new spread's width x 100 minus its credit; the old requirement is released on the close.",
+  "liquidity_needs": "Four legs across two expiries; both expiries must have OI >= 250 at all four strikes.",
+  "common_mistakes": "Rolling a spread whose thesis has already failed; rolling more than once; widening the new spread until the credit looks good and quietly doubling the max loss; opening the new spread before the old one is confirmed closed; booking the roll credit as realized profit.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never roll a 0DTE position - there is nothing to roll to. The 0DTE entries all say close, and that rule overrides this structure entirely.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

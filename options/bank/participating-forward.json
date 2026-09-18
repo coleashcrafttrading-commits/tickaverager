@@ -1,0 +1,71 @@
+{
+  "name": "Participating Forward",
+  "slug": "participating-forward",
+  "aliases": [
+    "ratio risk reversal",
+    "partial-participation forward",
+    "unbalanced combo"
+  ],
+  "summary": "An unbalanced risk reversal - long 2 calls against 1 short put - giving full upside participation on part of the notional while taking downside exposure on a smaller amount; the core FX corporate-hedging structure rendered in share-settled options.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ATM or slightly OTM, call delta 0.45-0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "|put delta| 0.30-0.45, struck so the put's premium pays for both calls (net cost <= 0)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either",
+  "max_profit": "UNLIMITED - 2 x $100 per point above the call strike",
+  "max_loss": "(put strike x 100) - net credit, if the underlying goes to zero; downside participation is half the upside",
+  "breakevens": "upside = call strike + net debit per share / 2; downside = put strike - net credit per share",
+  "greeks": {
+    "delta": "+60 to +90 per unit",
+    "gamma": "positive above, negative below",
+    "theta": "slightly negative",
+    "vega": "positive"
+  },
+  "typical_dte": "45-120 DTE",
+  "when_to_use": "When the system wants leveraged upside on an ETF it is willing to own at the put strike, financed by that willingness - a hedging-desk structure repurposed as a stock-replacement with a built-in entry order.",
+  "entry_rules": [
+    "Underlying must be an ETF or mega-cap the account is genuinely willing to own 100 shares of at the put strike.",
+    "LEVEL 3 CONSTRAINT: the short put must be cash-secured - hold put strike x 100 in cash. On a $50k account that caps the underlying at roughly $150-$200 per share alongside other positions. If cash is unavailable, convert the short put into a put credit spread and accept the smaller credit.",
+    "Ratio fixed at 2 long calls : 1 short put. Never invert it (1 call vs 2 puts) - that is a naked ratio.",
+    "Net cost <= 0 (a true participating forward is zero-cost) and IV rank <= 40 so the long calls are not overpaid.",
+    "Both legs same expiry, OI >= 250, single MLeg order.",
+    "No earnings inside the option's life for single names."
+  ],
+  "management_rules": [
+    "Take profit when the long calls reach 100% gain, or roll them up and out and leave the short put to decay.",
+    "Buy back the short put at 50% of its premium - the financing job is done.",
+    "If |put delta| reaches 0.60, either close the put or prepare cash to accept the shares; never roll it down and out more than once.",
+    "Time stop at 21 DTE on the short put regardless of the calls."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: flatten the short put by 15:30 ET on expiration day, always.",
+    "Close the short put at extrinsic < $0.10 or |delta| >= 0.85 - early assignment on an American put is a real risk once it is deep ITM.",
+    "Close the long calls rather than exercising; exercise would buy 200 shares.",
+    "If the short put is closed for a loss, re-evaluate the calls as a standalone long - do not keep the ratio alive by selling another put."
+  ],
+  "assignment_risk": "One assignable short put, cash-secured. Assignment delivers 100 shares at the strike while the 2 long calls remain - survivable, but it consumes the account's cash and is exactly what the guards exist to prevent.",
+  "buying_power": "put strike x 100 in cash (or spread width x 100 if converted), plus the calls' net debit.",
+  "liquidity_needs": "Liquid chain at both strikes; the 2:1 ratio must be fillable as one ticket or legged in the order put-first.",
+  "common_mistakes": "Choosing the put strike purely to reach zero cost and ending up with a put the account cannot actually afford to be assigned on; treating the 2x calls as 2x the risk when the risk is all in the single put.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - the structure is a multi-month participation trade.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

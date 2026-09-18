@@ -1,0 +1,87 @@
+{
+  "name": "Diagonal Butterfly Spread (McMillan)",
+  "slug": "diagonal-butterfly-spread",
+  "aliases": [
+    "McMillan diagonal butterfly",
+    "long-dated strangle financed by near-term sales",
+    "rolling strangle write against LEAPS"
+  ],
+  "summary": "A long-dated long strangle (or straddle) financed by repeatedly selling near-term strangles at strikes inside it - named in Options as a Strategic Investment, and the only structure in the bank whose economics come from a sequence of sales rather than one position.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "back month, call delta 0.25-0.35",
+      "dte_rule": "180-365 DTE (LEAPS preferred)"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "back month, |put delta| 0.25-0.35",
+      "dte_rule": "same back expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "front month, call delta 0.15-0.25 - in the CLASSIC form this strike is INSIDE (below) the long call strike, which makes it uncovered",
+      "dte_rule": "front expiry, 21-45 DTE, resold each cycle"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "front month, |put delta| 0.15-0.25, INSIDE (above) the long put strike in the classic form",
+      "dte_rule": "same front expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "Unbounded in principle: the long strangle's convexity plus the accumulated front-month credits once the longs are paid for",
+  "max_loss": "In the CLASSIC (inside-strike) form: UNDEFINED, because the short call sits below the long call and the short put above the long put. In the level-3 form: the net debit paid, less all credits collected.",
+  "breakevens": "Moves every cycle; recompute after each front-month sale as long strangle cost minus cumulative credits, spread around the current spot",
+  "greeks": {
+    "delta": "near zero if the strangles are centered",
+    "gamma": "negative in the front, positive in the back",
+    "theta": "positive while the front shorts are alive",
+    "vega": "positive (long back-month vega dominates)"
+  },
+  "typical_dte": "back 180-365 DTE, front 21-45 DTE resold 6-12 times",
+  "when_to_use": "INCLUDED FOR COMPLETENESS - the classic form is NOT TRADEABLE AT LEVEL 3. Used when long-dated IV is cheap relative to front-month IV (steep contango in the term structure) and the goal is to own a free long strangle by expiry.",
+  "entry_rules": [
+    "BLOCKED in its classic form: front shorts struck inside the long strikes are uncovered on both sides; requires Alpaca options level 4.",
+    "LEVEL 3 FORM (permitted, and the only version this system may run): buy the back-month leg as an ATM straddle (or a strangle with strikes INSIDE the shorts), and sell the front-month strangle OUTSIDE those strikes. Every short call then has a long call at an equal or lower strike, and every short put a long put at an equal or higher strike, so both shorts are option-covered and the structure is a double diagonal with a long-vol tilt.",
+    "Term-structure gate: back-month IV <= front-month IV minus 2 vol points at entry.",
+    "Back-month debit <= 4% of equity; the whole structure is a multi-month capital commitment.",
+    "Front-month credit per cycle >= 1/8 of the back-month debit, otherwise the financing plan does not finish inside a year.",
+    "All four strikes OI >= 250; no single names with earnings in the front cycle."
+  ],
+  "management_rules": [
+    "Resell the front strangle on the day after each front expiry or on the 21-DTE roll, whichever comes first, always at delta 0.15-0.25 and always outside the long strikes.",
+    "Track cumulative credits against the back-month debit; once credits >= debit, the long strangle is free and the system may stop selling and simply hold convexity.",
+    "If the underlying moves more than 1 long-strike width, re-center by rolling the untested front short in, never by moving a long strike out.",
+    "Stop selling front strangles entirely when front-month IV rank falls below 20 - there is nothing left to harvest and the shorts only cap the convexity.",
+    "Abandon the program (close everything) if cumulative credits are below 40% of the debit with less than 90 DTE left on the back month."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: both front legs are short; flatten both by 15:30 ET on every front expiration day, without exception.",
+    "Close any front short at extrinsic < $0.10 or |delta| >= 0.85; close short calls before any ex-dividend date while ITM.",
+    "Never let a front short expire ITM on the theory that the back-month long covers it - the long is an option, not shares, and assignment still delivers stock overnight.",
+    "Close the back-month legs rather than exercising them.",
+    "Hard stop: if a front short is assigned despite the guards, close the resulting share position at the next open and halt the program for review."
+  ],
+  "assignment_risk": "Two short legs alive at all times, refreshed every cycle, which multiplies the number of assignment windows by the number of cycles. In the level-3 form each short is covered by a longer-dated long of the same right, so an assignment is recoverable by exercising that long - but it is still shares delivered into an account that must never be assigned.",
+  "buying_power": "Level-3 form: the diagonal spread requirement per side (strike difference x 100 where the short is further OTM, otherwise the net debit). Classic form: naked margin on both front legs.",
+  "liquidity_needs": "A chain with genuine LEAPS liquidity and weekly or monthly front cycles - SPY, QQQ, IWM and a handful of mega-caps only.",
+  "common_mistakes": "Running the classic inside-strike version without level 4 and discovering the naked exposure at the first test; counting credits collected as profit before the back-month debit is recovered; rolling a long strike out to 'fix' a tested side, which converts the trade into a naked ratio.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable; the front cycle should never be shorter than 21 DTE in this structure.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "long-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

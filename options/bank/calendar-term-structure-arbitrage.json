@@ -1,0 +1,72 @@
+{
+  "name": "Calendar (Term-Structure) Arbitrage",
+  "slug": "calendar-term-structure-arbitrage",
+  "aliases": [
+    "term structure violation",
+    "near-over-far arbitrage",
+    "time-value arbitrage"
+  ],
+  "summary": "A genuine no-arbitrage violation: an American option expiring sooner trades above a same-strike option expiring later, so selling the near and buying the far locks a credit with a non-negative payoff.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the NEAR expiry, at strike K where the violation is observed (works for puts identically)",
+      "dte_rule": "near expiry, typically 7-30 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "the FAR expiry, SAME strike K",
+      "dte_rule": "far expiry, 30-90 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "The opening credit plus whatever value the far-dated option still carries after the near one expires",
+  "max_loss": "Theoretically zero at the moment of entry, because an American option cannot be worth less than an identical option with more time. In practice: the cost of an early assignment on the near leg, plus financing and dividend effects, plus execution slippage.",
+  "breakevens": "None - a correctly identified violation has no losing price region at the near expiry",
+  "greeks": {
+    "delta": "approximately zero at entry (same strike, similar deltas)",
+    "gamma": "negative in the near, positive in the far",
+    "theta": "positive while the near leg decays faster",
+    "vega": "positive (long the far-dated vega)"
+  },
+  "typical_dte": "near 7-30 DTE, far 30-90 DTE",
+  "when_to_use": "Only when the scanner finds a real violation. On American options these appear around hard-to-borrow names, imminent special dividends, and stale quotes in illiquid chains - and they are usually a quote artifact rather than money. This entry exists so the system can tell the difference, sitting alongside the bank's vertical-strike and butterfly-convexity arbitrages as the third no-arbitrage check.",
+  "entry_rules": [
+    "VIOLATION TEST, ON EXECUTABLE PRICES ONLY: near-expiry BID at strike K must exceed far-expiry ASK at the same strike and same right, by more than total round-trip costs. Mid prices do not count; a violation that disappears at the touch never existed.",
+    "Minimum edge: (near bid - far ask) x 100 >= $15 per contract after commissions, or skip it.",
+    "Quote freshness: both legs must have traded or updated within 60 seconds and both must show size >= 10 contracts.",
+    "Both legs same strike, same right, same underlying. Any strike or right mismatch makes this an ordinary calendar spread, not an arbitrage.",
+    "Dividend check: if an ex-dividend date falls between the two expiries, recompute - a large expected dividend legitimately makes the near call cheaper and the near put richer, and most apparent violations are exactly this.",
+    "Hard-to-borrow check: an elevated borrow rate can also explain the inversion legitimately; if the borrow rate exceeds 5% annualized, reject.",
+    "Submit as one MLeg order only. Never leg it - legging turns a riskless trade into a directional one."
+  ],
+  "management_rules": [
+    "Hold to the near expiry, then decide on the far leg as a standalone position.",
+    "Close both legs immediately if the spread reverts to normal and the credit can be banked early with more than 50% of the edge captured.",
+    "If the near leg's short delta exceeds 0.80 before expiry, close the pair - the assignment risk now exceeds the arbitrage edge.",
+    "Never add size to a violation that persists; a persisting violation is almost always a data error."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the near leg is short and American; close it by 15:30 ET on its expiration day, always.",
+    "Close the near leg at extrinsic < $0.10 or |delta| >= 0.85, and before any ex-dividend date while a short call is ITM.",
+    "If the near leg is assigned, exercise or sell the far leg in the same session to flatten the resulting share position, and log it as an incident.",
+    "Never hold the far leg unhedged overnight after an unexpected assignment."
+  ],
+  "assignment_risk": "The whole reason American term-structure violations exist. The short near leg can be assigned at any time, and on the deep-ITM side that is exactly when the counterparty will do it. An assignment converts a riskless credit into 100 shares that must be disposed of - which for this account is the failure mode, not the profit.",
+  "buying_power": "Calendar spread requirement: with the long leg longer-dated at the same strike, brokers typically hold little to nothing beyond the net credit, but Alpaca's own calculation governs.",
+  "liquidity_needs": "Both legs must be executable in one ticket at the quoted touch; this is where nearly all apparent violations die.",
+  "common_mistakes": "Scanning on mids; ignoring dividends and borrow, which explain most inversions; legging in; treating a persistent violation as free money rather than as a broken feed.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The near leg should never be 0DTE - the assignment window is too short to manage and the edge is always smaller than the pin risk.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

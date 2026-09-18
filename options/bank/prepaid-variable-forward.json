@@ -1,0 +1,79 @@
+{
+  "name": "Prepaid Variable Forward (PVF) / Collar-Plus-Loan",
+  "slug": "prepaid-variable-forward",
+  "aliases": [
+    "PVF",
+    "variable prepaid forward",
+    "monetized collar",
+    "concentrated-position monetization"
+  ],
+  "summary": "A collar on a concentrated share position combined with a loan against the collared stock, converting an unsellable holding into cash today while the option band defines how many shares are ultimately delivered.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "the existing concentrated position, 100 shares per unit, held as loan collateral",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "|put delta| 0.30-0.40, at the floor price the lender will advance against",
+      "dte_rule": "270-730 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.20-0.30, at the upper participation limit; strike solved so the collar is zero-cost",
+      "dte_rule": "same expiry as the put"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "(call strike - basis) x 100 plus whatever the advanced cash earns; upside above the call strike is surrendered",
+  "max_loss": "(basis - put strike) x 100 plus net collar cost; below the floor the lender keeps the shares and the loan is extinguished",
+  "breakevens": "basis +/- the net collar cost per share",
+  "greeks": {
+    "delta": "+30 to +50 per unit inside the band, collapsing toward zero at both strikes",
+    "gamma": "negative near the call strike, positive near the put",
+    "theta": "near zero when zero-cost",
+    "vega": "near zero"
+  },
+  "typical_dte": "270-730 DTE",
+  "when_to_use": "A single holding is too large a share of the account to keep unhedged but cannot or should not be sold (tax lot, restriction, conviction). The collar caps and floors it; the loan turns the floored value into deployable cash. Note this is a financing structure, not an alpha structure.",
+  "entry_rules": [
+    "OPTIONS LEGS ARE LEVEL 3 AND PERMITTED. THE FINANCING LEG IS NOT AVAILABLE HERE: Alpaca does not offer non-purpose lending against a collared position, so on this account the structure degrades to a long-dated zero-cost collar plus ordinary margin borrowing, which is not the same thing and must be logged as such.",
+    "Position must be >= 20% of account equity to justify the structure; below that use a plain collar.",
+    "Put strike >= 85% of spot (the advance rate a real PVF would lend against); call strike set so net collar cost <= 0.5% of share notional.",
+    "Both legs same expiry, 270+ DTE, OI >= 250, single MLeg order against the existing shares.",
+    "If ordinary margin is used as the financing substitute, borrow <= 50% of the put strike's notional and log the interest rate; never borrow above the floor.",
+    "No ex-dividend date within 5 trading days of expiration."
+  ],
+  "management_rules": [
+    "Roll the entire collar out at 90 DTE, keeping the floor at or above the outstanding borrow.",
+    "If spot rises more than 15% above the call strike, do not chase it by rolling the call up unless the roll is a credit - the surrendered upside was the price of the cash.",
+    "Repay borrowings from any dividends received on the collared shares.",
+    "Re-test quarterly: if the position has fallen below 10% of equity, unwind the structure - it no longer earns its complexity."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the short call is the assignable leg; close it by 15:30 ET on expiration day whenever it is ITM, and before every ex-dividend date while ITM - assignment would sell the collateral out from under the borrowing.",
+    "Close the short call at extrinsic < $0.10 or delta >= 0.85.",
+    "Close the long put rather than exercising it; exercising would sell the shares at the floor and must be a deliberate decision, not an expiry default.",
+    "Unwind in strict order: repay borrowings, then close the short call, then the long put, then decide on the shares."
+  ],
+  "assignment_risk": "One assignable short call against collateralized shares. In a real PVF the delivery is contractual at maturity; in this replication an early assignment liquidates the collateral while the loan is still outstanding, which is the single failure mode that matters.",
+  "buying_power": "Shares are already held; the short call is share-covered. Any financing leg consumes margin and interest at the broker's rate.",
+  "liquidity_needs": "Long-dated chain with real OI - realistically ETFs and mega-caps only; a genuinely concentrated small-cap position cannot be collared at 730 DTE.",
+  "common_mistakes": "Borrowing above the floor, which reintroduces exactly the downside the collar removed; treating margin borrowing as equivalent to a non-purpose PVF loan (the margin call behavior is completely different); losing the collateral to an early call assignment.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

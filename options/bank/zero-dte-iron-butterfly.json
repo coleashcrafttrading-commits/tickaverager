@@ -1,0 +1,88 @@
+{
+  "name": "0DTE Iron Butterfly",
+  "slug": "zero-dte-iron-butterfly",
+  "aliases": [
+    "same-day iron fly",
+    "0DTE fly",
+    "ATM 0DTE income structure"
+  ],
+  "summary": "An at-the-money iron butterfly opened and closed inside one session - the highest-credit, highest-gamma 0DTE income structure, betting the underlying pins near its current price into the close.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body strike - width W ($3-$10 on SPY/QQQ)",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the body: the ATM strike nearest spot (or nearest VWAP if the two differ by less than $0.50)",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "the same body strike",
+      "dte_rule": "expires today"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body strike + the same width W",
+      "dte_rule": "expires today"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit x 100, only if the underlying settles exactly at the body strike",
+  "max_loss": "(W x 100) - net credit",
+  "breakevens": "body -/+ net credit per share - a narrow band, typically well inside the day's remaining expected move",
+  "greeks": {
+    "delta": "near zero at entry and violently unstable thereafter",
+    "gamma": "the most negative of any structure in the bank",
+    "theta": "very large and positive",
+    "vega": "negative"
+  },
+  "typical_dte": "0 DTE only",
+  "when_to_use": "Late-session pin plays on SPY/QQQ when the tape has gone quiet, realized range is compressing, and there is a credible pin level (heaviest open interest strike, or a VWAP the price has not left for an hour). It is a pin bet, not a range bet - do not confuse it with the 0DTE condor.",
+  "entry_rules": [
+    "SPY, QQQ, IWM only. Locally computed greeks mandatory (Alpaca serves none at 0DTE); refresh every 30 seconds.",
+    "Entry window 12:30-14:30 ET. Earlier than that the underlying has too much time to leave the body; later and the credit does not cover the gamma.",
+    "Body strike must be within $0.75 of spot on SPY at entry and must be the strike with the highest 0DTE open interest within $2 of spot.",
+    "Net credit >= 25% of width - a fly collects more than a condor and should be held to a higher bar.",
+    "Compression gate: the last 30 minutes' realized range must be <= 60% of the session's average 30-minute range, and spot within 0.2% of VWAP.",
+    "Max loss per position <= 1% of equity; at most 1 concurrent 0DTE butterfly; counts against the 3%-per-day 0DTE defined-risk budget.",
+    "No entry on FOMC days before 14:30 ET or within 15 minutes of any scheduled release.",
+    "All four legs OI >= 1000; one MLeg limit order at the mid; no chasing beyond $0.02."
+  ],
+  "management_rules": [
+    "Take profit at 25% of credit - a 0DTE fly does not need to be held for the pin to pay; holding for the full credit is how the structure turns into its max loss.",
+    "Stop loss at 1.5x the credit received (tighter than the condor because the body is ATM from the start).",
+    "Touch stop: close immediately if the underlying trades more than 0.5 x W away from the body.",
+    "Never roll or re-center a 0DTE fly; close it and, if the thesis survives, open a new one at the new body.",
+    "Counts toward the daily circuit breaker: 2 stops or -2% of equity in 0DTE ends the session."
+  ],
+  "exit_rules": [
+    "UNCONDITIONAL FLATTEN AT 15:30 ET, no exceptions.",
+    "With an ATM body, one of the two shorts is always at or near the money - if either is ITM after 15:00 ET, close the whole structure immediately.",
+    "Auto-exercise of a $0.01-ITM leg delivers or removes 100 shares; with a straddle body both shorts can be pinned, producing a same-strike assignment on one side and an exercise on the other.",
+    "If unfilled by 15:40 ET, reprice to the natural every 10 seconds and log a critical incident."
+  ],
+  "assignment_risk": "The highest of any 0DTE structure in the bank: both short legs sit at the money, where extrinsic collapses to nothing and pin risk is maximal, and where the market maker's exercise decision is genuinely uncertain right up to the 17:30 ET exercise cutoff. The wings define the money loss, not the delivery.",
+  "buying_power": "(W x 100) - credit per contract.",
+  "liquidity_needs": "SPY/QQQ only; the ATM body must be penny-wide with four-figure open interest.",
+  "common_mistakes": "Holding for the full credit; entering before noon; picking the body off spot when spot is trending rather than off a genuine pin level; running it alongside a 0DTE condor on the same underlying and double-counting the risk budget.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "0DTE is the only sensible use of this structure. Entry 12:30-14:30 ET, body at the highest-OI near-spot strike, credit >= 25% of width, target 25% of credit, stop 1.5x credit or a 0.5 x W move, flatten 15:30 ET.",
+  "family": "Completeness gap-fill (cross-family): ratio/naked-financed put and call structures, quantity-unbalanced condors and strangles, stock+option overlays and monetizations, capital-protection and hybrid builds, 0DTE four-leg income, volatility-surface and relative-value trades, event-driven overlays, and roll/adjustment structures",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}
