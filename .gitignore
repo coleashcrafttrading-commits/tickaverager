@@ -25,3 +25,4 @@ config.json
 
 # agent worktrees (isolated checkouts) are never part of the repo
 .claude/worktrees/
+findings*.json

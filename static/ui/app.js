@@ -25,6 +25,7 @@ import "./views/risk.js";
 import "./views/add.js";
 import "./views/settings.js";
 import "./views/addaccount.js";
+import "./views/options.js";
 
 const labelOf = (id) => {
   const a = S.accounts.find((x) => x.id === id);
@@ -116,6 +117,11 @@ function paintRail() {
           <span style="color:var(--accent)">Add a ticker</span></div>`
       + `<div class="nav-label">This account</div>`
       + item("risk", "Risk", "◎")
+      // Options sits with the account, not with the shared library: its
+      // Positions tab is this account's open structures and its Chain is
+      // priced for the account that would trade it. The strategy bank it
+      // also shows is shared, the way Research's bank is.
+      + item("options", "Options", "◈")
       + item("settings", "Settings", "⚙");
   } else if (S.account) {
     html += `<div class="nav-item faint" style="cursor:default">Loading ${esc(acctLabel())}…</div>`;
