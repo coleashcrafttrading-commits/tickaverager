@@ -288,6 +288,129 @@ def report(data: dict, top: int = 5) -> None:
               + "  ".join(f"{m}x ${s[m]:>8.0f}" for m in sorted(s)))
 
 
+# ============================================================ cross-market
+def cross(files: list, top: int = 5) -> None:
+    """Grade structures on agreement between markets, not on one market.
+
+    The single most effective filter against a curve-fit is a second market
+    that was never used to choose anything. A structure that works on SPY and
+    not on QQQ is a fact about SPY over these particular months; one that works
+    on both, at the same parameters, at every spread assumption, is a weaker
+    claim but a real one.
+
+    Graded A to D, and the grade is deliberately hard to get:
+      A  positive at every spread on BOTH markets, robust (keeps >60% of its
+         profit when the spread doubles) on both, and 100+ trades each.
+      B  positive at every spread on both, but fragile to the spread on one,
+         or thin on trades.
+      C  positive on one market, not contradicted on the other.
+      D  disagrees between markets, or the spread decides the sign.
+    """
+    import json as _j
+    loaded = []
+    for f in files:
+        d = _j.loads(Path(f).read_text(encoding="utf-8"))
+        loaded.append(d)
+    if len(loaded) < 2:
+        print("cross-market grading needs at least two sweeps")
+        return
+
+    def keyof(r):
+        return (r["structure"], r["entry"],
+                _j.dumps(r["params"], sort_keys=True))
+
+    tables = []
+    for d in loaded:
+        rows = {}
+        for r in d["results"]:
+            by = r["by_spread"]
+            one, two = by.get("1.0") or 0.0, by.get("2.0") or 0.0
+            r["robustness"] = (two / one) if one > 0 else 0.0
+            r["fill_rate"] = 100.0 * r["trades"] / max(1, d["sessions"])
+            rows[keyof(r)] = r
+        tables.append((d["underlying"], rows))
+
+    shared = set(tables[0][1])
+    for _, rows in tables[1:]:
+        shared &= set(rows)
+
+    graded = []
+    for k in shared:
+        rs = [rows[k] for _, rows in tables]
+        if any(r["needs_level_4"] for r in rs):
+            continue
+        pos = all(r["verdict"] == "positive at every spread" for r in rs)
+        anyneg = any(r["verdict"] == "negative at every spread" for r in rs)
+        robust = all(r["robustness"] > 0.60 for r in rs)
+        thick = all(r["trades"] >= 100 for r in rs)
+        if pos and robust and thick:
+            g = "A"
+        elif pos:
+            g = "B"
+        elif not anyneg and any(r["verdict"] == "positive at every spread" for r in rs):
+            g = "C"
+        else:
+            g = "D"
+        graded.append({
+            "grade": g, "structure": k[0], "entry": k[1],
+            "params": _j.loads(k[2]),
+            "markets": {u: {"trades": r["trades"], "win": r["win_rate"],
+                            "total": r["total_pl"], "avg": r["avg_pl"],
+                            "dd": r["max_drawdown"], "pdd": r["pl_per_dd"],
+                            "robust": round(r["robustness"], 2),
+                            "fill": round(r["fill_rate"], 1)}
+                        for (u, rows), r in zip(tables, rs)},
+            "worst_pdd": min((r["pl_per_dd"] if r["pl_per_dd"] is not None else -9)
+                             for r in rs),
+        })
+
+    order = {"A": 0, "B": 1, "C": 2, "D": 3}
+    graded.sort(key=lambda x: (order[x["grade"]], -x["worst_pdd"]))
+    counts = {}
+    for x in graded:
+        counts[x["grade"]] = counts.get(x["grade"], 0) + 1
+    names = " and ".join(u for u, _ in tables)
+    print(f"\n{len(shared)} combinations ran on both {names}\n")
+    for g in "ABCD":
+        if counts.get(g):
+            print(f"  {counts[g]:5d}  grade {g}")
+
+    keep = [x for x in graded if x["grade"] in ("A", "B")]
+    if not keep:
+        print("\nNo structure earns an A or a B. Nothing here works on both "
+              "markets at every spread assumption.")
+        keep = [x for x in graded if x["grade"] == "C"][:top]
+        if not keep:
+            return
+        print("Grade C only -- works on one market, not contradicted on the other:")
+
+    thin = [x for x in keep[:top]
+            if min(m["fill"] for m in x["markets"].values()) < 40.0]
+    if thin:
+        # Measured, not hedged: for the 20-wide fly the days it DID trade had
+        # a median intraday range of 1.22% and the days it skipped 0.83%. The
+        # wings 20 points out simply do not PRINT on a quiet session, and a
+        # backtest with only trade prints cannot see them. Live this matters
+        # less, because a quote exists whether or not anyone trades -- but the
+        # P/L below was earned on the livelier part of the sample.
+        print("\n  READ THE FILL RATE. A structure that opened on a fifth of the")
+        print("  sessions did not decline the rest at random. For the 20-wide fly")
+        print("  the days it traded had a 1.22% median intraday range against")
+        print("  0.83% on the days it skipped: nobody prints a 20-point-out 0DTE")
+        print("  wing on a quiet day. These numbers are earned on the livelier")
+        print("  half of the sample, not on all of it.")
+    print(f"\nTop {min(top, len(keep))}, graded:\n")
+    for i, x in enumerate(keep[:top], 1):
+        p = ", ".join(f"{k}={v:g}" for k, v in x["params"].items()) or "-"
+        print(f"  {i}. [{x['grade']}] {x['structure']}  entry {x['entry']}  {p}")
+        for u, m in x["markets"].items():
+            print(f"        {u}: {m['trades']:4d} trades  {m['fill']:5.1f}% fill  "
+                  f"{m['win']:5.1f}% win  ${m['total']:>8.0f}  "
+                  f"avg ${m['avg']:>7.2f}  DD ${m['dd']:>8.0f}  "
+                  f"P/DD {m['pdd']:>5.2f}  robust {m['robust']:.2f}")
+        print()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -296,8 +419,13 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="")
     ap.add_argument("--report", default="", help="print a saved sweep instead")
     ap.add_argument("--top", type=int, default=5)
+    ap.add_argument("--cross", nargs="+", default=[],
+                    help="two or more saved sweeps: grade on agreement between them")
     a = ap.parse_args(argv)
 
+    if a.cross:
+        cross(a.cross, a.top)
+        return 0
     if a.report:
         report(json.loads(Path(a.report).read_text(encoding="utf-8")), a.top)
         return 0
@@ -312,3 +440,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
