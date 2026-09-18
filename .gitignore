@@ -15,6 +15,9 @@ research/ross/
 research/float/
 research/news/
 research/scanner/
+# options bars: a strike grid x every expiry x 19 months. Hundreds of MB, and
+# rebuildable from Alpaca with optfetch.py, so it is a cache and not a source.
+research/options/
 
 # per-machine, written by the app at runtime -- template is config.example.json
 config.json
