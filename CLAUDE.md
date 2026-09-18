@@ -114,6 +114,104 @@ legacy bar-close rule. The FIRST lot when flat is still the candle rule.
 Stop, halt, FROZEN, a session switching off and `max_lots` cancel the
 resting adds on the next tick; nothing in that path ever touches an exit.
 
+## Options (from 18 Sep 2026)
+
+A second asset class on the same account, with its own tab, its own strategy
+bank and its own engine. It shares the Alpaca connection and nothing else --
+`engine.py` is the share ladder and knows nothing about any of this.
+
+**The account is options level 3.** Alpaca rejects an uncovered short outright
+(`403 account not eligible to trade uncovered option contracts`), so every
+short leg must be defined-risk or covered. 57 of the 231 banked strategies need
+level 4; they stay documented and `optbank.permitted()` refuses them, because a
+bank that hides what it cannot do teaches nothing. Raising the level is an
+Alpaca approval, not a code change.
+
+**These are AMERICAN options on shares.** A short leg that finishes in the
+money delivers or takes 100 shares per contract that the account never sized
+for, and a partial-ITM expiry can lose MORE than the structure's stated max
+loss -- the short is auto-exercised at $0.01 ITM while the long expires
+worthless, leaving naked stock overnight. So the assignment guard is not a
+feature, it is the reason `optengine.py` exists. `docs/options_rules.md` holds
+all 193 researched rules; the safety-critical ones are the assignment topic and
+the Alpaca API topic.
+
+### The modules
+
+| | |
+|---|---|
+| `optsym.py` | contract identity. OCC symbols are parsed from the RIGHT (the root is the variable-length part). `year_fraction` is the 0DTE-critical one: on expiry day it shrinks through the session and floors at a second rather than reaching zero. |
+| `greeks.py` | Black-Scholes-Merton, greeks in stated units (theta per calendar day, vega per vol point), IV, and `implied_forward`. Alpaca returns NO greeks and NO IV, ever, at any feed. |
+| `optdata.py` | the only path to Alpaca for options data, plus a liquidity quality gate. |
+| `optbank.py` | the shelf: 231 structures under `options/bank/`, with `permitted()` and `assignment_legs()`. |
+| `optengine.py` | the automated trader and the assignment guard. |
+| `optfetch.py` | historical collection, and `optfetch.py verify` which finds a corrupt cache. |
+| `optbacktest.py` / `optsweep.py` | the replay engine and the sweep. |
+
+### Two things measured here that beat any documentation
+
+**The multi-leg limit price sign is the most dangerous thing in the API.** The
+same put credit spread, sell 600 / buy 595: `limit_price "4.90"` was accepted
+and held $990 of buying power, `limit_price "-4.90"` was accepted and held
+$500. NEGATIVE is a credit, POSITIVE is a debit, and $500 is the true max loss
+on a 5-wide spread -- the $990 case is Alpaca correctly reserving width plus a
+$490 debit, because a positive price on a credit structure IS an instruction to
+pay. **Alpaca does not reject the wrong sign; it fills it.** The engine
+computes the net as `sum(sign * ratio * price)`, asserts it against the
+structure's intent, and refuses to transmit on a mismatch.
+
+**Never price a chain off a spot print.** SPY after the close, 3 DTE: the spot
+print was $763.06 and the option quotes had frozen at 16:00 ET. Put-call parity
+was violated by a CONSTANT -$1.63 at all 26 strikes, and calls implied 3-6% vol
+where puts implied 9-31% at the SAME strikes. A constant parity error across
+every strike means the quotes are consistent and the SPOT is wrong.
+`chain_greeks` derives the forward from put-call parity by default, which drops
+the spot print, the rate drift and the dividend yield in one move. Cboe does
+the same thing. Call and put IV then agree to 0.46% on average.
+
+### Other facts that cost time to find
+
+- Market data (10,000/min) is a SEPARATE rate-limit budget from trading
+  (200/min, shared with the share fleet). Chain polling is cheap; orders
+  are not.
+- `mleg` is 2 to 4 legs; outside that is a 422.
+- Option MARKET orders are rejected outside 09:30-16:00 ET. LIMIT orders, day
+  or GTC, are accepted while the market is closed and rest until the open --
+  which is how a Monday open is traded from a Friday evening.
+- Alpaca rejects option orders after 15:30 ET on broad ETFs (15:15 on single
+  names) and begins auto-liquidating expiring positions at 15:45.
+- Option position `qty` is CONTRACTS and is UNSIGNED -- the direction is in the
+  separate `side` field. `market_value` already includes the 100 multiplier.
+- `/v2/options/contracts` silently returns only the NEAREST expiry unless
+  `expiration_date_gte` is passed, and never returns an expired contract.
+- Never call the exercise endpoint: it has no quantity parameter and exercises
+  the whole position.
+
+### Backtesting options, and what it may claim
+
+There is NO historical option quote data -- `/v1beta1/options/quotes` is a 404.
+There are bars and trade prints and nothing else, so a fill is MODELLED: a
+reference price off the tape plus a half-spread, measured from 2,415 live NBBO
+quotes and bucketed by premium (under $0.10: 40% of premium; $0.50-$2: 3.6%).
+
+Because that assumption is the whole result at 0DTE, every structure is run at
+0.5x, 1x and 2x the modelled spread, and one whose sign flips across that band
+is reported UNDECIDED rather than as an edge. Expired chains are reached by
+SYNTHESIZING OCC symbols across a strike grid, since the contracts endpoint
+never lists them.
+
+Measured over 659 SPY and 659 QQQ sessions, 280 combinations: 2 graded A,
+6 B, 13 C, 207 D. The two A grades are a 20-wide iron butterfly and a
+0.30-delta call condor, both entered at 09:45, both surviving a doubled spread
+on both underlyings. Read the FILL RATE beside them: they opened on 16-27% of
+sessions, and those were not a random fifth -- the days the 20-wide fly traded
+had a 1.22% median intraday range against 0.83% on the days it skipped. Nobody
+prints a 20-point-out 0DTE wing on a quiet day.
+
+Rank by profit per dollar of drawdown and read `robustness` (P/L at 2x spread
+over P/L at 1x) next to it. A row can be "positive at every spread" and still
+keep only $9 of $1,783 when the spread doubles, which is not an edge.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -187,7 +285,9 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_engine_strategy test_latency test_refresh_trend test_accounts
   test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
   test_research test_indicators test_touch_adds test_review_fixes
-  test_fractional test_report test_bank test_supertrend`, each printing
+  test_fractional test_report test_bank test_supertrend test_optsym
+  test_greeks test_optdata test_optbank test_optbacktest test_optengine
+  test_options_api`, each printing
   `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a scratch file.
   `deploy/vm_update.sh` runs thirteen of them on the VM and keeps the old
   process if one is red.
