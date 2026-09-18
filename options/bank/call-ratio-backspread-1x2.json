@@ -1,0 +1,77 @@
+{
+  "name": "Call Ratio Backspread 1x2",
+  "slug": "call-ratio-backspread-1x2",
+  "aliases": [
+    "call backspread",
+    "reverse call ratio spread",
+    "long call backspread",
+    "1x2 call backspread"
+  ],
+  "summary": "Sell one nearer call and buy two further-OTM calls in the same expiry; a long-volatility, explosively bullish structure that is often opened for a credit or near zero cost, with a defined loss valley between the strikes.",
+  "bias": "long_vol",
+  "net": "either",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short call ATM to slightly ITM, 0.45-0.60 delta. This leg is fully covered by one of the two long calls, so the package is Level 3 legal."
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "Two long calls at 0.25-0.35 delta, one strike-width or more above the short strike. Tune the width until the package prices at a net credit or a debit no greater than 10% of the strike width.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "unlimited above the long strike (you are net long one call)",
+  "max_loss": "(long strike - short strike) * 100 - net credit (or + net debit), realized exactly at the long strike at expiry. Fully defined.",
+  "breakevens": "lower: short strike + net credit per share (no lower breakeven if opened for a credit -- you keep the credit if everything expires worthless); upper: long strike + max loss per share",
+  "greeks": {
+    "delta": "near zero to slightly positive at entry (short 0.55 + long 2 x 0.30 = +0.05)",
+    "gamma": "positive above the long strike, negative in the valley between strikes",
+    "theta": "negative -- you are net long one option; expect -$1 to -$3/day per unit at 30-45 DTE",
+    "vega": "positive, roughly +$8 to +$20 per vol point per unit"
+  },
+  "typical_dte": "45-90 DTE. Backspreads need time; under 30 DTE the valley eats you before the move arrives.",
+  "when_to_use": "IV rank <= 30 with an expected explosive upside move (short squeeze setup, biotech catalyst, breakout from a multi-month base). Also attractive when call skew is unusually flat, making the two long calls cheap relative to the one you sell. Pays a little to own a lot of upside convexity.",
+  "entry_rules": [
+    "IV rank <= 30 (you are net long vega and net long one option).",
+    "Bullish catalyst or technical trigger: breakout above a 60-day base on >2x average volume, or a dated catalyst inside the expiry.",
+    "Short call delta 0.45-0.60; long calls delta 0.25-0.35.",
+    "Ratio exactly 1 short : 2 long. GCD of (1,2) is 1, so Alpaca accepts the ratio, and the single short call is covered by one of the two long calls within the same MLeg order -- this IS submittable at Level 3.",
+    "Package must open for a net credit, or a net debit no greater than 10% of (long strike - short strike).",
+    "Max loss = (width * 100) - credit must be <= 2% of equity.",
+    "DTE >= 45. Never open a backspread under 30 DTE.",
+    "Both strikes OI >= 500, bid/ask <= 10% of mid; the 2-lot long leg needs quoted size >= 20.",
+    "Submit as one MLeg order with leg_ratio 1 and 2, limit at the package mid."
+  ],
+  "management_rules": [
+    "Take profit: close when the package reaches 2.0x the max-loss amount in profit, or when the underlying trades 1.5 ATR(20) above the long strike -- whichever first.",
+    "Do not wait for 'unlimited' -- research consistently shows backspreads should be harvested on the first strong sustained move rather than held through a grind.",
+    "Time stop: close at 21 DTE if the move has not happened. Theta acceleration past 21 DTE destroys the structure and drags it toward the valley.",
+    "Valley stop: if at 30 DTE the underlying sits within 2% of the long strike (the max-loss point), close for whatever remains -- that is the worst place on the payoff and it only gets worse.",
+    "Delta drift: if net delta exceeds +1.00 per unit, sell one long call to bank the gain and leave a bull call spread running.",
+    "Never add contracts to a backspread sitting in its valley."
+  ],
+  "exit_rules": [
+    "Hard rule: flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: if the short call is ITM by any amount at 15:30 ET on expiration day, close the entire package immediately. Assignment delivers 100 short shares per unit even though you hold two long calls.",
+    "ASSIGNMENT GUARD: on any day, if the short call is ITM and its extrinsic value < $0.10, close the package that session.",
+    "DIVIDEND GUARD: if the short call is ITM and its extrinsic < 1.5 * the pending dividend, close no later than the close of the session before ex-dividend.",
+    "Mandatory close at 21 DTE absent a live catalyst."
+  ],
+  "assignment_risk": "Only the single short call can be assigned. It is covered by one of the two long calls, so the economic loss is bounded, but assignment still creates 100 short shares per unit that the system must not hold. Because the short strike is near the money at entry, it goes ITM in exactly the scenario the trade wants (a rally), so the assignment guard is not optional here -- it is the primary operational risk of an otherwise well-behaved structure.",
+  "buying_power": "The short call is covered by a long call at a higher strike, so the requirement is the vertical width: (long strike - short strike) * 100 - credit, per unit. Typically $200-$800 per unit on a $5-$10 width.",
+  "liquidity_needs": "OI >= 500 on both strikes, quoted size >= 20 on the long strike since you need double quantity. Package routing only -- legging in a backspread creates a momentary naked short call which Alpaca will reject.",
+  "common_mistakes": "Opening under 30 DTE; paying a large debit and destroying the 'free if wrong' property; holding through the valley hoping; not noticing that the short call goes ITM precisely when the trade is working; sizing off the credit instead of off the valley loss.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The valley loss is realized almost immediately at 0DTE and there is no time for convexity to pay. If the view is 'explosive move today', buy a 0DTE call outright or a tight debit vertical. Mark as not enabled for 0DTE.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

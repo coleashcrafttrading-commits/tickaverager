@@ -1,0 +1,75 @@
+{
+  "name": "Reverse Jade Lizard",
+  "slug": "reverse-jade-lizard",
+  "summary": "Sell an OTM call and an OTM put credit spread in the same expiry; the mirror image of the jade lizard, with no downside risk when the credit exceeds the put spread width, and uncapped risk to the upside.",
+  "aliases": [
+    "twisted sister",
+    "inverted jade lizard",
+    "reverse lizard"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.20-0.30 (UNCOVERED - see entry rules)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta -0.20 to -0.30",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short put strike - Wp, with Wp chosen so total credit > Wp x 100; typically 1.0-2.0% of spot",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "typical_dte": "30-60 DTE, managed at 21 DTE",
+  "when_to_use": "IV rank > 50 with steep PUT skew (index ETFs), where the put spread pays enough to exceed its own width. Structurally attractive on SPY/QQQ because put skew is persistently rich - but the naked short call makes it Level 4.",
+  "max_profit": "net credit received, if the underlying finishes between the short put and the short call",
+  "max_loss": "UNDEFINED to the upside (naked short call). No downside loss when credit > put spread width.",
+  "breakevens": "upside breakeven = short call strike + credit/100; NO downside breakeven when credit > Wp x 100",
+  "greeks": {
+    "delta": "negative at entry (-10 to -25 per unit)",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the short call is uncovered, which requires Alpaca options level 4. The order router must reject this slug while the account is Level 3.",
+    "Level 4 version: total credit must exceed put spread width x 100.",
+    "Level 4 version: short call delta 0.20-0.30, short put delta -0.20 to -0.30, IV rank >= 50.",
+    "A Level-3-legal substitute exists: add a long call above the short call (converting it to a call credit spread), which turns the structure into an iron condor variant and gives up the 'no downside risk' property."
+  ],
+  "management_rules": [
+    "Level 4 only: close at 50% of the credit.",
+    "Level 4 only: close or roll at 21 DTE.",
+    "Level 4 only: close if the short call delta reaches 0.45, or if spot trades above the short call strike at any time."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: naked short call - flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close the short call immediately if it is ITM with extrinsic < $0.10; an uncovered call assignment creates a naked short stock position.",
+    "DIVIDEND GUARD: close the short call before every ex-dividend date whenever it is ITM - uncovered short calls are the single most commonly assigned option ahead of dividends.",
+    "Close the short put if ITM with extrinsic < $0.10, and by 2 DTE unconditionally."
+  ],
+  "assignment_risk": "Worst-in-family for the call leg: uncovered short call assignment delivers -100 shares with no offsetting long, an unlimited liability and an immediate margin call on a $50k account. The put spread's short leg is the ordinary 100-share purchase risk.",
+  "buying_power": "Naked short call margin (approximately max(20% of underlying value - OTM amount, 10% of strike value) + premium) plus (Wp x 100 - put spread credit).",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Trading it without naked-call approval; assuming symmetry with the jade lizard (it is far more dangerous because upside risk is unbounded while downside risk was merely large); ignoring dividend assignment on the short call.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never. An uncovered 0DTE short call on an American-style ETF is the highest-severity assignment scenario this bank contains.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral-to-bearish, short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

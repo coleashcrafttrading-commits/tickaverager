@@ -1,0 +1,69 @@
+{
+  "name": "Split-Strike Long Combo (OTM Risk Reversal)",
+  "slug": "split-strike-long-combo",
+  "aliases": [
+    "long combo",
+    "bullish risk reversal",
+    "OTM risk reversal",
+    "sell put buy call",
+    "zero-cost risk reversal"
+  ],
+  "summary": "Sell an OTM put and buy an OTM call in the same expiry, usually structured for zero net cost; bullish exposure with a flat dead zone between the strikes.",
+  "bias": "bullish",
+  "net": "either",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM put at 0.20-0.30 delta (below spot)."
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM call whose premium approximately equals the put credit -- typically 0.20-0.30 delta. Tune the call strike until the net is within +/-$0.05 of zero for a 'zero-cost' structure.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "unlimited above the call strike",
+  "max_loss": "UNDEFINED below the put strike -- (put strike * 100) - net credit",
+  "breakevens": "if opened flat: below = put strike; above = call strike. Adjust by the net debit/credit per share.",
+  "greeks": {
+    "delta": "positive, roughly +0.40 to +0.60 per unit at entry",
+    "gamma": "positive above the call strike, negative below the put strike",
+    "theta": "near zero at entry; becomes positive if price sits between the strikes",
+    "vega": "near zero at entry; long vega above, short vega below"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "The classic 'get long using the skew': equity put skew means the OTM put you sell is richer in IV than the OTM call you buy, so a zero-cost structure gets you a call further out than symmetry would suggest. Used by institutions to establish leveraged bullish exposure cheaply.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. The short put is uncovered -- Level 4, unavailable on Alpaca, and rejected by the MLeg covered-legs rule.",
+    "Defined-risk substitute: sell a bull PUT SPREAD (defined) and use the credit to buy a call or a call spread -- that structure IS Level 3 legal as two separate MLeg orders and captures the same skew idea with a floor.",
+    "If it were enabled: put skew condition 25-delta put IV - 25-delta call IV >= 4 vol points; net cost between -$0.05 and +$0.05; both legs 0.20-0.30 delta; DTE 45-90.",
+    "Sizing would have to assume the short put is assigned: (put strike * 100 * contracts) <= 25% of equity."
+  ],
+  "management_rules": [
+    "If enabled: take profit when the long call reaches 2x its theoretical entry premium, or when the underlying exceeds the call strike by 1.5 ATR.",
+    "Close the whole structure at 21 DTE.",
+    "Stop: close if the underlying trades below the short put strike.",
+    "If the short put goes ITM, close it and keep the call only if you still want the exposure -- never roll a tested short put down and out on an account that cannot take delivery."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: close the short put whenever it is ITM with extrinsic < $0.10, and unconditionally if the underlying is below (put strike + $0.05) at 15:30 ET on expiry day.",
+    "Close or roll by 21 DTE as a standing rule."
+  ],
+  "assignment_risk": "The short put is uncovered. Assignment delivers 100 shares per contract at the put strike, unfunded. The long call is at a higher strike and provides no protection below.",
+  "buying_power": "Reg-T naked put margin on the short leg, less the premium of the long call. Not available on Alpaca.",
+  "liquidity_needs": "OTM strikes on both sides; OI >= 500, bid/ask <= 10% of mid.",
+  "common_mistakes": "Reading 'zero cost' as 'zero risk'; not sizing for assignment on the put; picking the call strike by dollars instead of by matching premium.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "No time for the structure to work and immediate assignment exposure. Not permitted.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bullish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

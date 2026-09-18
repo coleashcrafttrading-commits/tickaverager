@@ -1,0 +1,89 @@
+{
+  "name": "Long Box Spread",
+  "slug": "long-box-spread",
+  "aliases": [
+    "box",
+    "long box",
+    "synthetic loan (lending side)",
+    "alligator spread (when fees dominate)"
+  ],
+  "summary": "Four legs \u2014 a bull call spread plus a bear put spread on the same two strikes and expiry \u2014 that are worth exactly the strike width at expiry; buying it for less than the width is synthetic lending at the implied rate.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower strike K1 \u2014 choose by width, not delta: K1 and K2 should bracket spot, typically K1 = first strike below spot"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Upper strike K2 = K1 + width, where width is 5 or 10 points on a liquid ETF",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Upper strike K2 (same as the short call)",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Lower strike K1 (same as the long call)",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "((K2 - K1) x 100) - net_debit, known exactly at entry. This is the interest earned for lending the debit until expiry.",
+  "max_loss": "On European cash-settled options: only the failure to earn, i.e. a negative implied rate. On AMERICAN share-settled options (all US equities and ETFs): the theoretical max loss of a debit box is the net debit, but the practical loss mode is early assignment on one of the two short legs, which converts the box into an unhedged stock position overnight.",
+  "greeks": {
+    "delta": "0.00 by construction",
+    "gamma": "0.00 net",
+    "theta": "0.00 net; the P/L accretes as pure interest toward the width",
+    "vega": "0.00 net"
+  },
+  "breakevens": "None \u2014 flat payoff of (K2 - K1) x 100 at expiry regardless of the underlying.",
+  "when_to_use": "As a cash-parking instrument when the implied rate exceeds the money-market alternative. Implied_rate = ((width x 100 / net_debit) - 1) x (365 / days_to_expiry). Only interesting if implied_rate exceeds the risk-free rate by more than 50 bps after all fees. On a paper account the entire premise (earning interest on idle cash) is fictional, so this is a reference entry rather than a production strategy.",
+  "typical_dte": "60-365; the longer the tenor, the more interest to capture and the more early-assignment exposure accumulates",
+  "entry_rules": [
+    "LEVEL 3 LEGAL: every short leg is covered by a long leg of the same right at a better strike within the same multi-leg order, so Alpaca's same-order coverage rule is satisfied. Submit as a single 4-leg order \u2014 never leg it.",
+    "CRITICAL VIABILITY WARNING: on American-style equity and ETF options this is NOT a riskless instrument. The short put at K1 (if spot falls) or the short call at K2 (if spot rises) can be assigned at any time, delivering or taking 100 shares. The position is only self-liquidating at expiry.",
+    "Required rate test: implied_rate >= (current_effective_fed_funds + 0.50%) AND net_debit < (width x 100) - total_fees - $10. Reject otherwise.",
+    "Fees: 4 legs to open and 4 to close = 8 contract fees. At $0.65 each that is $5.20 per box round trip, against a 5-point box whose maximum earn on a 90-day tenor at 5% is about $6. The fee load alone usually kills it. Reject any box where total_fees > 30% of max_profit.",
+    "Underlying must be a top-tier liquid ETF (SPY, QQQ, IWM) with penny-wide option markets and OI >= 5,000 on every strike used.",
+    "Prefer the widest strikes available far from spot in BOTH directions only if liquidity permits; otherwise brackets straddling spot are fine for a long box since the risk is assignment, not direction.",
+    "NEVER on an underlying with an ex-dividend date inside the box's life \u2014 the short call becomes an early-exercise target."
+  ],
+  "management_rules": [
+    "Monitor both short legs daily for extrinsic value. If either short leg's extrinsic drops below $0.10, close the entire box that session.",
+    "Because the box's value converges to the width deterministically, there is no profit target other than 'hold to just before expiry or exit early if the implied rate available elsewhere improves'.",
+    "If assigned on either short leg: immediately exercise or sell the corresponding long option to flatten the resulting 100-share position in the SAME session. Do not carry assigned shares overnight \u2014 a 5-point box does not have the capital to support $10,000 of unexpected stock.",
+    "Re-evaluate weekly: if the box can be sold back for more than the present value of holding it to expiry, close early."
+  ],
+  "exit_rules": [
+    "MANDATORY: close all four legs no later than 15:30 ET on expiration day, as a single 4-leg order. Do not allow any leg to settle by exercise or assignment.",
+    "At expiry, two of the four legs are ITM by construction; letting them settle means an exercise on one long and an assignment on one short, with 100 shares moving in each direction and settlement-timing exposure in between. Close the box instead.",
+    "If either short leg's extrinsic value falls below $0.05 at any time, close the entire box that session regardless of the rate give-up.",
+    "If the underlying moves far enough that K1 and K2 are both ITM or both OTM by more than 10%, the box's short legs are at elevated assignment risk \u2014 close it."
+  ],
+  "assignment_risk": "Present on the short call at K2 and the short put at K1. Exactly one of them is ITM at any given time. Early assignment on either delivers a 100-share position that is hedged in payoff terms by the remaining long option but is NOT hedged in capital terms \u2014 the account suddenly owes or holds $10,000+ of stock. This is the structural reason American-style boxes are not the risk-free instrument the textbook describes. European cash-settled index options (SPX, XSP) have no early exercise and are the only correct vehicle for box financing \u2014 and Alpaca does not offer cash-settled index options at all, only equity and ETF options. That alone rules out proper box financing on this account.",
+  "alpaca_level": 3,
+  "buying_power": "A long box is a debit spread: the requirement is the net debit paid, roughly (width x 100) less the interest. About $495 for a 5-point box. Brokers that do not recognise the box as a unit may charge two separate spread requirements.",
+  "liquidity_needs": "Penny-wide markets on all four strikes, OI >= 5,000 each, and the ability to execute as one order. Crossing $0.02 of spread on each of four legs costs $8 per box \u2014 more than the typical earn.",
+  "common_mistakes": "Believing a box on SPY is risk-free because a box on SPX is. Legging it. Ignoring that 8 contract fees can exceed the entire interest earned. Computing the implied rate without annualising.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE box earns approximately zero interest by definition while incurring 8 fees and maximum pin risk on two short legs. Strictly negative expectancy.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)"
+  ]
+}

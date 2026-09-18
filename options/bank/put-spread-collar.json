@@ -1,0 +1,83 @@
+{
+  "name": "Put Spread Collar",
+  "slug": "put-spread-collar",
+  "aliases": [
+    "Collar with a put spread",
+    "Three-way collar",
+    "Financed put spread"
+  ],
+  "summary": "A collar where the protective leg is a put SPREAD rather than a single put, allowing a much higher (closer) floor for the same funding call.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.40-0.50 delta (close to ATM - a high floor)",
+      "dte_rule": "45-120 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.15-0.20 delta, 10-15% below the long put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.20-0.30 delta OTM, sized to fund the net put spread cost",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "(call strike - share basis - net debit) x 100",
+  "max_loss": "unbounded below the short put strike: (share basis - long put strike + net debit) x 100 plus all losses below the short put strike",
+  "breakevens": "share basis + net debit per share",
+  "greeks": {
+    "delta": "+45 to +60 per unit",
+    "gamma": "positive between the put strikes",
+    "theta": "near zero",
+    "vega": "near zero"
+  },
+  "when_to_use": "When the system wants a tight floor (protection starting near the money) but a plain collar's call strike would be unacceptably low. Trades crash protection for near-term protection - a legitimate choice when tail risk is separately hedged.",
+  "typical_dte": "45-120 DTE",
+  "entry_rules": [
+    "Long put delta in [0.40, 0.50]; short put delta in [0.15, 0.20]; spread width >= 10% of spot.",
+    "Call strike solved to make the total net cost <= 0.3% of share notional.",
+    "Call strike must be >= basis x 1.03 and >= basis.",
+    "Require the total structure to leave at least 6% of upside before the cap.",
+    "All legs same expiry; OI >= 250 each; 4-leg combo supported by Alpaca."
+  ],
+  "management_rules": [
+    "Roll all legs together at 21-30 DTE.",
+    "If spot falls below the long put strike, the hedge is engaged - monitor the SHORT put's delta and close the short put if delta < -0.60 to restore full protection (paying for it).",
+    "Roll the whole structure up on a rally of more than 1 x ATR(14) beyond the call strike minus one strike."
+  ],
+  "exit_rules": [
+    "HARD: TWO short legs to guard. Short call flattened by 15:30 ET on expiration day if ITM; short put flattened by 15:30 ET if ITM.",
+    "Extrinsic monitor on both short legs: close when extrinsic < 0.05 and |delta| > 0.85.",
+    "Short put assignment would add 100 shares at the worst possible time (a crash) while the long put's protection has already been used - treat the short put as the highest-priority leg to close in a fast decline.",
+    "Close the long put rather than letting it auto-exercise."
+  ],
+  "assignment_risk": "Two assignable legs pulling in opposite directions. Call assignment removes shares; put assignment adds shares. In a sharp selloff both the short put and the long put go deep ITM, and the account could end up long 200 shares with no protection if the guards fail. This is the most assignment-sensitive collar variant.",
+  "buying_power": "Shares plus the put spread's width x 100 held against the short put (defined risk), or cash securing the short put. Level 3 is sufficient because every short leg is covered by shares or a long option.",
+  "liquidity_needs": "Four legs; requires a dense, liquid chain - ETFs and mega-caps only. Combined spread <= 12% of net structure cost.",
+  "common_mistakes": "Believing the tight floor means more safety - the tail below the short put is completely open; neglecting the short put's assignment risk during the exact crash the structure was built for.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

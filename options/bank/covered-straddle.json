@@ -1,0 +1,76 @@
+{
+  "name": "Covered Straddle",
+  "slug": "covered-straddle",
+  "aliases": [
+    "Covered combination at-the-money",
+    "Long stock + short straddle"
+  ],
+  "summary": "Own 100 shares and sell both an ATM call and an ATM put at the same strike - maximum premium, maximum obligation to double the position.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM, 0.50 delta",
+      "dte_rule": "30-45 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM, same strike as the call, cash-secured",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "(strike - share basis) x 100 + total credits x 100, achieved at or above the strike",
+  "max_loss": "(share basis + strike - total credits) x 100 - 200 shares of downside",
+  "breakevens": "(share basis + strike - total credits) / 2 approximately",
+  "greeks": {
+    "delta": "+100 per unit at entry (100 shares, +50 put, -50 call)",
+    "gamma": "strongly negative",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "when_to_use": "Very high IV Rank (>= 50), strongly range-bound expectation, and complete willingness to own 200 shares. This is an aggressive, capital-hungry structure - FLAGGED as high risk for automation without strict sizing.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "100 shares held AND cash >= strike x 100.",
+    "IV Rank >= 50; combined ATM credit >= 4% of spot for a 30-45 DTE cycle.",
+    "Total share exposure at the doubled size <= 25% of equity.",
+    "Strike = nearest to spot; both legs same strike and expiry; OI >= 500 each (ATM is the most liquid area).",
+    "Never on a name with earnings, an FDA date, or any binary event inside the cycle."
+  ],
+  "management_rules": [
+    "Close at 25-35% of total credit - do not push an ATM short straddle to 50%, the gamma is too high.",
+    "21 DTE mandatory close or roll.",
+    "One side will always be ITM. Roll the tested side out (and away) for a credit once its delta exceeds 0.70 in absolute terms; leave the untested side alone.",
+    "If the put is threatened, prefer closing the whole unit to doubling the share position."
+  ],
+  "exit_rules": [
+    "HARD: at least one leg is nearly always ITM - both short legs must be flattened by 15:30 ET on expiration day, without exception.",
+    "Extrinsic guard on both legs: close when extrinsic < 0.05 and |delta| > 0.85.",
+    "Ex-dividend guard on the short call (ATM calls go ITM easily).",
+    "Unit stop: close everything if the unit loss exceeds 2% of account equity."
+  ],
+  "assignment_risk": "Highest routine assignment probability of any covered structure - an ATM straddle almost guarantees one leg finishes ITM. Put assignment doubles the share position at the strike; call assignment removes the shares. The system must treat this structure as requiring continuous monitoring, not end-of-day checks.",
+  "buying_power": "Shares plus strike x 100 in cash.",
+  "liquidity_needs": "ATM strikes, OI >= 500, penny or nickel wide.",
+  "common_mistakes": "Chasing the fat ATM premium without modeling the 200-share downside; managing at 50% like an OTM strangle; letting an ITM leg run to expiration.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "An ATM 0DTE covered straddle is near-certain assignment on one side. Not appropriate.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

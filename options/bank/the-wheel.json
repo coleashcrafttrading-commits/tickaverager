@@ -1,0 +1,68 @@
+{
+  "name": "The Wheel",
+  "slug": "the-wheel",
+  "aliases": [
+    "triple income strategy",
+    "CSP-to-covered-call cycle"
+  ],
+  "summary": "Sell cash-secured puts until assigned, then sell covered calls on the assigned shares until called away, and repeat. Structurally sound but DIRECTLY CONFLICTS with the system's never-assign mandate.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Phase 1: cash-secured put at delta -0.25 to -0.30",
+      "dte_rule": "30-45 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Phase 2 (only if assigned): covered call at delta 0.25-0.30, strike at or above the assigned cost basis",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "Per cycle: put credit + call credit + (call strike - assignment price) x 100",
+  "max_loss": "Full stock downside from the put strike, minus accumulated credits. In a sustained decline the wheel accumulates shares and losses at the same time.",
+  "breakevens": "Rolling: assigned cost basis minus all credits collected to date",
+  "greeks": {
+    "delta": "+0.25 to +0.30 in the put phase; +0.70 to +0.75 in the covered call phase",
+    "gamma": "negative throughout",
+    "theta": "positive throughout - the engine",
+    "vega": "negative throughout"
+  },
+  "typical_dte": "30-45 DTE per leg",
+  "when_to_use": "For accounts that WANT to be assigned. This system does not. Either disable the wheel entirely, or run the modified no-assignment form described in the rules, which rolls instead of accepting assignment and therefore never reaches phase 2.",
+  "entry_rules": [
+    "CONFLICT FLAG: the standard wheel requires accepting assignment. This system's mandate is never to be assigned. Do not run the standard form",
+    "Modified no-assignment form, if enabled: run only the cash-secured put phase, and when the put would otherwise be assigned, roll down and out for a credit instead. Phase 2 then only occurs if a roll fails and assignment happens anyway - treated as a breach, not a plan",
+    "Phase 1 gates identical to cash-secured-put: IVR > 30, delta -0.25 to -0.30, 30-45 DTE, cash >= strike x 100, credit >= 1% of strike per 30 days",
+    "Only on names the account would tolerate holding: ADV >= 2M, price $20-$150 (so a round lot fits inside 20% of equity), no leveraged or inverse ETFs"
+  ],
+  "management_rules": [
+    "Put phase: close at 50% of credit or 21 DTE",
+    "Roll down and out for a net credit when delta exceeds -0.50; maximum 2 rolls per cycle, then close",
+    "Call phase (only after an unintended assignment): sell a 0.25-0.30 delta call with a strike at or above the assignment price. Never write a call below cost basis just to collect a credit",
+    "Track cost basis net of every credit ever collected on the symbol; that number, not the raw assignment price, is the real breakeven",
+    "Stop the wheel on a symbol after 3 consecutive losing cycles or a 20% drawdown in the underlying"
+  ],
+  "exit_rules": [
+    "Put phase: close at 50% of credit, 21 DTE, or the 2.5x credit stop",
+    "NEVER-ASSIGN RULE: roll or close any short put at extrinsic < $0.10, delta > -0.85, or within 1.0% of the strike at 14:30 ET on expiration day; hard backstop 15:45 ET",
+    "Call phase: close at 50% of credit or 21 DTE; same never-assign triggers on the short call plus the pre-ex-dividend check",
+    "If an unintended assignment occurs, log it as a system breach, sell the shares or begin the covered-call phase per explicit human decision, and disable new wheel entries on that symbol until reviewed"
+  ],
+  "assignment_risk": "By design, the classic wheel EXPECTS assignment on both legs - which is precisely why it must be modified or disabled here. The put assigns shares to you; the call assigns them away.",
+  "buying_power": "Put phase: strike x 100 in cash. Call phase: the shares themselves.",
+  "liquidity_needs": "Both phases need OI >= 500 and spreads <= 8% of mid, since rolling is the core mechanic.",
+  "common_mistakes": "Wheeling a stock in a downtrend and calling the accumulating losses income; writing calls below the assigned cost basis; running the standard wheel in a system whose core invariant is never to hold shares from assignment.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

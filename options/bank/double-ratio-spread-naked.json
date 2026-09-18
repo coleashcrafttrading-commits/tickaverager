@@ -1,0 +1,78 @@
+{
+  "name": "Double Ratio Spread (Short / Naked)",
+  "slug": "double-ratio-spread-naked",
+  "aliases": [
+    "double ratio write",
+    "front spread both sides",
+    "naked double ratio spread"
+  ],
+  "summary": "The inverse of the double backspread - buy 1 nearer-the-money option and sell 2 further-OTM options on both the call and put side; collects large premium with uncovered tails. Requires level 4 and is outside this system's risk policy.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.35 delta put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "0.15-0.20 delta put (further OTM, UNCOVERED beyond the 1:1 pair)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.35 delta call",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "0.15-0.20 delta call (further OTM, UNCOVERED beyond the 1:1 pair)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "net credit plus the width between the long and short strikes on whichever side finishes at the short strike, x 100",
+  "max_loss": "UNDEFINED - one extra naked short call (unlimited upside loss) and one extra naked short put (loss down to zero) per unit",
+  "breakevens": "two breakevens outside the short strikes; compute numerically at entry",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "strongly negative in both tails",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Never on this account. Level 3 forbids uncovered short calls and puts, and Alpaca will reject the order. Listed for completeness and so the screener can recognize and block the shape.",
+  "entry_rules": [
+    "PROHIBITED at Alpaca options level 3 - the second short on each side is uncovered. Requires level 4.",
+    "Order-validation rule for the system: reject any proposed structure where the count of short contracts of a given right exceeds the count of long contracts of that right at a protective strike",
+    "If it were ever run at level 4: naked short notional per unit <= 5% of equity, and a hard stop at 2x credit"
+  ],
+  "management_rules": [
+    "Not applicable - blocked at the order-validation layer"
+  ],
+  "exit_rules": [
+    "If somehow held: close the uncovered shorts first, then the longs, same session",
+    "Standard guards on every short: close if extrinsic < $0.10 or |delta| >= 0.85",
+    "Never hold into expiration day"
+  ],
+  "assignment_risk": "Unbounded. Each unit carries one uncovered short call (assignment creates 100 short shares with unlimited loss) and one uncovered short put (assignment creates a 100-share purchase obligation with no offsetting long).",
+  "buying_power": "Naked margin: roughly 20% of underlying notional minus the OTM amount per uncovered short, per contract.",
+  "liquidity_needs": "n/a - prohibited.",
+  "common_mistakes": "Confusing it with the backspread (which has the shorts closer to the money and is defined risk); assuming the 1 long per side covers 2 shorts.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "No - uncovered 0DTE shorts are the fastest path to an unrecoverable loss.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

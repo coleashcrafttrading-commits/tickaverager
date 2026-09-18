@@ -1,0 +1,77 @@
+{
+  "name": "Covered Call",
+  "slug": "covered-call",
+  "aliases": [
+    "Covered write",
+    "Call write against stock",
+    "Overwrite"
+  ],
+  "summary": "Own 100 shares per contract and sell an OTM call against them to harvest premium and cap upside; the core income overlay on an existing share position.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a - 100 shares per 1 short call; shares may be pre-existing",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.30 delta OTM (range 0.16-0.35); strike must be >= cost basis of the shares so an assignment would still be a gain",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(short call strike - share entry price) x 100 + credit received x 100, realized if shares are called at/above the strike",
+  "max_loss": "(share entry price - credit) x 100 if the stock goes to zero; effectively the full share risk less the premium",
+  "breakevens": "share entry price - credit received",
+  "greeks": {
+    "delta": "net long, roughly +70 per unit at a 0.30-delta strike (+100 shares, -30 from the short call)",
+    "gamma": "short gamma from the call; small negative overall, grows sharply inside 7 DTE",
+    "theta": "positive, roughly +$1 to +$4/day per contract at 30-45 DTE on a $50-$150 underlying",
+    "vega": "negative, short vol via the call"
+  },
+  "when_to_use": "IV Rank >= 30 on the underlying, neutral-to-mildly-bullish 30-day view, no earnings inside the option's life, and the shares are already held or are wanted long term. Best when the term structure is flat or in contango.",
+  "typical_dte": "30-45 DTE (sell), close/roll at 21 DTE",
+  "entry_rules": [
+    "Require exactly N x 100 shares free and unencumbered before submitting; reject if shares_held < 100 x contracts.",
+    "Require IV Rank >= 30 and IV Percentile >= 30 on the underlying over the trailing 252 days.",
+    "Select the expiry with DTE in [28,50]; prefer the standard monthly if open interest is >= 3x the nearest weekly.",
+    "Choose the strike with |delta| nearest 0.30 subject to strike >= share cost basis x 1.00 and strike >= spot x 1.01.",
+    "Require credit >= 0.6% of (spot x 100) for a 30-45 DTE write, otherwise skip the cycle.",
+    "Require option bid > 0.15, bid-ask spread <= 8% of mid, and open interest >= 250.",
+    "Skip if an earnings date or ex-dividend date with dividend > 1% of spot falls inside the option's life unless explicitly enabled."
+  ],
+  "management_rules": [
+    "Close at 50% of the credit received (buy-to-close at <= 0.50 x credit) - the primary target.",
+    "At 21 DTE, if not yet at 50%, close or roll to the next 30-45 DTE cycle regardless of P/L (gamma risk step-up).",
+    "Roll up-and-out when short call delta >= 0.70: buy back and sell a later expiry at 0.30 delta, only for a net credit; if no credit is available at a higher strike, roll out at the same strike.",
+    "Roll down-and-out when the stock falls > 10% and the call is worth <= 0.10: close the call and re-write at 0.30 delta in the next cycle.",
+    "Never let the roll lower the effective sale price below the share cost basis."
+  ],
+  "exit_rules": [
+    "HARD ASSIGNMENT GUARD: close any short call that is ITM or within 0.5% of its strike no later than 15:30 ET on expiration day. Never carry a short leg past the OCC $0.01 exercise-by-exception threshold.",
+    "Close the short call immediately, any DTE, if extrinsic value (call mid - max(0, spot - strike)) < 0.05 and delta > 0.85.",
+    "Ex-dividend guard: if the call is ITM and extrinsic < 1.10 x the declared dividend, close or roll before the close on the day BEFORE the ex-dividend date.",
+    "If closing the whole unit, submit the share sale and the call buyback together (or the call buyback first) so the shares are never naked-short-call collateral for even one tick.",
+    "Exit the entire unit if the shares breach the position stop (e.g. spot < entry x 0.85): buy back the call, then sell the shares."
+  ],
+  "assignment_risk": "The short call is the assignable leg. Early assignment is rational for the holder when the call is ITM and its extrinsic value is below the dividend, i.e. the day before ex-dividend; it is otherwise rare because the holder forfeits time value. Assignment simply delivers the covering shares, so it is not catastrophic, but it removes the equity position without warning and creates a taxable/accounting event the automation must reconcile. Pin risk on expiration Friday around the strike is real - flatten by 15:30 ET.",
+  "buying_power": "No incremental buying power beyond the shares; Alpaca reserves the 100 shares per contract as cover. Margin requirement on the short call is zero while cover is held.",
+  "liquidity_needs": "Underlying ADV >= 1M shares, option open interest >= 250 at the chosen strike, bid-ask <= 8% of mid. Large-cap equities and liquid ETFs (SPY, QQQ, IWM) are ideal.",
+  "common_mistakes": "Writing a strike below the share cost basis and locking in a loss on assignment; selling weeklies for headline annualized yield while eating gamma; holding through earnings for 'extra' IV and getting run over; letting an ITM call ride to expiry and getting the shares called away unintentionally; forgetting the ex-dividend early-assignment window.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Works on SPY/QQQ but the risk profile changes completely: almost no theta cushion, enormous gamma, and any ITM close means assignment. For 0DTE covered calls use 0.10-0.15 delta strikes, a fixed 60-70% profit take, and a mandatory buy-to-close by 15:30 ET no matter what. Alpaca returns no greeks/IV for 0DTE - compute delta locally with intraday T = minutes-to-close/(252 x 390).",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "single-leg"
+  ]
+}

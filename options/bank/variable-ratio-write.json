@@ -1,0 +1,72 @@
+{
+  "name": "Variable Ratio Write",
+  "slug": "variable-ratio-write",
+  "aliases": [
+    "Strap write",
+    "Split-strike ratio write"
+  ],
+  "summary": "Own 100 shares and sell two calls at DIFFERENT strikes (one near the money, one further out), widening the profit plateau versus a plain ratio write. Still one uncovered call.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.40-0.50 delta (covered by the shares)",
+      "dte_rule": "30-60 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.20-0.25 delta, further OTM (uncovered)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "achieved between the two strikes: (lower strike - basis + total credits) x 100",
+  "max_loss": "UNDEFINED above the upper strike; downside is basis - credits",
+  "breakevens": "lower: basis - total credits; upper: upper strike + total profit at the plateau",
+  "greeks": {
+    "delta": "+30 to +45 at entry, turning negative above the upper strike",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "Historical structure from the pre-electronic era for range-bound stocks with rich IV. FLAGGED: same level-4 problem as the ratio write, with a slightly friendlier payoff shape. Included for completeness only.",
+  "typical_dte": "30-60 DTE",
+  "entry_rules": [
+    "BLOCKED at level 3 for the same reason as the ratio write.",
+    "At level 4: strikes separated by at least 1.5 x ATR(14); combined credit >= 3% of spot.",
+    "Preferred conversion: buy a third, further-OTM call to cap the uncovered leg, converting the structure to covered call + call credit spread, which IS level 3."
+  ],
+  "management_rules": [
+    "Close at 30% of max profit.",
+    "Convert to defined risk on any move of 1 x ATR(14) toward the upper strike.",
+    "No rolling of the uncovered leg upward."
+  ],
+  "exit_rules": [
+    "Flatten all short calls by 15:30 ET on expiration day.",
+    "Immediate close if total short call delta exceeds 1.20 per 100 shares.",
+    "Hard stop at 2x total credit."
+  ],
+  "assignment_risk": "Assignment on the uncovered upper call produces short stock. Assignment on the lower call delivers the shares, leaving the upper call fully naked - a two-stage failure mode that is worse than a plain ratio write.",
+  "buying_power": "Naked call margin on the uncovered leg; level 4 only.",
+  "liquidity_needs": "n/a at this level.",
+  "common_mistakes": "Assuming the wider plateau reduces tail risk - it does not, it only moves the cliff.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

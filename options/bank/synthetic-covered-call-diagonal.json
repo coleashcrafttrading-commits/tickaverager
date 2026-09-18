@@ -1,0 +1,73 @@
+{
+  "name": "Synthetic Covered Call (Diagonal / PMCC)",
+  "slug": "synthetic-covered-call-diagonal",
+  "aliases": [
+    "poor man's covered call",
+    "PMCC",
+    "diagonal call spread",
+    "LEAPS covered call"
+  ],
+  "summary": "A long deep ITM long-dated call stands in for the 100 shares while a short-dated OTM call is sold against it, reproducing a covered call at a fraction of the capital.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM long-dated: delta 0.80-0.90, 180-365 DTE, extrinsic <= 3% of spot"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM short-dated: delta 0.25-0.35, 30-45 DTE. HARD CONSTRAINT: short_strike - long_strike must exceed the net debit paid, so the spread cannot lose money on a large upside move",
+      "dte_rule": "30-45 DTE, always a nearer expiry than the long leg"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "Approximately (short_strike - long_strike) x 100 - net_debit, plus any remaining extrinsic in the long call at the short leg's expiry",
+  "max_loss": "The net debit paid, if the underlying collapses and both calls expire worthless",
+  "greeks": {
+    "delta": "+0.50 to +0.60 per unit",
+    "gamma": "negative near the short strike",
+    "theta": "positive \u2014 the short call decays faster than the long",
+    "vega": "positive net (the long-dated leg has far more vega than the short-dated one), which is the key difference from a real covered call"
+  },
+  "breakevens": "Approximately long_strike + net_debit/100 at the short leg's expiry (path-dependent, not exact).",
+  "when_to_use": "Substituting for a covered call when the shares would consume too much capital. Best when the long-dated IV is low (IV rank < 30 for the back month) and the short-dated IV is elevated (front-month IV above back-month IV), so the structure sells rich and buys cheap.",
+  "typical_dte": "Long leg 180-365 DTE, short leg 30-45 DTE",
+  "entry_rules": [
+    "LEVEL 3 LEGAL: the short call is covered by the long call within the same multi-leg order (the long strike is lower and the long expiry is later), which satisfies Alpaca's same-order coverage rule. Submit as one 2-leg diagonal order.",
+    "CRITICAL WIDTH RULE: (short_strike - long_strike) x 100 must be GREATER than the net debit paid. If it is not, an upside move produces a loss on a structure that was supposed to be neutral-to-bullish. Reject any diagonal failing this test.",
+    "Long leg by delta: 0.80-0.90. Short leg by delta: 0.25-0.35. Both selected from the listed chain, not interpolated.",
+    "Long-leg extrinsic <= 3% of spot; front-month IV must exceed back-month IV by at least 2 vol points at entry.",
+    "Dividend yield of the underlying < 2.0%; the long call forgoes dividends and a high yield makes this structurally worse than a real covered call.",
+    "Size: net debit per unit <= 5% of equity ($2,500)."
+  ],
+  "management_rules": [
+    "Close the short call at 50% of its credit, or at 21 DTE, whichever comes first, then sell the next cycle's short call.",
+    "If the underlying rallies through the short strike and the short call delta exceeds 0.80, roll the short call up-and-out for a net credit. Never roll for a debit, and never roll to a strike below the long strike plus the total debit paid.",
+    "Close the entire diagonal if the long call's delta falls below 0.60 \u2014 the structure has become a directional loss, not a premium engine.",
+    "Roll the long leg out when its DTE falls below 90.",
+    "Track cumulative credits: the structure is profitable only when accumulated short-call credits plus the long call's remaining value exceed the original debit."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on its expiration day if spot is within 1.0% of the short strike or above it.",
+    "If the short call is ITM at any point on its expiration day, close it by 14:00 ET.",
+    "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic < 1.25 x declared_dividend. This is more dangerous here than in a real covered call: assignment delivers a 100-SHARE SHORT position, because there are no shares to deliver \u2014 only a long call.",
+    "If the short call is ever assigned, the account is short 100 shares against a long call. Flatten within the same session by exercising the long call or by buying the shares back; do not carry it overnight.",
+    "Close the long call by 15:00 ET on ITS expiration day if ITM, to prevent auto-exercise into a 100-share purchase."
+  ],
+  "assignment_risk": "On the short call, and this is the structure's defining hazard: unlike a real covered call there are no shares to deliver, so assignment creates a SHORT 100-share position. The long call caps the loss economically but does not prevent the short share position from existing, with its borrow fee, dividend liability and buy-in risk. The correct response is to exercise the long call to cover, which takes a session. This is why the dividend rule and the expiry-day close rule are mandatory rather than advisory.",
+  "alpaca_level": 3,
+  "buying_power": "Net debit paid. The broker treats the long call as the cover, so no additional short-call requirement. Roughly $1,500-$2,000 per unit on a $100 underlying, versus $10,000 for a real covered call.",
+  "liquidity_needs": "The long-dated deep ITM strike is the binding constraint: OI >= 250 and bid-ask <= 2% of the option price. Front-month short strike needs OI >= 500 and bid-ask <= $0.05.",
+  "common_mistakes": "Violating the width rule and building a diagonal that loses on a rally. Rolling the short call down for a credit when the underlying falls, which caps the recovery. Forgetting that assignment produces short shares, not a simple share sale.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE short leg against a LEAPS is technically possible and Alpaca would accept it, but the credit is tiny relative to the fees and the assignment probability at the close is the highest of any tenor. Use 30-45 DTE short legs.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

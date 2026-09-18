@@ -1,0 +1,68 @@
+{
+  "name": "Cash-Secured Put Roll Down and Out",
+  "slug": "csp-roll-down-and-out",
+  "aliases": [
+    "Defending a short put",
+    "Rolling a CSP"
+  ],
+  "summary": "Management structure: close a threatened short put and reopen at a lower strike in a later expiry for a net credit, delaying or avoiding assignment.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "close the existing short put (now 0.55+ delta)",
+      "dte_rule": "current expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "new strike <= old strike, at 0.25-0.30 delta in the new cycle",
+      "dte_rule": "next cycle, 30-45 DTE, at least 14 days beyond the old expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "cumulative credits x 100",
+  "max_loss": "(new strike - cumulative credits) x 100",
+  "breakevens": "new strike - cumulative credits",
+  "greeks": {
+    "delta": "reduced back toward +0.30 per contract",
+    "gamma": "reduced by pushing expiry out",
+    "theta": "reset",
+    "vega": "more negative"
+  },
+  "when_to_use": "Short put delta >= 0.55 with DTE <= 21 and the system wants to avoid taking the shares now. Only valid if the underlying's thesis is intact.",
+  "typical_dte": "execute at 14-21 DTE; new leg 30-45 DTE",
+  "entry_rules": [
+    "Trigger: short put delta <= -0.55 OR spot < strike x 1.01, with DTE <= 21.",
+    "Execute as ONE multi-leg roll order (buy-to-close + sell-to-open).",
+    "Require NET CREDIT. If no lower strike pays a credit, roll out at the SAME strike for a credit; if that also fails, close the position and take the loss.",
+    "Require cash reserve for the new strike before submitting.",
+    "Do not roll into an expiry containing earnings.",
+    "Hard cap of 2 rolls per position."
+  ],
+  "management_rules": [
+    "Track cumulative credits; the position must remain profitable at the new breakeven or the roll is just loss-deferral.",
+    "If total time in the position exceeds 90 days, close regardless.",
+    "If the underlying breaks its 200-day SMA by more than 5%, stop rolling and close."
+  ],
+  "exit_rules": [
+    "If the roll cannot be filled by 15:30 ET on expiration day, buy back the short put outright - never carry it into expiration.",
+    "Standard extrinsic guard on the old leg until it is closed.",
+    "Kill the whole position if the unrealized loss exceeds 1.5% of account equity."
+  ],
+  "assignment_risk": "The gap between closing and reopening is the exposure window - a combo order removes it. A deep ITM put being rolled may already be at early-exercise risk; if extrinsic < 0.05, close rather than roll.",
+  "buying_power": "Cash reserve for the NEW strike (which is lower, so slightly less).",
+  "liquidity_needs": "Both expiries liquid; roll net credit must exceed 10% of the roll's bid-ask cost.",
+  "common_mistakes": "Rolling for a debit; rolling forever and turning a defined bad trade into an unbounded time commitment; rolling without re-checking that the cash reserve exists.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Do not roll 0DTE puts - close them.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

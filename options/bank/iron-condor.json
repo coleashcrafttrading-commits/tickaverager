@@ -1,0 +1,95 @@
+{
+  "name": "Short Iron Condor",
+  "slug": "iron-condor",
+  "aliases": [
+    "iron condor",
+    "short iron condor",
+    "IC",
+    "condor spread (iron)"
+  ],
+  "summary": "Sell an OTM put spread and an OTM call spread in the same expiry for a net credit; bets the underlying stays inside the short strikes and IV contracts.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short put strike minus wing width W (W = 5% of spot, rounded to the listed strike increment; min $1, typical $5 on SPY/QQQ)",
+      "dte_rule": "same expiry as all legs"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "delta-selected: |delta| between 0.14 and 0.20 (target 0.16)",
+      "dte_rule": "same expiry as all legs"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "delta-selected: delta between 0.14 and 0.20 (target 0.16)",
+      "dte_rule": "same expiry as all legs"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short call strike plus the same wing width W as the put side (balanced wings)",
+      "dte_rule": "same expiry as all legs"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit received x 100 per contract, realized only if both shorts expire OTM (we never let that happen; see exit rules)",
+  "max_loss": "(wider wing width - net credit) x 100 per contract",
+  "breakevens": "lower BE = short put strike - net credit per share; upper BE = short call strike + net credit per share",
+  "greeks": {
+    "delta": "near zero at entry, target |net delta| <= 0.05 per 1-lot (5 share-equivalents)",
+    "gamma": "negative, small at 45 DTE, grows sharply inside 14 DTE",
+    "theta": "positive, roughly +0.5% to +1.5% of max loss per day at 45 DTE",
+    "vega": "negative, roughly -0.05 to -0.15 per 1-lot at 45 DTE"
+  },
+  "typical_dte": "30-60 DTE, target 45",
+  "when_to_use": "IV rank >= 30 (ideally >= 40), IV percentile >= 40, underlying range-bound: ADX(14) < 20 and price within 1.0 ATR(20) of the 20-day SMA, term structure in contango, no earnings/ex-dividend/FOMC before the chosen expiry",
+  "entry_rules": [
+    "Alpaca options level >= 3 (defined risk; no naked leg) - allowed on the paper account",
+    "IV rank(252-day) >= 30",
+    "Net credit >= 33% of the wing width W (e.g. >= $1.65 on a $5 wing); reject the trade otherwise",
+    "Short strikes at 0.14-0.20 delta on both sides; if the chain has no strike in that band, take the nearest strike with delta <= 0.20",
+    "Both wings the same width W (unbalanced = use the broken-wing entry instead)",
+    "DTE between 30 and 60",
+    "No earnings report, ex-dividend date, or scheduled FOMC/CPI inside the expiry window",
+    "Per-leg liquidity: open interest >= 500, day volume >= 100, bid-ask spread <= 10% of leg mid or <= $0.10, whichever is larger",
+    "Underlying price >= $20 and 20-day ADV >= 2,000,000 shares",
+    "Position size: max loss of the structure <= 2% of account equity ($1,000 on $50k); total short-premium buying power across all open structures <= 35% of equity",
+    "Submit as a single Alpaca 4-leg mleg limit order, net credit, limit = mid of the structure; if unfilled after 60s, improve by $0.05 up to 3 times, then cancel (never market order a 4-leg)"
+  ],
+  "management_rules": [
+    "Take profit: close the entire structure at 50% of the credit received (buy back for <= 0.50 x credit)",
+    "Time stop: close at 21 DTE regardless of P/L (tastytrade SPY study: managing at 50%/21 DTE raised win rate and cut time in trade)",
+    "Loss stop: close if the structure can only be bought back for >= 2.0x the credit received (i.e. -100% of credit as loss, roughly 2x credit debit)",
+    "Tested-side roll: if either short strike's |delta| >= 0.30, roll the untested side's spread toward the money to a 0.25-0.30 delta short, same expiry, for additional credit - only once per trade, and only if DTE > 21",
+    "Never roll a losing side out in time for a debit; roll only for a net credit or close",
+    "Delta guard: if net position delta exceeds +/-0.20 per 1-lot, either roll the untested side or close",
+    "If IV rank falls below 15 while the trade is profitable, take profit early (the vega edge is gone)"
+  ],
+  "exit_rules": [
+    "HARD ASSIGNMENT GUARD: submit a closing order for the entire structure no later than 15:45 ET on expiration day, regardless of P/L, even if both shorts are OTM. Nothing with a short leg is ever held to settlement.",
+    "Close immediately (market-adjacent marketable limit) if any short strike goes ITM by more than 0.25 x W, or a short leg's delta >= 0.85, or a short leg's extrinsic value < $0.10",
+    "Dividend guard: if the short call's extrinsic value < the projected dividend amount, close or roll that call spread before the close of the session preceding the ex-dividend date",
+    "Pin guard on expiration day: if the underlying is within 0.30% of either short strike at 15:30 ET, close immediately rather than waiting for 15:45",
+    "If any leg becomes untradeable (no bid, halted underlying), close the remaining tradeable legs that carry short risk first, then flatten the longs"
+  ],
+  "assignment_risk": "Both short legs (put and call) are American-style and can be assigned any time. Real risk appears when a short goes deep ITM with little extrinsic, and on short calls the session before ex-dividend. Assignment delivers 100 shares per contract - the long wing does NOT prevent it, it only caps the loss.",
+  "buying_power": "Defined risk: (wider wing width - net credit) x 100 per contract held as margin. Alpaca releases it on close.",
+  "liquidity_needs": "Penny-wide or near-penny chains only. Per leg: OI >= 500, volume >= 100, spread <= 10% of mid. Effectively SPY, QQQ, IWM, and large-cap single names with weeklies.",
+  "common_mistakes": "Wings too narrow for the credit collected; selling in low IV rank; holding through 21 DTE into the gamma zone; letting a short leg go ITM overnight; legging in one vertical at a time and getting caught directional; market orders on 4 legs.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Workable on SPY/QQQ but gamma is extreme. Use 0.08-0.12 delta shorts, enter no earlier than 10:00 ET (after the opening range) and no later than 13:30 ET, take profit at 40-50% of credit, hard stop at 2x credit, and force-close at 15:45 ET. Alpaca returns no greeks/IV on 0DTE at any tier - compute Black-Scholes greeks locally with T measured in fractional days (minutes to 16:00 ET / 525600) and an intraday IV solved from the mid.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

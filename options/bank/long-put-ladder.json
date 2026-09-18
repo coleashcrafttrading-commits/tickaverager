@@ -1,0 +1,73 @@
+{
+  "name": "Long Put Ladder (Bear Put Ladder)",
+  "slug": "long-put-ladder",
+  "summary": "Buy 1 higher put, sell 1 middle put, sell 1 lower put; a bear put spread financed by an extra short put, leaving large risk below the bottom strike.",
+  "aliases": [
+    "bear put ladder",
+    "short put ladder (UK usage)",
+    "put ladder write"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "K3 = ATM or slightly ITM, put delta -0.50 to -0.60",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "K2 = K3 - W, put delta -0.30 to -0.35",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "K1 = K2 - W, put delta -0.15 to -0.20 (UNCOVERED unless cash-secured)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit (small) or credit",
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "COMPLETENESS / LEVEL 4 unless the extra short put is fully cash-secured. IV rank > 50 with a target between K1 and K2. Under Level 3 use a put butterfly or put BWB instead.",
+  "max_profit": "(K3 - K2) x 100 - net debit, flat between K1 and K2",
+  "max_loss": "very large below K1; treat as UNDEFINED for risk sizing",
+  "breakevens": "upper = K3 - debit/100; lower = K1 - (K3 - K2) + debit/100",
+  "greeks": {
+    "delta": "negative at entry, sharply positive below K1",
+    "gamma": "negative",
+    "theta": "positive once spot is below K3",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "AT LEVEL 3: permitted only if the extra short put is fully cash-secured - reserve K1 x 100 in cash beyond the spread requirement. Otherwise the router must reject it as level 4.",
+    "Level 4 version: IV rank >= 50; K1 delta <= -0.20.",
+    "Level-3 substitute: buy a fourth put below K1 to form a put condor, or use a put BWB."
+  ],
+  "management_rules": [
+    "Close at 50% of max profit.",
+    "Close immediately if spot trades below K1.",
+    "Close at 21 DTE regardless of P/L."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: two short puts; flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if either short put is ITM with extrinsic < $0.10.",
+    "Close any ITM short put by 2 DTE."
+  ],
+  "assignment_risk": "Assignment on both shorts buys 200 shares per unit, hedged by only 1 long put; the residual is an outright long 100-share position acquired above market during a decline.",
+  "buying_power": "Spread requirement plus cash-securing for the extra short put (K1 x 100), or naked put margin at Level 4.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Miscounting legs and running it uncovered at Level 3; being right about direction and still losing because price broke through K1.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "moderately bearish with a capped target; short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

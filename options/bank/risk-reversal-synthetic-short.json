@@ -1,0 +1,68 @@
+{
+  "name": "Reverse Risk Reversal (Synthetic Short Stock / Collar Without Stock)",
+  "slug": "risk-reversal-synthetic-short",
+  "aliases": [
+    "synthetic short stock",
+    "short combo",
+    "collar without stock",
+    "reverse combo"
+  ],
+  "summary": "Buy a put and sell a call at the same strike and expiry; replicates 100 short shares with delta -1.00. This is the structure people mean when they say 'a collar without the stock' -- and without the stock it is not a collar, it is a naked synthetic short.",
+  "bias": "bearish",
+  "net": "either",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM strike, identical to the call's strike."
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Identical strike to the put.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "(strike * 100) - net cost, as the underlying approaches zero",
+  "max_loss": "UNDEFINED -- unlimited above the strike, exactly like being short 100 shares",
+  "breakevens": "strike - net debit per share (or strike + net credit per share)",
+  "greeks": {
+    "delta": "-1.00 per unit",
+    "gamma": "approximately zero",
+    "theta": "approximately zero",
+    "vega": "approximately zero"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "Used institutionally to short hard-to-borrow names without a borrow. For this account: never. The short call is uncovered and the loss is unbounded to the upside, which is the worst risk profile available.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. The short call is uncovered -- Level 4, which Alpaca does not offer. Alpaca's MLeg engine rejects it outright.",
+    "IMPORTANT NAMING NOTE: a true COLLAR is long 100 shares + long put + short call, and is a Level 1/2 hedged structure. Strip out the stock and the short call becomes naked. The system must never build a 'collar' without first verifying 100 long shares per contract exist in the account, and Alpaca does not accept equity legs inside an MLeg order, so a real collar must be assembled as separate orders.",
+    "Defined-risk substitute that expresses the same view: a bear call spread or a bear put spread.",
+    "If it were enabled: same strike both legs, DTE 45-90, and the combo must price near synthetic-forward fair value."
+  ],
+  "management_rules": [
+    "If enabled: manage as 100 short shares -- a hard stop above resistance, and a mandatory buy-in rule.",
+    "Close or roll by 21 DTE.",
+    "Close before every ex-dividend date: a short synthetic owes the dividend if the short call is assigned."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: the short call goes ITM on any rally -- exactly when the trade is losing. Close the combo the moment the short call's extrinsic drops below $0.10.",
+    "DIVIDEND GUARD: close by the close of the session before ex-dividend whenever the short call is ITM and extrinsic < 1.5 * the dividend.",
+    "Close if the underlying is above (strike - $0.05) at 15:30 ET on expiry day."
+  ],
+  "assignment_risk": "The short call is naked. Assignment creates a short stock position of 100 shares per unit with no long stock and only a long put as economic (not operational) cover. On a dividend payer you would also owe the dividend. This is the highest-consequence assignment scenario in the two-leg family.",
+  "buying_power": "Reg-T naked call margin, roughly 20% of underlying value minus OTM amount plus premium. Not available on Alpaca.",
+  "liquidity_needs": "ATM strikes; combo should quote near synthetic fair value.",
+  "common_mistakes": "Calling it a collar and assuming it is conservative; opening it with the intention of buying the shares later; ignoring dividend liability on the short call.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Guaranteed assignment on one leg at expiry and no time for the view to work. Not permitted.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

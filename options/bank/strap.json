@@ -1,0 +1,69 @@
+{
+  "name": "Strap",
+  "slug": "strap",
+  "summary": "Buy 2 ATM calls and 1 ATM put at the same strike and expiry; a long straddle weighted bullish, with three contracts and no short legs.",
+  "aliases": [
+    "strap straddle",
+    "2:1 bullish straddle"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ATM, call delta 0.48-0.52",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "SAME ATM strike as the calls",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "typical_dte": "1-30 DTE, usually event-driven",
+  "when_to_use": "IV rank < 25 with a catalyst you expect to resolve with a big move, probably up. The 2:1 call weighting expresses the directional lean while keeping the downside payoff. Expensive - three long premiums - so reserve it for genuinely low IV.",
+  "max_profit": "UNLIMITED to the upside (2x the slope of a straddle); large but bounded to the downside",
+  "max_loss": "net debit paid, at the strike. Defined.",
+  "breakevens": "upside = strike + debit/200 (two calls share the move); downside = strike - debit/100",
+  "greeks": {
+    "delta": "positive at entry, approximately +50 per unit (2 x 0.50 - 0.50)",
+    "gamma": "strongly positive",
+    "theta": "strongly negative - three long premiums decaying",
+    "vega": "strongly positive"
+  },
+  "entry_rules": [
+    "IV rank < 25; reject if IV rank >= 35 (you would be buying three overpriced options).",
+    "All three contracts on the identical ATM strike and expiry.",
+    "Total debit <= 1% of equity per unit.",
+    "A dated catalyst must fall inside the expiry.",
+    "Strike liquidity: OI >= 1000 at the ATM strike, per-leg spread <= max($0.05, 8% of mid).",
+    "Single 3-contract multi-leg order at mid, pay up to mid + $0.03."
+  ],
+  "management_rules": [
+    "Close at 50% gain on the debit, or on the session after the catalyst resolves, whichever comes first.",
+    "Time stop: close if 40% of the calendar time to expiry has elapsed with no move exceeding 0.75 x the implied expected move.",
+    "Hard stop at 50% loss of the debit.",
+    "Consider closing the put leg alone if the underlying gaps up more than 1.5 expected moves, converting the remainder into a pure long call position."
+  ],
+  "exit_rules": [
+    "No short legs, so there is no assignment risk to the account.",
+    "Still close all legs by 15:00 ET on expiration day - long ITM options are auto-exercised by the OCC at $0.01 ITM, which would deliver SHARES into the account. Never allow a long option to be auto-exercised; close it for value.",
+    "Close any long leg trading below $0.05 rather than riding it to zero, to avoid auto-exercise surprises on the other side."
+  ],
+  "assignment_risk": "None from short legs. The real operational risk is the opposite: OCC exercise-by-exception will automatically exercise any long option that finishes $0.01 or more ITM, delivering 100 or 200 shares into the account. The system must close every long leg before expiry for exactly this reason.",
+  "buying_power": "Net debit paid only.",
+  "liquidity_needs": "Moderate; needs a tight ATM chain because the position pays three spreads on entry and three on exit.",
+  "common_mistakes": "Buying it in high IV before earnings and losing to the vol crush even when the direction is right; holding through the time decay of three long premiums; forgetting auto-exercise on the winning leg.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Usable as a 0DTE event structure around 08:30 or 10:00 ET data prints, but theta at 0DTE is brutal on three long premiums - hold minutes, not hours, and use a hard time stop (close by 30 minutes after the print regardless). Alpaca gives no 0DTE greeks; solve IV from the mid and compute locally.",
+  "alpaca_level": 2,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "long-vol with a bullish tilt",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

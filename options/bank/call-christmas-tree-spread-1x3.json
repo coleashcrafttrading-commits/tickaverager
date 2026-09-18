@@ -1,0 +1,62 @@
+{
+  "name": "Call Christmas Tree Spread (1x3, uncovered)",
+  "slug": "call-christmas-tree-spread-1x3",
+  "summary": "Buy 1 ATM call and sell 3 further-OTM calls at one higher strike; the historical 'christmas tree', which leaves 2 uncovered short calls and unlimited upside risk.",
+  "aliases": [
+    "1x3 call ratio",
+    "christmas tree spread",
+    "ladder write"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM, call delta 0.45-0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 3,
+      "strike_rule": "OTM strike at call delta 0.15-0.20",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "typical_dte": "21-45 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS ONLY - DO NOT TRADE IN THIS SYSTEM. Historically used by floor traders with deep capital in very high IV. The 2 uncovered short calls create theoretically unlimited loss and require naked-call approval.",
+  "max_profit": "net credit + (short strike - long strike) x 100, at the short strike",
+  "max_loss": "UNDEFINED (unlimited above the short strike)",
+  "breakevens": "lower = long strike - credit/100; upper = short strike + [(short - long) + credit/100] / 2",
+  "greeks": {
+    "delta": "positive at entry, flips sharply negative above the short strike",
+    "gamma": "strongly negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "BLOCKED: requires Alpaca options level 4 (uncovered short calls). Level 3 accounts cannot and must not submit this. The automated system should reject this slug at the order-router layer.",
+    "If ever enabled: IV rank > 70, short strike delta <= 0.15, and a hard-coded buy-stop hedge in the underlying above the upper breakeven."
+  ],
+  "management_rules": [
+    "N/A under Level 3. If enabled at Level 4: close at 50% of credit, and close unconditionally if spot trades within 0.5 x (short - long) of the short strike."
+  ],
+  "exit_rules": [
+    "N/A - not tradeable at Level 3.",
+    "If ever enabled: ASSIGNMENT GUARD - 3 short calls, 2 of them naked; flatten by 15:45 ET on expiration day and immediately on any ITM short call with extrinsic < $0.10; close before every ex-dividend date when the short calls are ITM."
+  ],
+  "assignment_risk": "Catastrophic. Three short calls, two of them uncovered: assignment creates a short stock position of 200 shares per unit with no offsetting long option, at any price. On an index ETF that is an unbounded liability.",
+  "buying_power": "Naked short call margin on 2 contracts: roughly 20% of underlying value per uncovered contract plus premium, recomputed daily. A single SPY unit would tie up most of a $50k account.",
+  "liquidity_needs": "Irrelevant - not tradeable here.",
+  "common_mistakes": "Confusing this with the 1-3-2 christmas tree BUTTERFLY, which is defined risk and Level 3 eligible. The system must keep the two slugs strictly separate.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Absolutely not. Uncovered short calls at 0DTE on an American-style ETF are the fastest path to an assignment disaster.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral-to-mildly-bullish, short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

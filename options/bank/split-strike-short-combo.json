@@ -1,0 +1,68 @@
+{
+  "name": "Split-Strike Short Combo (OTM Reverse Risk Reversal)",
+  "slug": "split-strike-short-combo",
+  "aliases": [
+    "short combo",
+    "bearish risk reversal",
+    "sell call buy put",
+    "zero-cost bearish reversal"
+  ],
+  "summary": "Sell an OTM call and buy an OTM put in the same expiry, typically for near-zero cost; bearish exposure with unlimited upside risk.",
+  "bias": "bearish",
+  "net": "either",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM call at 0.20-0.30 delta (above spot)."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM put whose premium approximately equals the call credit; usually a lower delta than the call because put skew makes puts pricier.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "(put strike * 100) - net cost, as the underlying approaches zero",
+  "max_loss": "UNDEFINED -- unlimited above the short call strike",
+  "breakevens": "if opened flat: below = put strike; above = call strike, adjusted by the net debit/credit",
+  "greeks": {
+    "delta": "negative, roughly -0.40 to -0.60 per unit",
+    "gamma": "positive below the put strike, negative above the call strike",
+    "theta": "near zero at entry",
+    "vega": "near zero at entry; long vega below, short vega above"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "Bearish exposure financed by selling an upside call -- the mirror of the long combo. Skew works AGAINST you here: you buy the expensive put with the cheap call's credit, so the zero-cost put strike ends up uncomfortably far away.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. The short call is uncovered -- Level 4, unavailable on Alpaca, rejected by the MLeg covered-legs rule.",
+    "Defined-risk substitute: sell a bear CALL SPREAD and use the credit to buy a put or put spread, as two separate Level 3 MLeg orders.",
+    "If it were enabled: net cost between -$0.05 and +$0.05; short call 0.20-0.30 delta; DTE 45-90; and an explicit check that the resulting put strike is within 1.5 ATR(20) of spot, otherwise the hedge is decorative.",
+    "Sizing would have to assume unlimited upside risk -- there is no correct size for that on a $50k account."
+  ],
+  "management_rules": [
+    "If enabled: take profit when the long put reaches 2x entry value or the underlying breaks 1.5 ATR below the put strike.",
+    "Close at 21 DTE.",
+    "Stop: close if the underlying trades above the short call strike.",
+    "Never roll the short call up and out on a running underlying."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: close the short call whenever it is ITM with extrinsic < $0.10, and unconditionally if the underlying is above (call strike - $0.05) at 15:30 ET on expiry day.",
+    "DIVIDEND GUARD: close before ex-dividend whenever the short call is ITM and extrinsic < 1.5 * dividend."
+  ],
+  "assignment_risk": "The short call is uncovered. Assignment creates short stock (100 shares per contract) plus a dividend obligation on payers. The long put caps nothing above the call strike.",
+  "buying_power": "Reg-T naked call margin less the long put premium. Not available on Alpaca.",
+  "liquidity_needs": "OTM strikes both sides; OI >= 500.",
+  "common_mistakes": "Assuming skew symmetry with the long combo; underestimating how far out the financed put ends up; holding a short call through a squeeze.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not permitted and structurally pointless at 0DTE.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

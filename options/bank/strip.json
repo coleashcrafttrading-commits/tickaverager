@@ -1,0 +1,69 @@
+{
+  "name": "Strip",
+  "slug": "strip",
+  "summary": "Buy 2 ATM puts and 1 ATM call at the same strike and expiry; a long straddle weighted bearish.",
+  "aliases": [
+    "strip straddle",
+    "2:1 bearish straddle"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ATM, put delta -0.48 to -0.52",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "SAME ATM strike as the puts",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "typical_dte": "1-30 DTE, event-driven",
+  "when_to_use": "IV rank < 25 with a catalyst and a downside lean. Note that put skew makes the 2 long puts relatively expensive, so the strip usually costs more than the strap on the same strike - factor that into the expected-move math.",
+  "max_profit": "very large to the downside (2x the slope of a straddle); unlimited but single-weighted to the upside",
+  "max_loss": "net debit paid, at the strike. Defined.",
+  "breakevens": "downside = strike - debit/200; upside = strike + debit/100",
+  "greeks": {
+    "delta": "negative at entry, approximately -50 per unit",
+    "gamma": "strongly positive",
+    "theta": "strongly negative",
+    "vega": "strongly positive"
+  },
+  "entry_rules": [
+    "IV rank < 25; reject if IV rank >= 35.",
+    "All three contracts on the identical ATM strike and expiry.",
+    "Total debit <= 1% of equity per unit.",
+    "A dated catalyst inside the expiry.",
+    "ATM OI >= 1000, per-leg spread <= max($0.05, 8% of mid).",
+    "Single 3-contract multi-leg order at mid, pay up to mid + $0.03."
+  ],
+  "management_rules": [
+    "Close at 50% gain on the debit, or the session after the catalyst, whichever first.",
+    "Time stop: close if 40% of the time to expiry has elapsed with no move beyond 0.75 expected moves.",
+    "Hard stop at 50% loss of the debit.",
+    "Consider closing the lone call if the underlying breaks down hard, leaving a pure long put position."
+  ],
+  "exit_rules": [
+    "No short legs, so no assignment risk.",
+    "Close every leg by 15:00 ET on expiration day: OCC exercise-by-exception auto-exercises longs that finish $0.01 ITM, which would deliver 100 or 200 shares into the account.",
+    "Close any leg worth less than $0.05 rather than letting it expire."
+  ],
+  "assignment_risk": "None from short legs; the exposure is auto-exercise of the winning long leg delivering shares. Close everything before expiry.",
+  "buying_power": "Net debit paid only.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Paying up for skewed puts and needing an outsized move just to break even; buying in high IV; holding three decaying premiums through a quiet tape.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Same as the strap: event-window only, minutes not hours, hard time stop, greeks computed locally because Alpaca supplies none at 0DTE.",
+  "alpaca_level": 2,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "long-vol with a bearish tilt",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

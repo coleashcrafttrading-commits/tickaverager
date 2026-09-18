@@ -1,0 +1,71 @@
+{
+  "name": "Put Ratio Backspread (1x2)",
+  "slug": "put-ratio-backspread",
+  "summary": "Sell 1 nearer put and buy 2 further OTM puts for a credit or flat; a defined-upside, large-downside-payoff crash hedge.",
+  "aliases": [
+    "put backspread",
+    "reverse put ratio spread",
+    "1x2 long put ratio"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM or slightly ITM, put delta -0.55 to -0.65",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "OTM strike at put delta -0.30 to -0.35, chosen so the package opens at a credit or zero cost",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit (preferred) or zero cost",
+  "typical_dte": "21-60 DTE, or 1-5 DTE for event trades",
+  "when_to_use": "IV rank < 30 and FLAT put skew - the hard part, because equity put skew is usually steep enough to make a credit backspread impossible. Check skew first: if the OTM puts trade at a higher IV than the nearer put by more than 3 vol points, this structure will not open for a credit and should be skipped.",
+  "max_profit": "(short strike x 100) minus the loss zone, effectively very large on a move toward zero",
+  "max_loss": "(short strike - long strike) x 100 - net credit, exactly at the long strike. Defined.",
+  "breakevens": "upper: none when opened for a credit; lower breakeven = long strike - (short strike - long strike) + credit/100",
+  "greeks": {
+    "delta": "slightly negative to flat at entry, strongly negative below the long strike",
+    "gamma": "positive below the long strike",
+    "theta": "negative between the strikes",
+    "vega": "positive"
+  },
+  "entry_rules": [
+    "Open for a net CREDIT or zero cost only; reject debits.",
+    "Skew filter: (IV of the long strike) - (IV of the short strike) <= 3.0 vol points; otherwise the structure is not economically available.",
+    "Short leg delta -0.55 to -0.65; long legs -0.30 to -0.35.",
+    "Max loss <= 1.5% of equity per unit.",
+    "IV rank < 30.",
+    "Both strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-contract multi-leg order at mid; must remain a credit after slippage."
+  ],
+  "management_rules": [
+    "Close at 100% of the max-loss amount in profit.",
+    "Close at 14 DTE regardless of P/L.",
+    "Stop at 60% of the theoretical max loss.",
+    "Close the session after the catalyst resolves."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 1 short put, covered by 2 longs but assignable. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short put is ITM with extrinsic < $0.10 - the winning scenario.",
+    "Close no later than 14 DTE."
+  ],
+  "assignment_risk": "One short put, covered by two longs. Assignment buys 100 shares at the short strike, which the long puts hedge economically but which the system must not hold. Because the winner drives the short deep ITM, assignment risk rises precisely when the trade is working.",
+  "buying_power": "(short strike - long strike) x 100 - credit, per unit.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Ignoring put skew and paying a debit, which creates a loss on a rally too; using it as a permanent hedge and bleeding theta; being right about direction but having the underlying stop exactly at the long strike (the maximum-loss point).",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Works 0DTE as a crash-day structure but put skew is steepest at 0DTE, so credits are rare; expect to pay a small debit and size accordingly. Time-stop by 14:00 ET, flatten by 15:45 ET.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "strongly bearish, long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,75 @@
+{
+  "name": "Put Ratio Backspread 1x2",
+  "slug": "put-ratio-backspread-1x2",
+  "aliases": [
+    "put backspread",
+    "reverse put ratio spread",
+    "long put backspread",
+    "crash spread"
+  ],
+  "summary": "Sell one nearer put and buy two further-OTM puts in the same expiry; a long-volatility, explosively bearish structure with a defined loss valley and large payoff in a crash.",
+  "bias": "long_vol",
+  "net": "either",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short put ATM to slightly ITM, 0.45-0.60 delta. Covered by one of the two long puts within the same order."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "Two long puts at 0.25-0.35 delta, one or more strike widths below the short strike. Tune width so the package opens for a credit or a small debit.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "very large below the long strike -- (long strike * 100 * 1) approaching zero underlying, net of the structure",
+  "max_loss": "(short strike - long strike) * 100 - net credit (or + debit), at exactly the long strike at expiry. Defined.",
+  "breakevens": "upper: short strike - net credit per share (none if opened for a credit); lower: long strike - max loss per share",
+  "greeks": {
+    "delta": "near zero to slightly negative at entry",
+    "gamma": "positive below the long strike, negative in the valley",
+    "theta": "negative -- net long one option",
+    "vega": "positive, and the best-behaved long-vega structure in the family because put IV expands hardest in a selloff"
+  },
+  "typical_dte": "45-90 DTE",
+  "when_to_use": "IV rank <= 30 with crash risk you want convex exposure to: a topping tape, a credit-event narrative, or a macro catalyst. Note the structural headwind -- put skew means the two long puts you buy are priced at HIGHER IV than the single put you sell, so a credit entry is harder than on the call side. If you can open a put backspread for a credit, the skew is unusually flat, which is itself a signal.",
+  "entry_rules": [
+    "IV rank <= 30, AND check skew: if 25-delta put IV exceeds ATM IV by more than 8 vol points, the long wings are too expensive and the structure will require a large debit -- skip.",
+    "Bearish trigger: close below the 50-SMA with the 20-EMA crossing under it, a break of a 60-day base, or a dated macro catalyst inside the expiry.",
+    "Short put delta 0.45-0.60; long puts delta 0.25-0.35.",
+    "Ratio exactly 1 short : 2 long (GCD 1). The short put is covered by one long put inside the same MLeg order -- this IS submittable at Level 3.",
+    "Net credit, or a net debit no greater than 10% of (short strike - long strike).",
+    "Max loss (width*100 - credit) <= 2% of equity.",
+    "DTE >= 45.",
+    "OI >= 500 both strikes; quoted size >= 20 on the long strike."
+  ],
+  "management_rules": [
+    "Take profit: close at 2.0x the max-loss amount in profit, or when the underlying trades 1.5 ATR(20) below the long strike.",
+    "Also take profit on a pure vol move: if IV rank rises above 60 while price is still between the strikes, close -- you have been paid in vega and the valley is still ahead of you.",
+    "Time stop: close at 21 DTE if the move has not occurred.",
+    "Valley stop: at 30 DTE, if the underlying is within 2% of the long strike, close.",
+    "Delta drift: if net delta is beyond -1.00 per unit, sell one long put and leave a bear put spread running.",
+    "Never add to a backspread sitting in its valley."
+  ],
+  "exit_rules": [
+    "Hard rule: flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: if the short put is ITM by any amount at 15:30 ET on expiry day, close the whole package immediately -- assignment delivers 100 long shares per unit.",
+    "ASSIGNMENT GUARD: any day the short put is ITM with extrinsic < $0.10, close that session. ITM puts are exercised early for interest carry, and in a selloff the short put goes deep ITM fast.",
+    "Mandatory close at 21 DTE absent a live catalyst."
+  ],
+  "assignment_risk": "Only the single short put can be assigned, and it is covered by one of the two long puts, so loss is bounded. Operationally, assignment means buying 100 shares per unit at the short strike in the middle of a selloff -- the worst possible time for a $50k account to be handed stock. Because the short put goes ITM exactly when the trade starts working, this guard must run on every tick, not just at expiry.",
+  "buying_power": "The short put is covered by a long put at a lower strike, so the requirement is the vertical width: (short strike - long strike)*100 - credit per unit.",
+  "liquidity_needs": "OI >= 500 both strikes, quoted size >= 20 on the 2-lot leg. Downside strikes widen violently in a selloff -- use limit orders and accept partial fills only as full packages.",
+  "common_mistakes": "Ignoring put skew and paying a big debit; opening under 30 DTE; holding through the valley; not taking the vega profit when IV expands but price has not moved; letting the short put sit ITM overnight in a crash.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "No time for convexity, immediate valley loss, and the short put goes deep ITM within minutes on a gap. Buy a 0DTE put or a put debit vertical instead. Not enabled for 0DTE.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

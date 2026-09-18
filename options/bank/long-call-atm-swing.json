@@ -1,0 +1,59 @@
+{
+  "name": "Long Call (ATM swing)",
+  "slug": "long-call-atm-swing",
+  "aliases": [
+    "50 delta call",
+    "at-the-money call"
+  ],
+  "summary": "Buy the ~50 delta call for a 1-3 week directional swing: maximum gamma-per-dollar with a clean 1:1 initial delta.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike closest to 0.50 delta (nearest strike to spot)",
+      "dte_rule": "single expiry, 21-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited: (spot at exit - strike) x 100 - debit",
+  "max_loss": "Debit paid x 100. Defined.",
+  "breakevens": "strike + debit per share",
+  "greeks": {
+    "delta": "+0.50",
+    "gamma": "positive and maximal for a single long call at this strike",
+    "theta": "negative and maximal in absolute dollars for a single long option at this strike",
+    "vega": "positive and maximal at ATM - the most IV-sensitive single long option"
+  },
+  "typical_dte": "21-45 DTE",
+  "when_to_use": "High-conviction 1-3 week directional swing where you want the delta to grow fast if you are right. Only when IVR < 30, because ATM carries the most vega.",
+  "entry_rules": [
+    "IVR < 30 (ATM has peak vega; do not buy ATM premium into elevated IV)",
+    "Directional trigger required: daily close above a 20-day high, or a MACD cross with price above the 50 EMA",
+    "21-45 DTE, strike nearest 0.50 delta",
+    "Debit <= 2% of equity per position (~$1,000 on $50k)",
+    "Bid/ask <= 8% of mid"
+  ],
+  "management_rules": [
+    "Take profit at +75% of debit (ATM converts faster than OTM; do not hold out for +100%)",
+    "Stop at -40% of debit",
+    "Time stop at 21 DTE or 10 trading days held, whichever first",
+    "If delta reaches 0.75+, either take profit or roll up to a new 0.50 delta strike and bank the difference"
+  ],
+  "exit_rules": [
+    "Sell to close at +75%, -40%, 21 DTE, or 10 trading days held",
+    "Mandatory flat by 15:30 ET on expiration day to avoid OCC auto-exercise into 100 long shares"
+  ],
+  "assignment_risk": "None (long). Auto-exercise risk at expiry only; the 15:30 ET flatten rule covers it.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Penny-wide or near-penny ATM markets; OI >= 1000 preferred.",
+  "common_mistakes": "Treating ATM as safer than OTM - it is the most theta- and vega-expensive strike in dollar terms.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

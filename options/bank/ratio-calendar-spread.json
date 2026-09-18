@@ -1,0 +1,73 @@
+{
+  "name": "Ratio Calendar Spread (Front Ratio Time Spread)",
+  "slug": "ratio-calendar-spread",
+  "summary": "Sell more near-term contracts than the longer-dated contracts bought at the same strike, usually 2:1, financing the calendar into a credit or free structure at the cost of a naked short.",
+  "aliases": [
+    "front ratio calendar",
+    "2:1 calendar",
+    "ratio time spread",
+    "unbalanced calendar"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "ATM to slightly OTM, front |delta| 0.30-0.45.",
+      "dte_rule": "front expiry, 21-35 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same strike as the shorts.",
+      "dte_rule": "back expiry, 45-70 DTE"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "either",
+  "max_profit": "Achieved with spot at the strike at front expiry: both shorts expire worthless and the long back-month retains its time value. Approximately (back-month value at front expiry) + net credit.",
+  "max_loss": "UNDEFINED on the call version above the strike (one short is uncovered) and (strike x 100 x 1 - credit) on the put version below the strike. The excess short is naked by construction.",
+  "breakevens": "Upside breakeven approximately strike + (max profit at the strike)/100 for the 2:1 call version; downside limited to the debit paid or improved by the credit received.",
+  "greeks": {
+    "delta": "negative for the 2:1 call version above the strike; near zero at the strike",
+    "gamma": "strongly negative (two shorts against one long)",
+    "theta": "strongly positive",
+    "vega": "can be near zero or negative depending on the ratio - the second short offsets the back month's vega"
+  },
+  "when_to_use": "IV rank 30-60 with a firm expectation that the underlying pins or drifts slightly against the excess short. Occasionally used to finance a back-month long for free. Given the naked leg, it is a level-4 structure and is included mainly for completeness.",
+  "typical_dte": "front 21-35 DTE, back 45-70 DTE",
+  "entry_rules": [
+    "REQUIRES ALPACA OPTIONS LEVEL 4 - only one of the two short fronts is covered by the single back-month long; the second is naked. The automation must reject this at level 3. A level-3-legal alternative is to add a further OTM long front-month option, turning it into a covered ratio (see calendar-backspread for the level-3 inverse).",
+    "IV rank between 30 and 60.",
+    "Ratio never worse than 2:1; 3:1 is prohibited by policy.",
+    "Front shorts by delta 0.30-0.45; long back at the identical strike.",
+    "Net credit >= $0 (never pay a debit for a structure that carries a naked leg).",
+    "Size on the naked-leg margin for the uncovered contract."
+  ],
+  "management_rules": [
+    "Close at +50% of max theoretical profit or +50% of credit, whichever applies.",
+    "Stop at 2x the credit received, or if the naked side's |delta| exceeds 0.50.",
+    "Close the excess short immediately if spot trades through the strike.",
+    "Maximum 1 unit, level 4 only."
+  ],
+  "exit_rules": [
+    "Close or roll ALL short legs by 14:30 ET on front expiration day, unconditionally.",
+    "Close the excess (uncovered) short the moment spot touches the strike - do not wait for the delta or time trigger.",
+    "Close any short whose extrinsic <= $0.05 or |delta| >= 0.90.",
+    "Short calls: close before ex-dividend if extrinsic < dividend per share.",
+    "Buy back shorts before selling the long."
+  ],
+  "assignment_risk": "Two short front-month contracts, only one of which has a same-strike back-month cover. If both are assigned, the account is short 200 shares against one long call - a genuinely uncovered position that must be flattened immediately. This is the reason the structure is level 4 and is discouraged.",
+  "buying_power": "Covered pair requires the debit; the uncovered contract requires full naked margin (greater of 20% of underlying value minus OTM amount or 10% of underlying value, plus premium).",
+  "liquidity_needs": "OI >= 500 both expiries; must be closeable in one order.",
+  "common_mistakes": "Selling the extra contract for a few cents of credit and taking on unlimited risk; assuming the back-month long 'sort of' covers both shorts (it does not); running the ratio on a name that can gap.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Absolutely not - a naked 0DTE short on a share-settled underlying is the single worst assignment profile available.",
+  "alpaca_level": 4,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

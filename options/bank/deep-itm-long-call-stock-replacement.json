@@ -1,0 +1,61 @@
+{
+  "name": "Deep ITM Long Call (stock replacement)",
+  "slug": "deep-itm-long-call-stock-replacement",
+  "aliases": [
+    "stock replacement",
+    "synthetic long stock via call",
+    "80 delta call"
+  ],
+  "summary": "Buy a 0.80-0.90 delta call as a capital-efficient substitute for 100 shares, paying a small time premium for a built-in floor.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike with delta 0.80-0.90 (typically 10-20% ITM)",
+      "dte_rule": "single expiry, 60-180 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited: tracks the stock nearly 1:1 above the strike, minus the extrinsic paid",
+  "max_loss": "Debit paid x 100 - far less than the cost of 100 shares, but still a total loss if the stock falls below the strike and stays there.",
+  "breakevens": "strike + debit per share",
+  "greeks": {
+    "delta": "+0.80 to +0.90, behaves like 80-90 shares",
+    "gamma": "small positive",
+    "theta": "small negative - only the thin extrinsic decays; typically < 0.3%/day of the debit",
+    "vega": "small positive (deep ITM has little vega)"
+  },
+  "typical_dte": "60-180 DTE",
+  "when_to_use": "When you want long exposure but do not want to tie up $X0,000 in shares, and the extrinsic (time value) in the deep ITM call is under ~2% of the strike. Best when IVR < 40 and the name has tight deep-ITM markets.",
+  "entry_rules": [
+    "Extrinsic value = call mid - max(0, spot - strike); require extrinsic <= 2% of strike price",
+    "Delta between 0.80 and 0.90",
+    "60-180 DTE so the thin extrinsic decays slowly",
+    "Bid/ask <= 3% of mid - deep ITM markets are often wide; reject the trade if they are",
+    "Debit <= 6% of equity (~$3,000 on $50k) per position",
+    "Skip any name where a dividend is large enough that the call's extrinsic is less than the dividend at entry (you forfeit dividends as a call holder)"
+  ],
+  "management_rules": [
+    "Manage the position like a stock position: hold while the daily trend is intact (price above the 50 EMA)",
+    "Roll out when DTE falls below 45: sell the current call, buy the same-delta call 90+ days out, in one net order",
+    "Stop at -35% of the debit or a daily close below the 50 EMA, whichever first",
+    "Take partial profits at +50% of the debit; let the balance run with a trailing stop 1.5 ATR below price"
+  ],
+  "exit_rules": [
+    "Sell to close on the stop, the trend break, or at 45 DTE (roll or exit)",
+    "NEVER hold into expiration week: an ITM call at expiry is auto-exercised and buys 100 shares at the strike, which on a $500 underlying is a $50,000 debit the account cannot fund. Hard flatten/roll by 5 trading days before expiry"
+  ],
+  "assignment_risk": "No assignment (long). Exercise risk is the danger: auto-exercise creates a large unfunded share purchase. Also note you receive no dividends and have no voting rights versus owning the stock.",
+  "buying_power": "Debit only. This is the entire point - roughly 10-20% of the cash needed for 100 shares.",
+  "liquidity_needs": "Needs a real deep-ITM market. Reject if bid/ask > 3% of mid or OI < 100 on that strike.",
+  "common_mistakes": "Paying too much extrinsic and turning a stock proxy into a decaying bet; forgetting there is no dividend and being out-returned by the shareholder; letting it go to expiry and triggering a six-figure exercise.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

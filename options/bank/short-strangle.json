@@ -1,0 +1,67 @@
+{
+  "name": "Short Strangle",
+  "slug": "short-strangle",
+  "aliases": [
+    "sell strangle",
+    "naked strangle",
+    "premium-selling strangle"
+  ],
+  "summary": "Sell an OTM call and an OTM put in the same expiry; wide profit zone, high win rate, undefined risk on both tails.",
+  "bias": "short_vol",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM call at 0.16 delta (the classic '16 delta strangle')."
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM put at 0.16 delta -- matched by delta, not dollars.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "total credit received, if the underlying finishes between the strikes",
+  "max_loss": "UNDEFINED. Unlimited above the call strike; (put strike * 100) - credit below.",
+  "breakevens": "call strike + credit per share, and put strike - credit per share",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "negative, less severe than a short straddle",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "typical_dte": "45 DTE in, 21 DTE out",
+  "when_to_use": "IV rank > 50 in a range-bound underlying with no earnings inside the cycle. The canonical premium-selling trade, with roughly 70% historical win rates at 16 delta -- and losses that can exceed many winners when a tail arrives.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. Both legs are uncovered; this requires Level 4 naked authority. Alpaca provides Levels 1-3 only, and its multi-leg engine rejects any order whose legs are not covered within the same order. The router must refuse this structure.",
+    "Defined-risk substitute the system SHOULD trade instead: an iron condor -- the identical short strangle with long wings 1-2 strikes further out. Same profit zone, capped tails, Level 3 legal.",
+    "If it were enabled: IV rank > 50, 45 DTE, both legs 0.16 delta, no earnings inside the cycle, and sizing such that a 3-sigma move costs <= 10% of equity."
+  ],
+  "management_rules": [
+    "If enabled: take profit at 50% of credit received.",
+    "Close at 21 DTE unconditionally.",
+    "Stop: close at 2.0x credit received.",
+    "Delta band: if either short leg's delta reaches 0.30, roll that side further out for a credit or close the position.",
+    "Never roll only the untested side down/up to collect more credit while the tested side runs -- that is how strangle sellers convert a manageable loss into a catastrophic one."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close whenever either short leg goes ITM with < 3 DTE, or whenever an ITM short leg's extrinsic < $0.10.",
+    "DIVIDEND GUARD: close the call side before any ex-dividend where the short call is ITM and extrinsic < 1.5 * dividend."
+  ],
+  "assignment_risk": "Both legs can be assigned, and neither is covered. An assigned put delivers 100 shares per contract; an assigned call creates short stock. With no long wings, the resulting position is naked equity risk. This is exactly what the Level 3 restriction exists to prevent.",
+  "buying_power": "Reg-T naked requirement per side, the greater side held plus the other side's premium -- typically $8,000-$15,000 per contract on index ETFs. Not available on Alpaca.",
+  "liquidity_needs": "16-delta wings on liquid index ETFs quote well; on single names they do not. Irrelevant here since the structure is blocked.",
+  "common_mistakes": "Believing the high win rate is the whole story; not defining a stop; rolling the untested side; running it through earnings; assuming assignment can be 'handled later'.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not permitted (Level 4) and, at 0DTE, the negative gamma is extreme. The correct 0DTE short-vol expression on this account is a defined-risk iron condor or a single credit vertical.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

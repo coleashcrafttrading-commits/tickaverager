@@ -1,0 +1,78 @@
+{
+  "name": "Bull Call Spread (Long Call Vertical)",
+  "slug": "bull-call-spread",
+  "aliases": [
+    "long call vertical",
+    "debit call spread",
+    "call debit spread",
+    "long call spread"
+  ],
+  "summary": "Buy a lower-strike call, sell a higher-strike call in the same expiry; a defined-risk debit bet that the underlying rises to or through the short strike.",
+  "bias": "bullish",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long strike at 0.55-0.70 delta for a high-probability directional trade, or 0.40-0.50 delta (ATM) for a cheaper, more convex trade. Never pick by round number.",
+      "dte_rule": "leg 1 sets the expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short strike = long strike + width, where width is chosen so that debit <= 0.50 * width for near-ATM setups; short leg typically 0.20-0.30 delta.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "(width between strikes * 100) - net debit paid, realized only if underlying > short strike at expiry",
+  "max_loss": "net debit paid (defined). Risk per position capped at 2% of equity = $1,000 on a $50k account.",
+  "breakevens": "long strike + net debit per share",
+  "greeks": {
+    "delta": "positive, roughly +0.20 to +0.35 per 1-lot at entry (long delta minus short delta)",
+    "gamma": "small positive when OTM-centered, flips negative if price runs past the short strike",
+    "theta": "negative while the spread is OTM (typically -$0.5 to -$3/day per 1-lot at 30-45 DTE), turns positive once price is above the midpoint of the strikes",
+    "vega": "slightly positive when spread is OTM, slightly negative when ITM; magnitude small (<$5 per vol point on a $5-wide)"
+  },
+  "typical_dte": "30-45 DTE for swing; 7-21 DTE for event/momentum; 0DTE for intraday momentum scalps",
+  "when_to_use": "IV rank below 30 (long premium is cheaper) combined with a bullish signal: price above rising 20-EMA and 50-SMA, or a confirmed breakout above a 20-day high. Prefer when skew makes the upper call relatively rich. Avoid when IV rank > 50 -- use a bull put spread instead.",
+  "entry_rules": [
+    "Underlying must be optionable, average daily volume >= 2,000,000 shares, price >= $20.",
+    "Directional gate: last close > 20-EMA AND 20-EMA > 50-SMA, or a breakout above the prior 20-day high on >1.5x average volume.",
+    "IV rank <= 40 (this is a long-vol/long-premium structure).",
+    "DTE between 25 and 50 for swing entries.",
+    "Long strike delta between 0.40 and 0.70; short strike delta between 0.15 and 0.35.",
+    "Net debit must be <= 50% of spread width (a $5-wide costs no more than $2.50), giving reward:risk >= 1:1.",
+    "Both legs: open interest >= 500 and bid/ask spread <= 10% of the leg mid, or <= $0.05 absolute.",
+    "Submit as a single Alpaca MLeg order, limit at the spread mid rounded to the nearest $0.01, never a market order. If unfilled after 60s, reprice in $0.01 steps up to mid + 25% of the bid/ask spread, then cancel.",
+    "Position size: contracts = floor(0.02 * equity / (net debit * 100)); hard cap 10 contracts per underlying.",
+    "No entry within 2 calendar days of an earnings report unless the trade is explicitly an earnings trade."
+  ],
+  "management_rules": [
+    "Take profit: close the whole spread at 65% of max profit (i.e., spread mid >= net debit + 0.65 * (width - debit)).",
+    "Stop loss: close if spread mid <= 50% of net debit paid, or if the underlying closes below the 20-EMA that triggered entry -- whichever comes first.",
+    "Time stop: if at 10 DTE the spread mid is below the entry debit, close it. Long verticals bleed fastest in the last two weeks.",
+    "Roll up only if the underlying has moved > 1.5 ATR in your favor and you can close the current spread at >= 50% profit; open the new spread as a separate order, never as an adjustment leg.",
+    "Never add to a losing long vertical."
+  ],
+  "exit_rules": [
+    "Hard rule: close the entire spread no later than 15:45 ET on expiration day regardless of P/L. Never let a leg expire.",
+    "ASSIGNMENT GUARD: if the short call is in the money by any amount at 15:30 ET on expiration day, close the full spread immediately at market-plus-limit (limit = bid - $0.05, repriced every 15s).",
+    "ASSIGNMENT GUARD: at any time, if the short call is ITM and its extrinsic value (mid - intrinsic) < $0.10, close the spread within the same session.",
+    "DIVIDEND GUARD: if the short call is ITM and its extrinsic value < 1.5 * the upcoming dividend, close the spread no later than the close of the session before the ex-dividend date.",
+    "If both legs are deep ITM (underlying > short strike + 2% ) at 5 DTE, close for near-max profit rather than waiting -- the remaining edge is pennies and the assignment risk is real."
+  ],
+  "assignment_risk": "Only the short call can be assigned. Early assignment is rational for the holder when the call is ITM and extrinsic value falls below the dividend, typically the day before ex-dividend. If assigned you are short 100 shares per contract and must either exercise the long call or buy shares back the next morning. On a Level 3 defined-risk spread the economic loss is capped, but the short stock position is a compliance and margin problem the system must never create.",
+  "buying_power": "Alpaca holds the net debit paid only. A $5-wide bought for $2.00 holds $200 per contract.",
+  "liquidity_needs": "Both legs OI >= 500, quoted size >= 10 on each side, combined spread bid/ask <= 10% of mid. Slippage budget: 2% of width round trip.",
+  "common_mistakes": "Paying more than 50% of width (turns a 1:1 into a losing proposition); buying debit spreads into high IV rank; choosing strikes by round numbers instead of delta; holding to expiry and getting assigned on the short leg when the underlying pins between strikes.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Works as a cheap intraday momentum vehicle on SPY/QQQ. Use strikes 0.45/0.25 delta, enter only between 09:45 and 13:30 ET, take profit at 50% of max, stop at -60% of debit, and hard-close every position by 15:30 ET. Alpaca returns no greeks or IV for 0DTE contracts, so compute delta locally with Black-Scholes using T = (seconds to 16:00 ET)/(252*23400) and the front-month IV as the seed.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

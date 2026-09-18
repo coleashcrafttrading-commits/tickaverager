@@ -1,0 +1,85 @@
+{
+  "name": "Broken-Wing Iron Condor",
+  "slug": "broken-wing-iron-condor",
+  "aliases": [
+    "skip-strike iron condor",
+    "unbalanced iron condor",
+    "ratio-width iron condor"
+  ],
+  "summary": "An iron condor with unequal wing widths - the wing on the side you fear least is widened - to collect more credit or to skew where the loss lives.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short put strike minus W_put (the NARROW wing if bias is bullish, e.g. $3)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.16 delta put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.16 delta call",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short call strike plus W_call, where W_call > W_put (the WIDE wing), typically 2x the narrow wing",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit x 100 (both shorts OTM)",
+  "max_loss": "(WIDER wing width - net credit) x 100 - the loss is asymmetric and lands on the wide-wing side",
+  "breakevens": "lower BE = short put - credit; upper BE = short call + credit (same as a balanced IC; only the tail loss differs)",
+  "greeks": {
+    "delta": "slightly skewed away from the wide wing, typically -0.05 to -0.10 per 1-lot when the call wing is the wide one",
+    "gamma": "negative, asymmetric",
+    "theta": "positive, slightly higher than a balanced IC for the same shorts",
+    "vega": "negative"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "Same IV conditions as a standard iron condor, plus a mild directional lean: widen the wing on the side you consider less likely to be tested (bullish lean = wide call wing is wrong; widen the PUT wing only if you are bearish). Also used when one side's wing strikes are illiquid.",
+  "entry_rules": [
+    "All standard iron condor entry filters apply (IVR >= 30, 30-60 DTE, no events, liquidity)",
+    "Wide wing width <= 3x the narrow wing width; beyond that the tail risk is not worth the extra credit",
+    "Net credit >= 30% of the WIDER wing width",
+    "Max loss (wide side) <= 2% of equity",
+    "Directional lean must be justified by a rule, not intuition: widen the call wing only when the 20-day SMA slope is negative, widen the put wing only when it is positive",
+    "Alpaca level 3 (defined risk)"
+  ],
+  "management_rules": [
+    "Take profit at 50% of credit",
+    "Time stop at 21 DTE",
+    "Loss stop at 2x credit",
+    "Extra rule: if the WIDE-wing side is tested (that short's delta >= 0.30), close the whole structure immediately rather than rolling - the asymmetric tail is the reason this trade exists and it is the one that hurts",
+    "If the NARROW-wing side is tested, roll that vertical out/away for a credit once, or close"
+  ],
+  "exit_rules": [
+    "Force-close the entire structure by 15:45 ET on expiration day, always",
+    "Close immediately if any short goes ITM by > 0.25 x its own wing width, or a short delta >= 0.85, or short extrinsic < $0.10",
+    "Ex-dividend guard on the short call as per standard iron condor"
+  ],
+  "assignment_risk": "Same as an iron condor - both shorts assignable, wide wing gives no extra protection against assignment, only against unbounded loss.",
+  "buying_power": "(wider wing - credit) x 100 per contract",
+  "liquidity_needs": "Same as iron condor; the wide wing strike must still have OI >= 250 so it can be closed.",
+  "common_mistakes": "Widening the wing on the side that actually trends; treating the extra credit as free; sizing off the narrow wing instead of the wide wing.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Usable but the asymmetric tail plus 0DTE gamma is a bad combination unless the wide wing is on the statistically quieter side. Prefer the balanced iron condor intraday.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

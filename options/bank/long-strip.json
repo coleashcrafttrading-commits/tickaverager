@@ -1,0 +1,71 @@
+{
+  "name": "Long Strip",
+  "slug": "long-strip",
+  "aliases": [
+    "strip",
+    "2:1 put-heavy straddle",
+    "bearish straddle"
+  ],
+  "summary": "Buy two puts and one call at the same ATM strike and expiry; the mirror of the strap -- long volatility with a bearish tilt.",
+  "bias": "long_vol",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ATM strike, put delta closest to -0.50."
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike as the puts.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "downside: (2 * strike * 100) - debit as the underlying approaches zero; upside: unlimited but at half the slope",
+  "max_loss": "net debit paid, if the underlying finishes exactly at the strike",
+  "breakevens": "downside: strike - debit/(2*100) per share; upside: strike + debit/100 per share",
+  "greeks": {
+    "delta": "negative, roughly -0.50 per unit at entry",
+    "gamma": "strongly positive, ~1.5x a straddle",
+    "theta": "strongly negative, ~1.5x a straddle",
+    "vega": "strongly positive, ~1.5x a straddle"
+  },
+  "typical_dte": "20-45 DTE, or event-dated",
+  "when_to_use": "You expect a large move and believe down is more likely, with IV cheap. Fits pre-earnings on a crowded long name, or ahead of a macro print in a fragile tape. Note the structural headwind: equity put skew means the two puts are the expensive legs, so this is more costly than a strap on the same name.",
+  "entry_rules": [
+    "IV rank <= 25 -- and check skew: if 25-delta put IV exceeds 25-delta call IV by more than 6 vol points, the puts are already crowded and the edge is gone.",
+    "ATM strike; |put delta| within 0.05 of 0.50.",
+    "Ratio exactly 2 puts : 1 call (GCD = 1; all legs long, so Alpaca accepts the MLeg).",
+    "Total debit <= 1.5% of equity.",
+    "Downside breakeven distance <= 0.75 * the average absolute adverse move on comparable catalysts.",
+    "DTE extends >= 5 days past the catalyst.",
+    "OI >= 500 per contract, bid/ask <= 8% of mid."
+  ],
+  "management_rules": [
+    "Take profit at +50% of debit.",
+    "Stop at -40% of debit.",
+    "Close within 30 minutes of a scheduled event print.",
+    "Time stop: 10 DTE.",
+    "If the underlying breaks down and net delta exceeds -1.20 per unit, sell one put to bank the directional move and leave a straddle running."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "No short legs, so no assignment risk. All legs are long, so ITM legs auto-exercise at expiry into up to 200 short shares (puts) or 100 long shares (call) per unit. Close everything before 15:45 ET.",
+    "Close at 10 DTE if flat."
+  ],
+  "assignment_risk": "None from short legs. The only stock-delivery path is OCC auto-exercise of your own ITM long legs at expiry, prevented by the 15:45 ET close.",
+  "buying_power": "Net debit only.",
+  "liquidity_needs": "ATM strikes; OI >= 500; route as one package.",
+  "common_mistakes": "Ignoring put skew, which makes the strip structurally pricier than the strap; expecting symmetric breakevens; holding past the catalyst into vol crush.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Same objection as the strap -- 1.5x the theta of a 0DTE straddle. Only around scheduled prints, and a plain 0DTE put usually expresses the view more cheaply.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

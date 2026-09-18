@@ -1,0 +1,75 @@
+{
+  "name": "Reverse (Short) Double Diagonal",
+  "slug": "reverse-double-diagonal",
+  "aliases": [
+    "short double diagonal",
+    "inverted double diagonal"
+  ],
+  "summary": "Double diagonal with the expiries inverted - long the near-term strangle, short the farther-dated strangle. Leaves naked short options after the near-term longs expire. BAD IDEA for this system.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.25 delta put",
+      "dte_rule": "FRONT expiry, 14-30 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "further OTM put",
+      "dte_rule": "BACK expiry, later than the front"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.25 delta call",
+      "dte_rule": "FRONT expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "further OTM call",
+      "dte_rule": "BACK expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "either",
+  "max_profit": "limited and model-dependent; realized on a fast near-term move",
+  "max_loss": "UNDEFINED after the front expiry - the remaining back-month shorts are naked",
+  "breakevens": "model-dependent; no closed form",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "positive near-term",
+    "theta": "negative near-term",
+    "vega": "negative (back-month shorts dominate)"
+  },
+  "typical_dte": "front 14-30 DTE, back 45-60 DTE",
+  "when_to_use": "Steep contango in the term structure (back-month IV far above front) combined with a near-term breakout expectation. Rare, and better expressed as a calendar sold outright by a desk with naked approval.",
+  "entry_rules": [
+    "DO NOT TRADE on this account. Requires Alpaca options level 4 (uncovered short calls and puts) because the shorts outlive the longs; level 3 will reject it.",
+    "If a level 4 account ever ran it: hard requirement to close the back-month shorts on or before the front expiration date, and modeled naked risk capped by an external stop"
+  ],
+  "management_rules": [
+    "Not applicable - the structure is not permitted at level 3"
+  ],
+  "exit_rules": [
+    "If ever held, the back-month shorts must be closed no later than the front expiration day close; carrying naked shorts is outside this system's risk policy",
+    "Standard ITM guards apply to the back-month shorts at all times: close if extrinsic < $0.10 or |delta| >= 0.85"
+  ],
+  "assignment_risk": "Severe and unhedged after the front expiry: naked short call means unlimited loss plus a short share position on assignment; naked short put means an obligation to buy 100 shares per contract with no offsetting long.",
+  "buying_power": "Naked margin requirement (roughly 20% of underlying notional less OTM amount per short) - far larger than any defined-risk structure.",
+  "liquidity_needs": "Irrelevant - not to be traded here.",
+  "common_mistakes": "Building a double diagonal with the expiries reversed by accident. Add a pre-submit validator: every short leg's expiry must be <= the covering long leg's expiry.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "No.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "long-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

@@ -1,0 +1,87 @@
+{
+  "name": "Short Calendar Straddle (Reverse Straddle Swap)",
+  "slug": "short-calendar-straddle",
+  "summary": "Buy the front-month straddle and sell the back-month straddle at the same strike; a net-credit, long-near-gamma, short-back-vega structure that goes fully naked after the front legs expire.",
+  "aliases": [
+    "reverse straddle swap",
+    "short straddle calendar",
+    "reverse calendar straddle"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM, |delta| 0.45-0.55.",
+      "dte_rule": "front expiry, 14-30 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "front expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "back expiry, 45-90 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "back expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "credit",
+  "max_profit": "Approximately the net credit received, when the underlying moves far from the strike by front expiry.",
+  "max_loss": "UNDEFINED. Worst case before front expiry is a pin at the strike. After front expiry both short back legs are naked - unlimited upside loss on the call and (strike x 100) downside loss on the put per contract.",
+  "breakevens": "Profitable outside a band around the strike, roughly strike +/- (1.0 to 1.2) x credit in underlying points at front expiry.",
+  "greeks": {
+    "delta": "~0",
+    "gamma": "positive into front expiry (2x a single reverse calendar)",
+    "theta": "negative, 2x",
+    "vega": "negative, 2x - the point of the trade"
+  },
+  "when_to_use": "Only in steep contango (back_IV - front_IV >= 6 vol points) with IV rank > 65 and a thesis that back-month vol is mispriced high. Almost always dominated by a simple short strangle or a ratio structure. Kept in the bank for completeness and for the rare post-shock term-structure inversion trade.",
+  "typical_dte": "front 14-30 DTE, back 45-90 DTE",
+  "entry_rules": [
+    "REQUIRES ALPACA OPTIONS LEVEL 4. Two naked shorts after front expiry. The automation must reject this at level 3.",
+    "back_IV - front_IV >= 6.0 vol points AND IV rank > 65.",
+    "ATM strike, |delta| 0.45-0.55, single strike for all four legs.",
+    "Front 14-30 DTE, back 45-90 DTE.",
+    "Credit >= 25% of the back-month straddle premium.",
+    "Size on naked-straddle margin, not credit; assume ~$5,000-$15,000 per contract pair."
+  ],
+  "management_rules": [
+    "Close at +50% of credit.",
+    "Stop at -100% of credit.",
+    "Close if back-month IV rises 5 vol points above entry.",
+    "NEVER allow the front long legs to expire while the back shorts remain.",
+    "Maximum 1 unit, level 4 only."
+  ],
+  "exit_rules": [
+    "Close the entire structure no later than 5 trading days before the FRONT (long) legs expire.",
+    "Close either short leg immediately if |delta| >= 0.85 or extrinsic <= $0.10.",
+    "Close the short call before any ex-dividend where extrinsic < dividend per share.",
+    "Buy back both shorts before selling the longs when legging out.",
+    "At level 3 the only valid action is rejection at entry."
+  ],
+  "assignment_risk": "Two long-dated short legs, exposed for months, with the hedge expiring first. One of them is nearly always ITM. Dividend risk on the call, interest-carry exercise risk on the put. This is the worst assignment profile in the family.",
+  "buying_power": "Naked short straddle margin on the back month: typically the greater of 20% of underlying value minus OTM amount plus premium, applied to the larger side, plus the premium of the other side.",
+  "liquidity_needs": "OI >= 500 both expiries; back-month spread <= $0.15. Exits are risk-driven, so execution quality is critical.",
+  "common_mistakes": "Mistaking it for a defined-risk trade; holding past front expiry; using it when a simple short strangle achieves the same short-vega exposure with cleaner margin and no expiry cliff.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "alpaca_level": 4,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "long-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

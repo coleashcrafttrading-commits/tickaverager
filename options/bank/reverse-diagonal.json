@@ -1,0 +1,72 @@
+{
+  "name": "Reverse Diagonal Spread (Short Diagonal)",
+  "slug": "reverse-diagonal",
+  "summary": "Buy the near-dated option and sell the longer-dated option at a different strike; a credit diagonal whose protection expires before the short leg does, leaving a naked position.",
+  "aliases": [
+    "short diagonal",
+    "reverse time diagonal",
+    "inverted diagonal"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Near strike by delta 0.40-0.60.",
+      "dte_rule": "front expiry, 14-30 DTE (this is the leg that dies first)"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Different strike, typically further OTM by delta 0.20-0.35.",
+      "dte_rule": "back expiry, 45-120 DTE"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "either",
+  "max_profit": "Limited; typically the credit received plus any gain on the front long if the underlying moves sharply before the front expires.",
+  "max_loss": "UNDEFINED. After the front long expires the back-month short call is completely naked - theoretically unlimited loss on the call version, (strike x 100) on the put version.",
+  "breakevens": "Path dependent; no useful closed form because the protective leg expires first.",
+  "greeks": {
+    "delta": "varies with the strike gap; usually modest",
+    "gamma": "positive before front expiry, sharply negative after",
+    "theta": "negative before front expiry",
+    "vega": "negative overall - short the longer-dated, higher-vega leg"
+  },
+  "when_to_use": "Rarely, and never at level 3. The only coherent use case is a steeply contangoed term structure (back_IV - front_IV >= 6 vol points) combined with a near-term catalyst you want long gamma for. In practice it is dominated by a long front-month option plus a separate, properly covered short structure. Kept in the bank as a clearly-marked bad idea for most accounts.",
+  "typical_dte": "front (long) 14-30 DTE, back (short) 45-120 DTE",
+  "entry_rules": [
+    "REQUIRES ALPACA OPTIONS LEVEL 4 - the short leg outlives its cover, so the broker treats it as an uncovered short from the outset. The automation must REJECT this at level 3.",
+    "MARKED AS A BAD IDEA: any diagonal whose SHORT leg expires LATER than its LONG leg violates the core covering rule of this bank. Prefer a bull/bear diagonal with the long leg further out.",
+    "If ever traded: back_IV - front_IV >= 6.0 vol points and IV rank > 65.",
+    "Credit >= 25% of the short option's premium.",
+    "Size on full naked margin for the short leg.",
+    "Maximum 1 unit, and only on an underlying with no dividend inside the short's life."
+  ],
+  "management_rules": [
+    "Close at +50% of credit.",
+    "Stop at -100% of credit.",
+    "Close the entire structure before the FRONT (long) leg expires - there is no version of this trade that should survive its own hedge.",
+    "Maximum 1 unit, level 4 only."
+  ],
+  "exit_rules": [
+    "Close the entire structure no later than 5 trading days before the front (long) leg's expiry.",
+    "Close the short leg immediately if |delta| >= 0.80 or extrinsic <= $0.10.",
+    "Close the short call before any ex-dividend where extrinsic < dividend per share.",
+    "Buy back the short before selling the long.",
+    "At level 3: reject at entry. There is no management path."
+  ],
+  "assignment_risk": "Worst-in-family alongside the reverse calendars: the short leg lives for months and its hedge expires first. Assignment on the short call delivers -100 shares with no cover once the front long is gone.",
+  "buying_power": "Full naked margin on the short leg: greater of 20% of underlying value minus OTM amount or 10% of underlying value, plus premium.",
+  "liquidity_needs": "OI >= 500 both expiries. Because exits are risk-forced, quote quality matters more than usual.",
+  "common_mistakes": "Building it by accident - e.g. rolling a short leg past the long leg's expiry, which silently converts a covered diagonal into this structure. The automation must validate on EVERY roll that short expiry < long expiry.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "alpaca_level": 4,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "long-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

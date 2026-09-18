@@ -1,0 +1,61 @@
+{
+  "name": "0DTE Power-Hour ATM Lotto",
+  "slug": "zero-dte-power-hour-lotto",
+  "aliases": [
+    "3pm lotto",
+    "closing drift 0DTE",
+    "end-of-day gamma flyer"
+  ],
+  "summary": "Buy a cheap near-the-money 0DTE option in the final hour to exploit end-of-day gamma and closing-imbalance drift. Very high variance, marked as speculative.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "First strike 0.20-0.35 delta in the direction of the closing drift; use a put instead of a call for a downside drift",
+      "dte_rule": "0 DTE, entered 15:00-15:30 ET"
+    }
+  ],
+  "bias": "either",
+  "net": "debit",
+  "max_profit": "Large multiples of a tiny debit (3x-10x) when the close trends",
+  "max_loss": "Debit x 100; total loss is the base case (>70% of the time)",
+  "breakevens": "strike +/- debit",
+  "greeks": {
+    "delta": "0.20-0.35 and climbing fast if it works",
+    "gamma": "maximal - this is a pure gamma trade",
+    "theta": "terminal; the option is worthless at 16:00 ET unless ITM",
+    "vega": "negligible in the final hour"
+  },
+  "typical_dte": "0 DTE, final 60 minutes",
+  "when_to_use": "Only when there is an identifiable closing driver: a strong trend day (price above VWAP all afternoon for calls), a large MOC imbalance, or an index rebalance day. Never on a flat, mean-reverting afternoon.",
+  "entry_rules": [
+    "SPY/QQQ only",
+    "Entry window 15:00-15:30 ET only",
+    "Trend gate: underlying has been on the same side of VWAP for the last 90 minutes and the 15-min trend is intact",
+    "Debit <= 0.25% of equity (~$125 on $50k); max 1 position per day",
+    "Option price between $0.10 and $0.60 - outside that band the risk/reward does not justify the variance",
+    "Bid/ask <= $0.03"
+  ],
+  "management_rules": [
+    "Take profit at +150% of debit",
+    "No stop loss - the debit is the risk. Position size is the only control",
+    "If price crosses back through VWAP, exit immediately regardless of P&L"
+  ],
+  "exit_rules": [
+    "Sell to close at +150%, on a VWAP cross-back, or at 15:50 ET",
+    "HARD FLATTEN at 15:50 ET with no exceptions. An ITM contract left at 16:00 is auto-exercised into 100 shares (call) or short 100 shares (put) with settlement the next business day"
+  ],
+  "assignment_risk": "None (long) but auto-exercise is the primary operational hazard - this strategy sits closest to the bell of anything in the bank.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "SPY/QQQ only; spreads widen after 15:45 so the flatten must not be late.",
+  "common_mistakes": "Letting it ride to the bell hoping for the last tick; trading it every day rather than only on trend days.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This is the highest-variance entry in the bank. Include it in backtests to quantify it, but expect a hit rate under 30% with a fat right tail. Do not deploy real size until the backtest confirms positive expectancy over >200 samples.",
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "directional-either",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

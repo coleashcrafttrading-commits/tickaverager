@@ -1,0 +1,65 @@
+{
+  "name": "Reverse Dividend Arbitrage",
+  "slug": "reverse-dividend-arbitrage",
+  "aliases": [
+    "short stock over the dividend",
+    "short dividend capture"
+  ],
+  "summary": "Short 100 shares plus a long call over the ex-dividend date, betting that the price drop on the ex-date exceeds the dividend the short position owes; the mirror of dividend arbitrage and equally closed by market pricing.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 short 100 shares before the ex-date"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM call, delta >= 0.90, minimal extrinsic",
+      "dte_rule": "nearest expiry after the ex-date"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(ex-date price drop - dividend_owed) x 100 - call_extrinsic x 100 - borrow_costs - fees. Expected value is negative because the drop averages approximately the dividend and the short owes the full amount.",
+  "max_loss": "call_extrinsic x 100 + borrow_costs + fees, plus buy-in risk on the share leg",
+  "greeks": {
+    "delta": "-0.05 to -0.10 per unit",
+    "gamma": "small positive",
+    "theta": "negative",
+    "vega": "slightly positive"
+  },
+  "breakevens": "Requires the ex-date drop to exceed the dividend by more than the call's extrinsic plus borrow plus fees.",
+  "when_to_use": "Effectively never. The short share position owes the full declared dividend in cash on the payment date, and the ex-date price adjustment is on average equal to the dividend \u2014 so the structural edge is zero before costs and negative after borrow fees.",
+  "typical_dte": "7-21 DTE spanning the ex-date",
+  "entry_rules": [
+    "NOT VIABLE on this account. Requires shorting shares (borrow availability, borrow fee, buy-in risk) and paying away the dividend. Options side is Level 2 (long call only), so the block is the equity leg and the economics, not the approval level.",
+    "Required test if ever evaluated: expected_ex_date_drop - dividend - call_extrinsic - borrow_cost - fees > $0.05 per share. This test is not expected to pass.",
+    "Never on a special dividend \u2014 special dividends of 10%+ trigger OCC contract adjustments and the ex-date mechanics differ.",
+    "Alpaca paper short fills do not validate live borrow."
+  ],
+  "management_rules": [
+    "If ever run: exit the entire structure on the ex-date open. Holding longer converts a dividend play into an unwanted short stock position.",
+    "Track the dividend liability explicitly \u2014 the cash is debited on the payment date, after the position is closed, so realised P/L lags."
+  ],
+  "exit_rules": [
+    "No short option legs, so no option assignment exposure.",
+    "Close the long call by 15:00 ET on its expiration day if ITM; auto-exercise would buy 100 shares and close the short at the strike without a decision.",
+    "Close the short shares and the long call together, options leg first.",
+    "Exit immediately on any buy-in notice."
+  ],
+  "assignment_risk": "No short options. The hazard is on the equity leg: short shares owe the dividend, and a hard-to-borrow buy-in can force the short to be covered at any time and any price.",
+  "alpaca_level": 2,
+  "buying_power": "Reg T short stock (50% of proceeds) plus the call debit, plus borrow fees and the dividend liability.",
+  "liquidity_needs": "Easy borrow is the binding requirement; deep ITM call bid-ask <= $0.05.",
+  "common_mistakes": "Forgetting that the short pays the dividend. Assuming the ex-date drop exceeds the dividend systematically \u2014 it does not, and where it appears to, taxes and market microstructure explain the difference.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

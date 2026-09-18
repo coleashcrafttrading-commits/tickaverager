@@ -1,0 +1,72 @@
+{
+  "name": "Bearish Seagull Spread",
+  "slug": "bearish-seagull",
+  "summary": "Buy a put spread financed by selling an OTM call; the bearish mirror of the seagull, with uncovered upside risk.",
+  "aliases": [
+    "bearish three-way",
+    "financed put spread",
+    "reverse seagull"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.15-0.25, at or above resistance (UNCOVERED)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM or slightly OTM, put delta -0.45 to -0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta -0.20 to -0.25, at the downside target",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "either (target zero cost)",
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "COMPLETENESS / LEVEL 4: the short call is uncovered. Under Level 3, replace the naked short call with a call credit spread (which makes it an unbalanced iron condor) or simply trade the put debit spread alone.",
+  "max_profit": "(long put strike - short put strike) x 100 + net credit",
+  "max_loss": "UNDEFINED above the short call strike",
+  "breakevens": "downside breakeven = long put strike - debit/100; upside breakeven = short call strike + credit/100",
+  "greeks": {
+    "delta": "clearly negative (-30 to -50 per unit)",
+    "gamma": "mixed",
+    "theta": "slightly positive",
+    "vega": "slightly negative"
+  },
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: uncovered short call requires Alpaca level 4; the router must reject this slug.",
+    "Level 4 version: short call delta <= 0.25 and above a 60-session resistance level; target near-zero net cost.",
+    "Level-3 substitute: buy a call above the short call, converting the financing leg into a call credit spread."
+  ],
+  "management_rules": [
+    "Level 4 only: close at 65% of the put spread's max value.",
+    "Level 4 only: close at 21 DTE, or immediately if the short call delta reaches 0.45."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: uncovered short call; flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close the short call immediately if ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close the short call before every ex-dividend date when it is ITM."
+  ],
+  "assignment_risk": "Uncovered short call assignment creates a naked short stock position with unbounded risk and an immediate margin call on a $50k account.",
+  "buying_power": "Naked short call margin plus the put spread debit.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Attempting it at Level 3; assuming the long put hedges the short call (it does not).",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

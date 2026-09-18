@@ -1,0 +1,80 @@
+{
+  "name": "Call Christmas Tree Butterfly (1-3-2)",
+  "slug": "call-christmas-tree-butterfly",
+  "summary": "Buy 1 call at A, sell 3 calls at B, buy 2 calls at C with equal strike spacing; a balanced but heavily unbalanced-ratio butterfly that widens the profit tent upward compared to a 1-2-1 fly.",
+  "aliases": [
+    "christmas tree butterfly",
+    "1-3-2 call butterfly",
+    "xmas tree fly",
+    "unbalanced 1-3-2 fly"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "A = strike nearest ATM, call delta 0.45-0.55",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 3,
+      "strike_rule": "B = A + W where W = 1.0-1.5% of spot; B delta 0.25-0.35",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "C = B + W (identical spacing); C delta 0.12-0.20",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit (usually a small one) or occasionally flat/credit",
+  "typical_dte": "14-45 DTE",
+  "when_to_use": "IV rank > 35, a slow uptrend, and call skew flat enough that selling 3 at B pays for the 1 at A and 2 at C. Contract count nets to zero (1 - 3 + 2 = 0), so the structure is fully defined-risk and Level 3 eligible.",
+  "max_profit": "(W x 100) - net debit, at strike B",
+  "max_loss": "net debit paid on the downside; on the upside the position converges to (net debit) as well because the 2 long C calls reclaim the extra short at B. Worst case is a finish between B and C: max loss there is bounded by (W x 100) + net debit minus the recovery from the C longs - compute per-fill from the payoff table before submitting.",
+  "breakevens": "lower breakeven = A + debit/100; upper breakeven between B and C, solved numerically from the 1-3-2 payoff",
+  "greeks": {
+    "delta": "positive at entry (+10 to +25 per unit)",
+    "gamma": "negative around B",
+    "theta": "positive when spot is below B",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "Strike spacing A->B and B->C must be exactly equal; reject otherwise.",
+    "Net debit <= 25% of W x 100.",
+    "Contract ratio strictly 1:3:2 so the net contract count is zero (no naked shorts); anything else is a Level 4 structure.",
+    "A delta 0.45-0.55, B delta 0.25-0.35, C delta 0.12-0.20.",
+    "Compute the full expiry payoff at A, B, C and 2W beyond C before submitting; reject if the worst point on that curve exceeds 1.5% of equity.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 6-contract multi-leg order at mid, pay up to mid + $0.04."
+  ],
+  "management_rules": [
+    "Close at 30% of max profit, i.e. when mark >= debit + 0.30 x ((W x 100) - debit).",
+    "Close at 21 DTE regardless of P/L.",
+    "Close if spot trades above C - the tent has been exited on the upside.",
+    "Stop at 60% loss of the debit if spot falls below A."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 3 short calls at B. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the B calls are ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before the ex-date if the B calls are ITM with extrinsic below the declared dividend.",
+    "Close no later than 5 DTE; the 1-3-2 payoff between B and C is unforgiving at high gamma."
+  ],
+  "assignment_risk": "Three short calls at B means -300 shares per unit on assignment, covered by only 1 long at A and 2 at C. If B is assigned while spot sits between B and C, the residual exposure is materially short. Highest assignment count of any structure in this family - treat the flatten rule as hard-wired.",
+  "buying_power": "Net debit plus the broker's spread requirement on the 1-3-2 decomposition (typically one W-wide short call spread's width x 100 minus credit). Budget (W x 100) + debit per unit until the actual Alpaca margin response is observed.",
+  "liquidity_needs": "High; six contracts per unit across three strikes.",
+  "common_mistakes": "Using unequal strike spacing, which silently converts the structure into something with naked exposure; assuming it behaves like a 1-2-1 fly; ignoring the region between B and C where the payoff dips; holding to expiry with 3 short calls live.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended. Six contracts of slippage plus three short strikes to monitor into the close is a poor 0DTE risk/effort trade. If forced, treat it as intraday-only with a 15:45 ET flatten.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "mildly bullish to neutral; profits if the underlying drifts up toward B",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

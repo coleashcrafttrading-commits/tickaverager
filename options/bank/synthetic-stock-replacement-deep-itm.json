@@ -1,0 +1,64 @@
+{
+  "name": "Deep ITM Call Stock Replacement",
+  "slug": "synthetic-stock-replacement-deep-itm",
+  "aliases": [
+    "stock replacement",
+    "LEAPS stock replacement",
+    "synthetic long via deep ITM call"
+  ],
+  "summary": "Replace 100 shares with a single deep in-the-money call at 0.85-0.95 delta, obtaining most of the directional exposure for a fraction of the capital with a defined floor.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM: strike such that call delta is in [0.85, 0.95], typically strike <= spot x 0.85; extrinsic value must be under 3% of spot"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "UNDEFINED (unlimited): (spot_at_exit - strike) x 100 - debit",
+  "max_loss": "The full debit paid, which is far less than the share notional \u2014 this is the whole point",
+  "greeks": {
+    "delta": "+0.85 to +0.95",
+    "gamma": "small positive",
+    "theta": "negative but small in absolute terms when extrinsic is minimal",
+    "vega": "positive but small"
+  },
+  "breakevens": "strike + debit/100",
+  "when_to_use": "When long delta-1 exposure is wanted but the shares would consume too much of a $50k account, and when IV rank < 35 so the small extrinsic is not overpriced. It is the Level-3-legal substitute for a synthetic long stock, and the router should prefer it whenever a synthetic-long signal fires.",
+  "typical_dte": "90-365 DTE; longer tenors amortise the extrinsic over more time",
+  "entry_rules": [
+    "LEVEL 2 LEGAL and fully executable on Alpaca Level 3. No short legs, no assignment exposure, no uncovered anything. This is the recommended Level-3 replacement for synthetic-long-stock.",
+    "Strike chosen by DELTA: nearest listed strike with delta in [0.85, 0.95].",
+    "Extrinsic gate: (call_ask - max(0, spot - strike)) <= 0.03 x spot. If the extrinsic exceeds 3% of spot, the option is a leveraged vol bet, not a stock replacement.",
+    "IV rank < 35 at entry; above that, the extrinsic embedded in a long-dated ITM call is expensive.",
+    "No ex-dividend date concerns on the long side (long calls forgo dividends, which is already priced in) but note that a high-dividend underlying makes stock replacement systematically worse \u2014 require dividend yield < 2.0%.",
+    "Size: debit per unit <= 5% of equity ($2,500). Deep ITM calls are capital-efficient but still represent full share-notional directional exposure.",
+    "Underlying price >= $20, ADV >= 1,000,000, OI >= 250 at the chosen strike."
+  ],
+  "management_rules": [
+    "Roll out to a further expiry when DTE falls below 60, paying no more than 1.5% of notional for the roll.",
+    "Take profit at +25% on the underlying's price (not on the option's percentage gain, which is leveraged and misleading).",
+    "Stop: close if the underlying falls more than 10% below entry spot, or if the call delta drops below 0.60 \u2014 at that point it is no longer a stock replacement, it is a losing directional option.",
+    "Do not sell calls against it without recognising that the result is a diagonal (see synthetic-covered-call-diagonal), which introduces a short leg and all of the assignment machinery."
+  ],
+  "exit_rules": [
+    "No short legs, therefore no assignment risk.",
+    "MANDATORY: close the call by 15:00 ET on expiration day if ITM. Auto-exercise of a deep ITM call buys 100 shares at the strike, creating a $10,000+ share position overnight with no prior decision \u2014 for a $50k account that is a material and unintended capital commitment.",
+    "If the call is OTM at 15:40 ET on expiration day it may lapse, but by then the delta stop should have closed it far earlier.",
+    "Never hold a deep ITM long call into the final session on the assumption that it will be sold in time; set the close as a resting order."
+  ],
+  "assignment_risk": "NONE \u2014 there are no short legs. The counterpart hazard is OCC auto-exercise of the long call at expiry if it finishes $0.01 or more ITM, which converts a $2,500 option into a $10,000 share position. The 15:00 ET expiry-day close rule exists specifically for this.",
+  "alpaca_level": 2,
+  "buying_power": "The debit paid in full, typically 15-25% of the share notional. About $1,800 for a 0.90-delta call on a $100 underlying versus $10,000 for the shares.",
+  "liquidity_needs": "Deep ITM calls quote wider than ATM; require bid-ask <= $0.15 or 2% of the option price, and OI >= 250. Long-dated deep ITM strikes on mid-caps frequently fail this.",
+  "common_mistakes": "Choosing a strike by price rather than by delta and ending up with a 0.70-delta call that behaves nothing like stock. Paying a large extrinsic and calling it stock replacement. Letting it auto-exercise.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE deep ITM call is pure intrinsic facing certain auto-exercise; it is a share purchase with extra steps and extra fees.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

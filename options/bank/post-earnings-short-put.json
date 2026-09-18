@@ -1,0 +1,62 @@
+{
+  "name": "Post-Earnings IV-Crush Short Put",
+  "slug": "post-earnings-short-put",
+  "aliases": [
+    "IV crush put sale",
+    "post-report CSP"
+  ],
+  "summary": "Sell a cash-secured put immediately after an earnings report, capturing elevated residual IV once the binary event risk has already resolved.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta -0.20 to -0.30, strike below the post-report low",
+      "dte_rule": "21-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The credit x 100",
+  "max_loss": "(strike - credit) x 100",
+  "breakevens": "strike - credit",
+  "greeks": {
+    "delta": "+0.20 to +0.30",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative - and here it works for you, since residual post-report IV usually continues to decay for several sessions"
+  },
+  "typical_dte": "21-45 DTE",
+  "when_to_use": "The session after a report, when binary risk is gone but IV has not fully normalised (IVR still above 30 and above the name's 60-day median).",
+  "entry_rules": [
+    "Entry window: the session after the report, through 3 trading days after",
+    "IVR still > 30 AND current IV > the name's 60-day median IV",
+    "Strike below the post-report intraday low, and delta between -0.20 and -0.30 - take whichever is lower",
+    "No further earnings before expiry (verified against the next scheduled report date)",
+    "Cash >= strike x 100 x contracts",
+    "Credit >= 1% of strike per 30 days",
+    "Standard liquidity gates: ADV >= 2M, OI >= 500, spread <= 8% of mid",
+    "Do not submit before 10:00 ET - post-report spreads need 30 minutes to normalise"
+  ],
+  "management_rules": [
+    "Buy to close at 50% of credit or at 21 DTE, whichever first",
+    "Hard stop at 2.5x credit",
+    "Roll down and out for a credit if delta exceeds -0.50; maximum 2 rolls",
+    "If IV normalises quickly and the position reaches 50% within a week, take it and redeploy - that is the strategy working as designed"
+  ],
+  "exit_rules": [
+    "Close at 50% of credit, 21 DTE, or the 2.5x stop",
+    "All never-assign rules apply: extrinsic < $0.10, delta > -0.85, within 1.0% of the strike at 14:30 ET on expiration day, hard backstop 15:45 ET"
+  ],
+  "assignment_risk": "MODERATE. Same profile as a standard CSP; choosing the strike below the post-report low reduces but does not remove it.",
+  "buying_power": "Cash: strike x 100 per contract.",
+  "liquidity_needs": "OI >= 500, spread <= 8% of mid after the first 30 minutes of trading.",
+  "common_mistakes": "Selling into a name that gapped down and is still falling - the IV is high for a reason; choosing the strike by delta alone and ignoring the post-report low.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,90 @@
+{
+  "name": "Calendar Straddle (Straddle Swap)",
+  "slug": "calendar-straddle",
+  "summary": "Sell the front-month straddle and buy the back-month straddle at the same strike; a double-weighted single-strike calendar that maximizes theta and vega at one price point.",
+  "aliases": [
+    "straddle swap",
+    "double calendar at one strike",
+    "calendarized straddle",
+    "straddle calendar"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM strike, |delta| 0.45-0.55; the same strike is used for all four legs.",
+      "dte_rule": "front expiry, 21-35 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "front expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "back expiry, 45-70 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "back expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "Roughly double a single ATM calendar: the back-month straddle's value at front expiry with spot at the strike, minus the debit. Typically 20-40% of the debit but with twice the dollar sensitivity.",
+  "max_loss": "The net debit paid, if spot ends far from the strike at front expiry.",
+  "breakevens": "Two, bracketing the strike, marginally wider than a single calendar because the debit is larger: approximately strike +/- (1.0 to 1.2) x (debit/2) x 2 in underlying points. Solve numerically.",
+  "greeks": {
+    "delta": "~0 at the ATM strike and stays flatter than a single calendar because the call and put calendar deltas offset as spot drifts",
+    "gamma": "negative, roughly 2x a single calendar",
+    "theta": "positive, roughly 2x a single calendar",
+    "vega": "positive, roughly 2x a single calendar - the most vega-dense structure in the family per dollar of debit"
+  },
+  "when_to_use": "IV rank < 25 with a strong pin thesis at a specific strike (max-pain level, heavy OI strike, a long-standing consolidation midpoint). The advantage over a plain calendar is that put-call skew asymmetries are neutralized and the delta stays flatter through drift; the disadvantage is double the vega.",
+  "typical_dte": "front 21-35 DTE, back 45-70 DTE",
+  "entry_rules": [
+    "IV rank < 25.",
+    "front_IV - back_IV >= -2.0 vol points on BOTH the call and the put.",
+    "Single ATM strike, |delta| 0.45-0.55, chosen at the highest-open-interest strike within 1 ATR of spot when a pin thesis exists.",
+    "Front 21-35 DTE, back 45-70 DTE.",
+    "Total debit <= 3% of equity; combined 4-leg bid-ask <= 8% of debit.",
+    "No earnings or ex-dividend inside the front cycle.",
+    "LEVEL 3 OK: the short front call is covered by the long back call at the same strike, and the short front put by the long back put. Submit as a single 4-leg mleg; if rejected, submit two 2-leg calendars (call calendar and put calendar), LONG leg first on each."
+  ],
+  "management_rules": [
+    "Profit target +20% of total debit.",
+    "Stop at -40% of total debit.",
+    "If |spot - strike| > 0.8 x front-month ATM straddle price, close - the pin thesis has failed.",
+    "If |net delta| > 0.35 per unit, close rather than adjust; recentering a calendar straddle costs four legs of slippage.",
+    "Roll both shorts out one expiry at front DTE <= 7 only if both shorts' |delta| <= 0.60, for a net credit.",
+    "Max 2 units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll BOTH short legs by 14:30 ET on front expiration day, unconditionally.",
+    "Close the whole structure no later than 2 trading days before front expiry if not rolling.",
+    "Whichever short goes ITM: close it immediately if extrinsic <= $0.05 or |delta| >= 0.90. Note that at expiry one of the two shorts is ALWAYS ITM by definition unless spot lands exactly on the strike - this structure guarantees an assignment candidate.",
+    "Close the short call before ex-dividend if extrinsic < dividend per share.",
+    "Unwind shorts before longs."
+  ],
+  "assignment_risk": "Structurally the highest routine risk of the level-3 calendars, because at front expiry one of the two short legs is essentially always ITM (spot is rarely exactly at the strike). Both shorts are covered by same-strike back-month longs, so the exposure is a covered stock position, but the forced close is not optional here - it is the core of the trade plan.",
+  "buying_power": "Net debit only; both shorts are strike-for-strike covered.",
+  "liquidity_needs": "Four legs at one strike, so only the strike's liquidity matters: OI >= 500 in both expiries, quoted spread <= $0.10 per leg. SPY/QQQ/IWM and mega-cap single names.",
+  "common_mistakes": "Loading double vega in a falling-IV tape; assuming the delta stays neutral (it does not once spot leaves the strike - the ITM side dominates); forgetting that one short leg is always in the money at expiry; adjusting instead of closing.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended: a 0DTE short straddle against 1-4 DTE longs guarantees one ITM short at the bell on a share-settled name.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

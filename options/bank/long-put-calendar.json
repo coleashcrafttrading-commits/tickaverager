@@ -1,0 +1,77 @@
+{
+  "name": "Long Put Calendar Spread",
+  "slug": "long-put-calendar",
+  "summary": "Sell a near-term put and buy a longer-dated put at the same strike; the put mirror of the call calendar, used when the pin level is at or below spot or when puts are the more liquid side.",
+  "aliases": [
+    "horizontal put spread",
+    "put time spread",
+    "long put horizontal"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM by delta: |delta| 0.45-0.55 neutral; 0.25-0.35 OTM put for a bearish directional calendar. Strike within 1.0 x ATR(14) of spot.",
+      "dte_rule": "front leg, 21-35 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Identical strike to leg 1.",
+      "dte_rule": "back leg, 45-70 DTE; gap 21-35 days"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "No closed form. Approximately the back-month put's theoretical value at front expiry with spot at the strike, minus the debit; typically 20-40% of the debit.",
+  "max_loss": "The net debit paid, if the underlying finishes far from the strike in either direction by front expiry.",
+  "breakevens": "Two, bracketing the strike; solve numerically at front expiry with back-month IV. Roughly strike +/- (1.0 to 1.3) x debit in underlying points.",
+  "greeks": {
+    "delta": "~0 at ATM (+/-0.05); moves to +/-0.15 as spot drifts off the strike",
+    "gamma": "negative, ~-0.01 to -0.03 per unit",
+    "theta": "positive, ~+$3 to +$8/day per unit at 30/60 on a $100 name",
+    "vega": "positive, ~+$8 to +$15 per unit"
+  },
+  "when_to_use": "Same regime as the call calendar: IV rank < 30, term structure flat-to-backwardated. Prefer the put calendar when the pin strike is below spot, when the put side of the chain is tighter, or when the underlying pays a dividend inside the front cycle (short puts have no dividend-driven early-assignment risk; short calls do). On high-dividend ETFs the put calendar is structurally safer than the call calendar.",
+  "typical_dte": "front 21-35 DTE, back 45-70 DTE",
+  "entry_rules": [
+    "IV rank < 30 AND IV percentile < 40.",
+    "front_IV - back_IV >= -3.0 vol points.",
+    "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days.",
+    "Strike by delta: neutral front |delta| 0.45-0.55; directional 0.25-0.35. Within 1.0 ATR(14) of spot.",
+    "Net debit <= $2.50/unit on sub-$150 underlyings; total debit <= 2% of equity.",
+    "Combined bid-ask <= 10% of the debit.",
+    "No earnings between now and front expiry unless running the earnings playbook.",
+    "LEVEL 3 OK: long back-month put at the same strike and later expiry covers the short front put. Single mleg order; if rejected, fill the LONG leg first."
+  ],
+  "management_rules": [
+    "Profit target +25% of debit; acceptable range 25-50%.",
+    "Stop at -50% of debit.",
+    "Directional stop: |spot - strike| > 1.0 x front-month ATM straddle price at entry.",
+    "If |net delta| > 0.30 per unit, close or recenter.",
+    "Roll the short put out one expiry when front DTE <= 7 and short |delta| <= 0.60, for a credit only.",
+    "Max 4 units per underlying; calendars in aggregate <= 10% of equity."
+  ],
+  "exit_rules": [
+    "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+    "Close the whole spread no later than 2 trading days before front expiry if not rolling.",
+    "Close the short put immediately if extrinsic <= $0.05/share OR short |delta| >= 0.90.",
+    "Deep-ITM short puts on hard-to-borrow or high-interest-rate names get exercised early for the interest - close any short put whose extrinsic is below $0.10 regardless of DTE.",
+    "Leg out short-first, always.",
+    "If the long put marks below $0.10, close both legs."
+  ],
+  "assignment_risk": "Only the short front-month put. Assignment delivers 100 LONG shares per contract (a cash/buying-power event, not a short-stock event) hedged by a long back-month put. Early exercise of short puts is driven by interest carry on deep-ITM puts, not dividends. If assigned, flatten the shares within one session and re-evaluate the long put.",
+  "buying_power": "Net debit only; no additional maintenance. Assignment consumes buying power equal to strike x 100 until the shares are sold.",
+  "liquidity_needs": "OI >= 250 per leg, volume >= 50, back-month quoted spread <= $0.25. Underlying ADV >= 2M shares.",
+  "common_mistakes": "Treating the put calendar as bearish - it is not, it is neutral around the strike; buying it into high IV rank; forgetting that a deep-ITM short put can be exercised for interest; choosing a strike far below spot for 'safety' and ending up with a structure that only pays if the market crashes precisely to that level.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Same as the call calendar: a 0DTE front leg belongs to the day-calendar playbook only.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,73 @@
+{
+  "name": "Call Ratio Backspread (1x2)",
+  "slug": "call-ratio-backspread",
+  "summary": "Sell 1 nearer call and buy 2 further OTM calls, usually for a credit or flat; a defined-downside, unlimited-upside bet on a violent rally.",
+  "aliases": [
+    "call backspread",
+    "reverse call ratio spread",
+    "1x2 long call ratio"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM or slightly ITM, call delta 0.55-0.65",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "OTM strike at call delta 0.30-0.35, chosen so the package opens at a credit or zero cost",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit (preferred) or zero cost",
+  "typical_dte": "21-60 DTE, or 1-5 DTE for event trades",
+  "when_to_use": "IV rank < 30 with a flat or inverted call skew, ahead of a catalyst that could produce a gap higher (earnings beat, FDA, buyout chatter). The credit means a decline is a small win; the loss zone sits between the two strikes.",
+  "max_profit": "UNLIMITED above the long strike",
+  "max_loss": "(long strike - short strike) x 100 - net credit, exactly at the long strike. Defined.",
+  "breakevens": "lower: none when opened for a credit (a decline keeps the credit); upper breakeven = long strike + (long strike - short strike) - credit/100",
+  "greeks": {
+    "delta": "slightly positive to flat at entry, strongly positive above the long strike",
+    "gamma": "positive above the long strike",
+    "theta": "negative when spot is between the strikes",
+    "vega": "positive"
+  },
+  "entry_rules": [
+    "Open for a net CREDIT or zero cost; reject any debit fill - a debit backspread loses on a decline too.",
+    "Short leg delta 0.55-0.65; long legs delta 0.30-0.35; strike distance = 1.5-3.0% of spot.",
+    "Max loss ((long strike - short strike) x 100 - credit) <= 1.5% of equity per unit.",
+    "IV rank < 30 at entry.",
+    "A catalyst inside the expiry, or a chart at the top of a multi-month base.",
+    "Both strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-contract multi-leg order at mid, accept mid - $0.03 as long as it stays a credit."
+  ],
+  "management_rules": [
+    "Profit target: close at 100% of the max-loss amount in profit, i.e. when mark-to-market gain >= (long strike - short strike) x 100.",
+    "Close the session after the catalyst resolves, win or lose.",
+    "Time rule: close at 14 DTE - the loss valley at the long strike deepens fast into expiry.",
+    "Stop: close if mark-to-market loss reaches 60% of the theoretical max loss.",
+    "Never roll the short leg up; that re-creates a front ratio."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 1 short call, covered by 2 longs but still assignable. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short call is ITM with extrinsic < $0.10 - which is exactly what happens in the winning rally scenario.",
+    "DIVIDEND GUARD: close before the ex-dividend date whenever the short call is ITM with extrinsic below the dividend.",
+    "Close no later than 14 DTE, or 1 DTE for event versions."
+  ],
+  "assignment_risk": "One short call, fully covered by two long calls. Assignment delivers -100 shares hedged by the longs, so the economics survive; but the system still ends up short 100 shares of stock, which it must not hold. In the winning scenario the short goes deep ITM and loses extrinsic, making assignment likely - so the winner must be closed, not ridden.",
+  "buying_power": "The vertical component: (long strike - short strike) x 100 - credit, per unit.",
+  "liquidity_needs": "Moderate; three contracts per unit.",
+  "common_mistakes": "Paying a debit; entering in high IV so the long legs are overpriced; holding through the valley at the long strike into expiry; forgetting that the biggest loss occurs exactly at the strike you were bullish toward.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Usable as a 0DTE momentum structure into a data release: open for a credit at 09:45 ET, target a fast trend day. The valley at the long strike is lethal at 0DTE, so the stop must be time-based (close by 14:00 ET if the move has not happened) as well as price-based. Compute all greeks locally - Alpaca returns none on 0DTE.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "strongly bullish, long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

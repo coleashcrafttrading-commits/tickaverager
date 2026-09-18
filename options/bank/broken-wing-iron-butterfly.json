@@ -1,0 +1,90 @@
+{
+  "name": "Broken-Wing Iron Butterfly",
+  "slug": "broken-wing-iron-butterfly",
+  "summary": "An iron butterfly with unequal wings - the short ATM straddle is protected by one narrow wing and one wide wing - skewing the risk to one side in exchange for a larger credit.",
+  "aliases": [
+    "unbalanced iron butterfly",
+    "skip-strike iron fly",
+    "BWIB"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "put wing: body - Wp; on a bullish-lean version Wp is the WIDE wing (2 x the call wing), on a bearish lean it is the narrow one",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "body: ATM strike, put delta -0.45 to -0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "same body strike as the short put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "call wing: body + Wc, the NARROW wing on a bullish-lean version (Wc = 0.5 x Wp)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "typical_dte": "14-45 DTE; 0DTE variant exists on SPY/QQQ",
+  "when_to_use": "IV rank > 45 plus a directional lean you want expressed without paying for it. Put the WIDE wing on the side you consider less likely, and collect the extra credit from not buying that expensive protection close in.",
+  "max_profit": "net credit received, at the body strike",
+  "max_loss": "(wide wing width x 100) - net credit. Defined but asymmetric - always size off the WIDE side.",
+  "breakevens": "body - credit (down) and body + credit (up), same as a standard iron fly; the asymmetry shows up beyond the wings, not at the breakevens",
+  "greeks": {
+    "delta": "non-zero by construction; typically -5 to -15 per unit when the wide wing is on the put side",
+    "gamma": "strongly negative at the body",
+    "theta": "strongly positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "Wide wing = 2.0 x narrow wing; reject ratios above 3.0x.",
+    "Credit >= 30% of the NARROW wing width and >= 15% of the wide wing width.",
+    "Both short legs on the identical ATM strike.",
+    "Max loss computed off the WIDE wing must be <= 2% of equity per unit.",
+    "IV rank >= 45; no earnings inside the expiry.",
+    "All four legs: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 4-leg limit order at mid, accept mid - $0.03."
+  ],
+  "management_rules": [
+    "Close at 25% of max profit (the credit) for swing versions.",
+    "Close or roll at 21 DTE regardless of P/L.",
+    "Stop at 2.0x the credit in mark-to-market loss, computed off the wide side.",
+    "If spot breaches the narrow wing, close - do not defend; the narrow side caps quickly and there is nothing to salvage.",
+    "Delta limit: close if net delta exceeds +/-25 per unit."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: an ATM short call AND an ATM short put both exist; one is ITM at expiry by construction. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if either short leg is ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before the ex-date if the short call is ITM with extrinsic below the dividend.",
+    "PIN GUARD: close at 15:30 ET if |spot - body| < 0.30% of spot."
+  ],
+  "assignment_risk": "Identical to the standard iron butterfly and just as severe: the short straddle guarantees one ITM short leg at expiry. The asymmetric wings change the P/L, not the assignment mechanics. Mandatory automated flatten.",
+  "buying_power": "(wide wing width x 100) - net credit, per unit.",
+  "liquidity_needs": "High; four legs with one far-OTM wing.",
+  "common_mistakes": "Sizing off the narrow wing and discovering the real risk is double that; putting the wide wing on the downside of an equity index, where gaps actually happen; treating the extra credit as free.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Traded 0DTE on SPY/QQQ with the wide wing placed against the prevailing intraday trend. Same mandatory 15:45 ET flatten and 1.5x-credit intraday stop as the standard iron fly.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral with a deliberate directional tilt; risk is concentrated on the wide-wing side",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)"
+  ]
+}

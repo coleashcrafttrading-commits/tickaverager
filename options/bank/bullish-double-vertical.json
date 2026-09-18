@@ -1,0 +1,90 @@
+{
+  "name": "Bullish Double Vertical (Call Debit + Put Credit)",
+  "slug": "bullish-double-vertical",
+  "aliases": [
+    "double vertical",
+    "risk-reversal spread",
+    "financed call spread",
+    "split-strike four-leg"
+  ],
+  "summary": "Buy a call debit spread and finance it by selling a put credit spread in the same expiry - a defined-risk directional bullish structure that can often be opened for a small debit or even a credit.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short put strike minus width Wp",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.20-0.25 delta put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.40-0.50 delta call (at or just OTM)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "long call strike plus width Wc, placed at the upside price target",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either",
+  "max_profit": "(Wc - net debit) x 100, or (Wc + net credit) x 100 if opened for a credit - achieved above the short call strike",
+  "max_loss": "(Wp + net debit) x 100, or (Wp - net credit) x 100 - achieved below the long put strike",
+  "breakevens": "if opened for a debit: long call strike + net debit per share, and short put strike - (Wp ... ) - compute the exact lower breakeven numerically at entry and store it",
+  "greeks": {
+    "delta": "positive, +0.30 to +0.50 per 1-lot at entry",
+    "gamma": "mixed, slightly negative near the short strikes",
+    "theta": "slightly positive when the put credit spread dominates",
+    "vega": "slightly negative"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "Directionally bullish with IV rank >= 25 (so the put spread pays for the call spread) and a defined upside target. Preferable to a naked long call spread when IV is elevated and you are willing to accept downside risk to the put spread.",
+  "entry_rules": [
+    "Bullish trigger required: price above the 50-day SMA AND 20-day SMA slope positive, or a defined breakout above the 20-day high",
+    "IV rank >= 25",
+    "Net cost <= 25% of Wc (the call spread width), i.e. the put spread must finance at least 75% of the call spread",
+    "Short put at 0.20-0.25 delta; short call at the target price (measured move or 20-day ATR x 2 above spot)",
+    "Max loss (put side) <= 2% of equity",
+    "DTE 30-60, no earnings inside the expiry",
+    "OI >= 500, spread <= 10% of mid on all four legs",
+    "Alpaca level 3 (two defined-risk verticals)"
+  ],
+  "management_rules": [
+    "Take profit at 60% of max profit",
+    "Roll or close the put spread at 50% of ITS credit if the call spread is still open and working",
+    "Time stop at 14 DTE",
+    "Loss stop: close everything if the loss reaches 1.0x the maximum profit of the call spread (asymmetric structures need a tighter loss rule than symmetric ones)",
+    "Trend invalidation: close if price closes below the 50-day SMA",
+    "Never add to the losing put side"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "Close the put vertical immediately if the short put goes ITM by more than 0.25 x Wp, or its delta <= -0.85, or its extrinsic < $0.10",
+    "Close the call vertical immediately if the short call goes ITM and its extrinsic < $0.10 (it is at max profit there anyway)",
+    "Ex-dividend guard on the short call"
+  ],
+  "assignment_risk": "Both verticals contain a short leg. The short put is the live one in a decline (obligation to buy 100 shares per contract); the short call only goes ITM at maximum profit, where the structure should be closed anyway.",
+  "buying_power": "Max of the two verticals' requirements, typically (Wp - put credit) x 100 per contract, plus any net debit on the call side.",
+  "liquidity_needs": "Four strikes, OI >= 500, penny-wide markets.",
+  "common_mistakes": "Treating the financed call spread as free - the put spread carries real downside risk; setting the short call below a realistic target and capping the trade too early; carrying the short put through a sharp decline.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Usable intraday as a directional 0DTE structure on SPY/QQQ after a confirmed trend signal (price above VWAP with rising volume). Use 0.15 delta short put, target the short call at the measured move, take profit at 50% of max, hard stop at 1x the call spread's max profit, force-close 15:45 ET.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

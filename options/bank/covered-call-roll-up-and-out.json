@@ -1,0 +1,73 @@
+{
+  "name": "Covered Call Roll Up and Out",
+  "slug": "covered-call-roll-up-and-out",
+  "aliases": [
+    "Rolling a covered call",
+    "Defending a called-away position"
+  ],
+  "summary": "Management structure, not an opening trade: buy back a threatened short call and sell a higher strike in a later expiry, for a net credit, to keep the shares and raise the cap.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "close the existing short call (now 0.60+ delta)",
+      "dte_rule": "current expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "new strike >= old strike, chosen at 0.30 delta in the new cycle",
+      "dte_rule": "next cycle, 30-45 DTE, at least 14 days beyond the old expiry"
+    },
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing shares, unchanged",
+      "dte_rule": "n/a"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(new strike - share basis + cumulative credits) x 100",
+  "max_loss": "full share downside less cumulative credits",
+  "breakevens": "share basis - cumulative net credits",
+  "greeks": {
+    "delta": "raises net delta back toward +70 per unit",
+    "gamma": "reduced by pushing expiry out",
+    "theta": "reset to a fresh positive decay curve",
+    "vega": "more negative (longer-dated short option)"
+  },
+  "when_to_use": "Short call delta >= 0.70, at least 7 DTE remaining, and the system wants to retain the shares (tax, core holding, or the underlying still trending up).",
+  "typical_dte": "execute at 14-21 DTE on the old leg; new leg at 30-45 DTE",
+  "entry_rules": [
+    "Trigger: short call delta >= 0.70 OR spot > strike x 1.02, with DTE <= 21.",
+    "Execute as a single multi-leg roll order (buy-to-close + sell-to-open), never two separate orders.",
+    "Require the roll to be a NET CREDIT. If no higher strike in the next cycle pays a credit, roll out at the same strike instead.",
+    "Do not roll more than 2 cycles on the same underlying without re-validating the thesis; after 2 rolls, allow the shares to be sold instead.",
+    "Do not roll into an expiry containing an earnings date."
+  ],
+  "management_rules": [
+    "Cap total rolls at 3 per position; after that, close the unit.",
+    "Track cumulative credits as a basis reduction; the unit must remain profitable if called at the new strike.",
+    "If the roll can only be done for a debit >= 0.25% of notional, abandon the roll and let the shares go (controlled close)."
+  ],
+  "exit_rules": [
+    "If the roll order does not fill within 3 attempts at progressively worse prices (mid, mid+5%, mid+10% of spread) before 15:30 ET on expiration day, abandon the roll and simply buy back the short call outright - never enter expiration with the short leg open.",
+    "Standard extrinsic guard applies to the old leg until it is closed."
+  ],
+  "assignment_risk": "The window between buying back the old call and the new call being live is the danger zone; a combo roll order eliminates it. If the old call is deep ITM near a dividend, the roll may be too late - close instead.",
+  "buying_power": "None beyond the shares; the roll is covered throughout if executed as a combo.",
+  "liquidity_needs": "Both expiries must be liquid; roll spread <= 10% of the net credit.",
+  "common_mistakes": "Rolling for a debit to 'save' a position; rolling indefinitely and turning a small capped gain into an unlimited commitment; legging the roll and briefly holding a naked call.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Rolling a 0DTE short call is almost always worse than closing it; the new leg's credit rarely compensates for the gamma already realized.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

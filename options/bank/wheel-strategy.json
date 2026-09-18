@@ -1,0 +1,78 @@
+{
+  "name": "The Wheel",
+  "slug": "wheel-strategy",
+  "aliases": [
+    "Triple income strategy",
+    "CSP-to-covered-call cycle",
+    "Put-call rotation"
+  ],
+  "summary": "A repeating cycle: sell cash-secured puts until shares are acquired, then sell covered calls against the shares until they are called away, then start again.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "phase 1: 0.25-0.30 delta cash-secured put",
+      "dte_rule": "30-45 DTE"
+    },
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "phase 2: shares acquired at the put strike (or deliberately bought in the market)",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "phase 3: 0.25-0.30 delta covered call, strike >= share basis",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "per cycle: put credits + call credits + (call strike - share basis) x 100; unbounded over many cycles",
+  "max_loss": "(share basis - cumulative credits) x 100 if the underlying collapses while shares are held",
+  "breakevens": "rolling: share basis minus all credits collected since inception",
+  "greeks": {
+    "delta": "+25 in the put phase, +70 in the covered call phase",
+    "gamma": "negative in both phases",
+    "theta": "positive throughout",
+    "vega": "negative throughout"
+  },
+  "when_to_use": "On liquid, fundamentally acceptable underlyings the system is content to own for months - large-cap ETFs and blue chips. Requires IV Rank >= 30 to be worth the capital. Do NOT wheel high-beta names that can gap 40%.",
+  "typical_dte": "30-45 DTE per phase",
+  "entry_rules": [
+    "Universe filter: price between $20 and $150 (so one lot is affordable in a $50k account), ADV >= 2M shares, weekly options available, OI >= 500, IV Rank >= 30, no binary catalysts.",
+    "Phase 1: standard CSP entry rules; cash reserved for the full strike.",
+    "Phase 3: standard covered call rules with the ADDITIONAL hard constraint strike >= share basis (basis = put strike - all credits collected to date).",
+    "Never run more than 3 wheels concurrently at $50k equity; total assignment notional <= 60% of equity.",
+    "Track a per-underlying ledger: cumulative credits, current basis, cycle count."
+  ],
+  "management_rules": [
+    "Every short option: 50% profit target, 21 DTE close-or-roll.",
+    "Phase transition on purpose, never by accident: when the put goes ITM, close it and decide explicitly whether to buy the shares in the market at the prevailing price.",
+    "If shares are held and the stock falls > 15% below basis, keep writing calls but at the basis strike even if that is a low delta; do not write below basis to chase premium.",
+    "If the effective basis (after credits) falls below the current price, a call written at the strike just above basis is acceptable to exit the cycle.",
+    "Halt the wheel on an underlying after 4 consecutive losing cycles or a 25% drawdown from basis."
+  ],
+  "exit_rules": [
+    "HARD, both phases: no ITM short leg is ever carried past 15:30 ET on expiration day. Put phase - close and buy shares deliberately if wanted. Call phase - close and sell shares deliberately if exiting.",
+    "Extrinsic guard on both phases: close when extrinsic < 0.05 and |delta| > 0.85.",
+    "Ex-dividend guard in the call phase: close or roll the day before ex-date if the call is ITM and extrinsic < 1.10 x dividend.",
+    "Cycle kill: if the underlying's thesis breaks (index deletion, halt, going-concern news), close options first, then liquidate shares."
+  ],
+  "assignment_risk": "Both phases have an assignable short leg. The traditional wheel WANTS assignment; this system does not, and instead replicates the phase transition with explicit share orders. That distinction must be encoded: the wheel's state machine advances on the system's own share purchase, not on a broker assignment notice. Reconciliation logic must still handle an unexpected assignment (random OCC allocation) by re-syncing the ledger and share count.",
+  "buying_power": "Put phase: strike x 100 in cash. Call phase: the shares. Effectively the full lot notional is committed for the whole cycle.",
+  "liquidity_needs": "Both puts and calls liquid at 0.25-0.30 delta across weeklies and monthlies; OI >= 500.",
+  "common_mistakes": "Wheeling a declining stock and calling the accumulated losses 'income'; writing calls below basis after a drawdown and locking the loss in; forgetting that the wheel is a covered strangle with extra steps and the same tail risk; running too many wheels for the account size.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The wheel's economics depend on 30-45 DTE theta and on being willing to hold shares; a 0DTE wheel is just daily overwriting plus daily put writing (see those entries).",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

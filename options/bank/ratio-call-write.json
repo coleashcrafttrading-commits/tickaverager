@@ -1,0 +1,65 @@
+{
+  "name": "Ratio Call Write",
+  "slug": "ratio-call-write",
+  "summary": "Long 100 shares plus 2 short calls; one call is covered by the shares and the second is naked, creating unlimited upside risk.",
+  "aliases": [
+    "variable ratio write",
+    "1x2 covered call",
+    "ratio write"
+  ],
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares per unit",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "call delta 0.30-0.40, one covered by shares and one UNCOVERED",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "COMPLETENESS / MOSTLY HISTORICAL: a floor-trader-era structure for very high IV on a stock expected to stall. The second short call is naked, so it requires level 4 and has unlimited risk. Under Level 3 the correct expression is a covered call plus a call credit spread.",
+  "max_profit": "total call credit + (strike - share cost basis) x 100, at the strike",
+  "max_loss": "UNDEFINED above the upper breakeven",
+  "breakevens": "lower = share cost basis - credit/100; upper = strike + [(strike - cost basis) + credit/100]",
+  "greeks": {
+    "delta": "near zero at entry by construction (100 share deltas minus roughly 70 option deltas)",
+    "gamma": "strongly negative",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the second short call is uncovered, requiring Alpaca level 4. The router must reject this slug.",
+    "Level 4 version: IV rank >= 70, strike delta 0.30-0.40, and a hard buy-stop in the shares above the upper breakeven.",
+    "Level-3 substitute: covered call on the 100 shares plus a separate defined-risk call credit spread."
+  ],
+  "management_rules": [
+    "Level 4 only: close at 50% of total credit.",
+    "Level 4 only: close immediately if spot exceeds the short strike, and always close at 21 DTE."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 2 short calls, 1 uncovered; close both by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short calls are ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before every ex-dividend date when the short calls are ITM."
+  ],
+  "assignment_risk": "Assignment on both calls delivers -200 shares; only 100 are covered by the held position, leaving a naked 100-share short with unlimited exposure.",
+  "buying_power": "Share position plus naked short call margin on the uncovered contract.",
+  "liquidity_needs": "Low-to-moderate.",
+  "common_mistakes": "Believing that holding shares makes both calls 'covered'; running it into a takeover or a squeeze.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never - uncovered short call.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral, aggressively short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

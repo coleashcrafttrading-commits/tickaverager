@@ -1,0 +1,66 @@
+{
+  "name": "Put Ratio Spread 1x2 (Put Front Spread)",
+  "slug": "put-ratio-spread-1x2",
+  "aliases": [
+    "put front spread",
+    "1x2 put ratio",
+    "short put ratio spread"
+  ],
+  "summary": "Buy one nearer put and sell two further-OTM puts in the same expiry, usually for a credit; profits most if the underlying drifts down to the short strike, with large risk below it.",
+  "bias": "neutral",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long put ATM or slightly ITM, 0.45-0.60 delta."
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Two short puts at 0.20-0.30 delta, placed so the package opens for a net credit.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "(long strike - short strike) * 100 + net credit, at exactly the short strike at expiry",
+  "max_loss": "Effectively undefined -- (short strike * 100) - max profit per unit, as the underlying falls toward zero. One short put is uncovered.",
+  "breakevens": "lower breakeven: short strike - (max profit per share); if opened for a credit there is no upper breakeven",
+  "greeks": {
+    "delta": "slightly negative at entry, turning sharply positive as price falls toward the short strike",
+    "gamma": "negative",
+    "theta": "positive above the short strike",
+    "vega": "negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Expecting a controlled pullback into support with elevated IV. Equity put skew means the two short puts pay well, making credit entries easy -- which is precisely what makes this structure seductive and dangerous in a crash.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. One of the two short puts is uncovered -- Level 4 authority, which Alpaca does not offer; the MLeg engine rejects uncovered legs.",
+    "Defined-risk substitute: a put broken-wing butterfly (buy 1 higher put, sell 2 middle puts, buy 1 lower put) -- same profile with a hard floor, Level 3 legal.",
+    "If it were enabled: IV rank >= 40; net credit > $0.00; short strike at or below support tested twice in 60 sessions; DTE 30-45; lower breakeven at least 2.0 ATR(20) below spot (markets fall faster than they rise, so demand more room than the call version)."
+  ],
+  "management_rules": [
+    "If enabled: take profit at 50% of max profit or close for any credit once within 1% of the short strike.",
+    "Close at 21 DTE.",
+    "Stop: close if the underlying trades below the lower breakeven, or if position delta reaches +0.50 per unit.",
+    "In a VIX spike above 30, close immediately regardless of P/L -- downside ratio spreads are the classic blow-up trade in a volatility event."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: assignment on both short puts delivers 200 long shares per unit against one long put; close before 15:30 ET on expiry day whenever the short puts are ITM.",
+    "ASSIGNMENT GUARD: close whenever the short puts are ITM with extrinsic < $0.10 -- ITM puts are exercised early for carry."
+  ],
+  "assignment_risk": "High. Two short puts, one covered. Double assignment means buying 200 shares per unit at the short strike, with only 100 shares' worth of long-put protection above.",
+  "buying_power": "The covered pair holds the vertical width; the extra short put holds Reg-T naked put margin (or cash-secured value). Not available on Alpaca.",
+  "liquidity_needs": "OI >= 500 both strikes; short leg quoted size >= 20.",
+  "common_mistakes": "Selling downside ratio spreads into a rising-VIX tape; treating the credit as the edge; not stress-testing a -10% gap.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not permitted, and 0DTE downside gaps are exactly the scenario that destroys this structure.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

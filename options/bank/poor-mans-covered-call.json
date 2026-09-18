@@ -1,0 +1,82 @@
+{
+  "name": "Poor Man's Covered Call (PMCC)",
+  "slug": "poor-mans-covered-call",
+  "summary": "Buy a deep-ITM long-dated call (LEAPS) as a stock surrogate and sell a short-dated OTM call against it, repeating monthly; a covered call at roughly a quarter of the capital.",
+  "aliases": [
+    "PMCC",
+    "synthetic covered call",
+    "LEAPS diagonal",
+    "long call diagonal (deep ITM)",
+    "diagonal covered call"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM by delta 0.80-0.90 (never below 0.70 - a lower-delta long tracks the stock too poorly and decays too fast). Extrinsic value of the LEAPS should be <= 10% of its total premium.",
+      "dte_rule": "back leg, 270-730 DTE (LEAPS); minimum 180 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM by delta 0.20-0.30. HARD CONSTRAINT: short strike >= long strike + net debit per share, so that a both-ITM finish still nets a profit. If no strike satisfies this at delta 0.20-0.30, move the short further out in time rather than violating it.",
+      "dte_rule": "front leg, 21-45 DTE; 30-35 DTE is the sweet spot"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "At or above the short strike at front expiry: approximately (short strike - long strike) x 100 - net debit + cumulative credits collected from all short calls sold to date. Each successful roll raises this ceiling.",
+  "max_loss": "The net debit paid, less all credits collected, realized if the underlying collapses and the LEAPS goes to near zero. On a 0.85-delta LEAPS the practical loss curve tracks about 85% of the stock's decline in the near term.",
+  "breakevens": "Approximately long strike + net debit per share at the LEAPS' expiry; at the short's front expiry the breakeven is lower because the LEAPS retains time value. Each collected credit lowers it further.",
+  "greeks": {
+    "delta": "net positive +0.50 to +0.65 per unit (0.85 long minus 0.25 short)",
+    "gamma": "slightly negative (the short front call has more gamma than the LEAPS)",
+    "theta": "positive but modest, +$1 to +$5/day per unit; the short's decay exceeds the LEAPS' decay",
+    "vega": "net positive - LEAPS vega is far larger than the short's; the position is quietly long volatility, which hurts in a vol crush"
+  },
+  "when_to_use": "Bullish 6-24 month view on a quality underlying with a healthy uptrend (spot > 50-day SMA > 200-day SMA). Buy the LEAPS when IV rank is LOW (< 35) so you are not overpaying for the long leg's vega; sell the short calls when the front-month IV is relatively elevated. On a $50k account, PMCC is the capital-efficient way to run covered-call income on 5-10 underlyings that would otherwise require $500k of stock.",
+  "typical_dte": "long 270-730 DTE, short 21-45 DTE, rolled monthly",
+  "entry_rules": [
+    "Trend filter: spot > 50-day SMA AND 50-day SMA > 200-day SMA; underlying must not have declined more than 15% in the last 20 sessions.",
+    "IV rank < 35 at the time of the LEAPS purchase (the long leg is your biggest vega exposure).",
+    "LEAPS: delta 0.80-0.90, DTE >= 180 (270-730 preferred), extrinsic <= 10% of premium.",
+    "Short call: delta 0.20-0.30, DTE 21-45.",
+    "MANDATORY: short strike >= long strike + net debit per share. If violated, the trade is rejected.",
+    "Net debit per unit <= 5% of equity ($2,500 on a $50k account); no more than 5 concurrent PMCCs.",
+    "LEAPS bid-ask <= 5% of its mid; short-call bid-ask <= $0.05.",
+    "LEVEL 3 OK: the short call is at a higher strike and an earlier expiry than a long call the account owns - a textbook covered diagonal. Submit as a 2-leg mleg for the open; thereafter manage the short leg as single-leg orders. If legging the open, BUY THE LEAPS FIRST and only then sell the call."
+  ],
+  "management_rules": [
+    "Close the short call at 50-75% of the credit received, then immediately sell the next cycle's 0.20-0.30 delta call at 21-45 DTE. This roll cadence is the income engine.",
+    "If the short call's |delta| exceeds 0.50, roll it up and out for a NET CREDIT only, and only to a strike still >= long strike + remaining net debit. If no credit roll satisfies that, close the short and let the LEAPS run naked-long (which is allowed and has no assignment risk) until a valid strike appears.",
+    "Roll the LEAPS forward when its delta falls below 0.70 OR its DTE falls below 120 - inside 90 DTE the theta cliff accelerates sharply.",
+    "Hard stop on the LEAPS: close the whole position if the LEAPS' mark falls to 50% of the purchase price, or if spot closes below the 200-day SMA for 3 consecutive sessions.",
+    "Track cost basis: the running net debit = original debit - cumulative credits. Every management decision references the CURRENT net debit, not the original.",
+    "Never sell more short calls than LEAPS owned - a second short call is naked and would require level 4."
+  ],
+  "exit_rules": [
+    "Close or roll the short call by 14:30 ET on its expiration day, unconditionally. A PMCC short call that expires ITM means -100 shares delivered on Monday.",
+    "Close the short call immediately if its extrinsic value <= $0.05/share or |delta| >= 0.90.",
+    "Close the short call before the close of the session preceding ex-dividend whenever its extrinsic value < the declared dividend per share. This is the #1 cause of PMCC assignment, and it typically happens when the stock has rallied through the short strike.",
+    "Close the LEAPS no later than 90 DTE, and always after the short call has been bought back.",
+    "Full exit: buy back the short call FIRST, then sell the LEAPS. Never the reverse.",
+    "If assigned: buy back the 100 short shares at market on the next open, keep the LEAPS, and re-sell a new short call once the strike constraint is satisfiable again."
+  ],
+  "assignment_risk": "Only the short call. Since the long strike is well below the short strike, an assignment produces -100 shares fully covered by a deep-ITM long call - economically similar to having exercised the LEAPS, but it leaves the account short stock with borrow and dividend liability. The dominant trigger is ex-dividend: a short call whose extrinsic is less than the dividend will be exercised the night before the ex-date. Do NOT solve the problem by exercising the LEAPS - that throws away its remaining time value; buy the shares back instead.",
+  "buying_power": "Net debit only. Alpaca recognizes a long call at a lower strike with a later expiry as full cover for the short call, so there is no additional maintenance requirement. If assigned, the short stock position carries a real margin requirement until flattened.",
+  "liquidity_needs": "LEAPS liquidity is the binding constraint: OI >= 100 at the chosen deep-ITM strike, bid-ask <= 5% of mid, and a real two-sided market. Practically this restricts PMCC to large-cap names and major ETFs (SPY, QQQ, AAPL, MSFT, NVDA, AMD, GOOGL, XLF, etc.). Underlying ADV >= 3M shares.",
+  "common_mistakes": "Buying a long call with delta below 0.70 (it behaves like a lottery ticket, not stock); selling a short strike below long strike + debit so that a strong rally produces a LOSS; exercising the LEAPS to cover an assignment and throwing away extrinsic value; holding the LEAPS inside 90 DTE; rolling the short for a debit to 'avoid' assignment; buying the LEAPS at high IV rank and watching the long vega bleed; running PMCC on a downtrending stock - the short call premium never compensates for a falling LEAPS.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The short leg is never sold at 0DTE in this playbook (minimum 21 DTE at entry). Weekly short calls at 7 DTE are a valid aggressive variant but raise assignment frequency and gamma risk materially; if used, the 14:30 ET forced close applies every Friday.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)"
+  ]
+}

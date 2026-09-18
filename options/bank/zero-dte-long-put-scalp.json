@@ -1,0 +1,64 @@
+{
+  "name": "0DTE Long Put Scalp",
+  "slug": "zero-dte-long-put-scalp",
+  "aliases": [
+    "0DTE put scalp",
+    "intraday put momentum"
+  ],
+  "summary": "The bearish mirror of the 0DTE call scalp: buy a near-ATM put on expiration day for a short, mechanical downside momentum burst.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta -0.40 to -0.55 (ATM to one strike OTM)",
+      "dte_rule": "0 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "Bounded by strike x 100 - debit; realistically 30-100% of debit on a clean flush",
+  "max_loss": "Debit paid x 100; assume full loss on every stop",
+  "breakevens": "strike - debit",
+  "greeks": {
+    "delta": "-0.40 to -0.55",
+    "gamma": "extremely high",
+    "theta": "catastrophic, same profile as the 0DTE call",
+    "vega": "positive; unlike calls, downside moves usually come with an IV bid, which helps the put"
+  },
+  "typical_dte": "0 DTE",
+  "when_to_use": "Downside momentum days. Puts have a structural edge over calls in 0DTE scalping because a selloff expands IV (vega tailwind) while a rally crushes it.",
+  "entry_rules": [
+    "SPY, QQQ, IWM only",
+    "10:00-15:00 ET window only",
+    "Trigger: 5-minute close below the opening range low AND below VWAP, bar volume >= 1.5x the 20-bar average",
+    "Optional confirmation: VIX up >= 3% on the day",
+    "Delta -0.40 to -0.55 computed locally (no Alpaca greeks on 0DTE)",
+    "Bid/ask <= $0.03; debit <= 0.5% of equity; max 3 scalps/day; 2 consecutive losses ends the day",
+    "Shares the same daily 0DTE loss limit of -1.5% of equity with the call scalp"
+  ],
+  "management_rules": [
+    "Take profit at +35% of debit (slightly wider than the call version because downside moves travel further)",
+    "Hard stop at -35%",
+    "15-minute time stop",
+    "Trail after +35%: stop to +12%, then in 10% steps",
+    "No adding, no rolling"
+  ],
+  "exit_rules": [
+    "Sell to close at +35%, -35%, or 15 minutes elapsed",
+    "Hard flatten at 15:45 ET. An ITM 0DTE put auto-exercises into a SHORT 100-share position overnight - an uncovered short equity position the account is not approved to carry",
+    "Abandon worthless contracts rather than paying to exit"
+  ],
+  "assignment_risk": "No assignment (long). Auto-exercise of an ITM long put creates a short stock position, which is worse than the call case. 15:45 ET flatten is mandatory.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Penny-wide index-ETF chains only.",
+  "common_mistakes": "Buying puts after the flush is already over (chasing the third red 5-min bar); ignoring that IV crush after a V-bottom reversal kills the put faster than delta does.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "In backtests, long 0DTE puts generally outperform long 0DTE calls because downside realized vol exceeds the implied path more often than upside does. Still net-negative expectancy without a filter.",
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

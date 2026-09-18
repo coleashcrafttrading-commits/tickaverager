@@ -1,0 +1,75 @@
+{
+  "name": "Reversal (Reverse Conversion)",
+  "slug": "reversal-reverse-conversion",
+  "aliases": [
+    "reverse conversion",
+    "rev con",
+    "reversal arbitrage"
+  ],
+  "summary": "Short 100 shares plus a synthetic long (long call and short put at the same strike and expiry) locks a fixed value; the mirror of a conversion, used when the synthetic prices cheap to the stock.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 short 100 shares at market (requires borrow)"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike nearest spot; call and put MUST share this strike"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SAME strike as the call",
+      "dte_rule": "same expiry as the call"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(entry_spot x 100) + put_credit - call_debit - (strike x 100) - borrow_costs - dividends_owed, locked at entry",
+  "max_loss": "The same locked figure if negative, plus the tail risks: a hard-to-borrow buy-in, an unexpected dividend the short owes, and early assignment on the short put",
+  "greeks": {
+    "delta": "0.00 by construction",
+    "gamma": "0.00 net",
+    "theta": "0.00 net; residual is carry and borrow",
+    "vega": "0.00 net"
+  },
+  "breakevens": "None \u2014 flat payoff at the strike.",
+  "when_to_use": "When the synthetic long prices BELOW spot minus PV(strike) minus dividends by more than costs. In practice this happens mostly on hard-to-borrow names, where the 'edge' is simply the borrow cost the trader is about to pay. Capturing it requires being the one who can borrow cheaply \u2014 which a retail account is not.",
+  "typical_dte": "Any",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the short put is not covered within the meaning of Alpaca's same-order coverage rule (short stock is not recognised as cover for a short put in a multi-leg options order, and the equity leg cannot be part of the options order at all). Requires Level 4.",
+    "ALSO NOT VIABLE for an independent reason: it requires shorting 100 shares. The borrow fee is the exact quantity the mispricing represents; a retail account pays retail borrow and the market maker pays wholesale, so the retail account is structurally on the losing side.",
+    "If ever evaluated at Level 4: required edge (spot_bid - call_ask + put_bid - strike_PV) x 100 - fees - (borrow_rate x strike x T/365 x 100) - dividends_owed > $25 per unit.",
+    "Absolute prohibition on hard-to-borrow names (borrow rate > 1% annualised) \u2014 that is where the apparent edge is largest and where the buy-in risk is real.",
+    "Alpaca paper short-sale fills are not a valid signal for live borrow availability."
+  ],
+  "management_rules": [
+    "Nothing to manage directionally. Monitor: (1) short put extrinsic for early assignment, (2) borrow rate changes, (3) dividend declarations.",
+    "If put_extrinsic = put_mid - max(0, strike - spot) < $0.10, unwind that session.",
+    "If the borrow rate on the short shares rises above 2% annualised at any time, unwind \u2014 the carry will exceed the locked edge.",
+    "If a dividend is declared with an ex-date before expiry, unwind within 1 session: the short share leg owes the dividend in cash."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: unwind all three legs no later than 15:30 ET on expiration day.",
+    "Unwind order is fixed: (1) buy back the short put, (2) sell the long call, (3) buy back the 100 short shares. The short option leg always closes first.",
+    "If the short put is ITM at any point on expiration day, close it by 14:00 ET.",
+    "Unwind immediately on any broker notice of a pending buy-in on the borrowed shares."
+  ],
+  "assignment_risk": "On the short put. Early assignment delivers 100 long shares at the strike, which covers the short stock and closes the position at a price the system did not choose, leaving an orphaned long call. Puts are exercised early for interest capture, so the risk rises with rates and with how deep ITM the put is. Plus a non-option risk that is arguably worse: the short stock leg can be bought in at any time.",
+  "alpaca_level": 4,
+  "buying_power": "Reg T short stock (50% of proceeds) plus naked short put requirement, partially offset by the long call. Budget $5,000-$7,000 per unit on a $100 underlying.",
+  "liquidity_needs": "Same extreme requirements as the conversion, plus an easy, stable borrow.",
+  "common_mistakes": "Treating the borrow cost as free profit. Running it on meme/squeeze names where the synthetic looks mispriced by dollars \u2014 that spread IS the borrow, and the buy-in risk is the reason it exists.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "No carry to arbitrage at 0DTE; only pin risk and three legs of cost.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

@@ -1,0 +1,71 @@
+{
+  "name": "Reverse Big Lizard",
+  "slug": "reverse-big-lizard",
+  "summary": "Sell an ATM straddle and buy one OTM put; the downside-protected mirror of the big lizard, with no downside risk when the credit exceeds the put spread width and an uncovered short call above.",
+  "aliases": [
+    "big lizard put side",
+    "inverted big lizard"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM strike, call delta 0.45-0.55 (UNCOVERED)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SAME ATM strike",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM strike - Wp, with Wp such that total credit > Wp x 100",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit (large)",
+  "typical_dte": "21-45 DTE",
+  "when_to_use": "INCLUDED FOR COMPLETENESS - Level 4 only. Attractive on index ETFs where put skew makes the credit > Wp condition easy, but the ATM short call is uncovered and unbounded.",
+  "max_profit": "net credit received, at the ATM strike",
+  "max_loss": "UNDEFINED to the upside. No downside loss when credit > Wp x 100.",
+  "breakevens": "upside breakeven = ATM strike + credit/100; no downside breakeven when the credit condition holds",
+  "greeks": {
+    "delta": "slightly negative at entry",
+    "gamma": "strongly negative",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the ATM short call is uncovered, requiring Alpaca options level 4. The router must reject this slug.",
+    "Level 4 version: credit x 100 > Wp x 100; IV rank >= 70; both shorts on the identical ATM strike.",
+    "Level-3-legal substitute: buy a call above the ATM short call, producing a broken-wing iron butterfly."
+  ],
+  "management_rules": [
+    "Level 4 only: close at 25% of credit.",
+    "Level 4 only: close at 21 DTE, or immediately if the short call delta reaches 0.65."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: uncovered ATM short call; flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close the short call immediately if ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: an ATM uncovered short call must be closed before every ex-dividend date - this is the highest-probability early assignment in the entire bank."
+  ],
+  "assignment_risk": "Extreme. Uncovered ATM short call assignment creates a naked short stock position of 100 shares per unit with unbounded loss, plus the ATM short put's 100-share purchase obligation on the other side.",
+  "buying_power": "Naked short call margin plus (Wp x 100 - put-side credit).",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Attempting it at Level 3 by assuming the long put somehow covers the call; it does not.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral with a bearish tilt, aggressively short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

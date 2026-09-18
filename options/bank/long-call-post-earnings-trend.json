@@ -1,0 +1,61 @@
+{
+  "name": "Post-Earnings Long Call (trend continuation)",
+  "slug": "long-call-post-earnings-trend",
+  "aliases": [
+    "post-earnings drift call",
+    "PEAD call"
+  ],
+  "summary": "Buy a call AFTER the report, once IV has collapsed, to ride post-earnings announcement drift with cheap premium.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.35-0.45 delta",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited",
+  "max_loss": "Debit x 100",
+  "breakevens": "strike + debit",
+  "greeks": {
+    "delta": "+0.35 to +0.45",
+    "gamma": "moderate positive",
+    "theta": "negative but modest at 30-45 DTE",
+    "vega": "positive - and here it is a tailwind, because you are buying after the crush, at the IV floor"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "1-3 days after a positive earnings surprise, when IVR has dropped below 25 from its pre-report peak and the stock closed the report day in the top quartile of its range.",
+  "entry_rules": [
+    "Entry window: 1 to 3 trading days after the earnings release",
+    "IVR must have fallen below 25 post-report",
+    "Stock gapped up and closed the report day in the upper 25% of the day's range",
+    "Price above the pre-earnings high on a closing basis",
+    "Delta 0.35-0.45, 30-45 DTE",
+    "Debit <= 1% of equity per position",
+    "No other earnings event before the exit date"
+  ],
+  "management_rules": [
+    "Take profit at +80% of debit",
+    "Stop at -45%",
+    "Time stop at 21 DTE or 15 trading days held",
+    "Trail after +50%: stop to breakeven"
+  ],
+  "exit_rules": [
+    "Sell to close at +80%, -45%, 21 DTE, or 15 trading days",
+    "15:30 ET expiry-day flatten if ever carried that far"
+  ],
+  "assignment_risk": "None (long).",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "OI >= 500, spread <= 10% of mid.",
+  "common_mistakes": "Entering before the IV has finished collapsing; chasing a gap that has already filled.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

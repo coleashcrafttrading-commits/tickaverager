@@ -1,0 +1,89 @@
+{
+  "name": "Triple Calendar / Calendar Ladder",
+  "slug": "triple-calendar",
+  "summary": "Three same-strike calendars laddered across strikes (below, at, and above spot) to flatten the profit tent into a plateau across a wide range.",
+  "aliases": [
+    "calendar ladder",
+    "triple time spread",
+    "laddered calendar"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Lower strike, front put |delta| 0.20-0.30.",
+      "dte_rule": "front expiry, 21-35 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same lower strike.",
+      "dte_rule": "back expiry, 45-70 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Two more calendars: one ATM (|delta| 0.45-0.55) and one upper strike (delta 0.20-0.30). Encoded here as the upper short; the ATM calendar is the third pair and is submitted as a separate 2-leg mleg because the package exceeds 4 legs.",
+      "dte_rule": "front expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same strikes as the corresponding shorts (ATM and upper).",
+      "dte_rule": "back expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "A plateau rather than a peak; typically 15-30% of total debit. The added ATM calendar raises the middle of the tent that a double calendar leaves sagging.",
+  "max_loss": "Total net debit paid across all three calendars.",
+  "breakevens": "Approximately lowest strike - 0.8 x (per-side debit) and highest strike + 0.8 x (per-side debit).",
+  "greeks": {
+    "delta": "~0 with symmetric strikes",
+    "gamma": "negative, spread across three strikes so no single sharp peak",
+    "theta": "positive, the largest in the family per unit of debit",
+    "vega": "strongly positive - three long back-month legs; a vol crush is the main non-directional risk"
+  },
+  "when_to_use": "IV rank < 25, flat term structure, and an underlying expected to chop within a wide but bounded range for the next month (post-event drift, summer ETFs, a stock that has just gapped and is consolidating). Rarely worth the six-leg friction on anything other than SPY/QQQ/IWM.",
+  "typical_dte": "front 21-35 DTE, back 45-70 DTE",
+  "entry_rules": [
+    "IV rank < 25.",
+    "front_IV - back_IV >= -2.0 vol points at all three strikes.",
+    "Strikes by delta: lower put 0.20-0.30, middle ATM 0.45-0.55, upper call 0.20-0.30; outer strikes delta-symmetric within 0.05.",
+    "Total width of the ladder >= 1.5 x the front-month expected move.",
+    "Total debit <= 4% of equity; total bid-ask across all six legs <= 10% of debit (this is the binding constraint - most candidates fail here).",
+    "LEVEL 3 OK (every short is covered by a same-strike later long). Must be submitted as three separate 2-leg mlegs (Alpaca caps mleg at 4 legs); submit LONG-first on each pair if legging is ever required, and submit the ATM pair first so the largest short is covered soonest.",
+    "Liquid ETF underlyings only."
+  ],
+  "management_rules": [
+    "Profit target +15% of total debit.",
+    "Stop at -35% of total debit.",
+    "Manage per-calendar, not as a blob: close any individual calendar whose short |delta| exceeds 0.70.",
+    "If |net delta| > 0.40 per unit, close the tested outer calendar rather than rolling it.",
+    "Roll shorts out at front DTE <= 7 only for the calendars whose short |delta| <= 0.55; close the rest.",
+    "Maximum 1 triple-calendar unit per underlying, maximum 2 in the portfolio."
+  ],
+  "exit_rules": [
+    "Close or roll ALL THREE short legs by 14:30 ET on front expiration day, unconditionally.",
+    "Close the whole ladder no later than 2 trading days before front expiry if not rolling.",
+    "Close any short leg whose extrinsic <= $0.05 or |delta| >= 0.90 immediately.",
+    "Short calls: close before ex-dividend if extrinsic < dividend per share.",
+    "Unwind shorts first, in order of moneyness (most ITM first)."
+  ],
+  "assignment_risk": "Three short front legs, each covered by a same-strike later-dated long. The ATM short is the one most likely to end up ITM, and the outer short on the tested side is the one most likely to end up DEEP ITM. Each requires the same monitoring and forced close.",
+  "buying_power": "Net debit only.",
+  "liquidity_needs": "Six legs. Restrict to SPY, QQQ, IWM or the top few sector ETFs with penny-wide quotes and OI >= 1,000 per strike. If the automation cannot model the six-leg fill, do not trade it.",
+  "common_mistakes": "Underestimating six-leg slippage; treating the ladder as one position when it should be managed as three; running it on a single stock; forgetting that the vega is triple and a 3-point IV drop can turn a perfectly pinned ladder into a loser.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not suitable - too many short legs to manage under the forced 14:30 ET close.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

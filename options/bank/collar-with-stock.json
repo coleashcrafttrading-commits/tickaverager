@@ -1,0 +1,79 @@
+{
+  "name": "Collar (Long Stock + Long Put + Short Call)",
+  "slug": "collar-with-stock",
+  "aliases": [
+    "protective collar",
+    "hedge wrapper",
+    "fence",
+    "zero-cost collar"
+  ],
+  "summary": "Own 100 shares, buy a protective put below and sell a covered call above, same expiry; caps both the downside and the upside. Included here because 'collar without stock' is a different and far more dangerous animal.",
+  "bias": "neutral",
+  "net": "either",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares per collar unit, held in the account BEFORE the option legs are placed."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Protective put at 0.25-0.35 delta, below spot -- typically 5-10% OTM."
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Covered call at 0.20-0.30 delta, above spot. Tune until the call credit approximately funds the put debit (a 'zero-cost' collar).",
+      "dte_rule": "same expiry as the put"
+    }
+  ],
+  "max_profit": "(call strike - stock cost basis) * 100 - net option cost",
+  "max_loss": "(stock cost basis - put strike) * 100 + net option cost. Fully defined.",
+  "breakevens": "stock cost basis + net option debit per share (or - net credit per share)",
+  "greeks": {
+    "delta": "positive, roughly +0.40 to +0.60 per unit (100 shares at +1.00, less the short call and long put deltas)",
+    "gamma": "negative near the call strike, positive near the put strike",
+    "theta": "slightly positive if the call's extrinsic exceeds the put's",
+    "vega": "slightly negative if the call is richer, slightly positive otherwise"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "You hold shares with an unrealized gain, want to protect them through an uncertain period, and are willing to cap upside to pay for it. The correct, conservative structure -- and the one people mean when they say 'collar'.",
+  "entry_rules": [
+    "PRECONDITION: the account must already hold >= 100 long shares per collar unit. The system must verify share count via the positions endpoint before placing any option leg. A collar without the shares is a synthetic short (slug risk-reversal-synthetic-short) and is Level 4 / blocked.",
+    "ALPACA EXECUTION NOTE: Alpaca does not support equity legs inside a multi-leg order. The collar must be assembled as (a) the existing stock position, plus (b) a two-leg MLeg order for the long put and short call, or as two single-leg orders. The short call is covered by the shares, so it is acceptable at Level 1/2; the long put is Level 2. Submit the option pair as one MLeg order so the short call never exists unpaired.",
+    "Put strike 0.25-0.35 delta; call strike 0.20-0.30 delta.",
+    "Net option cost between -$0.10 (credit) and +$0.25 (debit) per share for a zero-cost-style collar.",
+    "Call strike must be above the stock cost basis -- otherwise the collar locks in a loss on the shares.",
+    "DTE 30-90; match the expiry to the period of uncertainty you are hedging.",
+    "Both option legs OI >= 500."
+  ],
+  "management_rules": [
+    "If the underlying rallies above the call strike and you want to keep the shares, roll the short call up and out for a net credit no later than 21 DTE. If you are willing to sell the shares, let the call do its job -- but close it rather than allowing assignment (see exit rules).",
+    "If the underlying falls to the put strike, either close the whole collar (sell the shares, sell the put, buy back the call) or roll the put down and out.",
+    "Close the put at 21 DTE if it has lost more than 80% of its value and the threat has passed; re-hedge later if needed.",
+    "Re-evaluate at every earnings date."
+  ],
+  "exit_rules": [
+    "Both option legs must be flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD (short call): if the short call is ITM at 15:30 ET on expiry day, buy it back. Allowing assignment would sell the shares -- which may be acceptable, but it must be an explicit decision, not an accident. Default behavior for an automated system: always buy back.",
+    "DIVIDEND GUARD (short call): if the short call is ITM and its extrinsic value < 1.5 * the pending dividend, buy the call back by the close of the session before ex-dividend, or you will be assigned and lose both the shares and the dividend.",
+    "LONG PUT GUARD: if the protective put is ITM at expiry, the OCC will auto-exercise it and sell your 100 shares at the strike. If you intend to keep the shares, sell the put before 15:45 ET on expiry day instead of letting it exercise.",
+    "Any ITM short call with extrinsic < $0.10 should be bought back the same session."
+  ],
+  "assignment_risk": "The short call is covered by the shares, so assignment is economically harmless -- it simply sells your 100 shares at the strike. But for a system that tracks positions programmatically, an unplanned share sale breaks inventory accounting and can trip the ladder logic on the same ticker. Treat it as an error condition. The long put carries the mirror risk: auto-exercise at expiry sells your shares without a trade signal.",
+  "buying_power": "Stock margin on the shares; the short call is covered by the shares so it holds nothing extra; the long put costs its premium.",
+  "liquidity_needs": "OI >= 500 on both option legs. Collars are usually placed on names you already own, so check liquidity before choosing this hedge over simply trimming the position.",
+  "common_mistakes": "Building a 'collar' without verifying the 100 shares exist; setting the call strike below cost basis; forgetting that the long put auto-exercises and sells the shares; ignoring ex-dividend on the short call; trying to submit the stock leg inside an Alpaca MLeg order, which is not supported.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Pointless -- a one-day collar costs the spread and hedges nothing. And both legs would need managing into the bell against a live share position.",
+  "alpaca_level": 2,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

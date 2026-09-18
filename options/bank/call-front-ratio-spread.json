@@ -1,0 +1,66 @@
+{
+  "name": "Call Front Ratio Spread (1x2)",
+  "slug": "call-front-ratio-spread",
+  "summary": "Buy 1 nearer call and sell 2 further OTM calls for a credit; profits from a drift up to the short strike, with unlimited risk above it.",
+  "aliases": [
+    "call ratio spread",
+    "1x2 call ratio",
+    "front ratio call spread",
+    "ratio vertical"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM or slightly ITM, call delta 0.50-0.60",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "OTM strike at call delta 0.25-0.30, chosen so the package opens at a net credit",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "typical_dte": "30-60 DTE, managed at 21 DTE",
+  "when_to_use": "COMPLETENESS / LEVEL 4: IV rank > 50 with elevated call skew and a target price at the short strike. One of the two short calls is uncovered, so the structure is unlimited-risk and requires level 4. Under Level 3, trade the broken-wing call butterfly instead - it is the same thesis with the tail capped.",
+  "max_profit": "(short strike - long strike) x 100 + net credit, at the short strike",
+  "max_loss": "UNDEFINED (unlimited above the upper breakeven)",
+  "breakevens": "downside: none when opened for a credit; upside breakeven = short strike + (short strike - long strike) + credit/100",
+  "greeks": {
+    "delta": "positive at entry, turns negative above the short strike",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: 2 short calls against 1 long leaves one uncovered call; requires Alpaca level 4. Router must reject at Level 3.",
+    "Level 4 version: open for a net credit only - never a debit; short strike delta <= 0.30; IV rank >= 50.",
+    "Level-3 substitute (preferred): add a long call above the shorts at the same distance, converting this into a broken-wing call butterfly with identical directional character and a capped tail."
+  ],
+  "management_rules": [
+    "Level 4 only: close at 50% of max profit.",
+    "Level 4 only: close if spot trades above the short strike, and always close at 21 DTE."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 2 short calls, 1 uncovered; flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short calls are ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before every ex-dividend date when the short calls are ITM."
+  ],
+  "assignment_risk": "Assignment on both short calls delivers -200 shares per unit, covered by only 1 long call; the residual is a naked 100-share short. Unacceptable at Level 3 and dangerous at Level 4.",
+  "buying_power": "Naked short call margin on the uncovered contract plus the debit spread's cost.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Opening for a debit, which creates a loss zone on the downside as well as the unlimited one above; assuming the long call 'covers' both shorts.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not permitted here - uncovered short call at 0DTE.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "mildly bullish, short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

@@ -1,0 +1,66 @@
+{
+  "name": "Synthetic Long Put",
+  "slug": "synthetic-long-put",
+  "aliases": [
+    "protective call",
+    "short stock plus call",
+    "synthetic put"
+  ],
+  "summary": "100 short shares plus one long call at the same strike replicates a long put; used when the put is expensive relative to the call plus carry.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 short 100 shares at market (requires locate/borrow)"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike nearest spot, call delta 0.45-0.55, for a true synthetic put"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(entry_spot x 100) - call_debit if the underlying goes to zero",
+  "max_loss": "(call_strike - entry_spot) x 100 + call_debit, defined by the long call cap",
+  "greeks": {
+    "delta": "-0.45 to -0.55 per unit",
+    "gamma": "positive, from the long call",
+    "theta": "negative",
+    "vega": "positive"
+  },
+  "breakevens": "entry_spot - call_debit/100",
+  "when_to_use": "Only when the listed put prices above the synthetic by more than the borrow cost \u2014 i.e. put_ask > (call_ask + strike - spot + borrow_cost). In practice on a retail account this is almost never true, because retail borrow rates are far worse than the market-maker rates embedded in option prices.",
+  "typical_dte": "30-90 DTE",
+  "entry_rules": [
+    "NOT PRACTICALLY VIABLE on Alpaca paper, and marginal on live retail. Requires shorting 100 shares, which needs an available borrow, incurs a borrow fee the options market has already priced in more cheaply, and exposes the account to buy-in risk. The correct implementation for this account is: just buy the put.",
+    "Options side is Level 2 (long call only). The blocking constraint is the short stock leg, not the options approval.",
+    "If ever run: only when put_ask - (call_ask + strike - spot) > annualised_borrow_rate x strike x T/365 + 0.10, and only on a name with a borrow rate under 1% annualised.",
+    "Alpaca paper fills short-stock orders on names that may be hard or impossible to borrow live \u2014 a backtest or paper result here does not transfer to production. Flag any fill as unvalidated."
+  ],
+  "management_rules": [
+    "Treat as a long put: close at 50% of the maximum theoretical gain or at a 50% loss of the call debit.",
+    "Monitor the borrow fee daily; if the annualised rate rises above 5%, close the structure \u2014 the carry will eat the edge that justified it.",
+    "If the shares are bought in by the broker, the long call becomes an unhedged directional bet and must be closed the same session."
+  ],
+  "exit_rules": [
+    "No short option legs, so no assignment risk from options.",
+    "The long call must be closed by 15:40 ET on expiration day if ITM: auto-exercise would buy 100 shares to cover the short, which may be the desired outcome but must be an explicit decision, not an accident.",
+    "Close the short shares and the long call as a single package; never unwind one side and leave the other.",
+    "If the underlying announces a dividend, the short stock position owes the dividend \u2014 close before the ex-date unless the dividend is explicitly budgeted."
+  ],
+  "assignment_risk": "No option assignment risk (no short options). The equivalent hazard is on the stock leg: a hard-to-borrow buy-in can force the short to be covered at any time, at any price, with no notice.",
+  "alpaca_level": 2,
+  "buying_power": "Reg T short stock: 50% of the short proceeds held as margin, plus the call debit. Roughly $5,000 plus $300 on a $100 underlying, plus ongoing borrow fees.",
+  "liquidity_needs": "Easy-to-borrow status is the real requirement. Call OI >= 250.",
+  "common_mistakes": "Building this because the short-stock view exists anyway, and forgetting that the long call is a decaying asset that must be rolled. Also assuming paper-trading borrow availability reflects reality.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Pointless at 0DTE \u2014 the overnight borrow cost and the share settlement mechanics dwarf any one-day edge.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

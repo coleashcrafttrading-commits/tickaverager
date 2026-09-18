@@ -1,0 +1,73 @@
+{
+  "name": "Level-3 Synthetic Long Substitute (Long Call Vertical at Delta 0.80)",
+  "slug": "level3-synthetic-long-substitute",
+  "aliases": [
+    "deep ITM call debit spread",
+    "capped synthetic long",
+    "Level 3 combo replacement"
+  ],
+  "summary": "A deep ITM call debit spread that approximates synthetic long stock exposure inside Level 3 permissions, with both legs covered within the same order and a hard cap on both profit and loss.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM: delta 0.75-0.85"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM: delta 0.15-0.25; the width between the strikes sets the maximum profit and should be at least 1.5x the expected move over the tenor",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "((short_strike - long_strike) x 100) - net_debit",
+  "max_loss": "The net debit paid, fully defined",
+  "greeks": {
+    "delta": "+0.55 to +0.70 per unit",
+    "gamma": "small, negative near the short strike",
+    "theta": "small positive when the position is profitable",
+    "vega": "small negative"
+  },
+  "breakevens": "long_strike + net_debit/100",
+  "when_to_use": "Whenever a synthetic-long-stock or split-strike-risk-reversal signal fires and the account is Level 3. It is not the same payoff \u2014 the upside is capped and the downside is floored \u2014 but it is the closest delta-1-like exposure that is actually permitted, and its defined risk suits a $50k automated account far better than an uncapped synthetic.",
+  "typical_dte": "45-90 DTE",
+  "entry_rules": [
+    "LEVEL 3 LEGAL: the short call is covered by the lower-strike long call in the same expiry within the same multi-leg order. Alpaca accepts it.",
+    "Submit as a single 2-leg order. Never leg it.",
+    "Long leg by delta: nearest listed strike with delta in [0.75, 0.85]. Short leg by delta: nearest listed strike with delta in [0.15, 0.25].",
+    "Width test: (short_strike - long_strike) >= 1.5 x (spot x IV x sqrt(DTE/365)), so the cap sits beyond the expected move.",
+    "Cost test: net_debit <= 0.65 x (short_strike - long_strike) x 100, giving at least a 1:0.54 risk/reward.",
+    "IV rank < 40 at entry (a debit spread is net long premium and suffers from an IV crush).",
+    "Size: net debit per unit <= 2% of equity ($1,000), so a full loss costs 2% of the account.",
+    "Underlying price >= $20, ADV >= 1,000,000, OI >= 500 per leg."
+  ],
+  "management_rules": [
+    "Close at 50% of the maximum profit ((width x 100) - debit), or at 21 DTE, whichever comes first.",
+    "Hard stop: close at a 50% loss of the net debit.",
+    "If the short leg's delta exceeds 0.80, the spread is near max profit \u2014 close it rather than waiting for the last 10%, because the short leg's assignment risk rises faster than the remaining profit.",
+    "Do not roll a losing debit spread; close it and re-evaluate the thesis."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on expiration day, unconditionally, even though it is covered by the long call.",
+    "If the short call is ITM at any point on expiration day, close the entire spread by 14:00 ET.",
+    "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic < 1.25 x declared_dividend. A deep ITM short call on a dividend payer will be exercised.",
+    "If both legs finish ITM, close the spread rather than allowing exercise and assignment to offset \u2014 the offset is exact in payoff but involves two 100-share movements and settlement timing between them.",
+    "If the long leg is ITM and the short leg is OTM at expiry, close the long leg by 15:00 ET to prevent auto-exercise into a 100-share purchase."
+  ],
+  "assignment_risk": "On the short call, fully covered by the long call in payoff terms so the maximum loss is unchanged by assignment. But assignment delivers 100 short shares that must be covered by exercising the long call, which settles overnight \u2014 an unwanted five-figure share position for a $50k account. The dividend trigger is the main practical cause.",
+  "alpaca_level": 3,
+  "buying_power": "The net debit paid. Roughly $600-$800 for a 10-wide spread on a $100 underlying.",
+  "liquidity_needs": "OI >= 500 per leg, bid-ask <= $0.05 each, package executable within $0.05 of the mid.",
+  "common_mistakes": "Setting the width too narrow so the cap sits inside the expected move, which makes it a neutral trade dressed as a bullish one. Holding for the last 10% of max profit and inheriting assignment risk for pennies.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "At 0DTE a deep ITM debit spread is nearly all intrinsic with both legs facing exercise/assignment at the close; the 15:40 ET close becomes a 14:00 ET close and the remaining edge is negligible.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

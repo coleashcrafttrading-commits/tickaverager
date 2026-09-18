@@ -1,0 +1,71 @@
+{
+  "name": "Cash-Secured Put",
+  "slug": "cash-secured-put",
+  "aliases": [
+    "CSP",
+    "secured put write",
+    "put write to acquire"
+  ],
+  "summary": "Sell a put while holding enough cash to buy 100 shares at the strike - income now, with a willingness to own the stock lower.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta -0.16 to -0.30 (the -0.16 strike approximates the 1-SD expected move)",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The credit x 100, realised if the put expires OTM",
+  "max_loss": "(strike - credit) x 100 if the underlying goes to zero. Large but defined and fully cash-collateralised.",
+  "breakevens": "strike - credit per share",
+  "greeks": {
+    "delta": "+0.16 to +0.30 (a short put is positive delta)",
+    "gamma": "negative",
+    "theta": "positive - the income engine",
+    "vega": "negative; the position profits when IV falls, which is why IVR > 30 is the entry gate"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "IVR > 30 on a liquid underlying you would genuinely be willing to own at the strike. The classic short-premium workhorse and the most capital-appropriate income strategy for a Level 1-3 account.",
+  "entry_rules": [
+    "Cash available >= strike x 100 x contracts. The automation verifies this before submitting; without it the position is a naked put (Level 4)",
+    "IVR > 30 on the underlying",
+    "Short put delta -0.16 to -0.30",
+    "30-45 DTE",
+    "Credit >= 1% of the strike per 30 days (e.g. >= $1.00 on a $100 strike), otherwise the risk is underpaid",
+    "Underlying must be one you are willing to own: ADV >= 2M shares, price > $20, no pending merger, not a leveraged or inverse ETF",
+    "No earnings before expiry unless running the explicit post-earnings variant",
+    "Per-position notional (strike x 100) <= 20% of equity (~$10,000 on $50k); total short-put notional <= 100% of equity",
+    "Option OI >= 500, bid/ask <= 8% of mid"
+  ],
+  "management_rules": [
+    "Buy to close at 50% of the credit received - the standard short-premium benchmark: it raises win rate per unit of time and cuts gamma exposure",
+    "Or close at 21 DTE, whichever comes first. Gamma risk past 21 DTE is not compensated by the remaining theta",
+    "Roll down and out when the short put delta exceeds -0.50: buy back the put and sell a lower strike 30-45 days out FOR A NET CREDIT. If no credit is available, close the position instead of rolling into a bigger one",
+    "Do not roll more than twice on the same position. After the second roll, close and accept the loss",
+    "Hard stop at 2.5x the credit received (position mid >= 2.5 x entry credit)"
+  ],
+  "exit_rules": [
+    "Buy to close at 50% of credit, at 21 DTE, or at the 2.5x credit stop, whichever comes first",
+    "MANDATORY NEVER-ASSIGN RULE: close or roll the short put whenever (a) it goes ITM and its extrinsic value falls below $0.10, or (b) its delta exceeds -0.85, or (c) on expiration day if the underlying is within 1.0% of the strike as of 14:30 ET. ABSOLUTE BACKSTOP: no short put may be held past 15:45 ET on expiration day under any circumstances",
+    "American-style equity puts can be assigned at ANY time. Put early assignment is driven by interest-rate carry and deep-ITM extrinsic collapse rather than dividends, so the extrinsic < $0.10 check must run on every position refresh, not only near expiry",
+    "If assignment happens despite the rules, the recovery procedure is: sell the 100 shares at market at the next open, log the breach, and disable new CSPs on that symbol until reviewed"
+  ],
+  "assignment_risk": "MODERATE to HIGH depending on how far ITM. Assignment delivers 100 shares at the strike and consumes the collateral cash. The account CAN absorb it (it is cash-secured) but the mandate is never to be assigned, so the triggers above are hard-coded. Unlike calls, put early assignment is not dividend-driven.",
+  "buying_power": "Cash collateral of strike x 100 per contract, less the credit received. In a margin account Alpaca will typically hold less, but the system should self-impose full cash securing so the position can never become effectively naked.",
+  "liquidity_needs": "OI >= 500, spread <= 8% of mid, underlying ADV >= 2M shares. You must be able to buy the put back and to roll it.",
+  "common_mistakes": "Selling puts on a name you do not actually want to own; rolling a loser three or four times and turning a small loss into a large one; holding to expiry hoping a near-the-money put expires worthless, which is exactly how unwanted assignment happens; selling puts when IVR < 20 and being paid nothing for real risk.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "See zero-dte-cash-secured-put for the same-day variant.",
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)"
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "name": "Butterfly Convexity Arbitrage",
+  "slug": "butterfly-convexity-arbitrage",
+  "aliases": [
+    "convexity violation",
+    "negative butterfly",
+    "free fly",
+    "strike convexity arb"
+  ],
+  "summary": "Option prices must be convex in strike; a butterfly quoted at zero or negative cost violates that and is riskless, since the butterfly's payoff is non-negative everywhere.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower wing K1"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Body K2 = K1 + width; the violation is when C(K1) + C(K3) - 2 x C(K2) <= 0 at executable prices",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Upper wing K3 = K2 + width (equidistant wings)",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(width x 100) - net_debit; if the net debit is <= 0 the maximum profit is the full width plus the credit and the minimum profit is zero",
+  "max_loss": "Zero if the violation is real (a butterfly's payoff is never negative). In practice: fees and slippage on a non-arbitrage fill.",
+  "greeks": {
+    "delta": "near zero if the body is near spot",
+    "gamma": "positive at the wings, negative at the body",
+    "theta": "positive when the body is near spot",
+    "vega": "negative when the body is near spot"
+  },
+  "breakevens": "K1 + net_debit/100 and K3 - net_debit/100; at a zero or negative debit there are no losing prices.",
+  "when_to_use": "As a continuous chain scan alongside the vertical arbitrage scan. Genuine convexity violations on liquid chains are essentially extinct; the scan's practical value is detecting stale or crossed quotes and bad option data.",
+  "typical_dte": "Any; most false positives appear in low-OI long-dated strikes",
+  "entry_rules": [
+    "LEVEL 3 LEGAL: the two short body contracts are covered by the two long wings within the same multi-leg order, so Alpaca accepts a butterfly as a single order.",
+    "MANDATORY: submit as a single 3-leg (4-contract) order. Never leg it \u2014 a partially filled butterfly is a naked short call or a ratio spread.",
+    "Scan gate at executable prices: (K1_ask + K3_ask - 2 x K2_bid) x 100 + fees + $10 < 0. Wings must be exactly equidistant (K2 - K1 = K3 - K2) or the convexity test is invalid.",
+    "Pre-trade checks: all three strikes quoted within 2 seconds, displayed size >= 10 on each, OI >= 100 on each, same expiry, no OCC adjustment, underlying not halted.",
+    "One limit order at the arbitrage price; cancel after 3 seconds if unfilled. Do not improve the price."
+  ],
+  "management_rules": [
+    "Nothing to manage if the violation was real.",
+    "If the body's short calls go deep ITM (spot > K3), the butterfly is worth approximately zero and the short legs carry maximum assignment risk with minimum value \u2014 close it.",
+    "Do not adjust the wings; any adjustment converts a locked position into a directional one."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the two short body contracts no later than 15:40 ET on expiration day, unconditionally.",
+    "If spot is within 1.0% of the body strike K2 at any point on expiration day, close the entire butterfly by 14:00 ET \u2014 a pinned body is the worst assignment scenario in this structure because partial assignment on one of the two short contracts leaves a lopsided, directional residual.",
+    "If the short body's extrinsic value falls below $0.05, close the whole structure that session.",
+    "Close the short body calls by 15:00 ET the session before any ex-dividend date if extrinsic < 1.25 x declared dividend."
+  ],
+  "assignment_risk": "On the two short body contracts, covered in payoff terms by the wings. The specific hazard is PARTIAL assignment: being assigned on one of the two short contracts leaves a long call, a short call and 100 short shares \u2014 a live directional position that must be flattened immediately. This is why the body must be closed before expiry rather than allowed to settle.",
+  "alpaca_level": 3,
+  "buying_power": "A long butterfly is a debit structure: the requirement is the net debit. If the debit is zero or negative the broker may still hold the wing-width requirement; verify against the broker's actual margin response rather than assuming.",
+  "liquidity_needs": "Three strikes with real displayed size and OI >= 100 each. Six contract fees round trip means the violation must be worth more than ~$4 before it is worth acting on.",
+  "common_mistakes": "Using non-equidistant strikes and mis-testing convexity. Acting on midpoints. Not accounting for the possibility of partial assignment on the two-contract body.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Convexity artefacts are common at 0DTE in the last 30 minutes as quotes widen. Almost all are noise. If taken, the structure must be closed the same session \u2014 a 0DTE butterfly body pinned at expiry is the textbook pin-risk disaster.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

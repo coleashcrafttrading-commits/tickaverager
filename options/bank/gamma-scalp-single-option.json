@@ -1,0 +1,69 @@
+{
+  "name": "Gamma Scalp (long single option, delta-hedged)",
+  "slug": "gamma-scalp-single-option",
+  "aliases": [
+    "delta-hedged long option",
+    "long gamma scalping"
+  ],
+  "summary": "Buy a single ATM option and continuously hedge its delta with shares, monetising realised volatility above the implied volatility paid.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM, delta 0.50",
+      "dte_rule": "30-60 DTE"
+    },
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short 50 shares initially to neutralise the call's +0.50 delta; rehedged as delta changes",
+      "dte_rule": "not applicable - the share hedge has no expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "Unbounded in theory: the sum of scalping profits (realised vol) minus the option's theta (implied vol paid)",
+  "max_loss": "The option debit plus accumulated hedging slippage, if realised volatility comes in below the implied volatility paid. In practice hedging costs and spreads make this a professional's game.",
+  "breakevens": "Profitable when realised volatility over the holding period exceeds the implied volatility paid, net of transaction costs",
+  "greeks": {
+    "delta": "maintained near 0 by the share hedge",
+    "gamma": "positive - the entire source of P&L",
+    "theta": "negative - the cost of carrying the gamma",
+    "vega": "positive"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "When implied volatility is cheap relative to your realised-vol forecast: IVR < 20 AND 20-day realised volatility above current ATM implied volatility. Rare and short-lived.",
+  "entry_rules": [
+    "Gate: 20-day realised volatility (close-to-close, annualised) exceeds current ATM IV by at least 3 volatility points",
+    "IVR < 20",
+    "ATM call, 30-60 DTE, on an underlying with penny-wide shares and options (SPY/QQQ or a mega-cap)",
+    "Requires the ability to short shares - this system does not carry short equity, so the hedge must instead be implemented by buying an ATM PUT and hedging with LONG shares, or the strategy must be disabled",
+    "Debit <= 2% of equity",
+    "Hedge band defined in advance: rehedge whenever net position delta moves more than +/-15 deltas from zero"
+  ],
+  "management_rules": [
+    "Rehedge on the +/-15 delta band, not on a time schedule. Rehedging too often converts gamma profit into commission and spread",
+    "Track cumulative scalping P&L versus cumulative theta paid daily. If scalping P&L trails theta by more than 30% after 5 sessions, the vol forecast was wrong - close",
+    "Close at 21 DTE: gamma rises but theta rises faster, and the hedging band would have to tighten beyond what costs allow",
+    "Take profit when cumulative scalping P&L exceeds 1.5x the total theta expected over the remaining life"
+  ],
+  "exit_rules": [
+    "Close the option and flatten the share hedge together at 21 DTE, at the profit target, or at the 5-session underperformance check",
+    "Never carry the option into expiry week - auto-exercise would collide with the share hedge and produce an unintended net position",
+    "Flatten the share hedge in the SAME session the option is closed; an orphaned hedge is a naked directional stock position"
+  ],
+  "assignment_risk": "None on the long option. The operational risk is an orphaned share hedge after the option is closed, which silently becomes an unhedged directional stock position.",
+  "buying_power": "Option debit plus share margin for the hedge. If the hedge requires shorting shares, the strategy is not available to this account and must be restructured around a long put plus long shares.",
+  "liquidity_needs": "Very high. Requires penny-wide options and near-zero-cost share execution. Marginal for retail even on SPY.",
+  "common_mistakes": "Rehedging on every tick and paying away the entire gamma profit; forgetting to flatten the share hedge when closing the option; running it when IV is not genuinely cheap versus realised.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "0DTE gamma scalping is theoretically the highest-gamma version and practically the fastest way to pay away an account in spreads and commissions. Not recommended.",
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

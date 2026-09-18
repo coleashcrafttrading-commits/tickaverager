@@ -1,0 +1,82 @@
+{
+  "name": "Diagonal Collar (Calendar Collar)",
+  "slug": "diagonal-collar",
+  "summary": "Long 100 shares, a longer-dated protective put, and a shorter-dated covered call sold repeatedly against the stock; a collar whose protection outlives each income leg.",
+  "aliases": [
+    "calendar collar",
+    "rolling collar",
+    "time-spread collar",
+    "LEAPS-protected covered call"
+  ],
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares per unit; the stock is the base of the structure.",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Protective put by delta |0.20-0.35|, typically 5-10% below the share cost basis.",
+      "dte_rule": "back expiry, 90-365 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Covered call by delta 0.20-0.30, strike ABOVE the share cost basis so a called-away outcome is profitable.",
+      "dte_rule": "front expiry, 21-45 DTE, re-sold each cycle"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "(Short call strike - share cost basis) x 100 - net option debit + cumulative call credits collected, if the shares are called away at the short strike.",
+  "max_loss": "(Share cost basis - long put strike) x 100 + net option debit - cumulative credits, if the stock collapses below the put strike. Fully defined for as long as the put is held.",
+  "breakevens": "Share cost basis + net option debit per share - cumulative credits per share.",
+  "greeks": {
+    "delta": "net positive +0.45 to +0.75 per unit (stock 1.00 minus put ~0.28 minus call ~0.25)",
+    "gamma": "slightly negative",
+    "theta": "positive once the put's decay is outpaced by the rolled call credits; negative in the first cycle",
+    "vega": "net positive - the long-dated put has more vega than the short front call"
+  },
+  "when_to_use": "When the account already holds (or wants to hold) 100 shares of a quality underlying and wants both downside protection and income, with the protection deliberately outliving each income cycle. Buy the long-dated put when IV rank < 30; sell the calls when front-month IV is rich. Best on dividend-paying large caps and ETFs where the dividend partially finances the put - but note that dividends raise the short call's early-assignment risk.",
+  "typical_dte": "put 90-365 DTE, call 21-45 DTE rolled monthly",
+  "entry_rules": [
+    "Own or simultaneously buy exactly 100 shares per unit.",
+    "IV rank < 30 at the time of the protective put purchase.",
+    "Protective put delta |0.20-0.35|, DTE 90-365; cost of the put <= 4% of the share position value.",
+    "Short call delta 0.20-0.30, DTE 21-45, strike strictly above the share cost basis.",
+    "Net option debit (put cost - call credit) <= 2% of the share position value per cycle.",
+    "Share position value per unit <= 20% of account equity ($10,000 on a $50k account).",
+    "LEVEL 3 OK (level 1/2 would in fact suffice: covered call plus long protective put). Submit as separate orders: buy shares, buy put, then sell call. Always own the shares BEFORE selling the call."
+  ],
+  "management_rules": [
+    "Close the short call at 50-75% of its credit and re-sell the next 21-45 DTE cycle at delta 0.20-0.30.",
+    "If the short call's |delta| exceeds 0.60 and the shares are at risk of being called away at a profit, either let it happen (it is a profitable outcome) or roll up and out for a net credit - never for a debit.",
+    "Roll the protective put down and out when its DTE < 60, capturing remaining value and re-establishing at delta |0.20-0.35|.",
+    "If the stock closes below the put strike, evaluate exercising the put versus selling the shares and the put separately - selling the put in the market almost always captures more value than exercising it.",
+    "Never sell a call at a strike below the share cost basis; that locks in a loss on a called-away outcome."
+  ],
+  "exit_rules": [
+    "Close or roll the short call by 14:30 ET on its expiration day if it is ITM and being called away is not the desired outcome; if being called away IS acceptable and profitable, this is the one structure in the family where assignment may be allowed to occur deliberately - but the automation must confirm (short strike > cost basis) before permitting it.",
+    "Close the short call immediately if extrinsic <= $0.05 and being called away is NOT desired.",
+    "Close the short call before the session preceding ex-dividend if its extrinsic < the dividend per share and you intend to keep the shares and the dividend.",
+    "Never sell the protective put while holding the shares unless the entire position is being unwound on the same ticket.",
+    "Full exit order: buy back the short call, then sell the shares, then sell the put."
+  ],
+  "assignment_risk": "The short call, assigned against shares you actually own - the mildest case in the family, since it simply sells the stock at the strike. This is the one structure where assignment can be an acceptable exit rather than a failure, provided the short strike exceeds the cost basis. Ex-dividend remains the dominant early-exercise trigger, and a call assigned the day before the ex-date costs you the dividend.",
+  "buying_power": "Cost of the 100 shares (or 50% on margin) plus the net option debit. The short call is covered by shares; the long put adds no requirement.",
+  "liquidity_needs": "Long-dated puts 90-365 DTE need OI >= 200 and spread <= 6% of mid. Underlying ADV >= 2M shares. Restrict to large caps and major ETFs.",
+  "common_mistakes": "Selling a call below the cost basis; letting the protective put decay inside 60 DTE without rolling; exercising the put instead of selling it; treating a called-away outcome as a failure when it was profitable; forgetting the dividend when the short call is ITM before an ex-date.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The short call leg could be sold weekly but never at 0DTE under this playbook; the shares make assignment survivable, but weekly gamma is not worth the premium.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

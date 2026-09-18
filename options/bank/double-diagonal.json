@@ -1,0 +1,97 @@
+{
+  "name": "Double Diagonal Spread",
+  "slug": "double-diagonal",
+  "summary": "A put diagonal below spot and a call diagonal above, with the short legs in the near expiry and the long protective wings further out in time and further out of the money; an iron condor whose wings live in a later cycle.",
+  "aliases": [
+    "calendarized iron condor",
+    "double diagonal",
+    "diagonal condor",
+    "time condor"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short put by delta |0.20-0.30|.",
+      "dte_rule": "front expiry, 21-45 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long put BELOW the short put by 1-5 points (width set so max loss <= 1.5% of equity per side).",
+      "dte_rule": "back expiry, 21-45 days beyond the front"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short call by delta 0.20-0.30, delta-symmetric with the short put within 0.07.",
+      "dte_rule": "front expiry, same as leg 1"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long call ABOVE the short call by the same width as the put side.",
+      "dte_rule": "back expiry, same as leg 2"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "Net credit received plus the residual value of the two back-month wings once the front shorts expire worthless. The wings' survival is the entire advantage over an iron condor.",
+  "max_loss": "(Strike width x 100) - net credit on the tested side, at front expiry, provided the wings are never closed before the shorts.",
+  "breakevens": "Short put strike - (credit + residual wing value)/100 and short call strike + (credit + residual wing value)/100; wider than an iron condor at the same strikes.",
+  "greeks": {
+    "delta": "~0 when the short strikes are delta-symmetric",
+    "gamma": "negative, concentrated at the short strikes into front expiry",
+    "theta": "positive, the primary income source",
+    "vega": "slightly positive to neutral - the later-dated wings carry more vega than the front shorts, so unlike a plain iron condor this structure does not get destroyed by a vol spike, and it benefits modestly from one"
+  },
+  "when_to_use": "IV rank 30-60 with a range-bound underlying. The double diagonal is the right choice over an iron condor when (a) back-month IV is cheap relative to front (backwardation), so the wings cost less, and (b) you want protection that survives the front expiry so it can be reused against a second round of short legs. On a $50k account, run it on liquid ETFs only.",
+  "typical_dte": "short legs 21-45 DTE, long wings 45-90 DTE",
+  "entry_rules": [
+    "IV rank between 30 and 60.",
+    "Short strikes by delta 0.20-0.30 on each side, symmetric within 0.07 delta.",
+    "Long wings 1-5 points beyond each short, symmetric width on both sides.",
+    "Long expiry at least 21 days beyond the short expiry, never the reverse.",
+    "Total credit >= 20% of the one-sided strike width.",
+    "Max loss per side (width x 100 - credit) <= 1.5% of equity.",
+    "Short strikes must sit outside 1.0 x the front-month expected move.",
+    "Combined 4-leg bid-ask <= 10% of the credit.",
+    "LEVEL 3 OK: each short is covered by a same-side long at a protective strike in a LATER expiry. Submit as a single 4-leg mleg; if it must be legged, fill BOTH WINGS FIRST, then sell both shorts."
+  ],
+  "management_rules": [
+    "Take profit at 50% of the total credit.",
+    "Stop at 2x the credit received, or when either short's |delta| reaches 0.50.",
+    "At 21 DTE on the short legs, close or roll any short whose |delta| > 0.35 regardless of P&L.",
+    "Roll the tested short away from spot and out in time for a NET CREDIT only, and never into an expiry at or beyond the wings' expiry.",
+    "Roll the untested short toward spot to recenter only if doing so keeps |net delta| < 0.20 per unit and the short's delta stays <= 0.30.",
+    "After the front shorts are closed, the two wings remain as a long back-month strangle: either sell a new round of shorts against them (the reason to use a diagonal) or close the wings if their combined mark is below 25% of the original wing cost.",
+    "Max 2 units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll BOTH short legs by 14:30 ET on their expiration day, unconditionally.",
+    "Close either short immediately if its extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share.",
+    "Close any short put whose extrinsic drops below $0.10 (interest-carry exercise risk).",
+    "NEVER close a wing while its same-side short is open - that creates a naked short. Wings are sold only after the corresponding short is bought back.",
+    "If spot trades beyond a wing strike, close that side's pair as a package."
+  ],
+  "assignment_risk": "Both short front-month legs, though only the tested side matters in practice. Each is covered by a further-out-of-the-money long in a later expiry, so the worst case is a stock position hedged at the wing strike - defined, but with a gap equal to the strike width. Flatten any assigned stock within one session.",
+  "buying_power": "Alpaca holds the greater one-sided requirement: (width x 100 - credit) on the wider of the two sides, not both, because the underlying cannot finish beyond both short strikes simultaneously. Confirm the reserved amount before scaling.",
+  "liquidity_needs": "Four legs across two expiries and four strikes: OI >= 300 per leg, penny or nickel quotes, underlying ADV >= 3M shares. SPY, QQQ, IWM, and the largest sector ETFs are the realistic universe.",
+  "common_mistakes": "Closing a wing before its short leg; rolling a short past the wing's expiry and un-covering the position; setting the wings only one week later than the shorts so they add cost without residual value; assuming the buying-power hold is two-sided; treating it as an iron condor and applying iron-condor vega intuition (this structure is long vega, not short).",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not suitable - two short legs on a share-settled underlying at 0DTE is exactly the exposure the assignment policy exists to prevent.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)"
+  ]
+}

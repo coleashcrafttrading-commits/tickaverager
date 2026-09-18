@@ -1,0 +1,71 @@
+{
+  "name": "Long Strangle",
+  "slug": "long-strangle",
+  "aliases": [
+    "buy strangle",
+    "OTM strangle",
+    "long volatility strangle"
+  ],
+  "summary": "Buy an OTM call and an OTM put in the same expiry; a cheaper, wider-breakeven version of the long straddle that needs a bigger move.",
+  "bias": "long_vol",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM call at 0.20-0.30 delta."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM put at 0.20-0.30 delta, symmetric in delta rather than in dollars (put skew makes dollar-symmetry wrong).",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "unlimited upside; (put strike * 100) - debit on the downside",
+  "max_loss": "net debit paid, realized if the underlying finishes between the two strikes",
+  "breakevens": "call strike + total debit per share, and put strike - total debit per share",
+  "greeks": {
+    "delta": "near zero at entry if chosen by matching deltas",
+    "gamma": "positive but lower than a straddle",
+    "theta": "negative, less severe per dollar than a straddle but proportionally similar",
+    "vega": "strongly positive; the best pure long-vega expression per dollar in this family"
+  },
+  "typical_dte": "30-60 DTE. Strangles need time because they need a big move.",
+  "when_to_use": "IV rank <= 20 and an expectation of a regime change in volatility, or a known binary catalyst where the expected move exceeds the strike distance. Prefer over a straddle when you want maximum vega per dollar and are willing to accept a wider dead zone.",
+  "entry_rules": [
+    "IV rank <= 20 over 252 days. This is a long-vega trade; buy vol when it is objectively cheap.",
+    "Both legs 0.20-0.30 delta, chosen by delta not by equal dollar distance.",
+    "Total debit <= 1.0% of equity per position ($500 on $50k).",
+    "Move check: (call strike - put strike + debit)/spot must be <= the largest 30-day range over the last 12 months; if the required move has never happened, do not buy it.",
+    "DTE 30-60. Never open a strangle under 21 DTE without a dated catalyst.",
+    "IV30 < HV20 - 3 vol points, or a catalyst inside the expiry with >= 5 days of cushion after it.",
+    "Both legs OI >= 500, bid/ask <= 10% of mid."
+  ],
+  "management_rules": [
+    "Take profit at +50% of debit, or when one leg alone can be sold for more than the total debit paid.",
+    "Stop: close at -40% of debit.",
+    "Time stop: close at 21 DTE if not at target. Theta on OTM options accelerates hard in the last three weeks.",
+    "Vol stop: close if IV rank rises above 50 and price has not moved -- you got the vol expansion without the move; take the vega profit.",
+    "If one side goes deep ITM (delta > 0.80), consider selling that leg and holding the cheap wing as a free lottery ticket, but only if the remaining leg's value is < 10% of realized profit."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "No short legs, so no assignment risk. But OCC auto-exercises long options $0.01 ITM at expiry, which would create unwanted stock. Close both legs before 15:45 ET every expiration.",
+    "Close the whole structure at 21 DTE absent a catalyst."
+  ],
+  "assignment_risk": "None -- both legs are long. The only stock-delivery risk is OCC auto-exercise of your own ITM long leg at expiry, prevented by closing before 15:45 ET.",
+  "buying_power": "Net debit only.",
+  "liquidity_needs": "OI >= 500 per leg. OTM wings on less-liquid names quote badly; restrict to underlyings with at least 5,000 contracts of daily option volume.",
+  "common_mistakes": "Buying strangles at elevated IV and calling it a 'cheap' trade; choosing strikes by equal dollar distance instead of equal delta (skew makes this lopsided); holding into the last three weeks; sizing as if the max loss is unlikely -- for strangles, max loss is the modal outcome.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE strangle needs an enormous intraday move to clear two OTM premiums plus slippage. Statistically a loser except on scheduled macro prints, and even then a 0DTE straddle is the better expression. Mark as not enabled.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

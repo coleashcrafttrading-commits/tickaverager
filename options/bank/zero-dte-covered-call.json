@@ -1,0 +1,68 @@
+{
+  "name": "Zero-DTE Covered Call",
+  "slug": "zero-dte-covered-call",
+  "aliases": [
+    "Daily overwrite",
+    "Intraday covered call scalp"
+  ],
+  "summary": "Sell a same-day-expiry OTM call against held ETF shares every session, harvesting the last day of theta and buying it back before the close.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "pre-existing ETF shares (SPY/QQQ/IWM)",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.10-0.15 delta computed locally (Alpaca returns no 0DTE greeks) using intraday T = minutes_to_1600ET / (252 x 390)",
+      "dte_rule": "0 DTE, same-session expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "credit received x 100 (typically 0.05-0.20% of notional per day)",
+  "max_loss": "share downside for the session, less the credit; upside capped above the strike",
+  "breakevens": "spot at entry - credit",
+  "greeks": {
+    "delta": "+85 to +90 per unit",
+    "gamma": "very negative and accelerating into the close",
+    "theta": "large positive per hour but small in dollars",
+    "vega": "negative, small"
+  },
+  "when_to_use": "Only on liquid index ETFs, on days without a scheduled 08:30/10:00 ET macro release, when the overnight gap has already been absorbed. Enter after 10:00 ET once the opening range is set.",
+  "typical_dte": "0 DTE",
+  "entry_rules": [
+    "Restrict to SPY, QQQ, IWM, DIA and other ETFs with penny-wide 0DTE strikes and OI >= 1000.",
+    "Do not enter before 10:00 ET or after 14:30 ET.",
+    "Compute delta locally from a Black-Scholes fit to the 0DTE chain; require computed |delta| in [0.08, 0.16].",
+    "Require credit >= 0.03% of notional (e.g. >= 0.18 on a $600 SPY) - otherwise the assignment risk is unpaid.",
+    "Skip the day if VIX1D > 25 or if a FOMC/CPI/NFP release is scheduled that session.",
+    "One 0DTE call per 100 shares; never more contracts than share lots."
+  ],
+  "management_rules": [
+    "Take profit at 65% of the credit (buy-to-close <= 0.35 x credit).",
+    "Hard stop: buy back if the call price reaches 2.5x the credit received.",
+    "Do not roll intraday to a further strike - close and stand down for the session."
+  ],
+  "exit_rules": [
+    "ABSOLUTE: buy to close by 15:30 ET regardless of price, ITM or OTM. No 0DTE short leg is ever held into the close.",
+    "Immediate close if spot comes within 0.25% of the strike at any time after 14:30 ET.",
+    "Immediate close if computed delta > 0.45."
+  ],
+  "assignment_risk": "Assignment only happens at expiry for a 0DTE equity/ETF call, but exercise-by-exception triggers at $0.01 ITM and the shares get called away with no warning. The 15:30 ET flatten rule is the entire defense. Alpaca also begins risk-based handling of expiring positions late in the session - do not rely on it.",
+  "buying_power": "Shares only.",
+  "liquidity_needs": "Penny-wide 0DTE chains only; reject any strike quoting wider than 0.05.",
+  "common_mistakes": "Selling too close to the money for a few extra cents; letting a winner ride past 15:30 ET; running 0DTE overwrites on single-name stocks where the chain is illiquid and gap risk is brutal.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This is the flagship 0DTE strategy for a share-settled account because the short leg is always covered. The whole edge is in the discipline of the 15:30 ET flatten and the 0.10-0.15 delta strike.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

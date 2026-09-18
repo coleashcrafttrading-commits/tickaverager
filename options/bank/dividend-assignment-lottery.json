@@ -1,0 +1,67 @@
+{
+  "name": "Ex-Dividend Call-Spread Exercise Play",
+  "slug": "dividend-assignment-lottery",
+  "aliases": [
+    "dividend play",
+    "exercise-and-hold play",
+    "assignment lottery",
+    "MM dividend spread"
+  ],
+  "summary": "Buy a deep ITM call spread the session before the ex-date, exercise the long call to become long shares, and profit if the OCC's random assignment process leaves some of the short calls unassigned so the dividend is collected on unhedged shares.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM, delta >= 0.95, extrinsic < $0.05, expiry immediately after the ex-date"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Also deep ITM, one strike above the long call; both must have extrinsic below the dividend",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "dividend x 100 x (fraction of short calls NOT assigned) - spread_cost - fees. Historically a fraction of a cent per share of expected value at institutional scale.",
+  "max_loss": "The spread's cost plus fees, plus the open-interest risk of holding shares overnight if the hedge breaks. In size, the tail is the whole dividend paid out on shares you no longer hold.",
+  "greeks": {
+    "delta": "~0.00 net before exercise; +1.00 immediately after exercising the long call and before assignment resolves",
+    "gamma": "~0",
+    "theta": "~0 over the one-session horizon",
+    "vega": "~0"
+  },
+  "breakevens": "Requires the unassigned fraction of short calls to exceed (spread_cost + fees) / dividend.",
+  "when_to_use": "Never, at retail. This trade depends on being a large enough participant that the OCC's random assignment allocation leaves a usable residual, and on paying market-maker transaction costs. It also depends on there being open interest in the strike held by parties who will fail to exercise. Retail participation adds to the pool being assigned rather than the pool escaping it.",
+  "typical_dte": "1-7 DTE, spanning the ex-date",
+  "entry_rules": [
+    "BLOCKED IN PRACTICE. Requires exercising a long option the same session it is bought, which Alpaca supports as an exercise request but with cut-off times and no intraday guarantee. Missing the exercise cut-off leaves a naked-equivalent overnight position.",
+    "BLOCKED BY SCALE: expected value is positive only across thousands of contracts where the law of large numbers applies to the random assignment draw. At 1-5 contracts the outcome is a coin flip with negative fees.",
+    "The short call leg is covered by the long call within the same order, so the OPTIONS side is Level 3 legal \u2014 but the moment the long call is exercised, the short call becomes covered by shares instead, and if assignment arrives before the shares settle the account is briefly naked short a call. That transient state is a Level 4 exposure and a compliance problem.",
+    "Recommended: permanent denylist. Documented so the classifier recognises the pattern and refuses it."
+  ],
+  "management_rules": [
+    "If ever run: the exercise notice must be submitted before the broker's cut-off (typically 15:30-16:30 ET, broker-specific and earlier than the OCC's). Verify the cut-off programmatically; do not assume.",
+    "On the ex-date morning, immediately sell any shares that remain after assignments resolve, and close any remaining short calls.",
+    "Never let the resulting share position sit unhedged past the opening rotation on the ex-date."
+  ],
+  "exit_rules": [
+    "MANDATORY: all short calls must be closed by 15:40 ET on the expiration day of the spread, and the entire structure must be flat by the close of the ex-date session.",
+    "If the exercise request is not confirmed by the broker before the cut-off, close both legs of the spread at market immediately \u2014 do not hold into the ex-date with the plan unexecuted.",
+    "If assignment arrives on 100% of the short calls (the normal outcome), the position is flat by construction; verify and reconcile share balances the same session."
+  ],
+  "assignment_risk": "This strategy is DELIBERATELY courting assignment and betting on incomplete allocation \u2014 an inversion of the account's never-be-assigned mandate. The OCC allocates assignments randomly among short positions at clearing member level and then the member allocates among customers, so the outcome is not controllable. For a system required never to be assigned, this strategy is definitionally prohibited.",
+  "alpaca_level": 4,
+  "buying_power": "The spread debit, plus the full share cost the moment the long call is exercised \u2014 a deep ITM exercise on a $100 stock creates a $10,000 share position overnight per contract.",
+  "liquidity_needs": "Requires large open interest in deep ITM strikes on a high-dividend name, plus the ability to trade size without moving the market.",
+  "common_mistakes": "Believing the historical market-maker edge transfers to a retail account. Underestimating the overnight share exposure created by exercising. Missing the exercise cut-off.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Inherently a 1-2 session trade tied to the ex-date, but the exercise mechanics make 0DTE versions unmanageable.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

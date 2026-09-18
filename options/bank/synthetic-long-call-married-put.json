@@ -1,0 +1,68 @@
+{
+  "name": "Synthetic Long Call (Married Put)",
+  "slug": "synthetic-long-call-married-put",
+  "aliases": [
+    "married put",
+    "protective put",
+    "stock plus put"
+  ],
+  "summary": "100 long shares plus one long put at the same strike produces the identical payoff to a long call at that strike; it is the parity identity S + P = C + K, used when shares are already held.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares at market"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike nearest spot for a true synthetic call (delta -0.45 to -0.55); a lower strike converts it to a cheaper but imperfect hedge"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "UNDEFINED (unlimited): (spot_at_exit - entry_spot) x 100 - put_debit",
+  "max_loss": "(entry_spot - put_strike) x 100 + put_debit, fully defined and known at entry",
+  "greeks": {
+    "delta": "+0.45 to +0.55 at entry (100 shares at +1.00 plus a put at about -0.50)",
+    "gamma": "positive, from the long put",
+    "theta": "negative \u2014 the entire put premium decays",
+    "vega": "positive, from the long put"
+  },
+  "breakevens": "entry_spot + put_debit/100",
+  "when_to_use": "When shares are already held and downside must be capped, or when IV rank < 30 so the put is cheap in absolute terms. It is strictly worse than simply buying the call when the synthetic prices above the actual call by more than the parity carry \u2014 check that first.",
+  "typical_dte": "30-90 DTE for the put",
+  "entry_rules": [
+    "LEVEL 2 legal: buying a put against owned shares requires no uncovered permissions. Fully executable on a Level 3 Alpaca account.",
+    "Shares and put must be sized 100:1 exactly; any share count not a multiple of 100 leaves an unhedged stub.",
+    "Only enter if actual_call_ask - (stock_cost + put_ask - strike) > 0.10, i.e. only build the synthetic when it is at least $0.10 per share cheaper than just buying the real call. Otherwise buy the call.",
+    "Put debit <= 4% of the share notional; above that the hedge cost overwhelms the expected drift.",
+    "Underlying price >= $20, ADV >= 1,000,000 shares, put OI >= 250."
+  ],
+  "management_rules": [
+    "Roll the put out when it reaches 21 DTE if the share position is still wanted, paying no more than 1.5% of notional for the roll.",
+    "If the put goes ITM by more than 10% of the strike, either exercise it (see exit rules) or sell it and the shares together as one closing package \u2014 never sell the put alone and leave naked long stock.",
+    "Take profit on the shares at +20% and simultaneously sell the remaining put; do not hold an orphaned put.",
+    "If IV rank rises above 60 while the position is profitable, consider selling the put for its inflated premium and replacing it with a put spread \u2014 but only while the shares remain hedged at all times."
+  ],
+  "exit_rules": [
+    "No short legs, so there is no assignment exposure. The only expiry action is on the long put.",
+    "If the long put is ITM at 15:00 ET on expiration day, close it for its market value rather than exercising: exercising sells the shares and is usually worse after fees, and auto-exercise of an ITM long put will liquidate the share position without warning.",
+    "If the long put is OTM at 15:40 ET on expiration day, let it lapse and immediately decide whether the unhedged shares are acceptable \u2014 an unhedged 100-share position is a different risk profile and must be explicitly re-approved by the risk layer.",
+    "Hard rule: the system must never carry unhedged long shares into a weekend as an accidental byproduct of a put expiring."
+  ],
+  "assignment_risk": "NONE on this structure \u2014 there are no short legs. The counterpart risk is auto-exercise of the long put by the OCC if it finishes $0.01 or more ITM, which sells the 100 shares at the strike. That is not assignment but it is an unwanted automatic state change, so the put must be closed or the outcome deliberately accepted before 15:40 ET on expiry day.",
+  "alpaca_level": 2,
+  "buying_power": "Full cash cost of 100 shares (or 50% under Reg T margin) plus the put debit. Roughly $10,000 cash or $5,000 margin plus $300 on a $100 underlying \u2014 a large fraction of a $50k account for one unit.",
+  "liquidity_needs": "Share liquidity is the binding constraint; put OI >= 250 and bid-ask <= $0.10 is sufficient.",
+  "common_mistakes": "Buying the put at a far OTM strike and calling it a synthetic call \u2014 it is not, the payoff only matches at the same strike. Also holding the shares after the put expires without re-evaluating.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE put on an existing share position is a same-day insurance policy with almost no time value; it is a legitimate but expensive event hedge, not a synthetic call in any meaningful sense.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

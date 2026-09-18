@@ -1,0 +1,60 @@
+{
+  "name": "Systematic OTM Tail-Hedge Put",
+  "slug": "otm-tail-hedge-put",
+  "aliases": [
+    "black swan put",
+    "crash put",
+    "convexity sleeve"
+  ],
+  "summary": "Systematically buy small amounts of far-OTM index puts every month as a convexity sleeve. Loses small amounts continuously and pays enormously in a crash.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta -0.03 to -0.07 on SPY/QQQ (roughly 12-20% OTM)",
+      "dte_rule": "45-90 DTE, laddered monthly"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "Very large multiples (10x-50x) in a >15% drawdown event",
+  "max_loss": "The full monthly debit, which is the expected outcome in roughly 11 of 12 months",
+  "breakevens": "strike - debit; far below spot, so it only pays in genuine tails",
+  "greeks": {
+    "delta": "-0.03 to -0.07",
+    "gamma": "tiny at rest, explosive in a selloff",
+    "theta": "negative, small in dollars but 100% of the position decays most months",
+    "vega": "positive; far-OTM puts carry the steepest skew and gain the most vega in a panic"
+  },
+  "typical_dte": "45-90 DTE, rolled monthly to maintain a ladder",
+  "when_to_use": "As a permanent, small, budgeted sleeve rather than a timed trade. Do not try to time it - the cost of missing the one month that pays exceeds the savings.",
+  "entry_rules": [
+    "Fixed monthly budget: 0.15% of equity per month (~$75 on $50k), capped at 1.8%/yr",
+    "Buy on a fixed calendar day (e.g. the first trading day of each month) - no discretion, no timing",
+    "Delta -0.03 to -0.07 on SPY or QQQ, 45-90 DTE",
+    "Skip the month only if VIX > 30 at the scheduled buy (skew is then prohibitively expensive)",
+    "Log separately from directional P&L so the sleeve's drag is visible and intentional"
+  ],
+  "management_rules": [
+    "Do nothing in normal months - let them decay",
+    "Monetisation ladder: sell 25% of the sleeve at 5x the debit, another 25% at 10x, another 25% at 20x, hold the last 25% to the exit rule",
+    "Roll the ladder monthly; do not let the sleeve go empty",
+    "Never increase the budget after a scare"
+  ],
+  "exit_rules": [
+    "Positions are held until the monetisation ladder triggers or until 7 DTE, at which point any remaining value is sold and the contract abandoned if worthless",
+    "Any contract still ITM must be closed by 15:30 ET on expiration day to avoid auto-exercise into short index shares"
+  ],
+  "assignment_risk": "None (long). Auto-exercise into short SPY is the only operational hazard.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "SPY/QQQ only; far-OTM puts there still carry OI in the thousands.",
+  "common_mistakes": "Abandoning the sleeve after a year of losses right before it would have paid; scaling it up after a small scare.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

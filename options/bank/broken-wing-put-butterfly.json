@@ -1,0 +1,83 @@
+{
+  "name": "Broken-Wing Put Butterfly",
+  "slug": "broken-wing-put-butterfly",
+  "summary": "A put butterfly with the lower wing skipped further out so the trade opens for a credit; no risk if the underlying rallies, with the only real loss below the far lower strike. The most widely used BWB variant on index ETFs.",
+  "aliases": [
+    "skip-strike put butterfly",
+    "BWB put",
+    "put BWB",
+    "unbalanced put butterfly",
+    "21 DTE put BWB"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "inner long: put delta -0.30 to -0.40 (just OTM below spot)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "body: inner long strike - narrow width W1 (W1 = 1.0-1.5% of spot), body delta -0.20 to -0.25",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "outer long: body - wide width W2 where W2 = 2 x W1; outer delta -0.08 to -0.12",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit (preferred) or very small debit",
+  "typical_dte": "17-45 DTE; the canonical version is entered at 21 DTE",
+  "when_to_use": "IV rank > 35 and steep put skew (which makes the outer long cheap relative to the body), an index ETF or large-cap in an uptrend, and no earnings inside the expiry. Put skew is why this version is structurally easier to open for a credit than the call BWB.",
+  "max_profit": "W1 x 100 + net credit, at the body strike",
+  "max_loss": "(W2 - W1) x 100 - net credit, below the outer long strike. Defined.",
+  "breakevens": "single lower breakeven between the body and the outer long; no upper breakeven when opened for a credit - a rally scratches to the credit",
+  "greeks": {
+    "delta": "slightly positive at entry (+3 to +10 per unit)",
+    "gamma": "negative between the outer long and the body",
+    "theta": "positive when spot is above the body",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "Open for a net CREDIT; reject any fill that would be a debit larger than 3% of W1.",
+    "W2 = 2 x W1 exactly (skip one strike interval below the body).",
+    "Inner long delta -0.30 to -0.40; body -0.20 to -0.25; outer long -0.08 to -0.12.",
+    "Target credit of 12-18% of W1 when using the mechanical 21 DTE variant.",
+    "Max loss ((W2 - W1) x 100 - credit) <= 1.5% of equity per unit.",
+    "IV rank >= 35; no earnings inside the expiry.",
+    "All three strikes: OI >= 500, prior-day volume >= 100, per-leg spread <= max($0.05, 10% of mid).",
+    "Single multi-leg order at the natural mid, accept mid - $0.03."
+  ],
+  "management_rules": [
+    "Mechanical variant: on fill, immediately rest a GTC order to close at 2% of W1; it typically fills with 7-8 DTE left.",
+    "Discretionary variant: close at 25-50% of max profit - trigger when mark >= 0.30 x (W1 x 100 + credit).",
+    "Time rule: close at 7 DTE unconditionally, and never carry into the final week's gamma.",
+    "Breach rule: close if the short body put delta exceeds 0.40 in absolute value, or if spot closes below the inner long strike.",
+    "Never roll the outer long up to harvest credit; that widens the tail."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the 2 short body puts are the exposure. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short body puts are ITM with extrinsic < $0.10.",
+    "TAIL GUARD: close the entire structure if spot trades below the outer long strike; the position is at max loss there and only assignment risk remains.",
+    "Hard time exit at 7 DTE; the 21 DTE variant exists specifically so the position never sees expiration-week gamma."
+  ],
+  "assignment_risk": "Two short body puts; assignment means buying 200 shares per unit at the body strike - roughly $115k of SPY on a $50k account. The inner long put offsets 100 of those shares economically; the outer long is far away. Short puts do not carry dividend-driven early assignment, but deep-ITM short puts with no extrinsic are routinely assigned. The $0.10-extrinsic rule and the 7 DTE exit keep the system clear of this.",
+  "buying_power": "((W2 - W1) x 100) - net credit, per unit.",
+  "liquidity_needs": "Moderate-to-high; SPY/QQQ/IWM and liquid large caps. The far outer long needs OI >= 500 or the exit slips badly.",
+  "common_mistakes": "Treating the credit as the max loss; skipping two or three strikes to boost the credit and quietly tripling the tail; running it through earnings; holding into expiration week where the body gamma is worst; entering when put skew is flat, which makes a credit structurally impossible without a dangerous W2.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Works 0DTE on SPY/QQQ as a credit-collecting bullish-lean structure: a rally or a flat tape scratches or wins, only a fast selloff through the outer strike loses. Use locally computed deltas (Alpaca returns none at 0DTE - solve IV from the option mid with T in seconds to 16:00 ET). Enter after 10:00 ET, stop out on a print below the outer long, flatten by 15:45 ET.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral-to-mildly-bullish with capped downside risk",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,75 @@
+{
+  "name": "Zero-Cost Collar",
+  "slug": "zero-cost-collar",
+  "aliases": [
+    "Costless collar",
+    "Cashless collar",
+    "Equity risk reversal overlay"
+  ],
+  "summary": "A collar where the call strike is solved so the credit exactly offsets the put's cost, giving free downside protection in exchange for a capped upside.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "chosen first, by the drawdown tolerance, e.g. 7% OTM",
+      "dte_rule": "60-180 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "solved: the lowest strike whose bid x 100 >= put ask x 100, i.e. net cost <= 0",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(call strike - share basis) x 100",
+  "max_loss": "(share basis - put strike) x 100",
+  "breakevens": "share basis (net cost is zero)",
+  "greeks": {
+    "delta": "+35 to +55 per unit",
+    "gamma": "near zero",
+    "theta": "near zero",
+    "vega": "near zero"
+  },
+  "when_to_use": "When the mandate is 'protect this position at no cash cost'. Works best on underlyings with steep put skew (index ETFs), where the call needed to fund the put is far enough away to leave real upside.",
+  "typical_dte": "60-180 DTE",
+  "entry_rules": [
+    "Solve for the call strike: smallest strike K with call_bid(K) >= put_ask, subject to K >= basis x 1.05.",
+    "REJECT the trade if the solved call strike is below basis x 1.05 - the upside band is too narrow to be worth owning the shares.",
+    "Require (call strike - put strike) / spot >= 10%.",
+    "Both legs same expiry; OI >= 250 each.",
+    "Prefer ETFs where put skew makes the math favorable."
+  ],
+  "management_rules": [
+    "Roll both legs together at 21-30 DTE, re-solving for zero cost.",
+    "Roll the whole collar up when spot reaches 90% of the distance to the call strike, again solving for zero cost.",
+    "Monetize the put if it doubles in value and the thesis has changed, converting to a plain covered call."
+  ],
+  "exit_rules": [
+    "Identical hard guards to the collar: short call flattened by 15:30 ET on expiration day if ITM; immediate close when extrinsic < 0.05 and delta > 0.85; ex-dividend guard.",
+    "Long put closed rather than auto-exercised.",
+    "Unwind all legs as one combo."
+  ],
+  "assignment_risk": "Short call assignable, covered by shares. Because the call is often closer to the money than in a discretionary collar (to achieve zero cost), assignment probability is materially higher than a standard collar - tighten the monitor accordingly.",
+  "buying_power": "Shares only; zero net premium.",
+  "liquidity_needs": "Both wings OI >= 250; solving for zero cost requires a dense strike ladder ($1 or $2.50 increments).",
+  "common_mistakes": "Accepting whatever call strike the solver returns even when it caps upside at 2%; forgetting that 'costless' means you paid with your upside, not with nothing.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

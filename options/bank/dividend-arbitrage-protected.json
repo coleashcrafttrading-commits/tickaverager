@@ -1,0 +1,71 @@
+{
+  "name": "Dividend Arbitrage (Protected Dividend Capture)",
+  "slug": "dividend-arbitrage-protected",
+  "aliases": [
+    "dividend capture with protective put",
+    "married put dividend play",
+    "riskless dividend capture"
+  ],
+  "summary": "Buy 100 shares plus a deep ITM put before the ex-dividend date to collect the dividend with the share price risk hedged; the trade works only if the put's time value is less than the dividend, which the options market prices away.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares bought no later than the session before the ex-dividend date"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM: strike >= spot x 1.05, delta <= -0.90, so the put's extrinsic value is minimal",
+      "dte_rule": "Nearest expiry AFTER the ex-dividend date, typically 7-21 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "dividend_per_share x 100 - put_extrinsic x 100 - fees. Because the market prices puts to include the forthcoming dividend, this is almost always <= 0.",
+  "max_loss": "put_extrinsic x 100 + fees + any assignment/slippage cost. Bounded, but reliably negative.",
+  "greeks": {
+    "delta": "+0.05 to +0.10 per unit (shares plus a -0.90+ delta put)",
+    "gamma": "small positive",
+    "theta": "negative \u2014 the put's remaining extrinsic decays",
+    "vega": "slightly positive"
+  },
+  "breakevens": "Effectively: the trade profits only if dividend > put_extrinsic + fees.",
+  "when_to_use": "Almost never, and the reason is structural: option pricing models already discount the known dividend out of the forward price, so a put spanning the ex-date is priced richer by approximately the dividend. The 'arbitrage' is a textbook exercise that the market closed decades ago. Include it in the bank as a recognisable pattern and a reject.",
+  "typical_dte": "7-21 DTE, spanning the ex-date",
+  "entry_rules": [
+    "LEVEL 2/3 LEGAL: long stock plus long put, no short legs, fully permitted on Alpaca Level 3.",
+    "VIABILITY: negative expected value in essentially all cases. The gate below will almost never pass, which is the point.",
+    "Required test, evaluated at 15:00 ET the session before the ex-date: declared_dividend_per_share - (put_ask - max(0, put_strike - spot_ask)) - (fees/100) > $0.03 per share. Reject otherwise.",
+    "Dividend must be DECLARED (not estimated) with a confirmed ex-date, amount and record date.",
+    "Shares must settle in time to be holder of record: buy on or before the session immediately preceding the ex-date (T+1 settlement in 2026 means buying on the ex-date does NOT earn the dividend).",
+    "Never on a special dividend of more than 5% of the share price without checking for an OCC contract adjustment \u2014 adjusted contracts break every assumption in this trade.",
+    "Underlying price >= $20, ADV >= 1,000,000, put OI >= 250."
+  ],
+  "management_rules": [
+    "Hold exactly through the ex-date, then exit. This is not a position to hold.",
+    "If the put's extrinsic value rises above the dividend at any point before the ex-date, abandon the trade and close both legs.",
+    "Do not exercise the put on the ex-date reflexively: compare selling the put and selling the shares at market against exercising, and take the better of the two after fees.",
+    "Track the dividend receipt explicitly; the cash arrives on the payment date, not the ex-date, so the position's realised P/L is not final until then."
+  ],
+  "exit_rules": [
+    "No short legs, therefore no assignment risk. Close both legs on the ex-date or the session after.",
+    "If the long put is ITM at 15:00 ET on its expiration day, close it rather than allowing auto-exercise, which would sell the shares at the strike without a decision.",
+    "Never carry this structure past the first expiry after the ex-date \u2014 its only purpose was the dividend.",
+    "If the dividend is cancelled or reduced after entry, close both legs the same session."
+  ],
+  "assignment_risk": "NONE from short legs (there are none). The relevant mechanic is the mirror image: it is the counterparties to SHORT calls who get assigned around ex-dates, which is why an ITM call with extrinsic below the dividend is exercised. This strategy sits on the other side of that and therefore has no assignment exposure \u2014 only auto-exercise of the long put at expiry, which must be pre-empted by the 15:00 ET close rule.",
+  "alpaca_level": 2,
+  "buying_power": "Full share cost (cash) or 50% Reg T margin plus the put debit; ~$10,000 or ~$5,000 plus the put on a $100 name, tied up for a dividend typically worth $50-$100.",
+  "liquidity_needs": "Deep ITM puts are frequently wide-quoted and thinly traded \u2014 bid-ask on a deep ITM put of $0.15 wipes out a $0.50 dividend edge instantly. Require bid-ask <= $0.05 and OI >= 250 or skip.",
+  "common_mistakes": "Believing the dividend is free money. Buying the shares on the ex-date instead of before it. Ignoring that the deep ITM put's spread is the real cost. Not checking for OCC contract adjustments on special dividends.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable \u2014 the put must span the ex-date, so the tenor is set by the dividend calendar, not by DTE preference.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

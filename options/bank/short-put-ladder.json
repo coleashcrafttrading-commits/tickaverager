@@ -1,0 +1,79 @@
+{
+  "name": "Short Put Ladder (Bull Put Ladder)",
+  "slug": "short-put-ladder",
+  "summary": "Sell 1 higher put, buy 1 middle put, buy 1 lower put; a credit structure with defined upside, a loss valley in the middle, and a very large payoff on a crash.",
+  "aliases": [
+    "bull put ladder",
+    "put tree",
+    "short put tree",
+    "long put ladder (UK usage)"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "K3 = ITM or ATM, put delta -0.55 to -0.70",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "K2 = K3 - W, put delta -0.35 to -0.45; W = 1.5-2.5% of spot",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "K1 = K2 - W (equal spacing), put delta -0.20 to -0.30",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit (required)",
+  "typical_dte": "21-60 DTE",
+  "when_to_use": "IV rank < 30 with reasonably flat put skew - hard to find on equity indexes, easier on single names after a squeeze. It is a put ratio backspread with the second long pushed further out, trading upside slope for a shallower valley.",
+  "max_profit": "very large on a move toward zero (bounded by K1 x 100 plus the structure)",
+  "max_loss": "(K3 - K2) x 100 - net credit, reached at K2. Defined.",
+  "breakevens": "upper: none when opened for a credit; lower breakeven = K1 - (K3 - K2) + credit/100 (solve exactly)",
+  "greeks": {
+    "delta": "near flat at entry, strongly negative below K1",
+    "gamma": "positive below K2",
+    "theta": "negative between K1 and K3",
+    "vega": "positive"
+  },
+  "entry_rules": [
+    "Open for a net CREDIT; reject debit fills.",
+    "Skew filter: (IV at K1) - (IV at K3) <= 4.0 vol points, otherwise no credit is achievable.",
+    "Equal strike spacing; K3 delta -0.55 to -0.70, K2 -0.35 to -0.45, K1 -0.20 to -0.30.",
+    "Max loss ((K3 - K2) x 100 - credit) <= 1.5% of equity per unit.",
+    "IV rank < 30.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-leg limit order at mid; must remain a credit."
+  ],
+  "management_rules": [
+    "Close at 100% of the max-loss amount in profit.",
+    "Close at 14 DTE regardless of P/L.",
+    "Stop at 60% of theoretical max loss.",
+    "No rolls."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 1 short put at K3, deliberately placed ITM or ATM - assignable from day one. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the K3 short put is ITM with extrinsic < $0.10.",
+    "Close no later than 14 DTE."
+  ],
+  "assignment_risk": "One short put at K3, chosen ITM/ATM, so early assignment risk exists from entry. Assignment buys 100 shares at K3 - a $10k-$60k cash event - hedged economically by the two long puts but operationally unacceptable. Deep ITM short puts lose extrinsic quickly and are assigned for carry reasons.",
+  "buying_power": "(K3 - K2) x 100 - net credit, per unit.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Attempting it on SPY/QQQ where put skew makes a credit impossible; opening for a debit; holding through the valley at K2 into expiry; ignoring that the ITM short put is assignable at any time.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended - an ITM short put at 0DTE means same-day share delivery, and the crash payoff needs more than a day.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "bearish breakout with a neutral consolation prize; long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,80 @@
+{
+  "name": "Covered Call Ladder",
+  "slug": "covered-call-ladder",
+  "aliases": [
+    "Staggered overwrite",
+    "Tranche writing"
+  ],
+  "summary": "Split a multi-hundred share position into tranches and write calls at staggered strikes and expiries so the whole position is never called at once.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 300,
+      "strike_rule": "3+ lots of 100",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "tranche A: 0.20 delta",
+      "dte_rule": "~21 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "tranche B: 0.30 delta",
+      "dte_rule": "~42 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "tranche C: 0.40 delta",
+      "dte_rule": "~63 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "sum of each tranche's capped gain plus all credits",
+  "max_loss": "full share downside less total credits",
+  "breakevens": "weighted average share basis - total credits per share",
+  "greeks": {
+    "delta": "+60 to +80 per 100 shares, smoothed across strikes",
+    "gamma": "negative but diversified across expiries",
+    "theta": "positive, smoother than a single write",
+    "vega": "negative"
+  },
+  "when_to_use": "Positions of 300+ shares where a single strike would create a lumpy all-or-nothing outcome, and where the system wants a continuous income stream rather than monthly cliffs.",
+  "typical_dte": "laddered 21/42/63 DTE",
+  "entry_rules": [
+    "Require shares_held >= 300 (3 tranches minimum).",
+    "Each tranche independently satisfies the standard covered call entry gates (IVR >= 30, OI >= 250, credit >= 0.6% notional).",
+    "No two tranches share the same expiry date.",
+    "Total short call delta across tranches <= 0.45 x (shares/100)."
+  ],
+  "management_rules": [
+    "Manage each tranche independently at 50% profit / 21 DTE.",
+    "When a tranche closes, immediately re-write it at the longest rung so the ladder keeps its shape.",
+    "If aggregate short delta exceeds 0.55 per lot (a strong rally), roll the deepest tranche up-and-out for a credit before adding new rungs."
+  ],
+  "exit_rules": [
+    "Per-tranche hard assignment guard: any ITM short call closed by 15:30 ET on its expiration day.",
+    "Extrinsic < 0.05 and delta > 0.85 on any rung triggers an immediate close of that rung.",
+    "If the whole position is being liquidated, close all short calls first, then sell shares."
+  ],
+  "assignment_risk": "Each rung carries normal covered call assignment risk; the ladder's benefit is that at most one third of the position can be called in any one expiry. Ex-dividend guard must run per rung.",
+  "buying_power": "Shares only.",
+  "liquidity_needs": "Needs a chain with multiple liquid expiries - monthlies plus weeklies with OI >= 250.",
+  "common_mistakes": "Letting rungs drift onto the same expiry, which defeats the design; over-writing so aggregate delta is too short in a rally.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The ladder concept is about spreading expiries; a 0DTE rung can be added as a tactical extra but is not part of the core structure.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 3
+}

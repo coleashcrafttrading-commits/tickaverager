@@ -1,0 +1,68 @@
+{
+  "name": "Short Straddle",
+  "slug": "short-straddle",
+  "aliases": [
+    "sell straddle",
+    "naked straddle",
+    "short ATM straddle"
+  ],
+  "summary": "Sell a call and a put at the same strike and expiry for a large credit; maximum premium collection, undefined risk on both sides.",
+  "bias": "short_vol",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Strike nearest spot (call delta closest to 0.50), or the delta-neutral strike if you want zero starting delta."
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same strike as the call.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "total credit received, achieved only if the underlying finishes exactly at the strike",
+  "max_loss": "UNDEFINED. Unlimited to the upside; (strike * 100) - credit to the downside.",
+  "breakevens": "strike + credit per share and strike - credit per share",
+  "greeks": {
+    "delta": "near zero at entry, becomes large fast",
+    "gamma": "strongly negative -- the worst negative gamma in the family",
+    "theta": "strongly positive, the highest theta per contract of any two-leg structure",
+    "vega": "strongly negative, -$30 to -$60 per vol point per 1-lot on an index ETF at 30 DTE"
+  },
+  "typical_dte": "45 DTE in, 21 DTE out, in the classic premium-selling framework",
+  "when_to_use": "IV rank > 50 with an expectation of range-bound price action and vol contraction. Highest theoretical premium capture of any structure and, historically, positive expectancy on indices -- but the tail risk is real and unhedged.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. Requires uncovered (naked) short call and short put authority, which is Level 4. Alpaca offers Levels 1-3 only and rejects any multi-leg order whose legs are not covered within the same order. This strategy cannot be submitted and must be flagged as unavailable by the order router.",
+    "If it were ever enabled: IV rank > 50, no earnings inside the expiry, DTE 30-60, strike at the delta-neutral point.",
+    "Sizing would be by expected-move stress test: max loss at spot +/- 3 standard deviations must be <= 10% of equity, which on a $50k account means at most 1 contract on a sub-$100 underlying and zero on SPY.",
+    "Defined-risk substitute the system SHOULD trade instead: an iron butterfly (same short straddle with protective long wings), or a short strangle converted to an iron condor."
+  ],
+  "management_rules": [
+    "If enabled: take profit at 25% of credit received (short straddles are managed at 25%, not 50%, because the risk is unbounded).",
+    "Close at 21 DTE unconditionally.",
+    "Stop: close the entire position if the loss reaches 2.0x the credit received.",
+    "Delta band: if net delta exceeds +/-0.30 per 1-lot, roll the tested side to restore neutrality, for a credit only."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: one of the two legs is always ITM at expiry by construction. This structure is guaranteed to be assigned if held. Close by 15:30 ET on expiry day, no exceptions.",
+    "ASSIGNMENT GUARD: close immediately whenever the ITM leg's extrinsic value < $0.10.",
+    "DIVIDEND GUARD: close the call side before any ex-dividend date where the short call is ITM and extrinsic < 1.5 * dividend."
+  ],
+  "assignment_risk": "Maximum in this family. One side finishes ITM essentially always. Assignment on the call side creates short stock; on the put side, long stock at the strike, which on a $50k account is an immediate margin breach for anything index-sized. There is no long leg to cover.",
+  "buying_power": "Would be Reg-T naked margin: roughly 20% of the underlying value minus OTM amount, plus premium, per side, with only the greater side held. On SPY near $600 that is roughly $12,000-$14,000 per contract. Not available on Alpaca.",
+  "liquidity_needs": "ATM legs are liquid, but the exit in a stress event is where the cost lands; require the underlying to have penny-wide ATM markets.",
+  "common_mistakes": "Treating historical index short-straddle returns as a reason to run it undersized-margin; not having a mechanical stop; carrying it through an earnings gap; assuming 'I'll just take assignment' -- on a $50k account you cannot.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Extremely high negative gamma; a 0DTE ATM short straddle can lose several multiples of its credit in minutes. Not tradable on this account anyway (Level 4). If a short-vol 0DTE expression is wanted, use a 0DTE iron butterfly instead.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

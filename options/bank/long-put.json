@@ -1,0 +1,63 @@
+{
+  "name": "Long Put (standard directional)",
+  "slug": "long-put",
+  "aliases": [
+    "buying a put",
+    "naked long put"
+  ],
+  "summary": "Buy one OTM-to-ATM put for leveraged downside with risk capped at the debit.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta -0.30 to -0.40",
+      "dte_rule": "single expiry, 30-60 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(strike - underlying at exit) x 100 - debit; maximum when the underlying goes to zero",
+  "max_loss": "Debit paid x 100. Defined.",
+  "breakevens": "strike - debit per share",
+  "greeks": {
+    "delta": "-0.30 to -0.40",
+    "gamma": "positive",
+    "theta": "negative, similar magnitude to the equivalent call",
+    "vega": "positive - and puts benefit from volatility skew expanding during selloffs, a real structural tailwind"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "IVR < 40, price below a falling 20 EMA with the 20 below the 50, no earnings before exit. Puts tolerate slightly higher IVR than calls because downside moves usually expand IV further.",
+  "entry_rules": [
+    "IVR < 40",
+    "Price < 20 EMA and 20 EMA < 50 EMA on the daily",
+    "No earnings before the planned exit",
+    "30-60 DTE; delta -0.30 to -0.40",
+    "Bid/ask <= 10% of mid, OI >= 500",
+    "Debit <= 1.5% of equity per position",
+    "Limit order at mid, walk down in $0.05 steps"
+  ],
+  "management_rules": [
+    "Take profit at +100% of debit",
+    "Stop at -50% of debit",
+    "Time stop at 21 DTE",
+    "If VIX spikes above 30 and the position is profitable, take the profit - put vega gains mean-revert fast",
+    "No averaging down"
+  ],
+  "exit_rules": [
+    "Sell to close at +100%, -50%, or 21 DTE",
+    "Hard flatten by 15:30 ET on expiration day. An ITM long put auto-exercises into a SHORT 100-share position - an uncovered equity short the account cannot carry. This is the more dangerous of the two auto-exercise cases",
+    "Abandon contracts worth < $0.05 rather than paying to exit"
+  ],
+  "assignment_risk": "No assignment (long). Auto-exercise creates short stock, strictly worse than the call case. The 15:30 ET flatten is mandatory and must fire even when the put is only marginally ITM.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "ADV >= 2M shares; OI >= 500.",
+  "common_mistakes": "Buying puts after the VIX has already spiked (buying vega at the top); letting an ITM put expire and waking up short 100 shares.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

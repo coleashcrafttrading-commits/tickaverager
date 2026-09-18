@@ -1,0 +1,59 @@
+{
+  "name": "LEAPS Protective Put (portfolio hedge)",
+  "slug": "leaps-protective-put-portfolio-hedge",
+  "aliases": [
+    "long-dated index hedge",
+    "portfolio insurance"
+  ],
+  "summary": "Buy long-dated index-ETF puts (SPY/QQQ) sized to the whole portfolio's beta-weighted delta, as standing crash insurance.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta -0.15 to -0.25 on SPY or QQQ; quantity = beta-weighted portfolio delta / 100, rounded down",
+      "dte_rule": "270-540 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(strike - index level) x 100 x contracts - debit; large in a crash",
+  "max_loss": "Total debit. Expect this to be a persistent cost in any up market - it is insurance, and insurance is supposed to lose money most of the time.",
+  "breakevens": "strike - debit per share on the index",
+  "greeks": {
+    "delta": "-0.15 to -0.25 per contract against a positive portfolio delta",
+    "gamma": "positive, grows sharply in a selloff",
+    "theta": "negative but small per day at this duration",
+    "vega": "large positive - the main source of P&L in a fast selloff, often before delta even matters"
+  },
+  "typical_dte": "270-540 DTE, rolled annually",
+  "when_to_use": "When the portfolio's beta-weighted delta exceeds a risk threshold and VIX is low (VIX < 16, when tail hedges are cheapest).",
+  "entry_rules": [
+    "Only buy when VIX < 18; hedges bought during a spike are a wealth transfer",
+    "Compute beta-weighted portfolio delta against SPY; hedge 40-70% of it, never 100%",
+    "Delta -0.15 to -0.25; 270-540 DTE",
+    "Annual hedge budget capped at 1.5% of equity (~$750/yr on $50k)",
+    "SPY or QQQ only - index-ETF options are penny-wide and deeply liquid"
+  ],
+  "management_rules": [
+    "Roll annually when DTE < 180, into the same delta 270+ days out",
+    "Monetisation rule: if the put's value reaches 3x the debit, sell 50% and roll the remainder down to a fresh -0.20 delta strike. This converts a paper crash gain into cash without abandoning the hedge",
+    "Re-size the hedge quarterly as portfolio delta changes",
+    "Never increase the hedge during a selloff - that is buying vega at the peak"
+  ],
+  "exit_rules": [
+    "Roll at DTE < 180; monetise 50% at 3x; fully exit only if the underlying portfolio is liquidated",
+    "Never carry to expiry: auto-exercise would create a short index-ETF position"
+  ],
+  "assignment_risk": "None (long). Auto-exercise into short SPY shares is the hazard, prevented by the 180-DTE roll rule.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "SPY/QQQ LEAPS puts - among the most liquid long-dated contracts available.",
+  "common_mistakes": "Buying the hedge after the crash starts; hedging 100% of delta and guaranteeing underperformance; never monetising a winning hedge.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

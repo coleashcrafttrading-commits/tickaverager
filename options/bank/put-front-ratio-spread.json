@@ -1,0 +1,70 @@
+{
+  "name": "Put Front Ratio Spread (1x2)",
+  "slug": "put-front-ratio-spread",
+  "summary": "Buy 1 nearer put and sell 2 further OTM puts for a credit; profits from a drift down to the short strike, with large risk below it.",
+  "aliases": [
+    "put ratio spread",
+    "1x2 put ratio",
+    "front ratio put spread"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM or slightly ITM, put delta -0.50 to -0.60",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "OTM strike at put delta -0.25 to -0.30, chosen so the package opens at a net credit",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "typical_dte": "30-60 DTE, managed at 21 DTE",
+  "when_to_use": "COMPLETENESS / LEVEL 4 unless both short puts are fully cash-secured. With put skew, the credit is usually easy to obtain. Under Level 3 the correct substitute is the broken-wing put butterfly, which caps the downside tail.",
+  "max_profit": "(long strike - short strike) x 100 + net credit, at the short strike",
+  "max_loss": "(short strike x 100) - max profit, on a move to zero - effectively undefined for risk-management purposes",
+  "breakevens": "upside: none when opened for a credit; downside breakeven = short strike - (long strike - short strike) - credit/100",
+  "greeks": {
+    "delta": "negative at entry, turns positive below the short strike",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "AT LEVEL 3: permitted ONLY if both short puts are fully cash-secured - reserve 2 x (short strike x 100) - credit in cash. On a $50k account this restricts it to underlyings under $50. Otherwise the router must reject it as a level 4 structure.",
+    "Open for a net credit only.",
+    "Short strike delta between -0.25 and -0.30; long strike delta -0.50 to -0.60.",
+    "IV rank >= 50; no earnings inside the expiry.",
+    "Both strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Level-3 substitute (preferred): add a long put below the shorts, converting to a broken-wing put butterfly."
+  ],
+  "management_rules": [
+    "Close at 50% of max profit.",
+    "Close at 21 DTE regardless of P/L.",
+    "Close if spot trades below the short strike at any time.",
+    "Stop: close if the short put delta reaches -0.45."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 2 short puts, 1 uncovered by the long; flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short puts are ITM with extrinsic < $0.10.",
+    "Close any ITM short put by 2 DTE unconditionally."
+  ],
+  "assignment_risk": "Assignment on both shorts buys 200 shares per unit; only 100 of those are hedged by the long put. The unhedged 100 shares are an outright long position taken at a price above market. On a $50k account this must never happen.",
+  "buying_power": "Cash-secured requirement on 2 short puts (2 x strike x 100 - credit) at Level 3, or naked put margin at Level 4.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Opening for a debit; underestimating that a 1x2 put ratio on an index ETF is a short-crash position; using it instead of the capped BWB version for no additional edge.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended - an unhedged short put at 0DTE means same-day share delivery risk.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "mildly bearish, short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

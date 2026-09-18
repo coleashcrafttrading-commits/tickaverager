@@ -1,0 +1,72 @@
+{
+  "name": "Protective Put",
+  "slug": "protective-put",
+  "aliases": [
+    "Put hedge",
+    "Insurance put",
+    "Synthetic long call"
+  ],
+  "summary": "Buy a put against shares already owned, converting the position into a defined-risk long with a floor at the strike.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "pre-existing shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.25-0.40 delta OTM, typically 5-10% below spot; or ATM for a tight floor",
+      "dte_rule": "60-120 DTE (longer is cheaper per day)"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "unlimited above breakeven",
+  "max_loss": "(share basis - put strike + premium paid) x 100",
+  "breakevens": "share basis + premium per share",
+  "greeks": {
+    "delta": "+60 to +75 per unit",
+    "gamma": "positive",
+    "theta": "negative (the put bleeds)",
+    "vega": "positive"
+  },
+  "when_to_use": "Holding shares through a known risk window (earnings, macro event, a parabolic run) where downside must be capped. Best bought when IV Rank <= 40 so the insurance is not overpriced. Structurally identical to a long call at the put's strike.",
+  "typical_dte": "60-120 DTE; roll before 30 DTE where theta accelerates",
+  "entry_rules": [
+    "Require 100 shares per put; the put hedges, it does not create exposure.",
+    "Strike selected by delta in [0.25, 0.40] or by a max acceptable drawdown: strike = basis x (1 - max_drawdown_pct).",
+    "Require IV Rank <= 40 at purchase; if IVR > 60, prefer a put spread or collar instead (long vol is expensive).",
+    "Cost budget: premium <= 2.5% of share notional per quarter; reject if the annualized hedge cost exceeds 8% of notional.",
+    "Require OI >= 250 and spread <= 8% of mid."
+  ],
+  "management_rules": [
+    "Roll the put out when DTE < 30 to keep the floor alive without paying the steepest theta.",
+    "Roll the put UP (monetize) when the stock rallies and the put's delta falls below 0.10: sell the old put, buy a new one at 0.30 delta, locking in gains as a raised floor.",
+    "If IV spikes (IVR > 70) while holding, consider selling the put into the spike and re-hedging with a put spread.",
+    "Do not add to the hedge on a decline - that is buying insurance after the fire."
+  ],
+  "exit_rules": [
+    "HARD: close the long put before expiration if ITM - an ITM long put auto-exercises under OCC exercise-by-exception and SELLS the 100 shares at the strike, which may not be the intended outcome. Close by 15:30 ET on expiration day.",
+    "Sell the put when the hedged event has passed (e.g. the morning after earnings) to recover residual extrinsic.",
+    "If the shares are sold, sell the put in the same session - a naked long put is a different trade and must be re-authorized."
+  ],
+  "assignment_risk": "No short leg, so no assignment risk. The mirror hazard is unwanted EXERCISE of the long put at expiry, which liquidates the share position automatically. The system must close ITM long puts rather than let them exercise.",
+  "buying_power": "Premium paid in full; the put reduces the margin requirement on the share position in a margin account.",
+  "liquidity_needs": "OI >= 250, spread <= 8% of mid; longer-dated puts on ETFs are the most efficient.",
+  "common_mistakes": "Buying puts only after a drop, when IV has already exploded; paying so much for insurance that the position cannot make money; letting an ITM put auto-exercise and unintentionally liquidating the shares.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "0DTE puts as a hedge are pure lottery tickets; a stop order is cheaper for same-day protection.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0,
+  "also_filed_under": [
+    "single-leg"
+  ]
+}

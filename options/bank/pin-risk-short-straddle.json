@@ -1,0 +1,67 @@
+{
+  "name": "Short ATM Straddle Pin Play",
+  "slug": "pin-risk-short-straddle",
+  "aliases": [
+    "expiration straddle sale",
+    "pin the strike",
+    "gamma scalp sale"
+  ],
+  "summary": "Selling an at-the-money straddle into expiration to harvest the final hours of time value on the thesis that the underlying pins; unlimited risk, maximum pin risk, and included here explicitly as a structure to refuse.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM: strike nearest spot, call delta 0.45-0.55"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SAME strike as the call",
+      "dte_rule": "same expiry, 0-1 DTE"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "The full credit received, if the underlying finishes exactly at the strike",
+  "max_loss": "UNDEFINED (unlimited) on the upside; (strike x 100) - credit on the downside",
+  "greeks": {
+    "delta": "near zero at entry, swinging to +/-1.00 within minutes as expiry approaches",
+    "gamma": "extreme NEGATIVE \u2014 the largest gamma exposure available in listed options",
+    "theta": "extreme positive, which is the entire appeal and the entire trap",
+    "vega": "negative"
+  },
+  "breakevens": "strike +/- credit/100",
+  "when_to_use": "Never on this account. It is included so the classifier recognises the pattern and refuses it, including when it is assembled accidentally (e.g. an iron butterfly whose wings expire worthless or are closed, leaving the naked body).",
+  "typical_dte": "0-1 DTE",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: both legs are uncovered. Alpaca rejects the multi-leg order and rejects each leg submitted standalone. Requires Level 4.",
+    "BLOCKED BY RISK POLICY even at Level 4: unbounded loss, extreme negative gamma, and guaranteed assignment exposure on at least one leg at expiry. A single adverse 2% move on SPY in the final hour is a multiple of the credit.",
+    "BLOCKED BY MANDATE: at expiry one leg is always ITM by construction (unless the underlying finishes exactly at the strike). Assignment is not a risk here, it is the base case. A system that must never be assigned cannot hold this structure.",
+    "Level-3-legal substitute: an iron butterfly (short ATM straddle plus long OTM wings), which caps both tails and satisfies the same-order coverage rule. Route any short-straddle intent to the iron butterfly instead, and keep the wings open for the entire life of the position.",
+    "Classifier requirement: flag any state where a short call and a short put exist at the same strike and expiry with no protective long of the same right \u2014 including transient states created by closing wings early."
+  ],
+  "management_rules": [
+    "If this exposure is ever detected in the live book, raise a critical alert and close both short legs immediately, buying protective wings first if the shorts cannot be closed.",
+    "Never close the wings of an iron butterfly before closing the body. The wings are the only thing standing between the position and this structure.",
+    "No profit target or stop is specified because the position should not exist."
+  ],
+  "exit_rules": [
+    "If somehow open: close both legs immediately and unconditionally.",
+    "Absolute rule: no naked short option may be held past 15:40 ET on expiration day, and a 0DTE ATM short straddle must be flat by 14:00 ET at the latest.",
+    "If assigned on either leg, flatten the resulting 100-share position at the first available print; do not wait for the second leg to resolve."
+  ],
+  "assignment_risk": "MAXIMAL. One leg finishes ITM in essentially every outcome, so assignment is the expected case rather than a tail. Worse, when the underlying pins exactly at the strike, the assignment outcome is a coin flip decided by holders after the close, meaning the account discovers its Monday position after the market has shut. This is the canonical pin-risk failure mode.",
+  "alpaca_level": 4,
+  "buying_power": "Reg T naked straddle: the greater of the two naked requirements plus the other leg's premium. Roughly $2,000-$3,000 per contract on a $100 underlying, and subject to intraday increases.",
+  "liquidity_needs": "Irrelevant \u2014 do not trade.",
+  "common_mistakes": "Reaching this exposure by accident, by closing an iron butterfly's wings 'because they are worthless'. A $0.02 wing that costs $0.65 in fees to close is still the difference between defined and unlimited risk.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "0DTE is where this structure is most tempting (maximum theta) and most lethal (maximum gamma plus certain assignment). Permanent refusal.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

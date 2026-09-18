@@ -1,0 +1,79 @@
+{
+  "name": "Long Call Calendar Spread",
+  "slug": "long-call-calendar",
+  "summary": "Sell a near-term call and buy a longer-dated call at the same strike; bets the underlying pins near the strike while the front-month extrinsic decays faster than the back-month's.",
+  "aliases": [
+    "horizontal call spread",
+    "time spread",
+    "call time spread",
+    "long call horizontal"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM by delta: |delta| 0.45-0.55 for a neutral calendar; 0.25-0.35 OTM call for a bullish directional calendar. Never pick a strike by intuition - pick it by delta, then confirm the strike is within 1.0 ATR(14) of spot.",
+      "dte_rule": "front leg, 21-35 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Identical strike to leg 1.",
+      "dte_rule": "back leg, 45-70 DTE; gap between expiries 21-35 days"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "No closed form. Approximately the theoretical value of the back-month call at front expiry with spot exactly at the strike, minus the net debit. Empirically 20-40% of the debit for a 30/60 ATM calendar. Model it with Black-Scholes using the back-month IV at T = (back DTE - front DTE)/365.",
+  "max_loss": "The net debit paid, realized if the underlying finishes far enough from the strike in either direction that both legs carry near-identical (near-zero or near-parity) value at front expiry. Realized loss is capped only if the short leg is closed on time.",
+  "breakevens": "Two, bracketing the strike; no closed form. Solve numerically at front expiry with the back-month IV. Rough rule for a 30/60 ATM calendar: strike +/- (1.0 to 1.3) x the debit converted to underlying points.",
+  "greeks": {
+    "delta": "~0 at ATM (+/-0.05 per unit); grows to +/-0.15 as spot drifts off the strike",
+    "gamma": "negative, ~-0.01 to -0.03 per unit; most negative at the strike into front expiry",
+    "theta": "positive, ~+$3 to +$8/day per unit on a $100 underlying at 30/60",
+    "vega": "positive (net long vega), ~+$8 to +$15 per unit; back-month vega exceeds front-month vega"
+  },
+  "when_to_use": "IV rank of the underlying < 30 (you are net long vega, so buy back-month vol cheap - tastytrade prefers IVR under 10-20 for calendars). Term structure: want front IV - back IV >= 0 (flat to backwardated); reject if back IV exceeds front IV by more than 3 vol points, because you are then buying the expensive month and selling the cheap one. Best on range-bound, mean-reverting underlyings with a visible pin/magnet level (round numbers, high-OI strikes, prior VWAP consolidation).",
+  "typical_dte": "front 21-35 DTE, back 45-70 DTE",
+  "entry_rules": [
+    "Underlying IV rank < 30 AND IV percentile < 40.",
+    "front_IV - back_IV >= -3.0 vol points (reject steep contango).",
+    "Front leg DTE in [21,35]; back leg DTE in [45,70]; expiry gap in [21,35] days.",
+    "Strike selected by delta: neutral = front |delta| in [0.45,0.55]; directional = front |delta| in [0.25,0.35]. Strike must be within 1.0 x ATR(14) of spot.",
+    "Net debit per unit <= $2.50 on an underlying under $150, and total debit <= 2% of account equity ($1,000 on a $50k account).",
+    "Combined bid-ask of the two legs <= 10% of the net debit; reject if worse.",
+    "No earnings, no ex-dividend date, and no scheduled binary event between now and front expiry (unless running the earnings-calendar playbook explicitly).",
+    "LEVEL 3 OK: the long back-month call at the same strike, expiring later, fully covers the short front call. Submit as a single 2-leg mleg order. If Alpaca rejects the mixed-expiry mleg, leg in with the LONG back-month call filled FIRST, then sell the front - never the reverse.",
+    "Do not open if the front leg expires the same day (see zero-dte-day-calendar for that variant)."
+  ],
+  "management_rules": [
+    "Take profit at +25% of net debit (spread mark >= 1.25 x debit). 30-50% is acceptable on a wider-strike or longer-gap calendar; use 25% as the default machine target.",
+    "Stop out at -50% of net debit (spread mark <= 0.50 x debit).",
+    "Directional stop: close if |spot - strike| > 1.0 x the front-month ATM straddle price (the expected move) measured at entry.",
+    "Position delta cap: if |net delta| > 0.30 per unit, close or recenter to a new strike within 1 ATR of spot.",
+    "Roll the short leg out one expiry when front DTE <= 7 AND short |delta| <= 0.60 AND the short's remaining extrinsic <= 30% of its extrinsic at entry. Roll for a credit only; if the roll is a debit, close the whole structure.",
+    "Portfolio cap: max 4 concurrent calendar units per underlying; total capital in all calendars <= 10% of equity."
+  ],
+  "exit_rules": [
+    "Close the entire spread no later than 2 trading days before front expiry unless the short leg is being rolled.",
+    "HARD RULE: close or roll the short call by 14:30 ET on its expiration day, unconditionally, regardless of P&L. American, share-settled options are never carried into expiration.",
+    "Close the short call immediately if its extrinsic value <= $0.05 per share OR short |delta| >= 0.90 (early-assignment window is open).",
+    "Close the short call before the close of the session preceding ex-dividend if the short call's extrinsic value < the declared dividend per share.",
+    "When unwinding leg-by-leg rather than as an mleg, BUY BACK THE SHORT LEG FIRST, then sell the long - never leave a naked short.",
+    "If the long back-month call marks below $0.10, close both legs; the structure is dead."
+  ],
+  "assignment_risk": "Only the short front-month call is assignable. American style, settles in 100 shares. Trigger conditions: short call goes ITM and extrinsic collapses below ~$0.05, or the day before ex-dividend when extrinsic < dividend. If assigned, the account is short 100 shares against a long back-month call (a covered short at level 3): the system must buy the shares back within the same or next session and then decide whether to keep or sell the long call.",
+  "buying_power": "Net debit only. Alpaca reserves the debit; no additional maintenance requirement while both legs are open. If the short is assigned, the short stock position creates a real margin requirement until flattened.",
+  "liquidity_needs": "Both expirations: open interest >= 250 per leg, daily volume >= 50, quoted spread <= $0.10 on a leg priced around $2. Underlying ADV >= 2M shares. Reject any calendar whose back-month is quoted more than $0.25 wide - exit slippage destroys the edge.",
+  "common_mistakes": "Opening calendars when IV rank is high (the net long vega gets crushed); ignoring that the back month's IV can drop even while spot pins perfectly; letting the short leg run to expiry; picking the strike where you hope price goes rather than where it is likely to pin; using an illiquid back month so that exit slippage exceeds the theoretical profit; forgetting the ex-dividend assignment window on dividend ETFs and dividend payers.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE front leg converts this into the day calendar (see zero-dte-day-calendar). On share-settled SPY/QQQ the 0DTE short leg carries pin and assignment risk, so only the dedicated day-calendar playbook with its forced 14:30 ET close should ever run it.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

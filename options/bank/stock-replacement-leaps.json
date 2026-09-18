@@ -1,0 +1,59 @@
+{
+  "name": "Stock Replacement with Deep ITM LEAPS",
+  "slug": "stock-replacement-leaps",
+  "aliases": [
+    "Synthetic long via LEAPS",
+    "Capital-efficient long"
+  ],
+  "summary": "Sell (or never buy) the shares and hold a single deep ITM long-dated call instead, freeing capital and capping downside at the premium.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.80-0.90 delta, extrinsic <= 8% of premium",
+      "dte_rule": "270-730 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "unlimited above the strike",
+  "max_loss": "premium paid",
+  "breakevens": "strike + premium per share",
+  "greeks": {
+    "delta": "+80 to +90",
+    "gamma": "slightly positive",
+    "theta": "negative but small per day on a LEAPS",
+    "vega": "positive"
+  },
+  "when_to_use": "Bullish long-horizon view, want to free up capital, and IV Rank is LOW (<= 30) so the long vega is cheap. Also used to keep exposure while removing the capital drag of shares in a $50k account.",
+  "typical_dte": "270-730 DTE",
+  "entry_rules": [
+    "Delta in [0.80, 0.90]; extrinsic <= 8% of premium paid.",
+    "Require IV Rank <= 35 - never buy long vega when IV is rich.",
+    "Require premium <= 35% of the cost of 100 shares.",
+    "Require LEAPS OI >= 100 and spread <= 5% of mid.",
+    "Avoid underlyings with dividend yield > 3% (the long call forgoes dividends and is priced accordingly)."
+  ],
+  "management_rules": [
+    "Roll out when DTE < 120 or delta < 0.65.",
+    "Take profit in line with the share plan; optionally convert to a PMCC by selling 30-45 DTE calls against it once the position is up 20%.",
+    "Cut if the position loses 50% of premium."
+  ],
+  "exit_rules": [
+    "HARD: close before expiration - an ITM long call auto-exercises at $0.01 ITM under OCC exercise-by-exception and delivers 100 long shares requiring full cash/margin. Close by 15:30 ET on expiration day at the latest.",
+    "Close if delta < 0.50 (it has become a speculative option, not a stock substitute)."
+  ],
+  "assignment_risk": "No short leg, so no assignment risk. The mirror risk is unwanted EXERCISE: the long call will be auto-exercised if ITM at expiry, converting a $3,000 option into a $40,000 share purchase. That must be blocked by closing early.",
+  "buying_power": "Premium paid, in full (long options are never marginable).",
+  "liquidity_needs": "LEAPS liquidity is the constraint; mega-caps and large ETFs only.",
+  "common_mistakes": "Buying when IV is high; picking too low a delta and getting a decaying lottery ticket; forgetting the auto-exercise at expiration.",
+  "alpaca_level": 1,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - the whole point is long duration.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

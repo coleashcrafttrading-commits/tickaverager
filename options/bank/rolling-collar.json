@@ -1,0 +1,74 @@
+{
+  "name": "Rolling Collar",
+  "slug": "rolling-collar",
+  "aliases": [
+    "Dynamic collar",
+    "Perpetual collar",
+    "Collar maintenance"
+  ],
+  "summary": "Management structure: continuously roll a collar's put and call up (or down) and out to track the share price, keeping a constant percentage floor and ceiling over time.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "new put at 0.30 delta each cycle",
+      "dte_rule": "next 30-90 DTE cycle"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "new call solved for near-zero net cost",
+      "dte_rule": "same expiry as the new put"
+    },
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "unchanged share position",
+      "dte_rule": "n/a"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "path-dependent; each cycle's cap is reset higher when the stock rallies",
+  "max_loss": "limited to the current cycle's floor plus the cumulative net debits of all rolls",
+  "breakevens": "share basis + cumulative net debits per share",
+  "greeks": {
+    "delta": "maintained near +50 per unit by re-striking",
+    "gamma": "near zero",
+    "theta": "near zero",
+    "vega": "near zero"
+  },
+  "when_to_use": "Long-term holdings that must stay hedged indefinitely - a core ETF position in an automated fleet, or a concentrated legacy position.",
+  "typical_dte": "roll every 30-60 days, always as a 4-leg combo",
+  "entry_rules": [
+    "Trigger the roll at DTE <= 21, OR when the short call delta >= 0.60, OR when the long put delta <= 0.12 (protection has drifted too far away).",
+    "Execute as ONE 4-leg combo: close old put + close old call + open new put + open new call.",
+    "Each roll must satisfy: net cost <= 0.3% of share notional, and new call strike >= max(share basis, previous call strike).",
+    "Refuse a roll that would lower the call strike below the previous cycle's strike after a rally (that would lock in a lower cap)."
+  ],
+  "management_rules": [
+    "Track cumulative roll cost as a running basis adjustment; if cumulative cost exceeds 5% of notional annually, widen the collar or reduce the frequency.",
+    "Ratchet: after any 10% rally, force a roll-up so the floor rises with the position.",
+    "Do not ratchet the floor down after a decline - hold the existing floor and let it work."
+  ],
+  "exit_rules": [
+    "If the 4-leg roll cannot be filled by 15:30 ET on expiration day, fall back to closing the expiring legs outright (the position becomes unhedged shares, flagged for re-hedge next session) - never carry an ITM short call into expiry to preserve a roll.",
+    "Standard extrinsic and ex-dividend guards on the expiring short call throughout.",
+    "Full exit: unwind all legs plus shares as one order."
+  ],
+  "assignment_risk": "Each cycle's short call is assignable and covered. The roll execution window is the vulnerability - a single combo order eliminates it. Around dividends, roll BEFORE the ex-date rather than into it.",
+  "buying_power": "Shares plus the small per-cycle net debit.",
+  "liquidity_needs": "Needs consistent liquidity across many consecutive expiries; ETFs and mega-caps only.",
+  "common_mistakes": "Legging the roll; ratcheting the cap downward to fund a higher floor and slowly guaranteeing underperformance; ignoring cumulative roll costs.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

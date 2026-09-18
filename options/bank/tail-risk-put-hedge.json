@@ -1,0 +1,69 @@
+{
+  "name": "Tail-Risk Put Hedge",
+  "slug": "tail-risk-put-hedge",
+  "aliases": [
+    "Catastrophe put",
+    "Black swan hedge",
+    "Crash put"
+  ],
+  "summary": "A small, persistent allocation to deep OTM long-dated puts that pay off only in a crash, sized as a standing insurance premium.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "the equity/ETF portfolio being hedged",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.05-0.10 delta, roughly 20-30% OTM",
+      "dte_rule": "90-180 DTE, rolled quarterly"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(strike - 0) x 100 - premium, in a total collapse; practically, 10-30x the premium in a >20% crash",
+  "max_loss": "premium paid (expected to be lost in most quarters)",
+  "breakevens": "strike - premium per share",
+  "greeks": {
+    "delta": "-5 to -10 per contract",
+    "gamma": "small but explosive on a big move",
+    "theta": "negative and constant",
+    "vega": "strongly positive - this is primarily a long-vol position"
+  },
+  "when_to_use": "As a standing overlay on a share portfolio, sized at 0.3-0.6% of portfolio value per quarter. Buy when VIX < 16 and IV Rank <= 25; skip or reduce when IV Rank > 50 (crash insurance is already expensive).",
+  "typical_dte": "90-180 DTE, rolled at 45-60 DTE",
+  "entry_rules": [
+    "Budget: total annual premium spend <= 2% of portfolio value. At $50k that is $1,000/yr, ~$250/quarter.",
+    "Strike by delta in [0.05, 0.10]; prefer index/ETF puts (SPY, QQQ) over single names for cost efficiency.",
+    "Require IV Rank <= 30 and VIX <= 18 at purchase; if above, halve the size.",
+    "Require OI >= 500 (far OTM strikes are thin).",
+    "Reject if ask - bid > 15% of mid."
+  ],
+  "management_rules": [
+    "Roll at 45-60 DTE to a new 90-180 DTE 0.05-0.10 delta strike; do not hold into the steep theta zone.",
+    "MONETIZATION RULE: if the put's value reaches 5x the premium paid, sell half and re-strike the remainder lower. If it reaches 10x, sell all and re-establish a new tail hedge with a fraction of the proceeds.",
+    "Increase the hedge notional after a large rally (when it is cheap), reduce it after a crash (when it is expensive) - explicitly contrarian.",
+    "Accept that 90%+ of these expire worthless; do not 'fix' the strategy after a losing year."
+  ],
+  "exit_rules": [
+    "Close before expiration if ITM to avoid auto-exercise into a short-share obligation on a put the account does not have shares for (if the puts exceed the share position, exercise creates SHORT stock).",
+    "Monetize on the 5x/10x rules above.",
+    "Abandon (let expire worthless) OTM puts with value < 0.05 - transaction costs exceed the residual."
+  ],
+  "assignment_risk": "No short leg. The hazard is auto-exercise of a deep ITM long put at expiry: if the number of puts exceeds the number of 100-share lots owned, exercise creates a short stock position. Always close rather than exercise.",
+  "buying_power": "Premium in full.",
+  "liquidity_needs": "Index ETF options only; far OTM single-name puts are too wide.",
+  "common_mistakes": "Sizing the hedge so large that its bleed exceeds the portfolio's expected return; buying after the crash starts; never monetizing and giving back the entire payoff.",
+  "alpaca_level": 1,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "0DTE tail puts are a different trade entirely (intraday crash lottery); they do not hedge a portfolio over time.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,74 @@
+{
+  "name": "Diagonal Roll Repair (Rolling Out-and-Up / Out-and-Down)",
+  "slug": "diagonal-roll-repair",
+  "summary": "Convert a tested vertical or short option into a diagonal by buying back the tested short and selling a further-out expiry at a better strike; the standard defensive transformation that creates most real-world diagonals.",
+  "aliases": [
+    "roll out and up",
+    "roll out and down",
+    "defensive diagonal",
+    "repair roll",
+    "calendarizing a tested spread"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Buy back the existing tested short at its current strike (closing leg).",
+      "dte_rule": "current front expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Sell a new short at a strike further from spot, chosen by delta 0.20-0.30, and still on the covered side of the existing long (for calls: new short strike > long strike; for puts: new short strike < long strike).",
+      "dte_rule": "a LATER expiry, 21-45 DTE, but STRICTLY BEFORE the existing long leg's expiry"
+    }
+  ],
+  "bias": "either",
+  "net": "credit",
+  "max_profit": "The original structure's max profit plus the new net credit, minus any loss already realized on the closing leg. Each valid roll raises the cumulative credit.",
+  "max_loss": "Whatever the resulting diagonal's max loss is: net debit for a debit diagonal, or (strike width x 100 - cumulative credit) for a credit diagonal. The roll must never increase max loss.",
+  "breakevens": "Recompute from the new structure; each credit roll improves the breakeven by the credit per share.",
+  "greeks": {
+    "delta": "reduced in magnitude by moving the short strike away from spot",
+    "gamma": "reduced by moving to a later expiry",
+    "theta": "slightly reduced per day but extended over more days",
+    "vega": "increased slightly because the new short is further out in time"
+  },
+  "when_to_use": "When a short leg has been tested (|delta| >= 0.50) but the underlying thesis is intact and there is a later expiry where a strike further from spot can be sold for a NET CREDIT. It is the standard way a covered call becomes a PMCC-style diagonal and a vertical becomes a bull/bear diagonal.",
+  "typical_dte": "new short 21-45 DTE, always earlier than the long leg's expiry",
+  "entry_rules": [
+    "Only roll for a NET CREDIT. If the roll costs a debit, close the position instead - paying to stay in a losing trade is the most expensive habit in options.",
+    "VALIDATION (must be enforced on every roll): the new short's expiry must be STRICTLY EARLIER than the covering long's expiry. Rolling past the long's expiry silently creates a reverse diagonal and an uncovered short.",
+    "VALIDATION: for calls, new short strike >= long strike + cumulative net debit; for puts, new short strike <= long strike - cumulative net debit.",
+    "New short delta 0.20-0.30; never roll into a strike that is still ITM.",
+    "Maximum 3 rolls per position. After the third, close regardless.",
+    "The roll must not increase the position's maximum loss - if it does, reject and close.",
+    "LEVEL 3 OK provided both validations pass. Execute as a single 2-leg mleg (buy-to-close + sell-to-open) so the account is never momentarily naked."
+  ],
+  "management_rules": [
+    "Track cumulative credits; every subsequent strike constraint uses the running net debit or credit, not the original.",
+    "If the position requires a fourth roll, the thesis is wrong - close it.",
+    "After any roll, re-verify the covering relationship (strike and expiry) programmatically before the next session.",
+    "If the underlying has moved more than 2 ATR against the position since entry, do not roll - close."
+  ],
+  "exit_rules": [
+    "The closing side of the roll must fill before or simultaneously with the opening side; if the mleg does not fill as a package, BUY TO CLOSE first and only then sell the new short.",
+    "If no credit roll exists that satisfies both validations, close the entire structure by 14:30 ET on the short's expiration day.",
+    "Close the short immediately if extrinsic <= $0.05 or |delta| >= 0.90 rather than attempting a roll into the last hour.",
+    "Never roll on expiration day after 14:00 ET - liquidity is poor and assignment risk is immediate. Close instead."
+  ],
+  "assignment_risk": "During the roll, if executed as two separate orders in the wrong sequence, the account can be momentarily naked. Always buy to close first. The rolled-into short carries the ordinary front-leg assignment risk and the same ex-dividend and extrinsic-value rules apply.",
+  "buying_power": "Unchanged or reduced if the roll widens the distance to spot; a roll that widens the strike width on a credit structure INCREASES the requirement and must be checked before submission.",
+  "liquidity_needs": "The target expiry must be liquid enough to sell into: OI >= 300, spread <= $0.05 on the new short.",
+  "common_mistakes": "Rolling for a debit; rolling past the long leg's expiry (creating a naked short); rolling a third and fourth time to avoid booking a loss; rolling on expiration afternoon into an illiquid market; forgetting to re-check the strike constraint against the running net debit.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Do not roll a 0DTE short into a later expiry after 14:00 ET; close it.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "directional-either",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

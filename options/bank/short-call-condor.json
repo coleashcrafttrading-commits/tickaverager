@@ -1,0 +1,86 @@
+{
+  "name": "Short Call Condor",
+  "slug": "short-call-condor",
+  "aliases": [
+    "reverse call condor",
+    "credit call condor"
+  ],
+  "summary": "Sell the outer calls and buy the two middle calls for a net credit; profits if the underlying moves outside the outer strikes - a long-volatility structure in all calls.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike A: lowest (ITM, ~0.70 delta)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike B = A + W1",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike C (body straddles spot)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike D = C + W1",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "credit",
+  "max_profit": "net credit x 100, outside strikes A and D",
+  "max_loss": "(W1 - net credit) x 100, between B and C",
+  "breakevens": "A + credit; D - credit (per share)",
+  "greeks": {
+    "delta": "near zero",
+    "gamma": "positive outside the body",
+    "theta": "negative",
+    "vega": "positive"
+  },
+  "typical_dte": "20-45 DTE",
+  "when_to_use": "IV rank <= 25 with an expected breakout. Payoff-equivalent to a long (reverse) iron condor at the same strikes - route whichever is priced better.",
+  "entry_rules": [
+    "IV rank <= 25",
+    "Net credit >= 55% of W1 (equivalently, max loss <= 45% of width)",
+    "Body wide enough that the breakout distance is <= 1.0 x expected move",
+    "DTE 20-45",
+    "OI >= 500 and spread <= 10% of mid on all four strikes",
+    "Max loss <= 1.5% of equity",
+    "Alpaca level 3 (defined risk: short A is covered by long B, short D is naked-looking but covered by long C at a lower strike)",
+    "Compare against the reverse iron condor at the same strikes and route the better fill"
+  ],
+  "management_rules": [
+    "Take profit at 60% of max profit",
+    "Close within 30 minutes of the open after a scheduled catalyst",
+    "Time stop at 10 DTE",
+    "Loss stop at 50% of max loss"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "The lowest strike A is a SHORT ITM call from entry - close or roll it before any ex-dividend date whenever its extrinsic < the projected dividend",
+    "Close immediately if short A's extrinsic < $0.10 or its delta >= 0.90",
+    "Close when spot exceeds D or falls below A by more than 0.5 x W1 (at/near max profit)"
+  ],
+  "assignment_risk": "High: short call A is deep ITM from entry. Dividend-driven early assignment is the dominant risk. Prefer the reverse iron condor expression, which puts the short legs OTM.",
+  "buying_power": "(W1 - net credit) x 100 per contract",
+  "liquidity_needs": "ITM call strikes must be quotable; OI >= 500 per leg.",
+  "common_mistakes": "Not realizing the deep ITM short call is an assignment magnet; treating the credit as income when it is really the flip side of a debit structure.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Avoid - deep ITM short call on expiration day.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

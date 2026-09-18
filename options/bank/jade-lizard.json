@@ -1,0 +1,81 @@
+{
+  "name": "Jade Lizard",
+  "slug": "jade-lizard",
+  "summary": "Sell an OTM put and an OTM call credit spread in the same expiry; when the total credit exceeds the call spread width there is zero risk to the upside, leaving only downside exposure.",
+  "aliases": [
+    "jade lizard spread"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta -0.20 to -0.30 (cash-secured)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.20-0.30",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short call strike + Wc, where Wc is chosen so that total credit > Wc x 100; typically Wc = 1.0-2.0% of spot",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "typical_dte": "30-60 DTE, managed at 21 DTE",
+  "when_to_use": "IV rank > 50, an underlying you would genuinely be willing to own at the short put strike, and elevated call skew (post-squeeze names) so the call spread pays well. The defining condition is credit > call spread width, which removes upside risk entirely.",
+  "max_profit": "net credit received, if the underlying finishes between the short put and the short call",
+  "max_loss": "(short put strike x 100) - net credit, if the underlying goes to zero. Large but bounded. No upside loss when credit > call spread width.",
+  "breakevens": "downside breakeven = short put strike - credit/100; NO upside breakeven when the entry rule credit > Wc x 100 is satisfied",
+  "greeks": {
+    "delta": "positive at entry (+10 to +25 per unit)",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "MANDATORY: total net credit (in dollars per unit) MUST exceed the call spread width x 100. If credit <= Wc x 100 the structure is not a jade lizard and must be rejected.",
+    "Short put delta between -0.20 and -0.30; short call delta between 0.20 and 0.30.",
+    "IV rank >= 50.",
+    "The short put MUST be fully cash-secured: reserve (short put strike x 100) - credit in cash before submitting. Alpaca Level 3 permits cash-secured short puts; an uncollateralized short put is Level 4 and must be rejected by the router.",
+    "Underlying price <= $120 so a single cash-secured put consumes <= 25% of a $50k account; otherwise trade it on lower-priced ETFs or skip.",
+    "No earnings inside the expiry unless deliberately running an IV-crush trade sized at half.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-leg order at mid; accept mid - $0.03 as long as the credit > Wc rule still holds after slippage."
+  ],
+  "management_rules": [
+    "Profit target: close at 50% of the credit received.",
+    "Time rule: close or roll at 21 DTE regardless of P/L.",
+    "Tested-side rule: if spot trades below the short put strike, roll the short put down and out to the next monthly expiry for a net credit, once only; if no credit roll is available, close.",
+    "Untested-side rule: do NOT roll the call spread down for extra credit - that would break the credit > Wc condition and reintroduce upside risk.",
+    "Stop: close if the short put delta reaches -0.45.",
+    "Position limit: one jade lizard per underlying; total cash-secured put obligations across the account <= 50% of equity."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the short put and the short call are both assignable. Flatten every leg by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close the short put immediately if it is ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close the call spread before the ex-dividend date if the short call is ITM with extrinsic below the declared dividend.",
+    "Never accept assignment as a 'wheel' outcome - this system does not hold shares; the short put must be closed or rolled, never assigned.",
+    "If the short put is ITM at 2 DTE, close it regardless of the loss."
+  ],
+  "assignment_risk": "Two assignable legs. The short put is naked-equivalent for delivery purposes: assignment buys 100 shares at the strike (a $10k-$60k cash event depending on the underlying). The short call is covered by the long call, so a call assignment leaves a short stock position offset by a long call until that long is exercised - manageable but still an unwanted stock position. Put assignment is the real hazard for a $50k account.",
+  "buying_power": "Cash-secured put requirement (strike x 100 - credit) PLUS (Wc x 100 - call spread credit). Alpaca charges the put leg at the cash-secured rate under Level 3.",
+  "liquidity_needs": "Moderate; three legs, all reasonably near the money. Needs OI >= 500 at each strike.",
+  "common_mistakes": "Opening for a credit smaller than the call spread width, which silently reintroduces upside risk; rolling the call spread down and breaking the no-upside-risk property; running it on $500+ underlyings where the cash-secured put eats the entire account; letting the put get assigned and calling it 'the wheel'.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended. The naked put leg at 0DTE means a same-day assignment of 100 shares if the tape rolls over into the close, and the credit available at 0DTE is rarely enough to exceed the call spread width. If run at all, it must be intraday with a 15:45 ET flatten and half size.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral-to-bullish, short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

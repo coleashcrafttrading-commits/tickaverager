@@ -1,0 +1,76 @@
+{
+  "name": "Bear Call Diagonal Spread (Short Call Diagonal, Credit)",
+  "slug": "bear-call-diagonal",
+  "summary": "Sell a shorter-dated lower-strike call and buy a longer-dated higher-strike call; a credit diagonal that is a bear call spread with extra time bought on the protective leg.",
+  "aliases": [
+    "short call diagonal",
+    "diagonal credit spread",
+    "credit call diagonal",
+    "bearish call diagonal"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Lower strike by delta 0.20-0.35 (OTM above spot).",
+      "dte_rule": "front expiry, 21-45 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Higher strike, width 1-5 points above the short depending on the underlying's price; choose the width so that (width x 100 - credit) <= 1.5% of equity. Protective leg is bought in a LATER expiry, which is what makes this a diagonal rather than a vertical.",
+      "dte_rule": "back expiry, at least 21 days beyond the front, typically 45-90 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "max_profit": "The net credit received PLUS the residual value of the long back-month call after the short expires worthless. Unlike a vertical, the long leg survives and can be sold or reused.",
+  "max_loss": "(Long strike - short strike) x 100 - net credit, at front expiry. Note this understates the true max only if the long is closed before the short, which the rules forbid.",
+  "breakevens": "Approximately short strike + (credit + residual long value)/100 at front expiry; wider than the equivalent vertical because the long leg retains value.",
+  "greeks": {
+    "delta": "net negative, roughly -0.10 to -0.25 per unit",
+    "gamma": "negative near the short strike",
+    "theta": "positive while spot is below the short strike",
+    "vega": "net positive or near flat - the back-month long's vega partially or fully offsets the short's, which makes this less vol-sensitive than a plain bear call spread"
+  },
+  "when_to_use": "IV rank 35-70 (you want to sell a rich front-month call) combined with a downtrend or a resistance rejection. The diagonal version is preferable to a plain vertical when back-month vol is cheap relative to front (backwardation), because you buy your protection in the cheaper month and it outlives the short.",
+  "typical_dte": "short 21-45 DTE, long 45-90 DTE",
+  "entry_rules": [
+    "Trend/level filter: spot < 50-day SMA, or spot has just been rejected at a resistance level within 2 sessions.",
+    "IV rank >= 35.",
+    "Short call by delta 0.20-0.35; long call strike above it; long expiry at least 21 days beyond the short expiry.",
+    "Credit >= 25% of the strike width (e.g. >= $0.25 on a $1 wide, >= $1.25 on a $5 wide).",
+    "Max loss (width x 100 - credit) <= 1.5% of equity per unit.",
+    "Combined bid-ask <= 10% of the credit.",
+    "LEVEL 3 OK: the short call is covered by a higher-strike long call with a LATER expiry. The requirement is width-based, not debit-based. Submit as a 2-leg mleg; if legging, buy the long call FIRST."
+  ],
+  "management_rules": [
+    "Take profit at 50% of the credit received (close the short, and decide separately on the long).",
+    "Stop at 2x the credit received as a loss, or when the short call's |delta| reaches 0.50.",
+    "Close or roll at 21 DTE on the short leg regardless of P&L if the short's delta is above 0.35.",
+    "Roll the short up and out for a credit only; never roll into an expiry beyond the long leg's expiry.",
+    "If the long back-month call is worth more than 40% of the max loss and the thesis has flipped bullish, keep the long after buying back the short - it is a free directional option.",
+    "Max 3 units per underlying; aggregate credit-diagonal max loss <= 10% of equity."
+  ],
+  "exit_rules": [
+    "Close or roll the short call by 14:30 ET on its expiration day, unconditionally.",
+    "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share.",
+    "NEVER close the long leg while the short is open - that converts the trade into a naked short call. The long may only be sold after the short is bought back.",
+    "If the short is deep ITM and spot is above the long strike, close both legs as a package; do not attempt to salvage."
+  ],
+  "assignment_risk": "Only the short front-month call. Assignment delivers -100 shares, covered by a long call at a HIGHER strike in a later expiry - so the cover is real but imperfect: the shares are short from the lower strike and the call only caps risk above the higher strike. Flatten the stock within one session. Ex-dividend is the dominant early-assignment trigger.",
+  "buying_power": "(Long strike - short strike) x 100 minus the net credit, held as maintenance for the life of the short. Alpaca treats the later-expiring higher-strike long as valid cover for level 3.",
+  "liquidity_needs": "Both expiries OI >= 300; the short expiry should be penny or nickel wide. Underlying ADV >= 2M shares.",
+  "common_mistakes": "Closing the long leg first to 'save a commission' and creating a naked short call; buying the long in an expiry that is only a week later, so it provides almost no residual value; rolling the short past the long's expiry, which un-covers the position; treating it as a vertical for margin purposes.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not under this playbook; the short's minimum DTE at entry is 21.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

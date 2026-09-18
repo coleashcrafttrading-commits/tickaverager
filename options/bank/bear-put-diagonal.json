@@ -1,0 +1,77 @@
+{
+  "name": "Bear Put Diagonal Spread (Long Put Diagonal, Debit)",
+  "slug": "bear-put-diagonal",
+  "summary": "Buy a longer-dated higher-strike put and sell a shorter-dated lower-strike put; the bearish mirror of the bull call diagonal, financed by repeatedly selling the lower put.",
+  "aliases": [
+    "long put diagonal",
+    "bearish diagonal",
+    "put diagonal debit"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Higher strike by delta |0.60-0.75| (ITM put).",
+      "dte_rule": "back expiry, 60-120 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Lower strike by delta |0.25-0.35|, strictly below the long strike, and long strike - short strike >= net debit per share.",
+      "dte_rule": "front expiry, 21-45 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "At the short strike at front expiry: value of the back-month long put there minus the net debit, plus cumulative credits from rolled shorts.",
+  "max_loss": "The net debit paid, if the underlying rallies far enough that both puts approach zero.",
+  "breakevens": "Approximately long strike - net debit, adjusted for the long's remaining time value; solve numerically at front expiry.",
+  "greeks": {
+    "delta": "net negative, roughly -0.30 to -0.45 per unit",
+    "gamma": "slightly negative near the short strike",
+    "theta": "positive while spot is above the short strike",
+    "vega": "positive - back-month long put dominates"
+  },
+  "when_to_use": "Bearish view over 1-3 months on an underlying in a downtrend (spot < 50-day SMA < 200-day SMA), with IV rank 20-50. Note the structural headwind: put skew means the lower-strike short put you sell is relatively more expensive than the call-side equivalent, which helps the financing but also means the short gets tested faster on a drop.",
+  "typical_dte": "long 60-120 DTE, short 21-45 DTE",
+  "entry_rules": [
+    "Trend filter: spot < 50-day SMA AND 50-day SMA < 200-day SMA.",
+    "IV rank between 20 and 50 (avoid buying the long put after a vol spike).",
+    "Long put by delta |0.60-0.75|, 60-120 DTE; short put by delta |0.25-0.35|, 21-45 DTE.",
+    "MANDATORY: short strike < long strike, and (long strike - short strike) >= net debit per share.",
+    "Short expiry strictly before the long expiry.",
+    "Net debit <= 2.5% of equity per unit; combined bid-ask <= 8% of debit.",
+    "LEVEL 3 OK: a short put at a LOWER strike expiring EARLIER is fully covered by the long put. Submit as a 2-leg mleg; buy the long put FIRST if legging."
+  ],
+  "management_rules": [
+    "Close the short put at 50-75% of the credit received and re-sell the next cycle.",
+    "Close the entire structure at +50% of net debit.",
+    "Stop at -50% of net debit, or if spot closes above the long strike plus 1 ATR(14).",
+    "Trend stop: close if spot closes above the 50-day SMA for 2 consecutive sessions.",
+    "Roll the short down and out when spot falls below the short strike and the short's |delta| > 0.60, for a net credit only and only to a strike still below long strike - debit. If no credit roll exists, close the whole diagonal.",
+    "Roll the long put forward at DTE < 45 or when its |delta| drops below 0.50.",
+    "Max 3 units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+    "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Deep-ITM short puts are exercised early for interest carry - close any short put with extrinsic < $0.10 regardless of DTE.",
+    "Close the long put no later than 30 DTE or when |delta| < 0.40.",
+    "Buy back the short before selling the long.",
+    "If the long put marks below 30% of the entry debit, close both legs."
+  ],
+  "assignment_risk": "Only the short front-month put. Assignment delivers +100 shares at the short strike, consuming strike x 100 of buying power, hedged by a long higher-strike put (effectively a synthetic short via the protective put). Flatten the shares within one session. Early exercise on short puts is rate/carry driven, not dividend driven.",
+  "buying_power": "Net debit only - the short strike is below the long strike with an earlier expiry, so the long covers it. Assignment temporarily consumes strike x 100.",
+  "liquidity_needs": "Long leg 60-120 DTE OI >= 200, spread <= $0.20; short leg OI >= 500. Underlying ADV >= 2M shares.",
+  "common_mistakes": "Selling a short strike too close to the long, so a both-ITM finish loses money; buying the long put after a volatility spike and paying for vega that then collapses; rolling the short for a debit; forgetting that deep-ITM short puts can be assigned early for interest.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Short leg minimum 21 DTE at entry; never carried to 0DTE beyond the 14:30 ET forced close.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

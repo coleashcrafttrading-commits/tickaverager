@@ -1,0 +1,67 @@
+{
+  "name": "Index ETF Covered Call Overwrite",
+  "slug": "covered-call-etf-index-overwrite",
+  "aliases": [
+    "index overwrite",
+    "BXM-style buy-write"
+  ],
+  "summary": "Systematically write monthly calls against a held index ETF position (SPY/QQQ/IWM) - the retail version of the CBOE BXM buy-write index.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "100 shares of SPY/QQQ/IWM per contract"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta 0.25-0.35, or the first strike 2-4% OTM",
+      "dte_rule": "30-35 DTE, written on a fixed monthly schedule"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - cost basis + credit) x 100 per cycle; historically BXM has captured roughly index-like returns with lower volatility and a capped right tail",
+  "max_loss": "Full index downside minus credits - a covered call is a poor hedge, cushioning only about one month of premium",
+  "breakevens": "cost basis - cumulative credits",
+  "greeks": {
+    "delta": "+100 minus 25-35 = +65 to +75",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative - the structure is short volatility, which is why it underperforms in vol spikes and outperforms in grinding markets"
+  },
+  "typical_dte": "30-35 DTE, monthly cadence",
+  "when_to_use": "As a systematic income overlay on a core index holding. Best when IVR > 25 and the market is range-bound. Underperforms badly in strong bull runs.",
+  "entry_rules": [
+    "Hold 100 shares of SPY/QQQ/IWM per contract; coverage verified at order time",
+    "Write on a fixed schedule: the Monday after monthly opex, targeting the next monthly expiry (30-35 DTE)",
+    "Delta 0.25-0.35",
+    "Skip the cycle if IVR < 15 - the credit does not pay for the capped upside",
+    "Skip if the ETF's ex-distribution date is within 3 days of expiry and the call is ITM",
+    "Credit >= 0.8% of share value per 30-day cycle"
+  ],
+  "management_rules": [
+    "Buy to close at 50% of credit or at 21 DTE, whichever first, then wait for the next scheduled write",
+    "Roll up and out when delta exceeds 0.60, for a net credit only",
+    "Do not chase: if the index gaps above the strike, accept the capped outcome rather than rolling at a debit into a worse strike",
+    "Measure realised annualised yield each quarter against simple buy-and-hold; discontinue if the overlay has cost more in capped upside than it earned over a rolling 12 months"
+  ],
+  "exit_rules": [
+    "Buy to close at 50% of credit or 21 DTE",
+    "NEVER-ASSIGN RULE: close or roll when extrinsic < $0.10, delta > 0.85, before any ex-distribution date where extrinsic < the distribution, or by 14:30 ET on expiration day if within 1.0% of the strike. Backstop 15:45 ET",
+    "SPY and QQQ pay quarterly distributions - the pre-ex-dividend check must run on the quarterly schedule"
+  ],
+  "assignment_risk": "MODERATE. Index ETF calls are assigned early mainly around quarterly ex-distribution dates. Assignment sells the covered shares - not a loss, but an unplanned exit that breaks position accounting.",
+  "buying_power": "Shares are the collateral.",
+  "liquidity_needs": "Excellent - SPY/QQQ chains are penny-wide with enormous OI.",
+  "common_mistakes": "Running the overlay through a bull market and wondering why the account lags the index; treating a covered call as downside protection, which it is not.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

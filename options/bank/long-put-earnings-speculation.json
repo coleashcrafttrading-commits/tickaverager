@@ -1,0 +1,56 @@
+{
+  "name": "Long Put into Earnings",
+  "slug": "long-put-earnings-speculation",
+  "aliases": [
+    "earnings put buy"
+  ],
+  "summary": "Buy a put ahead of an earnings report. Same structural flaw as the call version - IV crush usually exceeds the realised move. Marked a bad idea.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta -0.30 to -0.45",
+      "dte_rule": "first expiry after the report, 2-9 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "Large on a gap-down beyond the implied move",
+  "max_loss": "Debit x 100; base case is a substantial loss to IV crush even when direction is right",
+  "breakevens": "strike - debit, which must be compared against the implied expected move",
+  "greeks": {
+    "delta": "-0.30 to -0.45",
+    "gamma": "high",
+    "theta": "very negative",
+    "vega": "positive and toxic - bought at peak event IV"
+  },
+  "typical_dte": "2-9 DTE",
+  "when_to_use": "Marginally more defensible than the call version because downside gaps are fatter-tailed and skew can steepen further, but still a losing proposition on average. Disabled by default.",
+  "entry_rules": [
+    "Gate: front-expiry IV below the median of the last 8 earnings cycles",
+    "Implied expected move = 0.85 x ATM straddle; your downside target must exceed it",
+    "Debit <= 0.3% of equity; max 2 per quarter",
+    "DISABLED by default; requires explicit per-trade human enable"
+  ],
+  "management_rules": [
+    "Exit within 30 minutes of the post-report open",
+    "Take profit at +75%; stop at -50% or at the 30-minute mark",
+    "Never hold a second day"
+  ],
+  "exit_rules": [
+    "Sell to close by 10:00 ET the session after the report",
+    "15:30 ET expiry-day flatten; an ITM put auto-exercises into short stock"
+  ],
+  "assignment_risk": "None (long); auto-exercise into short shares is the hazard.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Spreads blow out post-report; verify normalisation before exiting.",
+  "common_mistakes": "Buying the weekly at peak IV the afternoon before the report and losing despite a correct directional call.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

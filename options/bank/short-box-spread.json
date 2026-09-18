@@ -1,0 +1,77 @@
+{
+  "name": "Short Box Spread",
+  "slug": "short-box-spread",
+  "aliases": [
+    "short box",
+    "synthetic loan (borrower side)",
+    "box financing"
+  ],
+  "summary": "The reverse box - sell the call spread and the put spread at the same two strikes - receiving cash today and repaying the strike width at expiry; a synthetic borrowing. DANGEROUS on American-style options.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "lower strike K1",
+      "dte_rule": "same expiry, all legs"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "upper strike K2",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "upper strike K2",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "lower strike K1",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(net credit - (K2 - K1)) x 100, i.e. the borrowing benefit - always negative as a standalone P/L; the benefit is the use of the cash",
+  "max_loss": "UNDEFINED in practice on American options - early assignment on the short ITM leg can force an unwind at an arbitrary loss well beyond the strike width",
+  "breakevens": "n/a - constant liability of (K2 - K1) at expiry",
+  "greeks": {
+    "delta": "zero",
+    "gamma": "zero",
+    "theta": "negative and tiny (interest cost)",
+    "vega": "zero"
+  },
+  "typical_dte": "30-180 DTE",
+  "when_to_use": "Never on this system. Institutions use short SPX boxes (European, cash-settled) as cheap financing. On American-style share-settled equity/ETF options the early-assignment path makes it an uncapped risk.",
+  "entry_rules": [
+    "PROHIBITED on this system. American-style, share-settled options make the short box an unbounded-risk borrowing position.",
+    "Both short legs are short options; with one ITM by construction, Alpaca will treat parts of it as requiring level 4 in many configurations",
+    "Included in the bank only so the automated system can RECOGNIZE and REJECT this shape if a screener ever proposes it"
+  ],
+  "management_rules": [
+    "Not applicable - blocked at the order-validation layer"
+  ],
+  "exit_rules": [
+    "If somehow opened: close all four legs immediately, same session, at any reasonable price",
+    "Never allow a short ITM leg to sit with extrinsic < $0.05"
+  ],
+  "assignment_risk": "Maximum and asymmetric. One short leg is ITM by construction. Assignment converts the box into a naked directional stock position plus three residual legs, exactly the mechanism behind the well-documented retail box-spread losses.",
+  "buying_power": "Broker-dependent and large; assignment can trigger immediate margin calls.",
+  "liquidity_needs": "n/a - prohibited.",
+  "common_mistakes": "Using it as a cheap margin loan on equity options; assuming it behaves like the SPX version.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "No.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

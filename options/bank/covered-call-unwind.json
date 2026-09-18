@@ -1,0 +1,64 @@
+{
+  "name": "Covered Call Unwind (Buy-Write Close)",
+  "slug": "covered-call-unwind",
+  "aliases": [
+    "Unwind",
+    "Combo close",
+    "Sell-write close"
+  ],
+  "summary": "The correct exit mechanic for any share-plus-short-option unit: close the short option and the shares as a single combination order so cover is never broken mid-flight.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "close the existing short call at any strike",
+      "dte_rule": "current expiry"
+    },
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "sell the covering shares",
+      "dte_rule": "n/a"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "n/a - this is an exit mechanic, it realizes the unit's existing P/L",
+  "max_loss": "n/a - realizes existing P/L; the risk is execution slippage and momentary uncovered exposure if legged",
+  "breakevens": "n/a",
+  "greeks": {
+    "delta": "removes the unit's entire delta",
+    "gamma": "removes short gamma",
+    "theta": "removes positive theta",
+    "vega": "removes short vega"
+  },
+  "when_to_use": "Whenever a covered call, buy-write, covered strangle or collar unit is being closed for any reason: profit target, stop, thesis change, expiration guard, or portfolio rebalance.",
+  "typical_dte": "any",
+  "entry_rules": [
+    "ALWAYS submit as a single multi-leg order (sell stock + buy to close call). Alpaca supports multi-leg equity+option combos; if the combo is rejected, the fallback ORDER OF OPERATIONS is: buy to close the option FIRST, confirm the fill, THEN sell the shares. Never the reverse - selling shares first leaves a naked short call, which the account is not approved for and which the broker may auto-liquidate.",
+    "Price the unwind at the net mid, then walk the limit by 5% of the spread every 15 seconds up to 3 attempts.",
+    "Verify final share count and option position after the fill; any residual is a reconciliation alarm."
+  ],
+  "management_rules": [
+    "If the combo cannot fill within 3 attempts, split: close the option at market, then work the share sale.",
+    "Log the realized unit P/L against the tracked basis (entry debit minus cumulative credits) rather than against the raw share price."
+  ],
+  "exit_rules": [
+    "Must complete before 15:30 ET on expiration day for any ITM short leg.",
+    "If a partial fill occurs (option closed, shares unsold), the remaining shares are simply an unhedged long - acceptable. If the reverse occurs (shares sold, option open), it is a naked short call - close it IMMEDIATELY at market, regardless of price."
+  ],
+  "assignment_risk": "The entire purpose of this mechanic is to eliminate the assignment/naked-exposure window that legging creates. The dangerous state is shares-sold-option-open; the system must treat that as a P0 alarm with an immediate market close.",
+  "buying_power": "Frees the shares and any reserved cash.",
+  "liquidity_needs": "Combo markets are thinner than single legs; be willing to fall back to sequential closing in the correct order.",
+  "common_mistakes": "Selling the shares first; walking the limit too slowly near the close; not reconciling the ledger after a partial fill.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "On 0DTE, do not attempt combo pricing near the close - just buy to close the option at market before 15:30 ET and handle the shares separately.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

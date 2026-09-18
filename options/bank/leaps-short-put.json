@@ -1,0 +1,60 @@
+{
+  "name": "LEAPS Short Put",
+  "slug": "leaps-short-put",
+  "aliases": [
+    "long-dated put write",
+    "LEAP put sale"
+  ],
+  "summary": "Sell a put with more than a year to expiry for a large upfront credit. Obscure and capital-inefficient: theta per day is minimal and the collateral is locked up for years.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta -0.20 to -0.30",
+      "dte_rule": "365-730 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The credit x 100",
+  "max_loss": "(strike - credit) x 100",
+  "breakevens": "strike - credit, often 25-40% below spot, which is the one genuine appeal",
+  "greeks": {
+    "delta": "+0.20 to +0.30",
+    "gamma": "very small",
+    "theta": "positive but tiny per day - less than 0.1% of the credit daily, which is the core problem",
+    "vega": "strongly negative - the dominant greek. A vol spike produces a large mark-to-market loss long before any delta loss"
+  },
+  "typical_dte": "365-730 DTE",
+  "when_to_use": "Almost never for an income system. Theta is the slowest of any short-premium structure per unit of collateral. Selling 30-45 DTE puts repeatedly earns several times more per year on the same capital.",
+  "entry_rules": [
+    "Cash >= strike x 100 x contracts, locked for potentially two years",
+    "IVR > 50 required - nothing less justifies the capital lock-up",
+    "Annualised credit / collateral >= 12%, otherwise reject",
+    "Delta -0.20 to -0.30; DTE >= 365",
+    "Maximum 1 such position; notional <= 10% of equity",
+    "Default: DISABLED. The 30-45 DTE CSP dominates it on every metric except breakeven distance"
+  ],
+  "management_rules": [
+    "Close at 50% of credit - which on a LEAPS put often takes 12+ months",
+    "Consider closing at 40% of credit if reached within 6 months; the remaining theta is not worth the remaining time",
+    "Stop at 2x credit",
+    "Roll only into a shorter-dated position, never longer"
+  ],
+  "exit_rules": [
+    "Close at 50% of credit (or 40% if reached early), at the 2x stop, or when DTE < 120 - at which point convert to a standard 30-45 DTE CSP cycle",
+    "All never-assign triggers from cash-secured-put apply: extrinsic < $0.10, delta > -0.85, 14:30 ET expiry-day proximity check, 15:45 ET backstop"
+  ],
+  "assignment_risk": "LOW while far OTM and far from expiry, rising sharply if it ever goes deep ITM - at which point the collapsed extrinsic makes early assignment likely and you are delivered shares at a strike set two years earlier.",
+  "buying_power": "Full strike x 100 in cash, locked for the duration. This opportunity cost is the strategy's real cost.",
+  "liquidity_needs": "LEAPS put markets are wide; require spread <= 6% of mid and OI >= 100.",
+  "common_mistakes": "Being seduced by the large absolute credit while ignoring credit-per-day-per-dollar-of-collateral; ignoring the vega mark-to-market swings in the interim.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

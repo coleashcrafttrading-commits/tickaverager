@@ -1,0 +1,74 @@
+{
+  "name": "Long Straddle",
+  "slug": "long-straddle",
+  "aliases": [
+    "buy straddle",
+    "ATM straddle",
+    "long volatility straddle"
+  ],
+  "summary": "Buy a call and a put at the same strike and expiry; pure long-volatility, direction-agnostic, profits from a large move either way or a vol expansion.",
+  "bias": "long_vol",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike nearest to spot, i.e. the strike whose call delta is closest to 0.50."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same strike as the call (that is what makes it a straddle).",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "theoretically unlimited on the upside; (strike - 0) * 100 - debit on the downside",
+  "max_loss": "net debit paid (the full premium of both legs), realized if the underlying finishes exactly at the strike",
+  "breakevens": "strike + total debit per share (upside) and strike - total debit per share (downside)",
+  "greeks": {
+    "delta": "near zero at entry (+/-0.05); becomes strongly directional fast",
+    "gamma": "strongly positive -- the largest positive gamma per dollar of any two-leg structure",
+    "theta": "strongly negative; an ATM 30-DTE straddle on a $500 underlying bleeds roughly 1.5-2.5% of its premium per day, accelerating toward expiry",
+    "vega": "strongly positive, typically +$30 to +$60 per vol point per 1-lot on an index ETF at 30 DTE"
+  },
+  "typical_dte": "20-60 DTE for vol-expansion trades; 1-7 DTE for event trades; 0DTE only for scheduled macro prints",
+  "when_to_use": "IV rank <= 25 AND an identifiable catalyst inside the expiry (FOMC, CPI, earnings, FDA date, court ruling). Also valid as a pure vol trade when 30-day IV is below 20-day realized vol by more than 3 vol points, i.e. options are cheap relative to how much the stock is actually moving.",
+  "entry_rules": [
+    "IV rank <= 25 over the trailing 252 days. Buying straddles in high IV is how accounts die.",
+    "IV30 < HV20 - 3 vol points (implied cheaper than realized), or a dated catalyst inside the expiry.",
+    "Strike = the listed strike closest to spot; |call delta - 0.50| <= 0.05.",
+    "Total debit <= 1.5% of equity per position ($750 on $50k). Straddles are expensive; size small.",
+    "Required move check: (total debit / spot) must be <= 0.75 * the average absolute move over the last 4 comparable catalysts. If the option market already prices a bigger move than history delivers, skip.",
+    "DTE must extend at least 5 calendar days past the catalyst date so you can exit into post-event IV, not expiry.",
+    "Both legs OI >= 500, bid/ask <= 8% of mid.",
+    "Do NOT enter the day before earnings on a name whose IV rank is above 50 -- you will pay the full vol crush.",
+    "Submit both legs as one MLeg order at the combined mid."
+  ],
+  "management_rules": [
+    "Take profit: close the whole straddle at +50% of debit, or when either leg alone can be sold for more than the total debit paid.",
+    "Vol-crush exit: if the position is held through a scheduled event, close within 30 minutes of the event print regardless of P/L -- IV collapse destroys the straddle even when direction was right.",
+    "Stop: close at -40% of debit, or at any point where remaining DTE < 10 and the underlying is within 0.5% of the strike.",
+    "Delta drift: if net position delta exceeds +/-0.60 per 1-lot, either take the profit on the winning leg or close the whole thing; a straddle that has become a directional trade is no longer the trade you sized for.",
+    "Never hold an ATM straddle inside 7 DTE without a catalyst -- theta becomes brutal."
+  ],
+  "exit_rules": [
+    "Hard rule: flat by 15:45 ET on expiration day.",
+    "No short legs, so there is no assignment risk on this structure. However: ITM long options are AUTO-EXERCISED by the OCC at $0.01 ITM, which would deliver 100 shares per contract. Close both legs before 15:45 ET on expiration day, always. Never rely on a do-not-exercise instruction.",
+    "Time stop: close at 7 DTE if the position is not at a profit target and no catalyst remains.",
+    "If either leg's bid goes to $0.00 and the other leg is deep ITM, close the ITM leg by limit order and let the worthless leg be abandoned only after confirming it is more than $0.01 OTM at 15:30 ET; otherwise close both."
+  ],
+  "assignment_risk": "No short legs, so no assignment can occur. The exposure is the mirror image: OCC auto-exercise of your own long ITM leg at expiry would create an unwanted 100-share stock position (long from the call, short from the put). Closing by 15:45 ET on expiry eliminates this entirely.",
+  "buying_power": "Net debit only; both legs are long.",
+  "liquidity_needs": "ATM strikes are the most liquid on the board, so this is the easiest fill in the family. Still require OI >= 500 and route as a package.",
+  "common_mistakes": "Buying straddles at high IV rank before earnings and losing on the vol crush despite a correct direction; holding too close to expiry; sizing by contracts instead of debit; forgetting that the breakeven requires a move larger than the market already prices in.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Only justified 5-15 minutes ahead of a scheduled 08:30 or 14:00 ET macro print, and only on SPY/QQQ. 0DTE ATM straddles decay at several percent per hour; without an immediate catalyst this is a guaranteed loser. Compute greeks locally (Alpaca gives none for 0DTE), take profit at +40%, stop at -35%, and never hold past 15:15 ET.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

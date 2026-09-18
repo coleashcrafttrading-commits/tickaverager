@@ -1,0 +1,71 @@
+{
+  "name": "Synthetic Short Stock",
+  "slug": "synthetic-short-stock",
+  "aliases": [
+    "short combo",
+    "reverse combo",
+    "synthetic short"
+  ],
+  "summary": "Short call + long put at the same strike and expiry replicates 100 short shares without borrowing stock; unlimited upside risk and the single most dangerous structure in this family.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM: strike nearest spot, call delta 0.45-0.55"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "SAME strike as the call",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "bearish",
+  "net": "either",
+  "max_profit": "(strike x 100) - net_debit if the underlying goes to zero",
+  "max_loss": "UNDEFINED (unlimited): the short call has no upside cap. A single halt-and-reopen gap of +100% on a $60 stock is a $6,000 loss per contract.",
+  "greeks": {
+    "delta": "-1.00 per contract (-100 share-equivalents), essentially constant",
+    "gamma": "~0 net",
+    "theta": "~0 net; residual is the carry/borrow term",
+    "vega": "~0 net"
+  },
+  "breakevens": "strike - net_debit/100, or strike + net_credit/100",
+  "when_to_use": "Historically used when the underlying is hard-to-borrow or impossible to short: the options market prices the borrow cost into the combo, so the synthetic is available when the shares are not. There is no volatility use case (vega is zero).",
+  "typical_dte": "30-90 DTE",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the short call is uncovered. Requires Level 4 approval, which an Alpaca Level 3 account does not have. Include in the bank for completeness only; the order router must reject this slug outright rather than attempting it.",
+    "Additional hard block for an automated system regardless of level: max loss is unbounded and cannot be sized safely against a $50k account. Recommended permanent denylist entry.",
+    "If ever run at Level 4: hard notional cap of 10% of equity ($5,000), and a mandatory protective long call at strike x 1.15 converting it into a defined-risk structure (which is then a synthetic short with a cap, not this strategy).",
+    "Borrow-cost check: do not open if (combo credit - (spot - strike)) implies an annualised borrow rate above 15%; above that the shares are hard-to-borrow for a reason (squeeze risk) and the synthetic inherits it."
+  ],
+  "management_rules": [
+    "Treat as a 100-share short: close at +10% of notional profit or -7% notional loss.",
+    "Hard stop is unconditional and must be a resting order, not a monitored condition, because the loss is unbounded and gaps are the failure mode.",
+    "If the short call's extrinsic value drops below 1.25x any declared dividend before its ex-date, close the short call that session (see assignment_risk).",
+    "Do not average down. Ever. There is no defined loss to average into."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on expiration day, unconditionally.",
+    "If the short call is ITM (spot > strike) at any time on expiration day, close it by 14:00 ET.",
+    "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic = call_mid - max(0, spot - strike) < 1.25 x declared_dividend.",
+    "Close the entire structure if the underlying is halted and reopens more than 10% higher, at the first available print."
+  ],
+  "assignment_risk": "EXTREME. The short call is subject to early assignment for dividend capture: any ITM call whose remaining extrinsic value is less than the upcoming dividend will be exercised the day before the ex-date. Assignment creates a short stock position of 100 shares, which in a cash-or-limited-margin context is a violation and in a margin account incurs borrow fees and buy-in risk. American style, share settled \u2014 there is no cash-settlement escape hatch on equities and ETFs.",
+  "alpaca_level": 4,
+  "buying_power": "Reg T naked short call: greater of (20% of underlying value - OTM amount + premium) and (10% of underlying value + premium). Typically $2,000-$3,000 per contract on a $100 name, and it can be called for more intraday.",
+  "liquidity_needs": "Package bid-ask <= 2% of strike; OI >= 1,000 per leg. Thin names are exactly the hard-to-borrow ones where this is tempting and where the gap risk is worst.",
+  "common_mistakes": "Using it to short a squeeze candidate because the shares are unborrowable \u2014 the borrow cost is embedded in the combo price and the squeeze risk is undiminished. Also assuming the long put 'covers' the short call: it does not, the put is below the call's risk, not above it.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never. Unbounded risk with no time for a stop to work.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1,
+  "also_filed_under": [
+    "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)"
+  ]
+}

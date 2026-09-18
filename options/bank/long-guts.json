@@ -1,0 +1,68 @@
+{
+  "name": "Long Guts",
+  "slug": "long-guts",
+  "aliases": [
+    "guts strangle",
+    "long ITM strangle",
+    "buy guts"
+  ],
+  "summary": "Buy an ITM call and an ITM put in the same expiry -- the inside-out strangle. Economically identical to a long strangle at the mirrored strikes but costs far more in premium and slippage. Mostly a historical curiosity.",
+  "bias": "long_vol",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ITM call, strike below spot, delta 0.65-0.80."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ITM put, strike above spot (so the two strikes straddle the price from the inside), delta 0.65-0.80.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "unlimited upside; (put strike * 100) - debit downside",
+  "max_loss": "net debit - (put strike - call strike)*100. The intrinsic overlap between the strikes is always recovered, so the true risk is only the extrinsic paid.",
+  "breakevens": "call strike + total debit per share (upside); put strike - total debit per share (downside)",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "positive",
+    "theta": "negative, but only on the extrinsic portion",
+    "vega": "positive"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "Almost never. Put-call parity makes long guts equivalent to a long strangle at the mirror strikes, but you pay two ITM bid/ask spreads and tie up several times the capital. The only defensible reason is a market where the OTM options are illiquid and the ITM ones are not, which does not describe US ETFs.",
+  "entry_rules": [
+    "MARKED AS A BAD IDEA -- included for completeness. Prefer the equivalent long strangle in every realistic case.",
+    "If used at all: total extrinsic paid (debit - intrinsic overlap) must be lower than the total premium of the equivalent OTM strangle after slippage. Compute both and only take guts if it wins by >= 5%.",
+    "IV rank <= 20.",
+    "Both legs OI >= 500 and bid/ask <= 8% of mid -- ITM strikes rarely clear this.",
+    "Capital check: the debit is large (it contains full intrinsic value). Cap debit at 5% of equity even though the at-risk portion is much smaller."
+  ],
+  "management_rules": [
+    "Take profit at +50% of the EXTRINSIC paid, not of total debit -- measuring against total debit makes the target unreachable.",
+    "Stop: close when extrinsic paid has decayed by 50%.",
+    "Time stop: 21 DTE.",
+    "Do not leg out; close as a package."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "No short legs, so no assignment risk. BUT both legs are ITM by construction and both would be auto-exercised by the OCC at expiry, delivering 100 long shares from the call and 100 short shares from the put per contract. Closing before 15:45 ET is mandatory, not optional.",
+    "Close at 21 DTE absent a catalyst."
+  ],
+  "assignment_risk": "No short legs. The real hazard is the reverse: both of your long legs are ITM and would auto-exercise into offsetting stock positions, generating two unwanted equity trades plus commissions and overnight exposure. This structure must be closed before expiry more urgently than almost any other long structure.",
+  "buying_power": "Full net debit, which is large because it includes intrinsic value on both legs.",
+  "liquidity_needs": "ITM strikes on both sides; require bid/ask <= 8% of mid or skip. This is usually the reason to reject the trade.",
+  "common_mistakes": "Using it at all when a strangle is available; measuring profit targets against total debit instead of extrinsic; forgetting that both legs auto-exercise.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Do not use. At 0DTE both legs are nearly pure intrinsic and would auto-exercise into a pair of stock positions.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,81 @@
+{
+  "name": "Covered Strangle",
+  "slug": "covered-strangle",
+  "summary": "Long 100 shares plus a short OTM call and a short OTM put; collects two premiums against a share position, with an obligation to buy 100 more shares if the put goes ITM.",
+  "aliases": [
+    "covered combination",
+    "covered combo",
+    "strangle write with stock"
+  ],
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares per unit",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.25-0.30, strike above share cost basis (covered by the shares)",
+      "dte_rule": "30-45 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta -0.25 to -0.30 (cash-secured)",
+      "dte_rule": "same expiry as the call"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "typical_dte": "30-45 DTE, managed at 21 DTE",
+  "when_to_use": "Only on an underlying the system is deliberately holding and would double up on at the put strike. Effectively a covered call plus a cash-secured put, so the total share exposure can reach 200 per unit. Rarely appropriate for an automated $50k account.",
+  "max_profit": "(short call strike - share cost basis) x 100 + total credit",
+  "max_loss": "(share cost basis x 100) + (short put strike x 100) - total credit, on a move to zero",
+  "breakevens": "approximately (share cost basis + short put strike - total credit/100) / 2 for the doubled position",
+  "greeks": {
+    "delta": "strongly positive, typically +125 to +150 per unit",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "Requires 100 shares already held per unit AND cash to secure the short put (short put strike x 100 - credit) available.",
+    "Total notional exposure if both legs are assigned (200 shares) must be <= 25% of account equity.",
+    "Short call strike above the share cost basis; short call delta 0.25-0.30; short put delta -0.25 to -0.30.",
+    "IV rank >= 40.",
+    "No earnings inside the expiry.",
+    "Both strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid)."
+  ],
+  "management_rules": [
+    "Close both short options at 50% of the total credit received.",
+    "Close or roll at 21 DTE.",
+    "If the short put delta reaches -0.50, roll it down and out for a credit once, or close it - do not accept the assignment.",
+    "If the short call goes ITM, roll it up and out for a credit, or close the call and sell the shares deliberately."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: both shorts assignable. Close both option legs by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close either short immediately if ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close the short call before the ex-date if it is ITM with extrinsic below the dividend.",
+    "The short put must never be assigned; close or roll it by 2 DTE if ITM."
+  ],
+  "assignment_risk": "The short call is covered by the shares (benign - shares are sold). The short put is the hazard: assignment buys a second 100 shares, doubling the position exactly when the underlying is falling. That is the structural flaw of the strategy and the reason the exit rules close the put rather than accept it.",
+  "buying_power": "Share position plus cash-secured put requirement (strike x 100 - credit). The covered call consumes none.",
+  "liquidity_needs": "Low-to-moderate.",
+  "common_mistakes": "Treating the short put as free income and doubling into a downtrend; running it on a position the system did not want in the first place; ignoring that the true exposure is 200 shares.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - this is a monthly premium-collection overlay on stock.",
+  "alpaca_level": 2,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "bullish, short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2,
+  "also_filed_under": [
+    "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)"
+  ]
+}

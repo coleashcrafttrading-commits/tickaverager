@@ -1,0 +1,78 @@
+{
+  "name": "Call Ratio Spread with Stock (Stock Repair Strategy)",
+  "slug": "stock-repair-ratio",
+  "aliases": [
+    "stock repair",
+    "repair strategy",
+    "1x2 call ratio against stock"
+  ],
+  "summary": "Against 100 existing long shares, buy one ATM call and sell two OTM calls in the same expiry, usually for zero cost; doubles the recovery rate up to the short strike so a losing share position breaks even on a smaller bounce.",
+  "bias": "bullish",
+  "net": "either",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares per unit, already held at a loss. This structure only makes sense as a repair."
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM call at current price, 0.45-0.55 delta."
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Two calls at roughly the halfway point between current price and the original cost basis, 0.25-0.35 delta, tuned so the package opens for zero net cost.",
+      "dte_rule": "same expiry as the long call"
+    }
+  ],
+  "max_profit": "(short strike - stock cost basis) * 100 - net option cost, capped at the short strike",
+  "max_loss": "the same as continuing to hold the shares -- (stock cost basis * 100) as the underlying goes to zero, less any net credit. The options add no downside risk but remove none either.",
+  "breakevens": "substantially below the original cost basis: approximately cost basis - (short strike - long strike), because the ratio doubles your upside participation between the strikes",
+  "greeks": {
+    "delta": "roughly +1.0 to +1.3 per unit at entry (100 shares + 0.50 long call - 2 x 0.30 short calls)",
+    "gamma": "negative above the short strike",
+    "theta": "positive if opened for a credit",
+    "vega": "negative"
+  },
+  "typical_dte": "45-90 DTE. You need enough time for the bounce.",
+  "when_to_use": "You hold shares down 15-30% and want to break even on a partial recovery rather than a full one, and you are willing to cap the outcome at the short strike. Note the second short call is covered by the 100 shares, and the first by the long call -- so this is fully covered and does NOT require naked authority.",
+  "entry_rules": [
+    "PRECONDITION: >= 100 long shares per unit already held, verified via the positions endpoint. Without the shares, one short call is naked (Level 4, blocked).",
+    "ALPACA EXECUTION NOTE: Alpaca does not accept equity legs in an MLeg order. Submit the two option legs as one MLeg order (buy 1 call / sell 2 calls). Alpaca's coverage check evaluates the legs within the order: one short call is covered by the long call, and the second short call must be covered by the shares already in the account. Verify acceptance in paper before relying on this -- if Alpaca rejects the 1x2 as containing an uncovered leg, fall back to two separate orders (a bull call spread MLeg, plus a single covered call against the shares).",
+    "Shares must be down at least 15% from cost basis -- otherwise this just caps a healthy position.",
+    "Long call ATM (0.45-0.55 delta); short calls at 0.25-0.35 delta, placed at or below the original cost basis.",
+    "Package must open for a net cost between -$0.10 and +$0.10 per share.",
+    "DTE 45-90.",
+    "Underlying must still meet the original ownership thesis; do not repair a broken company, exit it.",
+    "All option legs OI >= 500."
+  ],
+  "management_rules": [
+    "Take profit: if the underlying reaches the short strike before 21 DTE, close the entire option package and decide separately whether to keep the shares.",
+    "Close all option legs at 21 DTE regardless.",
+    "If the underlying keeps falling, the options do nothing for you -- the stock stop still applies. Close the shares at your original risk level and close the options at the same time.",
+    "Do not repeat the repair more than once on the same position. Two failed repairs means the thesis is wrong."
+  ],
+  "exit_rules": [
+    "All option legs flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: two short calls. If they are ITM at 15:30 ET on expiry day, buy them back. Assignment on both delivers 200 short shares per unit against only 100 long shares and one long call -- the long call covers the second 100, but only if you exercise it, which creates another unwanted equity trade.",
+    "DIVIDEND GUARD: buy back the short calls before ex-dividend whenever they are ITM and extrinsic < 1.5 * dividend. Two ITM short calls on a dividend payer is the highest-probability early-assignment setup in this entire bank.",
+    "Any ITM short call with extrinsic < $0.10 -> buy back that session."
+  ],
+  "assignment_risk": "Two short calls. One is covered by the long call, the other by the shares, so the economics are contained -- but assignment on both sells your 100 shares AND creates a further 100-share short that must be covered by exercising the long call. For an automated inventory system that is two unplanned equity trades and a broken ledger. Treat any assignment here as a critical incident.",
+  "buying_power": "The covered pair holds the call spread's width; the second short call is covered by the shares and holds nothing extra.",
+  "liquidity_needs": "OI >= 500 on both strikes, quoted size >= 20 on the 2-lot short leg.",
+  "common_mistakes": "Attempting the repair without the shares (creates a naked short call); placing the short strike above the cost basis so the repair does not actually repair; treating it as free money rather than a capped exit plan; forgetting that the downside is unchanged -- you still own the falling stock.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable. A repair needs weeks of recovery time.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

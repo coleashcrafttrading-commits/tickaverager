@@ -1,0 +1,80 @@
+{
+  "name": "0DTE Defined-Risk Credit Vertical (Intraday Scalp Profile)",
+  "slug": "zero-dte-credit-vertical-scalp",
+  "aliases": [
+    "0DTE put credit spread",
+    "0DTE call credit spread",
+    "same-day vertical scalp",
+    "0DTE income spread"
+  ],
+  "summary": "A bull put or bear call spread opened and closed within a single session on SPY or QQQ; the same structure as the swing verticals but with entirely different timing, sizing and guard rules because gamma is enormous and there is no next day.",
+  "bias": "either",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Bullish version: short put at 0.10-0.20 delta computed LOCALLY (Alpaca returns no greeks or IV for 0DTE at any tier). Bearish version: flip both legs to calls, short call at 0.10-0.20 delta."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long put = short strike - width; width $1-$5 on SPY/QQQ so that max loss per contract is $100-$500.",
+      "dte_rule": "same expiry as leg 1 -- both legs expire today"
+    }
+  ],
+  "max_profit": "net credit received",
+  "max_loss": "(width * 100) - net credit",
+  "breakevens": "short strike -/+ net credit per share, depending on side",
+  "greeks": {
+    "delta": "+/-0.05 to 0.15 per 1-lot at entry, but changes faster than any other structure here",
+    "gamma": "extremely negative in the final 90 minutes -- a 0.10-delta short strike can become 0.60 delta in twenty minutes",
+    "theta": "very large and positive per hour, which is the entire attraction",
+    "vega": "small in absolute terms since there is almost no time value left"
+  },
+  "typical_dte": "0 DTE only. SPY, QQQ and IWM list daily expirations Monday through Friday.",
+  "when_to_use": "Intraday premium capture on the most liquid ETFs when the tape is range-bound or trending gently with you. This is the highest-frequency structure in the family and has the tightest operational requirements. Historically the highest realized win rate and the fattest left tail of anything here -- expectancy lives or dies on the stop discipline, not the entry.",
+  "entry_rules": [
+    "Underlying restricted to SPY, QQQ, IWM. No single names, no illiquid ETFs.",
+    "LOCAL GREEKS REQUIRED: Alpaca serves no greeks or IV for 0DTE contracts at any subscription tier. Compute IV by inverting Black-Scholes on the option mid, using T = (seconds remaining to 16:00 ET) / (252 * 23400), then compute delta from that IV. Refresh at least every 30 seconds while a position is open. Do not trade this structure if the greeks pipeline is stale by more than 60 seconds.",
+    "Entry window 09:45-14:00 ET only. No entries in the first 15 minutes (opening auction noise) and none after 14:00 (insufficient decay left to pay for the gamma).",
+    "Short strike delta 0.10-0.20 at entry.",
+    "Short strike must also be at least 1.0 x the current session's realized 30-minute range away from spot.",
+    "Directional gate: bullish version requires spot > VWAP and VWAP rising; bearish version requires spot < VWAP and VWAP falling.",
+    "Net credit >= 20% of width for 0DTE (lower than the 33% swing rule -- 0DTE credit is thinner, which is why the stop must be tighter).",
+    "Max loss per position <= 1% of equity = $500 on $50k. Maximum 3 concurrent 0DTE positions; total 0DTE defined risk <= 3% of equity per day.",
+    "Daily loss limit: after 2 stopped-out 0DTE trades OR a cumulative 0DTE loss of 2% of equity in one session, the system stops opening 0DTE positions for the rest of the day.",
+    "No 0DTE entries on FOMC statement days before 14:30 ET, or within 15 minutes either side of a scheduled 08:30/10:00/14:00 ET macro release.",
+    "Both legs OI >= 1000, bid/ask <= $0.03 on a $1-wide. Submit as one MLeg limit order at the mid; do not chase more than $0.02."
+  ],
+  "management_rules": [
+    "Take profit at 50% of credit received, or at any point after 15:00 ET where the spread can be closed for <= $0.05.",
+    "Stop loss: close at 2.0x the credit received. This is not optional -- 0DTE spreads go from 50% winner to max loss in minutes.",
+    "Delta stop: close if the short strike's locally computed delta reaches 0.35.",
+    "Touch stop: close immediately if the underlying trades through the short strike, regardless of the spread mark.",
+    "Time-decay ratchet: after 15:00 ET, tighten the profit target to 35% of credit -- the remaining theta is not worth the remaining gamma.",
+    "Never roll a 0DTE position. There is nothing to roll to. Close it.",
+    "Never open a second position on the same side to 'average' a losing one."
+  ],
+  "exit_rules": [
+    "UNCONDITIONAL FLATTEN AT 15:30 ET. Every 0DTE position, winner or loser, in the money or out, is closed by 15:30 ET. This is the single most important rule in the entire options module.",
+    "ASSIGNMENT GUARD: if the short leg is ITM at any time after 15:00 ET, close immediately rather than waiting for the 15:30 sweep.",
+    "ASSIGNMENT GUARD: an option that finishes $0.01 in the money is auto-exercised by the OCC. A short 0DTE SPY put finishing ITM delivers ~$60,000 of stock on a $50k account. There is no scenario in which holding to the bell is acceptable.",
+    "If a closing limit order is unfilled by 15:40 ET, escalate: reprice to the natural (bid for a sale, ask for a purchase) every 10 seconds until filled. Accept the slippage; it is always cheaper than assignment.",
+    "Log any position that reaches 15:45 ET unfilled as a critical incident and halt new 0DTE entries until reviewed."
+  ],
+  "assignment_risk": "The defining risk of this structure. The short leg is American-style and settles in shares. Pin risk at the short strike is severe because 0DTE order flow concentrates at round strikes. There is no overnight to fix a mistake and no time value left to warn you -- extrinsic is effectively zero for the last hour, so an ITM short leg is assignable immediately. The 15:30 ET flatten exists for exactly this reason. Note: SPX/XSP index options are European and cash-settled and carry none of this risk, but they are not available on Alpaca -- SPY and QQQ are equity ETFs and settle in shares.",
+  "buying_power": "(width * 100) - credit per contract. A $1-wide SPY spread sold for $0.25 holds $75.",
+  "liquidity_needs": "SPY and QQQ 0DTE are the most liquid options in the world -- penny-wide markets and enormous size. This structure should never be run anywhere those conditions do not hold.",
+  "common_mistakes": "Trading 0DTE without locally computed greeks because Alpaca does not supply them; entering after 14:00 for 'easy decay'; no hard stop; holding past 15:30 to avoid paying the spread; revenge-trading after a stop-out; running it on single names where a $0.20 wide market eats the entire credit.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This entry IS the 0DTE profile. Key numbers: entry 09:45-14:00 ET, short strike 0.10-0.20 delta computed locally, credit >= 20% of width, profit target 50% of credit (35% after 15:00), stop at 2x credit or 0.35 short delta or a strike touch, daily circuit breaker at 2 losses or -2% equity, and an unconditional flatten at 15:30 ET.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "directional-either",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,65 @@
+{
+  "name": "Ratio Write",
+  "slug": "ratio-write",
+  "aliases": [
+    "Ratio covered call",
+    "2:1 call write",
+    "Over-write"
+  ],
+  "summary": "Own 100 shares and sell 2 or more calls against them; one call is covered, the rest are naked. FLAGGED: unlimited upside risk and not permitted at level 3.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "100 shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "both at 0.30-0.40 delta OTM (one covered, one naked)",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - share basis + total credits) x 100 at the strike",
+  "max_loss": "UNDEFINED - unlimited above the strike, because the extra short call is uncovered",
+  "breakevens": "upper: strike + (strike - basis + total credits); lower: basis - total credits",
+  "greeks": {
+    "delta": "+40 per unit at entry, turning sharply negative above the strike",
+    "gamma": "strongly negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "Historically used by market makers and high-IV overwriters expecting a pin. FLAGGED: a bad idea for an automated retail account - the uncovered call has unbounded risk and the account is level 3, so the order will be rejected.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "BLOCKED: requires Alpaca options level 4 (uncovered calls). The system must hard-reject any order where contracts_sold > floor(shares_held / 100).",
+    "If ever run at level 4: uncovered ratio <= 1 extra contract per 100 shares, and the naked portion must be converted to a defined-risk spread by buying a further-OTM call (which turns it into a covered call + call credit spread, level 3)."
+  ],
+  "management_rules": [
+    "If permitted, close the entire structure at 25% of max profit - the tail is not worth pressing.",
+    "Convert to defined risk immediately (buy a higher call) if the underlying rallies more than 1 x ATR(14).",
+    "Never roll a losing ratio write up - close it."
+  ],
+  "exit_rules": [
+    "Close all short calls by 15:30 ET on expiration day; an assigned naked call creates a SHORT stock position of 100 shares per uncovered contract.",
+    "Immediate close if the aggregate short call delta exceeds 1.20 per 100 shares held.",
+    "Hard stop at 2x the credit received."
+  ],
+  "assignment_risk": "Severe. Assignment on the uncovered call delivers short shares the account does not hold, creating an unhedged short equity position subject to buy-in and unlimited loss. Exactly the scenario the never-assign rule exists to prevent.",
+  "buying_power": "Naked call margin (roughly 20% of notional minus OTM amount) on the uncovered portion - level 4 only.",
+  "liquidity_needs": "n/a - not usable at this approval level.",
+  "common_mistakes": "Treating the second call as 'mostly covered'; underestimating how fast a gap-up destroys the position.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE ratio write is one gap away from a catastrophic short-stock position. Never.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

@@ -1,0 +1,72 @@
+{
+  "name": "Short Put Calendar Spread (Reverse Put Calendar)",
+  "slug": "short-put-calendar",
+  "summary": "Buy the near-term put and sell the longer-dated put at the same strike; the put mirror of the reverse calendar, profiting from a large move or a drop in back-month IV, naked after the front expires.",
+  "aliases": [
+    "reverse put calendar",
+    "short put horizontal",
+    "reverse put time spread"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM, |delta| 0.45-0.55.",
+      "dte_rule": "front leg, 14-30 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same strike.",
+      "dte_rule": "back leg, 45-90 DTE"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "credit",
+  "max_profit": "Approximately the net credit received, when the underlying ends far from the strike in either direction at front expiry.",
+  "max_loss": "UNDEFINED in practice. Worst case before front expiry is a pin at the strike; after front expiry the naked short put's maximum loss is (strike x 100 - credit) per contract if the underlying goes to zero.",
+  "breakevens": "Two, outside of which the trade profits: approximately strike +/- (1.0 to 1.3) x the credit in underlying points at front expiry.",
+  "greeks": {
+    "delta": "~0 at ATM",
+    "gamma": "positive into front expiry",
+    "theta": "negative",
+    "vega": "negative"
+  },
+  "when_to_use": "Same regime as the reverse call calendar: steep contango (back_IV - front_IV >= 5 vol points) with IV rank > 60, or ahead of an anticipated volatility expansion in the near term. Rarely the best expression of that view.",
+  "typical_dte": "front 14-30 DTE, back 45-90 DTE",
+  "entry_rules": [
+    "REQUIRES ALPACA OPTIONS LEVEL 4 - the later-expiring short put is uncovered once the front long put dies. The automation must reject this structure at level 3.",
+    "back_IV - front_IV >= 5.0 vol points AND IV rank > 60.",
+    "Front 14-30 DTE, back 45-90 DTE, same strike, ATM by delta 0.45-0.55.",
+    "Credit >= 20% of the back-month put premium.",
+    "Underlying must be one you would tolerate owning 100 shares of at the strike (the naked-put tail is real).",
+    "Size assuming cash-secured equivalent: strike x 100 of exposure per contract."
+  ],
+  "management_rules": [
+    "Close at +50% of credit.",
+    "Stop at -100% of credit.",
+    "Close if back-month IV rises 5 vol points above entry.",
+    "Never let the front long put expire while the short back put is open.",
+    "Maximum 1 unit, level 4 accounts only."
+  ],
+  "exit_rules": [
+    "Close the entire structure no later than 5 trading days before the FRONT (long) leg expires.",
+    "Close the short put immediately if |delta| >= 0.85 or extrinsic <= $0.10 (interest-driven early exercise window on deep-ITM puts).",
+    "When legging out, buy back the SHORT put first.",
+    "At level 3, reject at entry - there is no valid management path."
+  ],
+  "assignment_risk": "The short leg is the long-dated one, so exposure lasts months and outlives the hedge. Assignment delivers +100 shares at the strike, requiring strike x 100 of buying power. Deep-ITM short puts are exercised early for interest carry, particularly when rates are elevated.",
+  "buying_power": "Naked short put margin: greater of 20% of underlying value minus OTM amount or 10% of the strike, plus premium. Typically $1,500-$8,000 per contract.",
+  "liquidity_needs": "OI >= 500 both months; back-month spread <= $0.20.",
+  "common_mistakes": "Assuming defined risk; holding past front expiry; using it to express a 'crash' view when a long put or put backspread is cleaner; ignoring hard-to-borrow names where early exercise is far more likely.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "alpaca_level": 4,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "long-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

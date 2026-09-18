@@ -1,0 +1,79 @@
+{
+  "name": "Bull Call Diagonal Spread (Long Call Diagonal, Debit)",
+  "slug": "bull-call-diagonal",
+  "summary": "Buy a longer-dated lower-strike call and sell a shorter-dated higher-strike call; a bullish debit spread whose short leg is sold repeatedly against a long-dated long.",
+  "aliases": [
+    "long call diagonal",
+    "diagonal debit spread",
+    "bullish diagonal",
+    "call diagonal"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower strike, chosen by delta 0.60-0.75 (ITM). Deeper than 0.75 is the PMCC variant.",
+      "dte_rule": "back expiry, 60-120 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Higher strike, chosen by delta 0.25-0.35, and strictly above the long strike. Additional constraint: short strike >= long strike + net debit, so that both-ITM at expiry is still a profit.",
+      "dte_rule": "front expiry, 21-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "At the short strike at front expiry: approximately (value of the back-month long at that price and date) - net debit. If the short is rolled repeatedly, cumulative max profit grows with each credit collected.",
+  "max_loss": "The net debit paid, realized if the underlying falls far enough that both calls approach zero. The debit-financing effect of rolled short calls reduces this over time.",
+  "breakevens": "At front expiry, approximately long strike + net debit adjusted for the remaining time value of the long - solve numerically. Rule of thumb: spot must be above long strike + (debit x 0.6) at front expiry.",
+  "greeks": {
+    "delta": "net positive, typically +0.30 to +0.45 per unit (long 0.65 minus short 0.30)",
+    "gamma": "slightly negative near the short strike, positive below it",
+    "theta": "positive when spot is below the short strike; negative when spot is far above it",
+    "vega": "positive - the back-month long has more vega than the front-month short"
+  },
+  "when_to_use": "Bullish but not explosive view over 1-3 months, on an underlying in an uptrend (price > 50-day SMA > 200-day SMA). Prefer IV rank 20-50: low enough that the long leg is not overpriced, high enough that the short leg pays. The diagonal beats a plain vertical when you intend to sell the short leg more than once.",
+  "typical_dte": "long 60-120 DTE, short 21-45 DTE",
+  "entry_rules": [
+    "Trend filter: spot > 50-day SMA AND 50-day SMA > 200-day SMA.",
+    "IV rank between 20 and 50.",
+    "Long leg by delta 0.60-0.75, 60-120 DTE. Short leg by delta 0.25-0.35, 21-45 DTE.",
+    "MANDATORY: short strike > long strike, and short strike >= long strike + net debit per share. This guarantees that if both legs finish ITM the trade is still profitable.",
+    "Short expiry must be strictly BEFORE the long expiry - never the reverse.",
+    "Net debit <= 2.5% of equity per unit.",
+    "Combined bid-ask <= 8% of the debit.",
+    "LEVEL 3 OK: a short call at a HIGHER strike with an EARLIER expiry is fully covered by the long call. Submit as a 2-leg mleg; if legging, buy the long call FIRST."
+  ],
+  "management_rules": [
+    "Close the short leg at 50-75% of the credit received and re-sell the next cycle (this is the income engine).",
+    "Close the whole structure at +50% of the net debit as total profit.",
+    "Stop at -50% of the net debit, or if spot closes below the long strike minus 1 ATR(14).",
+    "Trend stop: close if spot closes below the 50-day SMA for 2 consecutive sessions.",
+    "Roll the short up and out when spot exceeds the short strike and the short's |delta| > 0.60, but ONLY for a net credit and only to a strike still above the long strike + debit. If the roll cannot be done for a credit, close the entire diagonal.",
+    "Roll the long leg forward when its DTE < 45 or its delta drops below 0.50.",
+    "Max 3 units per underlying; total diagonal debit <= 15% of equity."
+  ],
+  "exit_rules": [
+    "Close or roll the short call by 14:30 ET on its expiration day, unconditionally.",
+    "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share - this is the most common early-assignment trigger for diagonals.",
+    "Close the long leg no later than 30 DTE (the theta cliff) or when its delta falls below 0.40.",
+    "Always buy back the short before selling the long.",
+    "Abandon rule: if the long call's mark is below 30% of the entry debit, close both legs."
+  ],
+  "assignment_risk": "Only the short front-month call. Because the long strike is BELOW the short strike, assignment leaves the account short 100 shares fully covered by an in-the-money long call - the least dangerous assignment in the family, but it still creates an unwanted stock position and financing cost. Buy the shares back within one session and re-sell a new short call. Dividend ex-dates are the main early-assignment trigger.",
+  "buying_power": "Net debit only. Because the short strike is above the long strike and the long expires later, Alpaca reserves the debit and no additional maintenance.",
+  "liquidity_needs": "Long leg 60-120 DTE with OI >= 200 and spread <= $0.20; short leg OI >= 500, penny or nickel quotes. Underlying ADV >= 2M shares.",
+  "common_mistakes": "Selling a short strike below long strike + debit, so that a both-ITM finish is a loss; selling the short too close to the money and capping the trade instantly; rolling the short for a debit and destroying the economics; letting the long leg decay inside 30 DTE; ignoring ex-dividend dates.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The short leg should never be 0DTE on a share-settled underlying under this playbook; the minimum short DTE is 21 at entry and the position is closed or rolled by 14:30 ET on expiry day.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

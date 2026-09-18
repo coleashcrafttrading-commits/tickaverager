@@ -1,0 +1,62 @@
+{
+  "name": "Ratio Covered Call Write",
+  "slug": "ratio-covered-call-write",
+  "aliases": [
+    "ratio write",
+    "1x2 covered write",
+    "variable ratio write"
+  ],
+  "summary": "Own 100 shares and sell 2 or more calls against them. The extra call is NAKED. Included for completeness; not permitted at Level 3.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "100 shares"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Delta 0.25-0.35; one call is covered by the shares, the second is uncovered",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - cost basis + 2 x credit) x 100 at the strike",
+  "max_loss": "UNDEFINED to the upside. Above the strike the uncovered second call loses without limit: the loss grows by $100 per $1 of underlying advance beyond the upper breakeven, forever.",
+  "breakevens": "Upside: strike + (strike - cost basis + 2 x credit). Downside: cost basis - 2 x credit",
+  "greeks": {
+    "delta": "+100 minus 50-70 = +30 to +50, turning negative as price rises",
+    "gamma": "strongly negative",
+    "theta": "positive, roughly double a single covered call",
+    "vega": "negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Never in this account. Documented so the automation recognises the structure and refuses it. Historically used by market makers and floor traders with continuous hedging ability.",
+  "entry_rules": [
+    "BLOCKED: requires Level 4 (uncovered short call). This account is Level 3, and Alpaca's approval tiers run 1 through 3 only - Level 4 is not offered at all, so the order will be rejected by the broker",
+    "The automation must count short calls against shares held and refuse any order where short call contracts x 100 > shares held",
+    "If it were permitted: never more than a 1x2 ratio, never without a hard upside stop at the short strike"
+  ],
+  "management_rules": [
+    "Not applicable - strategy is blocked",
+    "If a ratio ever appears accidentally (e.g. shares sold while a covered call remains open), the uncovered call must be bought to close IMMEDIATELY at market, before any other action"
+  ],
+  "exit_rules": [
+    "Immediate buy-to-close of any uncovered short call detected in the position set, at any time of day, at market",
+    "Standing invariant check on every position refresh: short_calls x 100 <= shares_held for every symbol. Any violation triggers an alert and an immediate flatten"
+  ],
+  "assignment_risk": "EXTREME. The uncovered call, if assigned, creates a short stock position with unlimited risk in an account not approved to carry it.",
+  "buying_power": "Naked call margin: roughly 20% of the underlying value minus the OTM amount, plus the premium. Not available at Level 3.",
+  "liquidity_needs": "Not applicable - blocked.",
+  "common_mistakes": "Creating one accidentally by selling the covering shares and leaving the call open. This is the single most dangerous bookkeeping error in the system.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 4,
+  "family": "single-leg",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

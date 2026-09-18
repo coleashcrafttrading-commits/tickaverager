@@ -1,0 +1,60 @@
+{
+  "name": "Long Call into Earnings (IV expansion play)",
+  "slug": "long-call-earnings-speculation",
+  "aliases": [
+    "earnings call buy",
+    "pre-earnings call"
+  ],
+  "summary": "Buy a call ahead of an earnings release to profit from a post-report gap. Included for completeness and clearly marked a BAD IDEA in its naive form: IV crush usually beats the move.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.30-0.45 delta",
+      "dte_rule": "first expiry AFTER the earnings date, typically 2-9 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited in theory; in practice capped by how far the gap exceeds the priced-in expected move",
+  "max_loss": "Debit x 100. Loss is the base case - post-report IV collapse routinely removes 30-60% of the option's value even when direction is right.",
+  "breakevens": "strike + debit; compare to the option-implied expected move. If breakeven is beyond the expected move, the trade is priced against you",
+  "greeks": {
+    "delta": "+0.30 to +0.45",
+    "gamma": "high (short DTE)",
+    "theta": "very negative",
+    "vega": "positive and TOXIC here - you are buying vega at its annual peak and it collapses the morning after"
+  },
+  "typical_dte": "2-9 DTE (the expiry immediately after the report)",
+  "when_to_use": "Almost never in the naive form. Only defensible when front-month IV is NOT elevated versus its own earnings history (current earnings IV below the trailing 8-quarter median) and you have a genuine directional edge.",
+  "entry_rules": [
+    "Gate: current front-expiry IV must be BELOW the median IV of the last 8 earnings cycles for that name. If above, do not take the trade",
+    "Compute the option-implied expected move = 0.85 x (ATM straddle price). Require your directional target to exceed that move, otherwise skip",
+    "Debit <= 0.3% of equity (~$150 on $50k); max 2 earnings positions per quarter",
+    "Delta 0.30-0.45, first expiry after the report",
+    "Liquid names only: OI >= 1000, spread <= 8% of mid",
+    "Mark this strategy DISABLED by default in the automation config; require an explicit manual enable per trade"
+  ],
+  "management_rules": [
+    "Exit within the first 30 minutes of the session after the report. The edge, if any, is in the gap, not the drift",
+    "Take profit at +75%",
+    "Stop at -50% or at the 30-minute mark, whichever first",
+    "Never hold a post-earnings long option for a second day"
+  ],
+  "exit_rules": [
+    "Sell to close by 10:00 ET on the session after the report, unconditionally",
+    "Standard 15:30 ET expiry-day flatten applies if it somehow survives to expiry"
+  ],
+  "assignment_risk": "None (long). Auto-exercise risk only.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Post-earnings open spreads blow out; require a first-5-minute check that the spread has normalised to <= 10% of mid before exiting.",
+  "common_mistakes": "Being right on direction and still losing money to IV crush - the single most common retail options loss; buying the weekly the day before the report when IV is at its annual maximum.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

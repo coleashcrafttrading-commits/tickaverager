@@ -1,0 +1,60 @@
+{
+  "name": "OTM Lottery Long Call",
+  "slug": "otm-lottery-long-call",
+  "aliases": [
+    "lotto call",
+    "far OTM call"
+  ],
+  "summary": "Buy a very cheap, very far OTM call (delta under 0.10) for a small-probability, large-multiple payoff. Structurally negative expectancy in most regimes - clearly marked as a low-allocation speculation.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta 0.03-0.10, or the first strike costing <= $0.30",
+      "dte_rule": "7-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited in theory; realistically 5x-50x the debit on a violent move",
+  "max_loss": "Debit paid x 100 - and the base case is a total loss. Expect a win rate under 15%.",
+  "breakevens": "strike + debit; typically far above spot, which is why most of these expire worthless",
+  "greeks": {
+    "delta": "+0.03 to +0.10",
+    "gamma": "positive but tiny until the underlying approaches the strike",
+    "theta": "negative; percentage decay is brutal - these lose value faster in percent terms than any other long option",
+    "vega": "positive, small in dollars; far-OTM calls carry skew premium"
+  },
+  "typical_dte": "7-45 DTE",
+  "when_to_use": "Rarely. Only as a deliberate convexity sleeve: a small, capped, recurring allocation where you accept a low hit rate for a fat tail. Not a core strategy.",
+  "entry_rules": [
+    "Hard cap: total open lottery-call debit <= 0.5% of equity (~$250 on $50k) at any time",
+    "Per-position debit <= 0.1% of equity (~$50)",
+    "Only on underlyings with ADV >= 5M shares and OI >= 250 on the chosen strike",
+    "Do not enter when IVR > 60 - you are buying the most skew-inflated part of the chain",
+    "Log these separately in the P&L so they never contaminate the performance stats of real strategies"
+  ],
+  "management_rules": [
+    "Take profit at +300% (4x the debit). Do not hold for the theoretical 20x",
+    "If the position reaches +300%, sell 75% and let 25% ride to expiry-minus-one-day",
+    "No stop loss - the debit is the stop; position size IS the risk control",
+    "Never add to the position"
+  ],
+  "exit_rules": [
+    "Sell to close at +300%, or let it expire worthless",
+    "If ITM at any point, close by 15:30 ET on expiry day - auto-exercise on a surprise winner would deliver 100 shares"
+  ],
+  "assignment_risk": "None (long). Only auto-exercise on the rare winner.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Far-OTM markets are frequently 0.01/0.05 wide in percentage terms - you can lose 50% on the spread alone. Require bid > 0 and spread <= $0.05 absolute.",
+  "common_mistakes": "Sizing these like real positions; treating a lucky winner as evidence the strategy works; buying them the day before earnings when the skew is at its most expensive.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "0DTE far-OTM calls are the purest version of this and the most negative-expectancy trade in the entire bank. If traded at all, treat as a <=0.1% equity flyer with a same-day 15:30 ET hard flatten.",
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,90 @@
+{
+  "name": "Jelly Roll",
+  "slug": "jelly-roll",
+  "summary": "A long calendar in calls combined with a short calendar in puts at the same strikes and expiries; isolates the cost of carry (interest minus dividends) between two expirations and is a pure arbitrage structure.",
+  "aliases": [
+    "jelly roll",
+    "roll spread",
+    "long jelly roll",
+    "reverse jelly roll (the mirror)"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Single strike K, usually ATM. All four legs share the same strike.",
+      "dte_rule": "back expiry, T2"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same strike K.",
+      "dte_rule": "front expiry, T1"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same strike K.",
+      "dte_rule": "back expiry, T2"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same strike K.",
+      "dte_rule": "front expiry, T1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "The mispricing captured at entry: theoretical value is approximately K x (e^(-r x T1) - e^(-r x T2)) minus the present value of dividends between T1 and T2. If the market price of the roll differs from that value, the difference is the profit, and it is locked at entry.",
+  "max_loss": "The mispricing plus all frictions if the roll must be unwound early, plus an unbounded operational loss if an early assignment breaks the synthetic. In practice the risk is not market risk but assignment/carry risk.",
+  "breakevens": "n/a - the structure is delta-, gamma- and vega-neutral by construction. P&L is the entry mispricing.",
+  "greeks": {
+    "delta": "~0 (the two synthetic stock positions cancel)",
+    "gamma": "~0",
+    "theta": "~0 in the Black-Scholes sense; the P&L is carry, not decay",
+    "vega": "~0"
+  },
+  "when_to_use": "Essentially never in a retail account, and it is included here as a completeness/historical entry. The jelly roll is a market-maker arbitrage on interest rates and dividends between expirations. Its edge is measured in single-digit cents per contract and is entirely consumed by retail commissions, bid-ask spreads and margin costs. The reverse jelly roll (sell the call calendar, buy the put calendar) is the mirror and is used when the roll trades rich.",
+  "typical_dte": "T1 30-60 DTE, T2 60-180 DTE",
+  "entry_rules": [
+    "REQUIRES ALPACA OPTIONS LEVEL 4: the short back-month put is uncovered once the front-month long put expires. Reject at level 3.",
+    "MARKED AS UNSUITABLE for this account: the theoretical edge (a few cents per contract) is smaller than the four-leg bid-ask crossing cost. The automation should never select it.",
+    "If ever evaluated: compute the fair roll value as K x (e^(-r x T1) - e^(-r x T2)) minus PV(dividends between T1 and T2), using the actual risk-free curve, and require a mispricing of at least 3x the total four-leg bid-ask.",
+    "American-style early exercise makes the arbitrage inexact - the theoretical value assumes European exercise. Any early assignment on a short leg destroys the synthetic.",
+    "Never on a name with an uncertain or special dividend between T1 and T2."
+  ],
+  "management_rules": [
+    "There is nothing to manage directionally; the only management is monitoring for early assignment on either short leg.",
+    "Close the entire structure if either short leg's extrinsic value falls below $0.10.",
+    "Do not hold through an ex-dividend date unless the dividend was explicitly modeled in the entry price.",
+    "Maximum 0 units under this account's policy."
+  ],
+  "exit_rules": [
+    "Close the whole four-leg structure before the FRONT expiry T1, without exception - at T1 the long put and short call die and the remaining back-month legs become a naked synthetic short stock position.",
+    "Close either short leg immediately if extrinsic <= $0.10 or |delta| >= 0.90.",
+    "Close before any ex-dividend date between T1 and T2.",
+    "Unwind shorts before longs.",
+    "At level 3, reject at entry."
+  ],
+  "assignment_risk": "Both short legs are assignable, and an assignment on either one instantly converts a market-neutral arbitrage into a directional stock position. The short back-month put survives the front expiry and is then uncovered. Dividend-driven exercise on the short call and interest-driven exercise on the short put both apply.",
+  "buying_power": "Brokers may recognize part of the structure as offsetting, but Alpaca will hold naked short put margin on the back-month put: greater of 20% of underlying value minus OTM amount or 10% of the strike, plus premium.",
+  "liquidity_needs": "Four legs, penny-wide markets required, and a rate curve accurate to the day. In practice only market makers with sub-penny execution can trade this.",
+  "common_mistakes": "Attempting it retail at all; ignoring the early-exercise premium that makes American jelly rolls structurally different from the European formula; forgetting that special dividends blow up the carry assumption.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "alpaca_level": 4,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+    "synthetics_and_arbitrage"
+  ]
+}

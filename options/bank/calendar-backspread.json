@@ -1,0 +1,75 @@
+{
+  "name": "Calendar Backspread (Back Ratio Time Spread)",
+  "slug": "calendar-backspread",
+  "summary": "Sell one near-term option and buy two longer-dated options at the same strike; a defined-risk, long-vega, long-convexity time spread that pays on a big back-month move or a vol expansion.",
+  "aliases": [
+    "back ratio calendar",
+    "1x2 calendar",
+    "long ratio time spread",
+    "calendar ratio backspread"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM to slightly OTM, front |delta| 0.35-0.50.",
+      "dte_rule": "front expiry, 21-35 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "Same strike as the short.",
+      "dte_rule": "back expiry, 60-120 DTE"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "Unbounded in the direction of the extra long leg after front expiry (two long calls with no cap), plus the calendar payoff at the strike. Effectively two payoff regimes: pin-at-strike (calendar payoff) and big-move (backspread payoff).",
+  "max_loss": "The net debit paid. Realized when spot sits between the pin zone and the convexity zone at back expiry with vol unchanged - the classic 'slow drift' loss.",
+  "breakevens": "Complex two-regime profile; solve numerically. The upside breakeven after front expiry is roughly strike + (remaining debit)/200 per unit because two long calls share the cost.",
+  "greeks": {
+    "delta": "positive for the call version (two longs vs one short), roughly +0.20 to +0.40 per unit",
+    "gamma": "positive overall once the front short is gone; slightly negative before",
+    "theta": "negative to flat - you are paying for convexity",
+    "vega": "strongly positive - two back-month longs; best entered at very low IV rank"
+  },
+  "when_to_use": "IV rank < 20 with an expectation of a vol expansion or a large directional move over the next 2-4 months. Pairs well with a low-vol, coiled chart (Bollinger band squeeze, ATR at a 6-month low). Explicitly LEVEL 3 LEGAL: the single short front leg is covered by the first back-month long, and the second long adds no short risk.",
+  "typical_dte": "front 21-35 DTE, back 60-120 DTE",
+  "entry_rules": [
+    "IV rank < 20 AND back-month IV below its own 12-month 30th percentile.",
+    "Ratio exactly 1 short : 2 long. Never sell more fronts than there are back-month longs.",
+    "Same strike on all legs; short front |delta| 0.35-0.50.",
+    "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front.",
+    "Net debit <= 2% of equity per unit.",
+    "Realized-vol filter: 20-day realized volatility below the 25th percentile of its own 1-year range (a coiled underlying).",
+    "LEVEL 3 OK - the short front is fully covered by one of the back-month longs at the same strike and a later expiry. Submit as a 3-contract mleg; if it is rejected, buy the two back-month longs FIRST, then sell the front."
+  ],
+  "management_rules": [
+    "Profit target +50% of debit (this structure is asymmetric - let winners run further than a plain calendar).",
+    "Stop at -50% of debit, or at -35% if the back-month IV has fallen 5 vol points below entry.",
+    "Roll the short front out one expiry at front DTE <= 7 for a credit, to keep financing the longs; roll at most 3 times.",
+    "If the structure becomes a pure long 2-lot after the front expires, apply plain long-call rules: stop at -50% of the remaining value, take profit at +100%.",
+    "Max 2 units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll the short front leg by 14:30 ET on its expiration day, unconditionally.",
+    "Close the short immediately if extrinsic <= $0.05 or |delta| >= 0.90.",
+    "Close the short call before ex-dividend if extrinsic < dividend per share.",
+    "After the short is gone, close the remaining long pair no later than 21 DTE on the back month, or when the long premium decays below 40% of the original debit.",
+    "Buy back the short before selling any long."
+  ],
+  "assignment_risk": "One short front leg, covered twice over by the back-month longs. Assignment leaves the account short 100 shares against two long calls - a covered and directionally hedged position, but it must still be flattened within one session.",
+  "buying_power": "Net debit only. The extra long adds cost, not margin.",
+  "liquidity_needs": "Back month 60-120 DTE must be genuinely quoted: OI >= 200, spread <= $0.20. Long-dated single-stock options are often too wide - prefer large caps and major ETFs.",
+  "common_mistakes": "Entering at high IV rank and watching the two long vegas bleed; over-rolling the short and turning a convexity trade into a grind; forgetting that this structure loses on a slow drift, which is the most common market outcome.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - the whole premise is multi-month convexity.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

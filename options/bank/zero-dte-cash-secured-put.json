@@ -1,0 +1,66 @@
+{
+  "name": "0DTE Cash-Secured Put",
+  "slug": "zero-dte-cash-secured-put",
+  "aliases": [
+    "daily put write",
+    "0DTE put sale"
+  ],
+  "summary": "Sell a same-day-expiry put fully secured by cash, harvesting one day of the steepest theta on the board.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta -0.08 to -0.18, computed locally (Alpaca returns no greeks on 0DTE)",
+      "dte_rule": "0 DTE, sold in the morning"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The credit, typically $0.20-$0.70 on SPY",
+  "max_loss": "(strike - credit) x 100 in a same-day crash; realistically bounded by how far the index can fall intraday, but a 3% flush produces a loss many times the credit",
+  "breakevens": "strike - credit",
+  "greeks": {
+    "delta": "+0.08 to +0.18 at entry, can reach +0.95 within hours",
+    "gamma": "extremely negative",
+    "theta": "the highest available per day, fully realised by the bell",
+    "vega": "small, but a vol spike during a selloff compounds the delta loss"
+  },
+  "typical_dte": "0 DTE",
+  "when_to_use": "SPY/QQQ only, on days with no scheduled macro catalyst. This is the short side of the 0DTE trade, where research indicates the structural edge lies - but the edge is small and the tail is real.",
+  "entry_rules": [
+    "SPY or QQQ only; cash >= strike x 100 x contracts reserved and verified before submission",
+    "Sell between 09:45 and 10:30 ET",
+    "Delta -0.08 to -0.18, computed locally with Black-Scholes using intraday T in fractions of a trading day and a locally estimated IV (Alpaca supplies no greeks or IV on 0DTE at any tier)",
+    "Credit >= $0.20 absolute; skip the day otherwise",
+    "SKIP the day if: VIX > 25, overnight gap < -0.75%, FOMC/CPI/NFP/PPI release scheduled, or the index is below its lower 20-period Bollinger band",
+    "Maximum 1 position per day; maximum notional (strike x 100) <= 20% of equity",
+    "Daily 0DTE loss limit shared with all 0DTE strategies: -1.5% of equity ends the session"
+  ],
+  "management_rules": [
+    "Buy to close at 70% of the credit",
+    "Hard stop: buy to close at 2.5x the credit received",
+    "Buy to close immediately if the index trades below the strike at any point after 13:00 ET",
+    "No rolling at 0 DTE - close only"
+  ],
+  "exit_rules": [
+    "Buy to close at 70% of credit, at the 2.5x stop, or on the below-strike trigger after 13:00 ET",
+    "ABSOLUTE NEVER-ASSIGN RULE: buy to close by 15:30 ET if the index is within 0.5% of the strike, and by 15:45 ET unconditionally if ITM or within 0.25%. An ITM 0DTE short put left at the bell is assigned that evening and delivers 100 shares (roughly $65,000 of SPY per contract) against the account overnight",
+    "The assignment check must run on a wall-clock timer, not only on price events, because a quiet drift into the strike in the last 20 minutes is the most common way this fails"
+  ],
+  "assignment_risk": "HIGHEST cadence and highest urgency in the bank. There is no next day to fix it. Share delivery of a full SPY round lot would consume most of a $50k account's buying power.",
+  "buying_power": "Full cash securing self-imposed: strike x 100 per contract.",
+  "liquidity_needs": "SPY/QQQ 0DTE only - penny-wide, deep OI.",
+  "common_mistakes": "Selling 0DTE puts on a macro release day; not having a wall-clock timer for the 15:30/15:45 flatten; sizing by premium collected rather than by the notional that assignment would deliver.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Short 0DTE puts carry the structural edge the research identifies (median daily move is smaller than what buyers need) but with a left tail that a small number of days can dominate. Backtest over at least 2 years including Feb 2018, Mar 2020 and Aug 2024 style shocks before sizing up.",
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)"
+  ]
+}

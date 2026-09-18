@@ -1,0 +1,80 @@
+{
+  "name": "Short Call Ladder (Bear Call Ladder)",
+  "slug": "short-call-ladder",
+  "summary": "Sell 1 lower call, buy 1 middle call, buy 1 higher call, all same expiry; a credit structure with defined downside, a loss valley in the middle, and unlimited upside profit.",
+  "aliases": [
+    "bear call ladder",
+    "long call ladder spread (UK usage)",
+    "call tree",
+    "short call tree"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "K1 = ITM or ATM, call delta 0.55-0.70",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "K2 = K1 + W, call delta 0.35-0.45; W = 1.5-2.5% of spot",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "K3 = K2 + W (equal spacing), call delta 0.20-0.30",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit (required) or small debit",
+  "typical_dte": "21-60 DTE",
+  "when_to_use": "IV rank < 30, flat-to-inverted call skew, and an expected explosive move higher. It is a call ratio backspread with the second long moved further out, which softens the loss valley at the cost of a smaller upside slope.",
+  "max_profit": "UNLIMITED above K3",
+  "max_loss": "(K2 - K1) x 100 - net credit, reached at K2. Defined.",
+  "breakevens": "lower: none when opened for a credit; upper breakeven = K3 + (K2 - K1) - credit/100 (solve exactly from the payoff)",
+  "greeks": {
+    "delta": "near flat at entry, strongly positive above K3",
+    "gamma": "positive above K2",
+    "theta": "negative when spot sits between K1 and K3",
+    "vega": "positive"
+  },
+  "entry_rules": [
+    "Open for a net CREDIT; reject debit fills.",
+    "Equal strike spacing K1->K2 and K2->K3.",
+    "K1 delta 0.55-0.70, K2 delta 0.35-0.45, K3 delta 0.20-0.30.",
+    "Max loss ((K2 - K1) x 100 - credit) <= 1.5% of equity per unit.",
+    "IV rank < 30 and a catalyst or breakout setup inside the expiry.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-leg limit order at mid; must remain a credit."
+  ],
+  "management_rules": [
+    "Close at 100% of max-loss amount in profit on the upside.",
+    "Close at 14 DTE regardless of P/L - the valley between K1 and K3 deepens sharply into expiry.",
+    "Stop at 60% of theoretical max loss.",
+    "Do not roll; close and re-establish if the thesis survives."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 1 short call at K1, the deepest ITM strike in the structure. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the K1 short call is ITM with extrinsic < $0.10 - which is the normal state of an ITM short call in this structure.",
+    "DIVIDEND GUARD: close before every ex-dividend date whenever K1 is ITM; an ITM short call with low extrinsic is assigned on the day before ex-div with high probability.",
+    "Close no later than 14 DTE."
+  ],
+  "assignment_risk": "One short call at K1, which is chosen ITM or ATM at entry - meaning early assignment risk is present from day one, not just at expiry. Assignment delivers -100 shares, economically hedged by the two long calls but operationally a short stock position the system must not carry. Dividend-driven assignment is the main path.",
+  "buying_power": "(K2 - K1) x 100 - net credit, per unit.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Opening for a debit (adds a downside loss zone to an already-awkward payoff); using unequal spacing; forgetting the ITM short call's dividend assignment risk; holding into the valley at expiry.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended - an ITM short call at 0DTE is the most assignment-prone leg type in the bank, and the upside slope needs time to pay.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "bullish breakout with a neutral-to-bearish consolation prize; long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

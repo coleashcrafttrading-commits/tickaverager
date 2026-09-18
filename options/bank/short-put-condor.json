@@ -1,0 +1,84 @@
+{
+  "name": "Short Put Condor",
+  "slug": "short-put-condor",
+  "aliases": [
+    "reverse put condor",
+    "credit put condor"
+  ],
+  "summary": "Sell the outer puts and buy the two middle puts for a net credit; long-volatility payoff built entirely in puts.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike A: lowest (OTM put)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike B = A + W1",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike C: above spot",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike D = C + W1 (ITM put)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "credit",
+  "max_profit": "net credit x 100, outside A and D",
+  "max_loss": "(W1 - net credit) x 100, between B and C",
+  "breakevens": "A + credit; D - credit (per share)",
+  "greeks": {
+    "delta": "near zero",
+    "gamma": "positive outside the body",
+    "theta": "negative",
+    "vega": "positive"
+  },
+  "typical_dte": "20-45 DTE",
+  "when_to_use": "Low IV rank (<= 25) breakout expectation, when put-side pricing beats the reverse iron condor. Otherwise use the reverse iron condor.",
+  "entry_rules": [
+    "IV rank <= 25",
+    "Net credit >= 55% of W1",
+    "Breakout distance to A or D <= 1.0 x expected move",
+    "DTE 20-45",
+    "OI >= 500, spread <= 10% of mid on all legs",
+    "Max loss <= 1.5% of equity",
+    "Alpaca level 3 (each short is covered by a long at a strike that bounds the risk)"
+  ],
+  "management_rules": [
+    "Take profit at 60% of max profit",
+    "Time stop at 10 DTE",
+    "Loss stop at 50% of max loss",
+    "Close within 30 minutes of the open after a scheduled catalyst"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "Short put D is ITM from entry: close the structure if D's extrinsic < $0.10 or its delta <= -0.90",
+    "Close when spot moves beyond A or above D by 0.5 x W1 (near max profit)"
+  ],
+  "assignment_risk": "High: short put D is ITM at entry and assignment means buying 100 shares per contract at strike D. Prefer the reverse iron condor, which keeps all shorts OTM.",
+  "buying_power": "(W1 - credit) x 100 per contract",
+  "liquidity_needs": "OI >= 500 per leg; ITM puts must be quotable.",
+  "common_mistakes": "Carrying the ITM short put; mistaking the credit for premium income.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Avoid - ITM short put on expiration day.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

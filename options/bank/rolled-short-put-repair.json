@@ -1,0 +1,70 @@
+{
+  "name": "Rolled Short Put Repair",
+  "slug": "rolled-short-put-repair",
+  "aliases": [
+    "roll down and out",
+    "put repair roll"
+  ],
+  "summary": "A management pattern rather than an entry: roll a losing short put down and out for a net credit to buy time and lower the strike, with a hard limit on how many times.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Buy to close the existing tested short put",
+      "dte_rule": "the current expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Sell a new put at a strike 3-8% lower, targeting delta -0.25 to -0.30",
+      "dte_rule": "30-45 DTE from the roll date, always further out than the original"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The new credit plus all credits previously collected on the position",
+  "max_loss": "(new strike - cumulative credits) x 100. Max loss FALLS with each credit-positive roll, but duration and capital lock-up both extend.",
+  "breakevens": "new strike - cumulative credits collected across all rolls",
+  "greeks": {
+    "delta": "reset to +0.25 to +0.30 after the roll",
+    "gamma": "reset lower by moving further out in time",
+    "theta": "positive, reset",
+    "vega": "negative, reset"
+  },
+  "typical_dte": "30-45 DTE per roll",
+  "when_to_use": "When a short put's delta exceeds -0.50 but the underlying thesis is intact and the roll can be done for a net credit. Never use it to avoid taking a loss on a broken thesis.",
+  "entry_rules": [
+    "Trigger: existing short put delta exceeds -0.50, OR the underlying has fallen more than 1.5 ATR since entry",
+    "The roll MUST be executed for a net credit. If no credit is available at a lower strike and later expiry, do not roll - close the position and take the loss",
+    "New strike at least 3% below the old strike",
+    "New expiry at least 21 days beyond the current one, and 30-45 DTE total",
+    "Roll counter: maximum 2 rolls per original position. On the third trigger, close",
+    "Hard abort: if the underlying has fallen more than 20% from the original entry, or has broken its 200-day SMA on a weekly closing basis, close rather than roll",
+    "Submit as a single multi-leg roll order to avoid legging risk, never as two separate orders"
+  ],
+  "management_rules": [
+    "After the roll, manage the new position with standard CSP rules: close at 50% of the NEW credit, or at 21 DTE",
+    "Track cumulative credit and cumulative days-in-trade per original position; if days-in-trade exceeds 120, close regardless",
+    "Never increase contract count on a roll. Rolling into more contracts to make it back converts a manageable loss into an account event",
+    "Capital check: the rolled position still ties up new_strike x 100 in cash. Confirm it does not breach the 20%-of-equity per-position limit"
+  ],
+  "exit_rules": [
+    "Close at 50% of the new credit, at 21 DTE, at the 2-roll limit, or on the 20%-decline / 200-day-SMA abort",
+    "NEVER-ASSIGN RULE persists across rolls: extrinsic < $0.10, delta > -0.85, within 1.0% of the strike at 14:30 ET on expiry day, hard backstop 15:45 ET",
+    "The roll itself must be completed before the never-assign timer on the OLD position fires. Schedule rolls no later than 3 DTE on the original contract"
+  ],
+  "assignment_risk": "The roll's buy-to-close leg removes the old contract's assignment risk instantly; the new short put carries fresh, lower assignment risk. The danger is a partial fill that closes nothing and opens a second short put - always submit as a single net order and verify both legs filled.",
+  "buying_power": "New strike x 100 in cash. Slightly less than before if rolled down.",
+  "liquidity_needs": "Rolling requires a liquid chain at BOTH strikes and BOTH expiries. If the target strike has OI < 250, the roll is not viable - close instead.",
+  "common_mistakes": "Rolling for a debit and calling it management; rolling indefinitely and turning a 2-week trade into a 9-month hostage position; rolling into a bigger contract count; legging the roll and being momentarily short two puts.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Rolling is not possible at 0 DTE - there is no later same-day expiry. 0DTE positions are closed, never rolled.",
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

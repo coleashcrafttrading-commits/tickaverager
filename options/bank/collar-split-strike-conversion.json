@@ -1,0 +1,79 @@
+{
+  "name": "Collar (Split-Strike Conversion)",
+  "slug": "collar-split-strike-conversion",
+  "aliases": [
+    "split-strike conversion",
+    "fence",
+    "hedge wrapper",
+    "zero-cost collar"
+  ],
+  "summary": "Long 100 shares plus a long OTM put and a short OTM call: a conversion with the strikes pulled apart, capping both the downside and the upside, often for near-zero net premium.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares held or bought at market"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM put at delta -0.20 to -0.30 (target -0.25), setting the floor"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM call at whatever strike makes the net premium <= $0.10 debit for a zero-cost collar, otherwise delta +0.25 to +0.30",
+      "dte_rule": "same expiry as the put"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "(call_strike - entry_spot) x 100 - net_debit (or + net_credit), capped at the call strike",
+  "max_loss": "(entry_spot - put_strike) x 100 + net_debit, fully defined by the put floor",
+  "greeks": {
+    "delta": "+0.45 to +0.60 per unit",
+    "gamma": "small, negative near the call strike and positive near the put strike",
+    "theta": "slightly positive when opened for a credit",
+    "vega": "slightly negative on a standard equity skew (the put bought is pricier per unit of delta than the call sold)"
+  },
+  "breakevens": "entry_spot + net_debit/100 (or entry_spot - net_credit/100)",
+  "when_to_use": "Holding shares through an uncertain period with a defined floor. A true conversion (same strike both sides) locks all P/L; pulling the strikes apart leaves a controlled band. Best when IV rank >= 40 so the sold call funds the put, and when put skew is not so steep that the floor is prohibitively expensive.",
+  "typical_dte": "30-60 DTE",
+  "entry_rules": [
+    "LEVEL 3 LEGAL as a structure and the short call is covered by the 100 shares, so it is fully permitted on Alpaca Level 3. Note the equity leg cannot be part of an Alpaca multi-leg options order \u2014 submit shares first, confirm the fill, then submit the two option legs as one multi-leg order.",
+    "Shares must be confirmed settled/held before the short call is submitted. If the share fill fails, the call order must be cancelled \u2014 a short call without shares is an uncovered position Alpaca will reject, and if it somehow filled it would be a Level 4 exposure.",
+    "Put strike by delta: nearest listed strike with delta in [-0.30, -0.20]. Call strike by net premium: choose the lowest call strike whose credit covers at least 90% of the put debit.",
+    "Require put_strike >= entry_spot x 0.90 \u2014 a floor more than 10% below spot is not a floor worth paying for on a 30-60 DTE horizon.",
+    "Require call_strike <= entry_spot x 1.10 only if the credit target demands it; capping upside tighter than 5% above spot makes the structure a conversion in all but name and should trigger a review of whether the shares should just be sold.",
+    "Skip any expiry containing an ex-dividend date unless the call credit exceeds the dividend by 2x.",
+    "Position size: share notional <= 20% of equity ($10,000), i.e. 1 unit on a $100 name."
+  ],
+  "management_rules": [
+    "Close or roll the short call at 50% of its credit, or at 21 DTE, whichever comes first.",
+    "If the underlying rallies through the call strike and the call delta exceeds 0.80, roll the call up-and-out for a net credit, or close the whole collar and realise the capped gain. Never roll for a debit.",
+    "If the underlying falls through the put strike, the floor is working as designed: either hold to expiry and exercise the put, or close all three legs together and re-enter at a lower basis.",
+    "At 21 DTE, roll both option legs as a single package to the next 30-60 DTE cycle if the share position is still wanted."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on expiration day if spot is within 1.0% of the call strike or above it.",
+    "If the short call is ITM at any point on expiration day, close it by 14:00 ET.",
+    "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic = call_mid - max(0, spot - strike) < 1.25 x declared_dividend.",
+    "If the long put is ITM at 15:00 ET on expiration day, close it rather than allowing auto-exercise to sell the shares at the strike without a decision.",
+    "Unwind order if closing the whole structure: (1) buy back the short call, (2) sell the long put, (3) sell the shares. Never leave shares without the call closed."
+  ],
+  "assignment_risk": "On the short call only, and it is covered by the shares so there is no margin event \u2014 but assignment sells the 100 shares at the strike, which for a never-be-assigned system is a failure state. The two triggers are dividend capture (ITM call with extrinsic below the dividend, exercised the day before the ex-date) and deep ITM near expiry. The long put carries no assignment risk, only auto-exercise risk at expiry.",
+  "alpaca_level": 3,
+  "buying_power": "100 shares at full cost (cash) or 50% Reg T margin; the short call is covered and adds nothing; the put is a debit. Roughly $10,000 cash or $5,000 margin plus the net premium on a $100 underlying.",
+  "liquidity_needs": "OI >= 500 on both option strikes, bid-ask <= $0.05 each. The two option legs should be traded as one multi-leg order so the net premium is controlled rather than legged.",
+  "common_mistakes": "Chasing 'zero cost' by tightening the call strike until the upside cap is below the expected move, which quietly converts a hedge into a forced sale. Selling the call before the shares are confirmed. Ignoring ex-dividend dates.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE collar is a one-session cap-and-floor with almost no premium on either leg; the fees exceed the protection. Not sensible.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

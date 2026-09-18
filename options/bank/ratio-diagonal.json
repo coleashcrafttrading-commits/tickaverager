@@ -1,0 +1,74 @@
+{
+  "name": "Ratio Diagonal Spread (Front Ratio Diagonal)",
+  "slug": "ratio-diagonal",
+  "summary": "Sell two shorter-dated options at one strike against one longer-dated option at a different strike; a diagonal financed into a credit at the cost of one uncovered short.",
+  "aliases": [
+    "front ratio diagonal",
+    "2:1 diagonal",
+    "unbalanced diagonal",
+    "ratio time diagonal"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Higher strike by delta 0.20-0.30.",
+      "dte_rule": "front expiry, 21-45 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower strike by delta 0.50-0.70.",
+      "dte_rule": "back expiry, 60-120 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "At the short strike at front expiry: the intrinsic gain on the long from the long strike up to the short strike, plus the net credit.",
+  "max_loss": "UNDEFINED above the short strike - the second short call is uncovered. Each dollar above the short strike costs $100 net per unit once the first short is offset by the long.",
+  "breakevens": "Downside: the long strike plus or minus the net credit. Upside: approximately short strike + (max profit at the short strike)/100.",
+  "greeks": {
+    "delta": "positive below the short strike, turning negative above it",
+    "gamma": "negative above the short strike, and it accelerates",
+    "theta": "positive",
+    "vega": "near zero to negative"
+  },
+  "when_to_use": "A moderately bullish view with a hard ceiling - you expect the underlying to rise to but not through the short strike. Included for completeness; the naked leg makes it level 4 and it is not appropriate for a $50k account. The level-3-legal way to express the same view is a bull call diagonal plus a separately covered short call spread.",
+  "typical_dte": "short 21-45 DTE, long 60-120 DTE",
+  "entry_rules": [
+    "REQUIRES ALPACA OPTIONS LEVEL 4 - one of the two short calls has no covering long. The automation must reject this at level 3.",
+    "Ratio never worse than 2:1.",
+    "Long leg 60-120 DTE at delta 0.50-0.70; shorts 21-45 DTE at delta 0.20-0.30, strike above the long strike.",
+    "Short expiry strictly before the long expiry.",
+    "Net credit >= $0; never pay a debit for a structure with an uncovered leg.",
+    "Short strike must sit above a durable technical resistance level and beyond 1.5 x the front-month expected move.",
+    "Size on full naked margin for the uncovered contract."
+  ],
+  "management_rules": [
+    "Close at +50% of the credit.",
+    "Stop if the underlying trades within 0.5% of the short strike, or if the uncovered short's |delta| exceeds 0.40.",
+    "Close the uncovered short first if spot approaches the short strike - reducing to a 1:1 diagonal restores defined risk.",
+    "Maximum 1 unit, level 4 only."
+  ],
+  "exit_rules": [
+    "Close or roll ALL short legs by 14:30 ET on their expiration day, unconditionally.",
+    "Close the uncovered short the moment spot touches the short strike; do not wait for a delta or time trigger.",
+    "Close any short whose extrinsic <= $0.05 or |delta| >= 0.90.",
+    "Close short calls before ex-dividend if extrinsic < dividend per share.",
+    "Buy back the shorts before selling the long."
+  ],
+  "assignment_risk": "Two short contracts, one of them uncovered. Double assignment leaves the account short 200 shares against one long call - a genuinely naked short stock position. This is the structural reason it is level 4 and why the bank marks it as unsuitable for this account.",
+  "buying_power": "Debit/width treatment on the covered pair plus full naked margin on the uncovered contract (typically $2,000-$8,000).",
+  "liquidity_needs": "OI >= 500 both expiries; the structure must be closeable as a package.",
+  "common_mistakes": "Selling the second short for a small credit and accepting an unlimited tail; assuming a single long call covers two shorts; leaving the ratio on through an earnings gap.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never - an uncovered 0DTE short on a share-settled underlying is the worst possible assignment profile.",
+  "alpaca_level": 4,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bullish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

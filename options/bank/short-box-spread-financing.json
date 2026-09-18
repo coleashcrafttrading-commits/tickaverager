@@ -1,0 +1,80 @@
+{
+  "name": "Short Box Spread (Synthetic Borrowing)",
+  "slug": "short-box-spread-financing",
+  "aliases": [
+    "short box",
+    "box spread loan",
+    "synthetic margin loan",
+    "borrowing box"
+  ],
+  "summary": "Selling the box for a credit borrows cash at the implied rate until expiry, repaid as the strike width at settlement; famous as cheap financing on European index options and famous as an account-destroyer on American ones.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Lower strike K1, chosen by width; deep ITM placement (e.g. K1 well below spot) is the conventional financing setup"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Upper strike K2 = K1 + width",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Upper strike K2",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower strike K1",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "None as a trade \u2014 the 'profit' is the use of the borrowed cash. Economically: credit_received now, repay (K2 - K1) x 100 at expiry; the implied borrowing rate is ((width x 100 / credit) - 1) x (365 / days).",
+  "max_loss": "On European cash-settled options: bounded at the width, and the structure is a true loan. On AMERICAN share-settled options: effectively UNDEFINED. Early assignment on a deep-ITM short leg can force a $10,000+ share transaction; the 2021 Robinhood box-spread liquidations and the 2018 '1 Ronin' style blowups are the cautionary record. Treat as unbounded operational risk.",
+  "greeks": {
+    "delta": "0.00 by construction",
+    "gamma": "0.00 net",
+    "theta": "0.00 net; the liability accretes toward the width",
+    "vega": "0.00 net"
+  },
+  "breakevens": "None \u2014 flat liability of (K2 - K1) x 100 at expiry.",
+  "when_to_use": "NOT ON THIS ACCOUNT. Legitimate use is borrowing against a large portfolio at a rate near the risk-free rate instead of a broker's margin rate, executed exclusively on European-style, cash-settled index options (SPX or XSP), where no early exercise is possible and settlement is in cash. Alpaca offers only American-style equity and ETF options, so the correct vehicle does not exist here.",
+  "typical_dte": "180-730 on index options in the legitimate version; irrelevant here",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3 and should be permanently denylisted. Even though every short leg is nominally covered by a long leg of the same right, brokers generally require the highest approval tier for a short box because of the assignment mechanics; treat as Level 4.",
+    "BLOCKED BY INSTRUMENT: Alpaca supports equity and ETF options only, all American style, all share settled. There is no SPX/XSP/NDX cash-settled product on the platform. A short box on SPY or QQQ is NOT a substitute for a short box on SPX \u2014 the early-exercise risk is the entire difference and it is the risk that matters.",
+    "BLOCKED BY PURPOSE: the account is paper with ~$50k. There is no real financing need, and the 'borrowed' cash in a paper account is fictional.",
+    "Documented so the strategy classifier recognises the leg pattern (short call K1 / long call K2 / short put K2 / long put K1) and refuses it, including when assembled by accident from two separate credit spreads."
+  ],
+  "management_rules": [
+    "If this exposure is ever detected in the live book, raise a critical alert and close all four legs immediately as one order.",
+    "No profit target, no stop \u2014 the position should not exist on this account."
+  ],
+  "exit_rules": [
+    "If somehow open: close all four legs as a single order, immediately, without waiting for expiry.",
+    "Never hold a short box into the final week. Both short legs accumulate assignment probability as extrinsic decays, and a deep-ITM short leg with under $0.05 of extrinsic will be exercised.",
+    "If assigned on any leg, flatten the resulting share position in the same session using the corresponding long option."
+  ],
+  "assignment_risk": "CATASTROPHIC on American options. Both short legs are typically deep ITM by design in the financing setup, which means both have near-zero extrinsic value and both are prime early-exercise candidates. An assignment on the short call delivers short shares; on the short put, long shares. The long options 'cover' the payoff but not the cash, and the broker may liquidate other positions to meet the resulting requirement. This is precisely how retail box-spread accounts have been blown up. European cash-settled index options eliminate this entirely, which is why every legitimate box-financing writeup specifies SPX or XSP \u2014 and why the strategy is unavailable on an equity/ETF-only platform.",
+  "alpaca_level": 4,
+  "buying_power": "((K2 - K1) x 100) less the credit received, held until expiry \u2014 i.e. the full repayment obligation. A 50-point SPY box is $5,000 of held requirement.",
+  "liquidity_needs": "Irrelevant \u2014 do not trade on this account.",
+  "common_mistakes": "The central one: substituting an ETF (SPY, QQQ) for the index (SPX, XSP) because the ticker looks similar. American vs European settlement is the whole trade. Second: opening a short box to 'raise cash' in a portfolio margin context without understanding that the repayment is a hard obligation at a fixed date.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never. A 0DTE short box is four legs of pin risk with two deep-ITM short options settling into shares.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

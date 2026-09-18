@@ -1,0 +1,88 @@
+{
+  "name": "Long Put Condor",
+  "slug": "long-put-condor",
+  "aliases": [
+    "put condor",
+    "long condor spread (puts)",
+    "debit put condor"
+  ],
+  "summary": "Four puts at four ascending strikes - buy the lowest, sell the two middles, buy the highest - for a net debit; same flat-topped neutral payoff as a call condor, built in puts.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike A: lowest, ~0.20 delta",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike B = A + W1 (body lower bound, below spot)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike C: body upper bound, above spot",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike D = C + W1 (ITM put, outer widths equal)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(W1 - net debit) x 100, between B and C",
+  "max_loss": "net debit x 100, outside A and D",
+  "breakevens": "A + net debit; D - net debit (per share)",
+  "greeks": {
+    "delta": "near zero with the body centered",
+    "gamma": "negative inside the body",
+    "theta": "positive inside the body",
+    "vega": "negative"
+  },
+  "typical_dte": "20-45 DTE",
+  "when_to_use": "Identical payoff to the call condor and the iron condor at the same strikes; useful when put strikes are better quoted or the put skew makes the debit cheaper. Range-bound view, IV rank >= 30.",
+  "entry_rules": [
+    "IV rank >= 30",
+    "Net debit <= 45% of W1",
+    "Body centered within 0.25 x body width of spot",
+    "Outer widths equal",
+    "DTE 20-45",
+    "OI >= 500, spread <= 10% of mid on all four legs",
+    "Debit <= 1.5% of equity",
+    "Route only if cheaper than the equivalent iron condor and call condor",
+    "Alpaca level 3"
+  ],
+  "management_rules": [
+    "Take profit at 50% of max profit",
+    "Time stop at 14 DTE",
+    "Loss stop at 50% of the debit",
+    "Close if spot leaves the A-D range"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "The upper short put (strike C) is ITM by construction - close the structure if its extrinsic < $0.10 or its delta <= -0.85",
+    "Short puts have no dividend-driven assignment, but deep ITM short puts are assigned when extrinsic vanishes, especially near expiry and around hard-to-borrow situations",
+    "Close immediately if either short strike is breached by more than 0.25 x W1"
+  ],
+  "assignment_risk": "The upper short put (C) is ITM for most of the trade's life; assignment delivers long shares (cash outlay of 100 x strike). No dividend trigger, but extrinsic-decay assignment is real.",
+  "buying_power": "Net debit x 100 per contract",
+  "liquidity_needs": "All four legs OI >= 500; ITM put strikes often quoted wider - check before routing.",
+  "common_mistakes": "Overpaying versus the equivalent iron condor; ignoring the ITM short put's assignment mechanics; body too narrow.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Avoid - an ITM short put on expiration day will be assigned.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

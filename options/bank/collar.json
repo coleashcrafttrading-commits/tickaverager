@@ -1,0 +1,83 @@
+{
+  "name": "Collar",
+  "slug": "collar",
+  "aliases": [
+    "Protective collar",
+    "Hedge wrapper",
+    "Split-strike conversion",
+    "Fence"
+  ],
+  "summary": "Own 100 shares, buy a protective put and sell a covered call to pay for it - defined floor, defined ceiling, near-zero net cost.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing or new shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.25-0.35 delta, 5-10% OTM (the floor)",
+      "dte_rule": "30-90 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.20-0.30 delta OTM, chosen so the credit >= 80% of the put's cost (the ceiling)",
+      "dte_rule": "same expiry as the put"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "(call strike - share basis - net debit) x 100",
+  "max_loss": "(share basis - put strike + net debit) x 100",
+  "breakevens": "share basis + net debit per share (or minus net credit)",
+  "greeks": {
+    "delta": "+40 to +60 per unit",
+    "gamma": "near zero",
+    "theta": "near zero by design (the short call's decay funds the put's)",
+    "vega": "near zero"
+  },
+  "when_to_use": "Holding a large concentrated share position through uncertainty; locking in gains after a big run; or as the default risk-controlled way to hold ETF shares in an automated fleet. Best when call skew is rich relative to put skew.",
+  "typical_dte": "30-90 DTE",
+  "entry_rules": [
+    "Require 100 shares per collar; the call MUST be covered by the shares (level 3 requirement).",
+    "Put strike by delta in [0.25, 0.35] or by a max drawdown target: put_strike >= basis x (1 - max_dd_pct).",
+    "Call strike chosen as the lowest strike whose credit >= 0.80 x put cost, subject to call_strike >= basis x 1.03 and call_strike >= basis (never cap below cost).",
+    "Require (call strike - put strike) >= 8% of spot so the profit band is worth having.",
+    "Both legs same expiry; OI >= 250 each; no earnings inside unless the collar is specifically the earnings hedge.",
+    "Reject if the net debit exceeds 0.5% of share notional."
+  ],
+  "management_rules": [
+    "Manage as a unit; there is no 50% profit rule - the collar is a holding structure, not an income trade.",
+    "Roll both legs together at 21-30 DTE to the next cycle, re-striking the put at 0.30 delta and the call at whatever funds it.",
+    "If the stock rallies to the call strike, roll the collar UP (higher put and call) for approximately zero cost rather than allowing assignment.",
+    "If the stock falls to the put strike, the floor is working; decide whether to monetize the put (sell it, keep the shares and the call) or exit the whole unit.",
+    "Never roll the call down below the share basis to fund a higher put."
+  ],
+  "exit_rules": [
+    "HARD: the short call is assignable. Flatten it by 15:30 ET on expiration day if ITM or within 0.5% of its strike; close immediately whenever its extrinsic < 0.05 and delta > 0.85.",
+    "Ex-dividend guard on the short call: close or roll the day before ex-date if ITM and extrinsic < 1.10 x dividend.",
+    "Close the long put before expiry if ITM - auto-exercise would sell the shares at the strike.",
+    "Unwind all three legs as one combo order when exiting the position entirely."
+  ],
+  "assignment_risk": "Only the short call is assignable, and it is fully covered by the shares, so the financial risk is bounded - but assignment removes the shares while the long put remains, leaving a naked long put (a bearish position the system did not choose). The reconciliation logic must detect share-count changes and close orphaned puts.",
+  "buying_power": "Shares plus the net debit; the short call is covered so no additional margin. A collar substantially reduces the maintenance requirement on a margin account.",
+  "liquidity_needs": "Both wings liquid at 0.25-0.35 delta; OI >= 250 each; combined spread <= 10% of the put's cost.",
+  "common_mistakes": "Setting the call strike below the share basis and guaranteeing a loss if called; collaring so tightly that the position cannot make money; rolling only one leg and leaving the position lopsided.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE collar is a share position with a same-day floor and ceiling - almost all the cost with almost none of the protection. Not worth automating.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)"
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "name": "Calendarized Butterfly (Time Butterfly)",
+  "slug": "calendarized-butterfly",
+  "summary": "Sell two near-term ATM options and buy one longer-dated option at a lower strike and one at a higher strike; a butterfly whose wings live in a later expiry, so it holds value longer than a standard fly.",
+  "aliases": [
+    "time butterfly",
+    "diagonal butterfly",
+    "calendar butterfly",
+    "double diagonal butterfly"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "ATM body, |delta| 0.45-0.55.",
+      "dte_rule": "front expiry, 21-35 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower wing: strike below the body by 1 x the front-month expected move, or by delta 0.70-0.80.",
+      "dte_rule": "back expiry, 45-70 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Upper wing: strike above the body by the same distance as the lower wing (symmetric width), delta 0.20-0.30.",
+      "dte_rule": "back expiry, same as the lower wing"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "Near the body strike at front expiry; larger than a same-expiry butterfly because the back-month wings retain time value. No closed form - model both wings at front expiry with back-month IV.",
+  "max_loss": "Net debit plus, on the upper side, the unmatched (upper wing strike - body strike) x 100 exposure that exists only in the window between the two expiries if the position is mishandled. Managed correctly and closed before front expiry, the loss is the net debit.",
+  "breakevens": "Two, inside the wings, solved numerically at front expiry with back-month IV.",
+  "greeks": {
+    "delta": "~0 at the body",
+    "gamma": "negative and concentrated at the body",
+    "theta": "positive, larger than a standard butterfly because the wings decay slower",
+    "vega": "positive (the two long wings are back-month); a standard butterfly is near vega-flat, this one is not"
+  },
+  "when_to_use": "IV rank < 30 with a strong pin thesis and a desire for a wider, longer-lived tent than a same-expiry butterfly. The back-month wings mean the structure does not go to zero value if the underlying moves - it degrades gracefully. Rarely worth the complexity outside SPY/QQQ.",
+  "typical_dte": "front 21-35 DTE (body), back 45-70 DTE (wings)",
+  "entry_rules": [
+    "IV rank < 30; front_IV - back_IV >= -2.0 vol points.",
+    "Body ATM by delta 0.45-0.55; wings symmetric in strike distance, sized at 1.0 x the front-month expected move.",
+    "Front body 21-35 DTE; wings 45-70 DTE; gap 21-35 days.",
+    "Net debit <= 2% of equity per unit; 4-leg bid-ask <= 10% of debit.",
+    "No earnings or ex-dividend in the front cycle.",
+    "LEVEL 3 OK but with a caveat the automation must encode: the lower-strike back-month long fully covers one short body contract (long strike < short strike, later expiry). The SECOND short body contract is covered by the UPPER wing only by strike, so Alpaca will hold (upper wing strike - body strike) x 100 minus the credit on that pair as maintenance. Verify the reserved buying power before sizing.",
+    "Submit as a single 4-leg mleg; if legging, buy BOTH wings first, then sell the body."
+  ],
+  "management_rules": [
+    "Profit target +20% of debit.",
+    "Stop at -40% of debit.",
+    "If |spot - body strike| > 0.8 x the wing width, close the structure - the fly has lost its geometry.",
+    "If |net delta| > 0.30 per unit, close rather than adjust.",
+    "Roll the body out one expiry at front DTE <= 7 only if both shorts' |delta| <= 0.60, for a credit.",
+    "Max 2 units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll BOTH short body contracts by 14:30 ET on front expiration day, unconditionally.",
+    "Close the whole structure no later than 2 trading days before the body's expiry if not rolling.",
+    "Close a short body contract immediately if extrinsic <= $0.05 or |delta| >= 0.90.",
+    "Close short calls before ex-dividend if extrinsic < dividend per share.",
+    "Unwind the body (shorts) before the wings (longs), always - the wings are the cover.",
+    "If either wing marks below $0.10, close everything."
+  ],
+  "assignment_risk": "Two short body contracts. If both are assigned the account is short 200 shares against two long back-month calls at different strikes - covered, but with a directional gap between the wing strikes. Flatten within one session.",
+  "buying_power": "Net debit plus a maintenance requirement of (upper wing strike - body strike) x 100 minus the credit on the pair whose cover is the upper wing. Do not assume debit-only.",
+  "liquidity_needs": "Four legs across two expiries and three strikes: OI >= 500 per leg, penny-wide preferred. SPY/QQQ/IWM and mega-caps only.",
+  "common_mistakes": "Assuming the buying-power requirement is just the debit; setting wings too narrow so the structure is all gamma and no tent; failing to recognize that the body is a DOUBLE short and therefore a double assignment candidate at front expiry.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not suitable - two 0DTE shorts on a share-settled name is exactly what the assignment policy forbids.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

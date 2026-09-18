@@ -1,0 +1,75 @@
+{
+  "name": "Bull Put Diagonal Spread (Short Put Diagonal, Credit)",
+  "slug": "bull-put-diagonal",
+  "summary": "Sell a shorter-dated higher-strike put and buy a longer-dated lower-strike put; a bull put credit spread whose protective leg is bought further out in time so it survives the short.",
+  "aliases": [
+    "short put diagonal",
+    "credit put diagonal",
+    "bullish put diagonal"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Higher strike by delta |0.20-0.35| (OTM below spot).",
+      "dte_rule": "front expiry, 21-45 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower strike, width chosen so (width x 100 - credit) <= 1.5% of equity; bought in a LATER expiry.",
+      "dte_rule": "back expiry, at least 21 days beyond the front, typically 45-90 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The net credit received plus the residual value of the long back-month put once the short expires worthless.",
+  "max_loss": "(Short strike - long strike) x 100 - net credit at front expiry, provided the long is never closed first.",
+  "breakevens": "Approximately short strike - (credit + residual long value)/100 at front expiry.",
+  "greeks": {
+    "delta": "net positive, roughly +0.10 to +0.25 per unit",
+    "gamma": "negative near the short strike",
+    "theta": "positive while spot is above the short strike",
+    "vega": "near flat to slightly positive - the back-month long put offsets much of the short's vega, which makes this more robust than a plain bull put spread to a vol spike"
+  },
+  "when_to_use": "IV rank >= 35 with an uptrend or a support bounce. The diagonal beats the vertical when the back month is cheap relative to the front, and when you want protection that outlives the short (useful into an event that sits between the two expiries). Put skew means the long lower-strike put costs relatively more here than the call-side mirror - check that the credit still meets the 25%-of-width rule.",
+  "typical_dte": "short 21-45 DTE, long 45-90 DTE",
+  "entry_rules": [
+    "Trend/level filter: spot > 50-day SMA, or a confirmed bounce off support within 2 sessions.",
+    "IV rank >= 35.",
+    "Short put by delta |0.20-0.35|; long put strike below it; long expiry at least 21 days beyond the short.",
+    "Credit >= 25% of the strike width.",
+    "Max loss (width x 100 - credit) <= 1.5% of equity per unit.",
+    "Combined bid-ask <= 10% of the credit.",
+    "LEVEL 3 OK: the short put is covered by a lower-strike long put with a LATER expiry. Submit as a 2-leg mleg; buy the long put FIRST if legging."
+  ],
+  "management_rules": [
+    "Take profit at 50% of the credit received.",
+    "Stop at 2x the credit received, or when the short put's |delta| reaches 0.50.",
+    "Close or roll at 21 DTE on the short leg if its |delta| > 0.35.",
+    "Roll the short down and out for a credit only; never roll past the long leg's expiry.",
+    "If the thesis flips bearish, buy back the short and keep the long put as a cheap hedge.",
+    "Max 3 units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+    "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Close any short put whose extrinsic drops below $0.10 - deep-ITM short puts are exercised early for interest carry.",
+    "NEVER sell the long put while the short put is open; the long is the cover.",
+    "If spot is below the long strike, close both legs as a package."
+  ],
+  "assignment_risk": "Only the short front-month put. Assignment delivers +100 shares at the short strike (buying power = strike x 100), hedged below by the long put. Flatten within one session and re-establish if the thesis stands. Early exercise risk rises sharply once the short put's extrinsic goes below the cost of carry.",
+  "buying_power": "(Short strike - long strike) x 100 minus the net credit, held for the life of the short.",
+  "liquidity_needs": "Both expiries OI >= 300; short expiry penny or nickel wide; underlying ADV >= 2M shares.",
+  "common_mistakes": "Selling the long put first and going naked short; choosing a back month only a week out so the long adds cost without residual value; rolling the short beyond the long's expiry; assuming the credit-to-width ratio from the call side applies - skew makes the put-side long more expensive.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not under this playbook; minimum short DTE at entry is 21.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,70 @@
+{
+  "name": "Buy-Write",
+  "slug": "buy-write",
+  "aliases": [
+    "Simultaneous covered call",
+    "Covered call opening order"
+  ],
+  "summary": "Buy the 100 shares and sell the call in one combined net-debit order, so the entry price of the covered call unit is locked as a single fill.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "market/limit at the combo net debit",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.30-0.40 delta OTM, or ATM for a maximum-income variant",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(strike x 100) - net debit paid for the combo",
+  "max_loss": "net debit paid (stock to zero)",
+  "breakevens": "net debit / 100 (i.e. share price minus premium)",
+  "greeks": {
+    "delta": "+60 to +70 per unit",
+    "gamma": "slightly negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "Establishing a new income position from scratch rather than overwriting existing shares. Preferred whenever the system is initiating, because it removes leg risk and prices the unit by its true net basis.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "Submit as a single multi-leg net-debit order (Alpaca supports multi-leg up to 4 legs); do NOT leg in.",
+    "Require net debit <= (spot x 100) - (0.6% x spot x 100), i.e. the credit covers at least 0.6% of notional.",
+    "Require static return (credit / net debit) >= 1.2% for a 30-45 DTE cycle, and if-called return >= 2.5%.",
+    "Require IV Rank >= 30 and no earnings inside the option's life.",
+    "Size so that net debit <= 8% of account equity per underlying (at ~$50k equity that is ~$4,000 per unit).",
+    "Reject if the combined order's implied share price is more than 0.3% worse than the current share NBBO mid."
+  ],
+  "management_rules": [
+    "Close at 50% of the option credit, or unwind the whole combo at 60% of max profit, whichever the config specifies.",
+    "At 21 DTE, roll the call or unwind the combo.",
+    "If the stock drops below net debit basis x 0.90, either roll the call down for credit or exit the unit; do not average down inside the same unit.",
+    "Track the position as one unit with an adjusted basis: basis = net debit - all subsequent net call credits."
+  ],
+  "exit_rules": [
+    "Unwind as a single net-credit combo order (sell stock + buy call) to avoid a naked leg.",
+    "HARD: if the call is ITM at 15:30 ET on expiration day, buy it back and decide separately whether to keep the shares.",
+    "Close the call if extrinsic < 0.05 and delta > 0.85 at any time.",
+    "Ex-dividend guard identical to the covered call."
+  ],
+  "assignment_risk": "Same as covered call: the short call is assignable, worst around ex-dividend when extrinsic < dividend, and at expiration when ITM. Shares cover the delivery, so the risk is unwanted disposal, not undefined loss.",
+  "buying_power": "Net debit in cash (paper cash account) or ~50% Reg-T initial margin on the share leg for a margin account; the call adds no requirement while covered.",
+  "liquidity_needs": "Needs a tradable combo: option OI >= 250, option spread <= 8% of mid, share spread <= 0.05%.",
+  "common_mistakes": "Legging in and getting a bad share fill; chasing the highest premium name (usually the highest realized-vol name) and losing on the shares; ignoring the if-called return and writing strikes that make the unit unprofitable even when everything works.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Buying shares to write a 0DTE call gives almost no premium against full overnight-free but full intraday share risk; the share leg dominates. Only sensible if the shares are wanted anyway.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

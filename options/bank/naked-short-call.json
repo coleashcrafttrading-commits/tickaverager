@@ -1,0 +1,56 @@
+{
+  "name": "Naked (Uncovered) Short Call",
+  "slug": "naked-short-call",
+  "aliases": [
+    "uncovered call",
+    "naked call write"
+  ],
+  "summary": "Sell a call with no underlying shares. Unlimited upside risk. Level 4 only - not permitted in this account and not offered by Alpaca at all.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta 0.15-0.25 OTM",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "max_profit": "The credit received x 100, and nothing more",
+  "max_loss": "UNDEFINED / UNLIMITED. Loss = (underlying at expiry - strike - credit) x 100 with no ceiling. A 100% overnight gap on a single name produces a loss many times the account equity.",
+  "breakevens": "strike + credit per share",
+  "greeks": {
+    "delta": "-0.15 to -0.25",
+    "gamma": "negative, and it accelerates against you exactly when you are losing",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Never in this account. Documented for completeness and so the system can classify and refuse it. Institutionally it is only run with continuous delta hedging and hard risk limits.",
+  "entry_rules": [
+    "BLOCKED: requires Level 4. This account is Level 3 (Alpaca PAPER, ~$50k equity), and Alpaca does not offer Level 4 to retail traders - its approval tiers run 1 through 3 only. Any such order will be rejected by the broker",
+    "The automation must refuse to construct this order rather than relying on broker rejection, so that rejected-order noise never masks a real problem",
+    "Any short call that exists with zero covering shares and no long call at a higher strike is naked by definition and must be flattened immediately"
+  ],
+  "management_rules": [
+    "Not applicable - blocked",
+    "Reference discipline if it were ever permitted: close at 50% of credit, hard stop at 2x credit, mandatory close if delta exceeds 0.30, never hold through earnings"
+  ],
+  "exit_rules": [
+    "Any detected uncovered short call is bought to close at market immediately, regardless of time of day or P&L",
+    "No never-assign timer applies, because the position must not exist for longer than it takes to flatten it"
+  ],
+  "assignment_risk": "EXTREME and unbounded. Early assignment creates a short stock position of unlimited risk, subject to buy-in, borrow fees and dividend liability, in an account not approved for it.",
+  "buying_power": "Level 4 naked call margin: the greater of (20% of underlying value - OTM amount + premium) or (10% of underlying value + premium). Unavailable here.",
+  "liquidity_needs": "Not applicable - blocked.",
+  "common_mistakes": "Assuming a far-OTM short call is safe. Single-name gap risk is the entire reason this approval level exists.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "See zero-dte-naked-short-call; equally blocked.",
+  "alpaca_level": 4,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

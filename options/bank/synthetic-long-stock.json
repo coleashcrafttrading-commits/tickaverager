@@ -1,0 +1,75 @@
+{
+  "name": "Synthetic Long Stock",
+  "slug": "synthetic-long-stock",
+  "aliases": [
+    "combo",
+    "synthetic stock",
+    "long combo",
+    "risk reversal at-the-money"
+  ],
+  "summary": "Long call + short put at the same strike and expiry replicates 100 long shares with almost no capital outlay; it bets on the underlying rising and carries full downside to zero.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM: strike nearest spot, call delta 0.45-0.55"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SAME strike as the call (exact match required, otherwise it is a split-strike combo, not a synthetic)",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either",
+  "max_profit": "UNDEFINED (unlimited): (spot_at_exit - strike) x 100 - net_debit, uncapped to the upside",
+  "max_loss": "UNDEFINED in practical terms: (strike x 100) - net_credit if the underlying goes to zero; a 20% overnight gap on a $100 name costs $2,000 per contract with zero protection",
+  "greeks": {
+    "delta": "+1.00 per contract (+100 share-equivalents), essentially constant",
+    "gamma": "~0 net (long call gamma cancels short put gamma at the same strike)",
+    "theta": "~0 net (call decay offsets put decay); residual is the carry/financing term",
+    "vega": "~0 net (long call vega cancels short put vega at the same strike)"
+  },
+  "breakevens": "strike + net_debit/100, or strike - net_credit/100",
+  "when_to_use": "When the desired exposure is pure delta-1 and capital efficiency matters, or when the underlying is hard-to-borrow and cheap to synthesise. Never used for a volatility view: net vega is zero by construction. IV rank is irrelevant here; the only pricing input that matters is whether the combo prices rich or cheap to spot minus the carry term (see put-call-parity-arbitrage).",
+  "typical_dte": "30-90 DTE for directional replication; 180-365 DTE if used as a long-term stock substitute",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the short put is uncovered. Alpaca Level 3 rejects a multi-leg order containing an uncovered short leg, and rejects the standalone naked short put. Requires Level 4. Do not attempt to leg into it by selling the put separately \u2014 the API will reject it and, if it did not, it would be an uncovered position.",
+    "If ever run at Level 4: underlying price >= $20, 20-day ADV >= 2,000,000 shares, and both legs have OI >= 500 and bid-ask <= 3% of mid.",
+    "Strike: choose the listed strike closest to spot such that |call_delta| is in [0.45, 0.55]; the put must use the identical strike.",
+    "Do not open if net_debit > (spot - strike) + strike x r x T/365 + 0.10, i.e. reject if the combo is priced more than $0.10 through fair carry.",
+    "Do not open within 5 calendar days of a declared ex-dividend date or within 2 sessions of earnings.",
+    "Position sizing: notional (strike x 100) must be <= 20% of the $50k account equity, so <= $10,000 notional, i.e. <= 1 contract on a $100 underlying."
+  ],
+  "management_rules": [
+    "Because net gamma, theta and vega are ~0, there is nothing to 'manage' except delta: treat it exactly like a 100-share stock position.",
+    "Close at +10% of notional or -7% of notional (hard stop measured on (spot - entry_spot) x 100), whichever hits first.",
+    "If the short put goes ITM by more than 2% of the strike, close the whole structure the same session; there is no reason to carry assignment risk on a position whose economics are just long stock.",
+    "If a dividend is declared after entry with an ex-date before expiry, close the structure within 1 session \u2014 the declared dividend is already priced into the put and the position will underperform holding shares.",
+    "Roll to the next expiry no later than 21 DTE if the exposure is still wanted; do not carry a synthetic into expiry week."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: the short put must be closed no later than 15:40 ET on expiration day, unconditionally, at market if necessary.",
+    "If the short put is ITM at any point on expiration day (spot < strike), close it by 14:00 ET. Do not wait for the 15:40 sweep.",
+    "If at 21 DTE the short put delta is <= -0.75, close or roll the entire structure that session.",
+    "American-style equity/ETF options settle in shares: allowing this put to be assigned delivers 100 shares and consumes (strike x 100) of buying power overnight. The system must never reach that state."
+  ],
+  "assignment_risk": "HIGH and one-sided. The short put can be assigned at any time once ITM, and assignment is near-certain if its extrinsic value falls below ~$0.05 or if the underlying pays no dividend and rates are low. Assignment delivers 100 shares at the strike, leaving the account long stock plus a long call \u2014 a much larger capital commitment than intended. No dividend risk on the put leg itself (puts are exercised early for interest, not dividends), but a large dividend makes early put exercise less likely, not more.",
+  "alpaca_level": 4,
+  "buying_power": "Reg T naked short put: greater of (20% of underlying value - OTM amount + put premium) and (10% of strike + premium), per contract. Roughly $1,500-$2,500 on a $100 underlying. Not available at Level 3 at any price.",
+  "liquidity_needs": "Both legs must be tradable as a single multi-leg order. Combined bid-ask on the package <= $0.10 or 2% of the strike, whichever is larger. Avoid strikes with OI < 500.",
+  "common_mistakes": "Treating it as 'cheap stock' and oversizing because the debit is small \u2014 the risk is full stock notional. Also using different strikes for the two legs and believing it is still delta 1.00; that is a risk reversal with gamma and vega, not a synthetic.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Unusable at 0DTE: the short put has zero extrinsic to protect it, and the position is a pure assignment coin-flip on the close. The delta-1 exposure it creates could be obtained by simply buying shares with none of the pin risk.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bullish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1,
+  "also_filed_under": [
+    "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)"
+  ]
+}

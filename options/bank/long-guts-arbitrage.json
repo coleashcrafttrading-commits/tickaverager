@@ -1,0 +1,68 @@
+{
+  "name": "Long Guts Arbitrage",
+  "slug": "long-guts-arbitrage",
+  "aliases": [
+    "guts",
+    "ITM strangle floor",
+    "guts parity floor"
+  ],
+  "summary": "A long ITM call plus a long ITM put (strikes inverted relative to a strangle) must be worth at least the distance between the strikes; buying the pair for less than that distance is a locked profit.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ITM call at lower strike K1 (K1 < spot)"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ITM put at higher strike K2 (K2 > spot); the arbitrage floor is that (call + put) >= (K2 - K1)",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "UNDEFINED (unlimited) on the upside beyond K2 less the debit; but the arbitrage component is (K2 - K1) x 100 - net_debit when that quantity is positive",
+  "max_loss": "net_debit - ((K2 - K1) x 100), which is zero or negative when the arbitrage condition holds; otherwise the standard guts max loss",
+  "greeks": {
+    "delta": "near zero when spot sits midway between the strikes",
+    "gamma": "positive",
+    "theta": "negative (both legs are long)",
+    "vega": "positive"
+  },
+  "breakevens": "K1 - (net_debit/100 - (K2 - K1)) and K2 + (net_debit/100 - (K2 - K1)); when the arbitrage condition holds there are no losing terminal prices.",
+  "when_to_use": "Rare and mostly historical. The floor is violated only when both ITM legs are quoted stale or when one side's market maker has stepped away. It is included because the guts structure is routinely misunderstood as 'the same as a strangle' when its arbitrage floor makes it behave differently under mispricing.",
+  "typical_dte": "30-60 DTE for the volatility version; any DTE for the arbitrage version",
+  "entry_rules": [
+    "LEVEL 2 LEGAL: two long options, no short legs, no uncovered exposure. Fully executable on Alpaca Level 3. This is one of the few entries in this family with no approval obstacle at all.",
+    "Arbitrage gate: (call_ask + put_ask) x 100 < (K2 - K1) x 100 - fees - $10. Use executable asks, never midpoints.",
+    "Both legs quoted within 2 seconds, displayed size >= 10, OI >= 100, same expiry.",
+    "As a non-arbitrage volatility trade (guts held for a large move), require IV rank < 25 and an expected catalyst, and note that it is capital-inefficient versus a standard strangle for identical exposure \u2014 the extra capital is the embedded (K2 - K1) that is returned at expiry.",
+    "Never on an adjusted contract."
+  ],
+  "management_rules": [
+    "If entered as an arbitrage, hold or close whenever the pair can be sold for more than (K2 - K1) x 100 plus fees.",
+    "If entered as a volatility trade, close at 100% of the debit above the floor, or at 21 DTE, whichever comes first.",
+    "No short legs, so the only decay risk is the extrinsic above the floor; measure P/L as (current pair value - (K2 - K1) x 100) so the floor is not mistaken for profit."
+  ],
+  "exit_rules": [
+    "No short option legs, therefore no assignment risk.",
+    "BOTH legs are ITM by construction, so BOTH will be auto-exercised at expiry if held: the call buys 100 shares and the put sells 100 shares, netting flat but moving $20,000+ of stock through the account with settlement-timing exposure. Close both legs by 15:00 ET on expiration day, unconditionally.",
+    "If the underlying moves so that one leg goes OTM, the structure is no longer a guts and the remaining ITM leg must be managed as a single long option \u2014 close by 15:00 ET on expiry day if ITM.",
+    "Never allow an ITM long option to reach auto-exercise."
+  ],
+  "assignment_risk": "NONE from short legs. The exposure is auto-exercise of BOTH long legs at expiry, which is uniquely awkward here because it is guaranteed rather than probabilistic: a guts always finishes with at least one leg ITM, and if the underlying stays between the strikes, both do. The 15:00 ET close rule is mandatory, not advisory.",
+  "alpaca_level": 2,
+  "buying_power": "Full debit paid, which includes the (K2 - K1) x 100 that is returned at expiry. Roughly $1,000+ per unit for a 10-point guts \u2014 capital-heavy for the exposure obtained.",
+  "liquidity_needs": "ITM options quote wider than OTM; require bid-ask <= $0.10 on both legs and OI >= 100. Wide ITM markets are the reason the apparent floor violations appear.",
+  "common_mistakes": "Reporting the whole position value as profit and not netting off the embedded (K2 - K1). Letting both legs auto-exercise and being surprised by two five-figure share movements. Confusing a guts with a strangle for margin purposes.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "At 0DTE a guts is almost pure intrinsic with both legs facing certain auto-exercise; the structure becomes a fee-laden way to hold cash for a day.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

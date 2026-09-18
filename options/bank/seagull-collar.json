@@ -1,0 +1,82 @@
+{
+  "name": "Seagull Collar",
+  "slug": "seagull-collar",
+  "aliases": [
+    "Seagull",
+    "Three-way with a bought call",
+    "Skewed fence"
+  ],
+  "summary": "A collar variant financing a put spread with a short call (or a call spread with a short put) so that part of the upside is bought back - a three-leg structure that keeps a slice of the tail.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.30-0.40 delta (the floor)",
+      "dte_rule": "60-120 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.25-0.30 delta (the funding leg, the cap)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.08-0.12 delta, well above the short call - restores upside participation above it",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either",
+  "max_profit": "capped between the short and long call strikes, then participating again above the long call strike: effectively (short call strike - basis) x 100 plus everything above the long call strike",
+  "max_loss": "(share basis - put strike + net debit) x 100",
+  "breakevens": "share basis + net debit per share",
+  "greeks": {
+    "delta": "+50 to +65 per unit",
+    "gamma": "positive in both tails",
+    "theta": "near zero",
+    "vega": "near zero to slightly positive"
+  },
+  "when_to_use": "Holding shares that could melt up (a takeover candidate, a momentum name) where a plain collar's hard cap is unacceptable, but downside protection is still required.",
+  "typical_dte": "60-120 DTE",
+  "entry_rules": [
+    "Long put 0.30-0.40 delta; short call 0.25-0.30 delta; long call 0.08-0.12 delta with at least 10% of spot between the two call strikes.",
+    "Net cost <= 0.75% of share notional.",
+    "Short call strike >= basis x 1.05 and >= basis.",
+    "All legs same expiry; OI >= 250 each; 4-leg combo.",
+    "Only on names with a plausible upside gap scenario - otherwise the long call is wasted premium."
+  ],
+  "management_rules": [
+    "Roll all legs together at 21-30 DTE.",
+    "If spot passes the short call strike, do NOT panic-roll; the long call is already restoring delta above its strike.",
+    "Monetize the long call if it reaches 4x its cost and re-strike higher."
+  ],
+  "exit_rules": [
+    "HARD: the short call is the only assignable leg - flatten it by 15:30 ET on expiration day if ITM; immediate close when extrinsic < 0.05 and delta > 0.85; ex-dividend guard applies.",
+    "If the short call is assigned, the shares are delivered and the remaining long put + long call is a long straddle-ish position - close it the same session unless explicitly re-authorized.",
+    "Close ITM long options rather than letting them auto-exercise."
+  ],
+  "assignment_risk": "One assignable leg (the short call), covered by the shares. The structural hazard is what remains AFTER assignment: orphaned long options with a directional profile the system did not intend.",
+  "buying_power": "Shares plus net debit; the short call is covered by shares AND by the long call.",
+  "liquidity_needs": "Four legs on a liquid chain; combined spread <= 12% of net cost.",
+  "common_mistakes": "Setting the long call so far out that it never pays; paying too much net debit and turning a hedge into a speculation.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

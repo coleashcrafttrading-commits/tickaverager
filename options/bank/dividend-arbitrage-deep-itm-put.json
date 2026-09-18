@@ -1,0 +1,64 @@
+{
+  "name": "Dividend Arbitrage with Deep ITM Puts",
+  "slug": "dividend-arbitrage-deep-itm-put",
+  "aliases": [
+    "Dividend play",
+    "Deep ITM put dividend capture"
+  ],
+  "summary": "Buy shares and a deep ITM put just before the ex-dividend date so the share position is fully hedged while the dividend is collected, then exercise the put after the ex-date. Mostly historical.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "bought before the ex-dividend date",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "deep ITM, 0.90+ delta, with extrinsic value < the dividend per share",
+      "dte_rule": "shortest expiry after the ex-date"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "dividend - put extrinsic - fees, per share; typically a few cents at best",
+  "max_loss": "the put's extrinsic plus fees; the share risk is fully hedged by the deep ITM put",
+  "breakevens": "n/a - the trade is a fixed small carry",
+  "greeks": {
+    "delta": "+5 to +10 per unit",
+    "gamma": "small positive",
+    "theta": "negative",
+    "vega": "positive, small"
+  },
+  "when_to_use": "Almost never. This was arbitraged away decades ago; modern option pricing embeds the dividend, so the put's extrinsic almost always exceeds the dividend. FLAGGED: a bad idea, included for completeness and so the system can recognize and reject it.",
+  "typical_dte": "a few days - shortest expiry past the ex-date",
+  "entry_rules": [
+    "Compute: expected_profit = dividend_per_share - put_extrinsic - all_fees. Require expected_profit >= $0.05 per share. In practice this condition is essentially never met.",
+    "Require the dividend to be declared, not estimated.",
+    "Require put delta >= 0.90 so the share hedge is near-complete.",
+    "Reject if the put's bid-ask spread exceeds the expected profit (it usually does)."
+  ],
+  "management_rules": [
+    "Hold only across the ex-date; there is nothing else to manage.",
+    "Do not let the hedge slip - a 0.90 delta put still leaves 10 deltas of share risk."
+  ],
+  "exit_rules": [
+    "After the ex-date, EXERCISE the long put to sell the shares at the strike (this is the one case where exercising a long option is the intended exit), or close both legs at market if the combined price is better than the strike.",
+    "Never carry past the put's expiry."
+  ],
+  "assignment_risk": "No short leg. The classic failure is that OTHER holders of the same put exercise, and the associated short-call/short-put open interest gets assigned - irrelevant here. The real risk is execution: paying more in spreads and fees than the dividend is worth.",
+  "buying_power": "Full share cost plus the put premium for a few days.",
+  "liquidity_needs": "Deep ITM puts are wide; this alone usually kills the trade.",
+  "common_mistakes": "Believing the dividend is free money; not modeling that the put price already contains the dividend; ignoring that the share price drops by the dividend on the ex-date.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,80 @@
+{
+  "name": "Conversion",
+  "slug": "conversion",
+  "aliases": [
+    "conv",
+    "long stock conversion",
+    "riskless arbitrage long"
+  ],
+  "summary": "Long 100 shares plus a synthetic short (short call and long put at the same strike and expiry) creates a locked position worth exactly the strike at expiry; the profit is the pricing discrepancy in put-call parity, and it is a market-maker trade.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares at market"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Strike nearest spot; the call and put MUST share this strike"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "SAME strike as the call",
+      "dte_rule": "same expiry as the call"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(strike x 100) + call_credit - put_debit - (entry_spot x 100) + dividends_received, locked at entry. Typically a few dollars per contract before fees, and negative after them.",
+  "max_loss": "Theoretically the same locked amount (it is a fixed number, positive or negative). In practice the loss modes are early assignment on the short call, a dividend that does not arrive as forecast, and financing carry on the stock leg.",
+  "greeks": {
+    "delta": "0.00 by construction (+1.00 stock, -0.50 short call, -0.50 long put at the same strike)",
+    "gamma": "0.00 net",
+    "theta": "0.00 net in theory; in practice the residual is pure interest carry on the strike",
+    "vega": "0.00 net"
+  },
+  "breakevens": "None \u2014 the payoff is flat at the strike regardless of where the underlying finishes.",
+  "when_to_use": "When the synthetic short (call minus put) prices ABOVE spot minus the present value of the strike minus dividends, by more than total transaction costs. On US equity options in 2026 this gap is measured in cents and is captured by market makers with sub-penny costs and firm-quote obligations. A retail account measuring in $0.65/contract commissions and 1-cent-wide spreads it does not get to cross is structurally on the wrong side of this.",
+  "typical_dte": "Any; shorter expiries have less carry to misprice and correspondingly less edge",
+  "entry_rules": [
+    "LEVEL 3 LEGAL as a structure: the short call is covered by the 100 shares, and the long put requires no permission. Alpaca can accept it, though the stock leg and the option legs must be submitted separately (Alpaca multi-leg orders do not include equity legs), which introduces legging risk on the very trade whose entire premise is that nothing can go wrong.",
+    "NOT ECONOMICALLY VIABLE for this account. The theoretical edge is typically $0.01-$0.05 per share ($1-$5 per conversion) while round-trip costs are $2.60 in contract fees plus stock commission plus at minimum half the option bid-ask on two legs. Mark as reference-only unless every one of the following holds.",
+    "Required edge test: (call_bid - put_ask + strike_PV - spot_ask) x 100 - total_fees - expected_dividends_adjustment > $25 per unit. If it does not clear $25, do not trade it \u2014 below that, one bad fill erases the whole position's profit.",
+    "strike_PV = strike / (1 + r x T/365) using the current effective federal funds rate; ignoring the discount is the single most common way a 'free' conversion turns out to be a loss.",
+    "Only on non-dividend-paying underlyings, or on underlyings whose next dividend is both declared and after expiry. An unexpected special dividend breaks the arithmetic.",
+    "All three legs must fill within 60 seconds or the partially-filled legs are unwound immediately.",
+    "Capital: one unit on a $100 underlying consumes ~$10,000 cash or ~$5,000 margin, so a $50k account can carry at most 4-5 units \u2014 too few for a cents-per-unit edge to compound into anything."
+  ],
+  "management_rules": [
+    "There is nothing to manage directionally; the position is delta, gamma, vega and theta neutral. The only monitoring that matters is early-assignment watch on the short call and dividend-announcement watch on the underlying.",
+    "Check daily: if call_extrinsic = call_mid - max(0, spot - strike) < $0.10, early assignment is imminent and the position should be unwound on its own terms rather than the assigning party's.",
+    "If a dividend is declared after entry with an ex-date before expiry, unwind the entire structure within 1 session. The dividend changes the parity relation and the short call becomes an early-exercise magnet.",
+    "Do not 'improve' the position by closing one leg. A conversion with a leg missing is a directional stock position."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: unwind all three legs no later than 15:30 ET on expiration day. Do not let the structure settle by assignment/exercise even though it is theoretically self-liquidating: the OCC will exercise the ITM side and the account will experience a share movement of 100 shares plus a cash movement of strike x 100 with T+1 settlement uncertainty.",
+    "Unwind order is fixed: (1) buy back the short call, (2) sell the long put, (3) sell the 100 shares. Closing the short call first is non-negotiable \u2014 at no point may the account hold shares without the call or the call without the shares.",
+    "If the short call goes deep ITM (extrinsic < $0.05) at any time, unwind that session regardless of remaining DTE.",
+    "Unwind by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic < 1.25 x declared_dividend."
+  ],
+  "assignment_risk": "On the short call only. Early assignment sells the 100 shares at the strike, leaving a naked long put \u2014 which is not a disaster (it is a long option, defined risk) but it destroys the locked P/L and leaves an unintended directional position. The dominant trigger is dividend capture: an ITM short call with extrinsic below the dividend WILL be exercised the day before the ex-date, and the conversion holder both loses the shares and forfeits the dividend that the arithmetic assumed.",
+  "alpaca_level": 3,
+  "buying_power": "Broker-dependent. Many brokers recognise a conversion and charge a reduced requirement; the conservative assumption is full stock cost (cash) or 50% Reg T margin plus the put debit, less the call credit. Budget ~$5,000-$10,000 per unit on a $100 underlying.",
+  "liquidity_needs": "Extreme. Both option legs need penny-wide or better markets with OI >= 2,000, and the stock must be sub-penny-spread with ADV >= 5,000,000. If the system is crossing more than $0.02 of spread per option leg the arbitrage is already gone.",
+  "common_mistakes": "Forgetting to discount the strike to present value and 'discovering' free money that is really just the interest rate. Ignoring dividends. Legging the stock separately and eating slippage larger than the entire edge. Believing paper-trading fills at mid are achievable.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "At 0DTE there is no carry to arbitrage, so there is no edge \u2014 only pin risk on the short call and three sets of transaction costs.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)"
+  ]
+}

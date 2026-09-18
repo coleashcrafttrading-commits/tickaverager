@@ -1,0 +1,67 @@
+{
+  "name": "Weekly Covered Call Overwrite",
+  "slug": "covered-call-weekly-overwrite",
+  "aliases": [
+    "weekly overwrite",
+    "weekly buy-write"
+  ],
+  "summary": "Sell a new short-dated call against held shares every week, harvesting the steeper short-dated theta at the cost of more gamma risk and more transactions.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "100 shares per contract, held continuously"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta 0.15-0.25",
+      "dte_rule": "5-10 DTE, rewritten weekly"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "Per cycle: (strike - cost basis + credit) x 100. Annualised yield beats monthly writing in flat markets and lags badly in trending ones.",
+  "max_loss": "Full stock downside minus accumulated credits",
+  "breakevens": "cost basis - cumulative credits per share",
+  "greeks": {
+    "delta": "+100 minus 15-25 = +75 to +85 net",
+    "gamma": "strongly negative - short-dated short calls carry far more gamma than monthlies",
+    "theta": "positive and steep, roughly 2-4% of the credit per day",
+    "vega": "negative, small"
+  },
+  "typical_dte": "5-10 DTE, rewritten every week",
+  "when_to_use": "Range-bound, high-IV names you intend to hold for months. Weekly overwriting underperforms monthly writing in strong uptrends because the shares keep getting called away or rolled at a loss.",
+  "entry_rules": [
+    "100 shares per contract verified before every write",
+    "Delta 0.15-0.25 (lower than the monthly version, to offset the higher gamma)",
+    "5-10 DTE",
+    "Credit >= $0.15 absolute AND >= 0.25% of share value, otherwise skip the week",
+    "Strike above cost basis",
+    "Skip any week containing earnings or an ex-dividend date",
+    "Skip the week if the stock closed above its upper Bollinger band (2 SD, 20 period) - do not cap upside into momentum"
+  ],
+  "management_rules": [
+    "Buy to close at 60% of credit (short-dated calls decay faster; take profit sooner and rewrite)",
+    "Roll up and out if delta exceeds 0.50 - earlier than the monthly rule, because weekly gamma turns a 0.25 delta into a 0.80 delta in one session",
+    "Track cumulative credits against the opportunity cost of capped upside monthly; if capped upside exceeds credits over 3 months, switch to monthly or stop overwriting"
+  ],
+  "exit_rules": [
+    "Buy to close at 60% of credit, or by Thursday close of expiry week, whichever first",
+    "NEVER-ASSIGN RULE (tighter than monthly because the window is short): close or roll whenever extrinsic < $0.10, delta > 0.80, the day before ex-dividend, or at 14:00 ET on expiration Friday if the underlying is within 0.75% of the strike. Absolute backstop 15:45 ET Friday",
+    "Never carry a weekly short call into the weekend gap if it is within 1% of the strike"
+  ],
+  "assignment_risk": "HIGH and frequent. Short-dated ITM calls lose extrinsic fastest, which is exactly the early-assignment trigger. The weekly cadence means the system faces the assignment decision 52 times a year instead of 12.",
+  "buying_power": "Shares are the collateral.",
+  "liquidity_needs": "Requires weekly expiries with real OI (>= 250). Names with only monthly expiries are ineligible.",
+  "common_mistakes": "Writing weeklies on a momentum stock and watching the shares get called away at a fraction of the move; underestimating the transaction-cost drag of 52 round trips a year.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

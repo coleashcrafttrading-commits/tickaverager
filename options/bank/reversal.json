@@ -1,0 +1,71 @@
+{
+  "name": "Reversal",
+  "slug": "reversal",
+  "aliases": [
+    "reverse conversion",
+    "short stock reversal"
+  ],
+  "summary": "Short 100 shares plus a long call and a short put at the same strike and expiry - the mirror of a conversion; used to borrow against a short share position or exploit an inverted parity violation.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "short 100 shares per unit",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike K near spot",
+      "dte_rule": "chosen expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "same strike K",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "(stock sale price - K - net option debit) x 100 minus borrow costs and any dividends owed",
+  "max_loss": "Locked in theory; in practice hard-to-borrow recalls, borrow-fee spikes and early assignment of the short put are the loss paths",
+  "breakevens": "n/a - fixed P/L at entry",
+  "greeks": {
+    "delta": "zero",
+    "gamma": "zero",
+    "theta": "carry accrual",
+    "vega": "zero"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "Rarely appropriate here. Requires shorting shares (borrow availability, borrow fees, dividend liability) plus a short put that Alpaca will treat as uncovered by the stock leg in most configurations.",
+  "entry_rules": [
+    "DO NOT TRADE on this system by default. The short put is treated as uncovered by most brokers when the offsetting position is short stock, which puts the structure at Alpaca level 4.",
+    "Short shares must be locatable with a borrow fee below the structure's modeled edge",
+    "Any dividend before expiry is owed by the short-stock holder and must be subtracted from the edge",
+    "If ever run: share notional <= 15% of equity, OI >= 500 on both option legs"
+  ],
+  "management_rules": [
+    "Not applicable at level 3"
+  ],
+  "exit_rules": [
+    "Close all three components together; never let the short put be assigned uncontrolled (assignment buys 100 shares, which simply closes the short stock - acceptable, but it must be a deliberate choice)",
+    "Exit before any ex-dividend date to avoid owing the dividend on the short shares",
+    "Force-close by 15:45 ET on expiration day"
+  ],
+  "assignment_risk": "The short put is assignable; assignment delivers 100 long shares that close the short stock position - mechanically tidy but it removes the hedge from the long call. Borrow recall on the short shares is the bigger operational risk.",
+  "buying_power": "Short stock margin (typically 50% of notional) plus the option requirement; far heavier than any defined-risk spread.",
+  "liquidity_needs": "Easy-to-borrow underlying with OI >= 500 on both legs.",
+  "common_mistakes": "Ignoring borrow fees and dividend liability; assuming the short stock covers the short put for margin purposes.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not meaningful intraday.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

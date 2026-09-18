@@ -1,0 +1,94 @@
+{
+  "name": "Double Calendar Spread",
+  "slug": "double-calendar",
+  "summary": "Two same-strike calendars at different strikes - a put calendar below spot and a call calendar above - widening the profit tent so the underlying can wander and still pay.",
+  "aliases": [
+    "strangle swap",
+    "calendar strangle",
+    "double time spread"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Lower strike by delta: front put |delta| 0.25-0.35 (roughly 1 standard deviation lower boundary).",
+      "dte_rule": "front expiry, 21-35 DTE"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same lower strike.",
+      "dte_rule": "back expiry, 45-70 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Upper strike by delta: front call delta 0.25-0.35; the two strikes should straddle spot roughly symmetrically (|put delta| within 0.07 of call delta).",
+      "dte_rule": "front expiry, same as leg 1"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same upper strike.",
+      "dte_rule": "back expiry, same as leg 2"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "No closed form; two local peaks at the two strikes at front expiry. Typically 20-35% of the total debit, with a flatter, wider payoff than a single calendar.",
+  "max_loss": "The total net debit paid, if the underlying finishes far outside both strikes (or, less commonly, if it sits exactly between them while vol collapses).",
+  "breakevens": "Roughly lower strike - 1.0 x (debit per side) and upper strike + 1.0 x (debit per side), in underlying points; solve numerically with back-month IV at front expiry.",
+  "greeks": {
+    "delta": "~0 when the strikes are delta-symmetric around spot",
+    "gamma": "negative, but flatter and less peaked than a single calendar",
+    "theta": "positive, roughly double the single calendar per unit of capital",
+    "vega": "positive, roughly double a single calendar; the structure is meaningfully long back-month vol"
+  },
+  "when_to_use": "IV rank < 30, flat-to-backwardated term structure, and a range-bound underlying whose expected move is wider than a single calendar's tent. Choose the double calendar over the single when the front-month expected move exceeds the single calendar's breakeven band - which is most of the time on liquid ETFs.",
+  "typical_dte": "front 21-35 DTE, back 45-70 DTE",
+  "entry_rules": [
+    "IV rank < 30 AND IV percentile < 40.",
+    "front_IV - back_IV >= -3.0 vol points at BOTH strikes.",
+    "Strikes by delta: front put |delta| 0.25-0.35, front call delta 0.25-0.35, and the two deltas within 0.07 of each other so the structure starts delta-neutral.",
+    "Strike spacing should bracket at least 1.0 x the front-month expected move (ATM straddle price).",
+    "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days.",
+    "Total debit <= 3% of equity per unit; combined bid-ask <= 10% of the total debit.",
+    "No earnings or ex-dividend inside the front cycle.",
+    "LEVEL 3 OK: each short front leg is covered by the same-strike later-expiring long. Submit as one 4-leg mleg. Alpaca supports up to 4 legs; if the mixed-expiry 4-leg order is rejected, submit it as two 2-leg calendar mlegs, LONG legs filled first."
+  ],
+  "management_rules": [
+    "Profit target +20% of total debit (the tent is wider but flatter than a single calendar, so take less).",
+    "Stop at -40% of total debit.",
+    "Delta band: if |net delta| > 0.35 per unit, roll the untested short strike toward spot (never the tested one away).",
+    "When spot breaches either short strike by more than 0.5 x ATR(14), close that side's calendar and let the other side run as a single directional calendar, or close both.",
+    "Roll short legs out one expiry when front DTE <= 7 and both shorts' |delta| <= 0.60, for a net credit only.",
+    "Max 3 double-calendar units per underlying."
+  ],
+  "exit_rules": [
+    "Close or roll BOTH short legs by 14:30 ET on the front expiration day, unconditionally.",
+    "Close the whole structure no later than 2 trading days before front expiry if not rolling.",
+    "Close any short leg immediately when its extrinsic <= $0.05/share or its |delta| >= 0.90.",
+    "Close the short call before the session preceding ex-dividend if its extrinsic < the dividend per share.",
+    "Unwind short legs before long legs, always.",
+    "If either long back-month leg marks below $0.10, close that calendar entirely."
+  ],
+  "assignment_risk": "Both short front legs. The tested side is the one to watch: a trending underlying pushes one short deep ITM while the other decays to zero. The same-strike back-month long covers each short, so the worst case is a covered stock position, but the system must flatten any assignment within one session.",
+  "buying_power": "Net debit only; no additional maintenance. Alpaca reserves the total debit.",
+  "liquidity_needs": "Four legs means four spreads to cross. OI >= 250 per leg, underlying ADV >= 3M shares, and the total package must fill within 10% of the mid. ETFs (SPY, QQQ, IWM, XLF, EEM) are the natural home; avoid single stocks with wide chains.",
+  "common_mistakes": "Setting the strikes too close together (you have just paid double for a single calendar's payoff); ignoring that the structure is double long vega in a falling-vol tape; rolling the tested side away from spot and turning a defined-risk trade into a chase; four-leg slippage quietly eating the entire profit target.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE double day calendar (0DTE shorts, 1-4 DTE longs, both sides) is viable on SPY/QQQ under the day-calendar rules at half size per side, with the same 14:30 ET forced close.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)"
+  ]
+}

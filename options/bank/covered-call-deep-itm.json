@@ -1,0 +1,67 @@
+{
+  "name": "Deep ITM Covered Call (ITM buy-write)",
+  "slug": "covered-call-deep-itm",
+  "aliases": [
+    "in-the-money buy-write",
+    "conservative buy-write"
+  ],
+  "summary": "Buy 100 shares and immediately sell a deep ITM call, creating a high-probability, low-return structure economically equivalent to a cash-secured put.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "100 shares per contract"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta 0.70-0.85 (ITM), providing a large downside cushion",
+      "dte_rule": "30-60 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - net share cost + credit) x 100 - small, typically 1-2% per cycle, achieved if the stock stays anywhere above the strike",
+  "max_loss": "(net debit paid for shares - credit) x 100 if the stock goes to zero. The cushion is large but the tail is still the full stock downside.",
+  "breakevens": "share cost - credit per share, typically 8-15% below spot",
+  "greeks": {
+    "delta": "+100 shares minus 70-85 from the call = +15 to +30 net",
+    "gamma": "negative",
+    "theta": "positive but modest (deep ITM calls hold little extrinsic)",
+    "vega": "negative, small"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "When you want a high-probability, small, bond-like return with a large cushion and are happy to be called away. Note it is synthetically identical to selling a cash-secured put at the same strike - prefer whichever has the better fill and no dividend complication.",
+  "entry_rules": [
+    "Own or simultaneously buy 100 shares per contract; coverage verified before order submission",
+    "Short call delta 0.70-0.85",
+    "Extrinsic in the short call >= 0.8% of the strike per 30 days, otherwise the return does not justify the capital",
+    "30-60 DTE",
+    "Downside cushion (spot - breakeven)/spot >= 7%",
+    "Reject if an ex-dividend date falls before expiry and the call's extrinsic is below the dividend - early assignment is then near-certain",
+    "Execute as a single net-debit buy-write order where supported, to avoid legging risk"
+  ],
+  "management_rules": [
+    "Close the whole structure at 60% of max profit, or at 14 DTE, whichever first",
+    "If the stock falls below the strike (call goes OTM), the position has become an ordinary covered call - switch to covered-call management rules",
+    "Do not roll a deep ITM covered call down; that realises the stock loss without improving the structure. Either close or convert"
+  ],
+  "exit_rules": [
+    "Close both legs at 60% of max profit or 14 DTE",
+    "NEVER-ASSIGN RULE: the short call here is ITM by design, so early assignment risk is permanently elevated. Close the structure immediately if the call's extrinsic value drops below $0.05, on the day before any ex-dividend date, or by 14:30 ET on expiration day. Absolute backstop 15:45 ET on expiry day",
+    "If assigned, the outcome is your shares sold at the strike for a small profit - the intended maximum outcome. Not a loss, but an unplanned, unlogged exit the position tracker must reconcile"
+  ],
+  "assignment_risk": "VERY HIGH by construction - the short call is ITM from day one. Early assignment simply produces max profit early, so economic harm is low, but it breaks the never-assign mandate and the position accounting. Treat extrinsic < $0.05 as a hard close.",
+  "buying_power": "Net debit for the structure (shares minus credit). Roughly the same capital as a cash-secured put at the same strike.",
+  "liquidity_needs": "Deep ITM calls are often wide; require spread <= 4% of mid and OI >= 100, or use the CSP equivalent instead.",
+  "common_mistakes": "Paying the spread twice on an illiquid ITM call when a cash-secured put would have been one cheap fill; being surprised by early assignment the day before ex-dividend.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

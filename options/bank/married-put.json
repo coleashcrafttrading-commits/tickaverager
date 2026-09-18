@@ -1,0 +1,68 @@
+{
+  "name": "Married Put",
+  "slug": "married-put",
+  "aliases": [
+    "Synthetic long call",
+    "Put hedge at entry",
+    "Bullet-proof stock"
+  ],
+  "summary": "Buy the shares and the protective put at the same moment, in one order, so the downside is capped from the first tick and the tax lot is matched.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "new purchase",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM to 5% OTM (0.40-0.50 delta) for a tight floor",
+      "dte_rule": "60-180 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "unlimited above breakeven",
+  "max_loss": "(share price - put strike + premium) x 100",
+  "breakevens": "share price + premium per share",
+  "greeks": {
+    "delta": "+50 to +60 per unit",
+    "gamma": "positive",
+    "theta": "negative",
+    "vega": "positive"
+  },
+  "when_to_use": "Initiating a new, higher-risk long (a breakout, a small cap, an earnings run-up) where the maximum loss must be known in advance. Also used when the system wants share exposure but cannot tolerate gap risk.",
+  "typical_dte": "60-180 DTE",
+  "entry_rules": [
+    "Submit the shares and put together as one combined order where possible; otherwise buy the put FIRST, then the shares.",
+    "Put strike chosen so max loss <= 1.5% of account equity for the whole unit.",
+    "Require IV Rank <= 45; married puts in high IV are a poor value - use a collar instead.",
+    "Premium <= 5% of share notional for a 90+ DTE put.",
+    "Require OI >= 250."
+  ],
+  "management_rules": [
+    "Roll the put up and out once the shares are up more than the put premium, converting paper gains into a raised floor.",
+    "At DTE < 30, roll out or close the unit.",
+    "If IV Rank climbs above 65 while holding, sell a call against the shares to convert the married put into a collar and recover hedge cost."
+  ],
+  "exit_rules": [
+    "HARD: never let the put auto-exercise. If ITM, close it by 15:30 ET on expiration day and decide about the shares separately.",
+    "Exit the unit when the thesis completes (target reached) by selling shares and put together.",
+    "If the shares gap below the strike, the unit's loss is already capped - exit on schedule rather than panicking."
+  ],
+  "assignment_risk": "No short leg; no assignment risk. Unwanted auto-exercise of the ITM long put is the only mechanical hazard, and it liquidates the shares at the strike.",
+  "buying_power": "Share cost plus put premium, both in cash.",
+  "liquidity_needs": "OI >= 250; longer-dated strikes on liquid names only.",
+  "common_mistakes": "Paying for a 180-day ATM put on a low-vol name and guaranteeing underperformance; treating the married put as free insurance rather than a real drag of 4-8% annually.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

@@ -1,0 +1,71 @@
+{
+  "name": "Split-Strike Synthetic Long (Risk Reversal)",
+  "slug": "split-strike-synthetic-long-risk-reversal",
+  "aliases": [
+    "risk reversal",
+    "combo spread",
+    "fence (short side)",
+    "collar without the stock"
+  ],
+  "summary": "Sell an OTM put and buy an OTM call in the same expiry for near-zero net cost, giving stock-like upside above the call strike and stock-like downside below the put strike with a flat zone between.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM put at delta -0.25 to -0.30 (choose the listed strike whose delta is nearest -0.27)"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM call at delta +0.25 to +0.30, i.e. roughly symmetric around spot",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either",
+  "max_profit": "UNDEFINED (unlimited) above the call strike: (spot_at_exit - call_strike) x 100 - net_debit",
+  "max_loss": "(put_strike x 100) - net_credit if the underlying goes to zero",
+  "greeks": {
+    "delta": "+0.50 to +0.60 at entry, rising toward +1.00 as spot moves outside either strike",
+    "gamma": "near zero at spot, positive above the call strike, negative below the put strike",
+    "theta": "slightly positive when opened for a credit with symmetric deltas; the short put usually decays faster",
+    "vega": "slightly negative on a standard equity skew (the put sold carries more IV than the call bought) \u2014 this is the skew trade embedded in the structure"
+  },
+  "breakevens": "Upside: call_strike + net_debit/100. Downside: put_strike - net_credit/100. Between the strikes the P/L equals the net credit or debit.",
+  "when_to_use": "Bullish view financed by selling downside skew. Best when IV rank > 40 and put skew is steep (25-delta put IV minus 25-delta call IV > 4 vol points), because the sold put is then genuinely expensive relative to the bought call.",
+  "typical_dte": "30-60 DTE",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the short put is uncovered. Requires Level 4.",
+    "Level-3-legal substitute: replace the naked short put with a put credit spread (put_strike and put_strike - width), producing a defined-risk 'risk reversal with a floor'. That variant IS Level 3 legal and should be the router's fallback.",
+    "If ever run at Level 4: open only for a net credit or a net debit <= $0.25, and only when 25d put IV - 25d call IV >= 4.0 vol points.",
+    "Both strikes must be roughly delta-symmetric: |put_delta| and call_delta must be within 0.05 of each other.",
+    "Underlying price >= $20, 20-day ADV >= 2,000,000 shares, OI >= 500 per leg.",
+    "No entry within 2 sessions of earnings or 5 days of an ex-dividend date."
+  ],
+  "management_rules": [
+    "Close at 50% of the maximum realistic gain measured as (current package mark - entry mark) >= 0.50 x (call_strike - spot_at_entry), or at 21 DTE, whichever comes first.",
+    "Hard stop: close if the package loses 2.0x the net credit received, or 100% of the net debit paid.",
+    "If the short put delta reaches -0.45, either close the whole structure or roll the put down-and-out one expiry for a credit; never roll for a debit.",
+    "Do not adjust the long call independently; the structure's whole point is the paired skew."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short put no later than 15:40 ET on expiration day, unconditionally.",
+    "If spot < put_strike at any point on expiration day, close the short put by 14:00 ET.",
+    "At 21 DTE, if the short put is ITM, close the structure entirely rather than carrying it.",
+    "If the long call expires worthless and the short put is OTM by more than 5%, the position may be allowed to lapse \u2014 but only after a 15:40 ET confirmation that the put is OTM; when in doubt, close."
+  ],
+  "assignment_risk": "On the short put only. Early assignment on an OTM put is effectively zero; risk appears when the underlying falls through the put strike and the put's extrinsic value decays below ~$0.05. Assignment delivers 100 long shares at the put strike, tying up (put_strike x 100) of capital. The long call cannot offset this.",
+  "alpaca_level": 4,
+  "buying_power": "Naked short put Reg T requirement (roughly 20% of underlying value less OTM amount plus premium), less the long call's debit. Typically $1,200-$2,000 per contract on a $100 name.",
+  "liquidity_needs": "OI >= 500 per leg, package bid-ask <= $0.10. Wing strikes on illiquid names quote very wide and destroy the near-zero-cost premise.",
+  "common_mistakes": "Chasing 'zero cost' by widening the call strike until the credit balances \u2014 this quietly moves the structure to a much worse risk/reward. Also ignoring that the short put is the entire risk of the trade while attention stays on the long call.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Skew is unstable and gamma is enormous at 0DTE; the short put can go from -0.10 delta to assigned within one session.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bullish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

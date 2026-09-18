@@ -1,0 +1,78 @@
+{
+  "name": "Bear Call Spread (Short Call Vertical / Call Credit Spread)",
+  "slug": "bear-call-spread",
+  "aliases": [
+    "short call vertical",
+    "call credit spread",
+    "short call spread",
+    "vertical credit spread (calls)"
+  ],
+  "summary": "Sell a nearer-the-money call and buy a further OTM call for a net credit; a defined-risk, high-probability bet that the underlying stays below the short strike.",
+  "bias": "bearish",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short call at 0.16-0.30 delta (16 delta = ~84% POP, 30 delta = ~70% POP). Pick delta, never a chart level alone."
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long call = short strike + width. Width $1-$5 on sub-$100 underlyings, $5-$10 on SPY/QQQ-class names. Choose the width so max loss <= 2% of equity.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "net credit received, if the underlying is below the short strike at expiry",
+  "max_loss": "(width * 100) - net credit received",
+  "breakevens": "short call strike + net credit per share",
+  "greeks": {
+    "delta": "negative, roughly -0.10 to -0.20 per 1-lot at a 20-delta short strike",
+    "gamma": "negative -- risk accelerates as price approaches the short strike",
+    "theta": "positive, typically +$1 to +$4/day per 1-lot at 30-45 DTE",
+    "vega": "negative, roughly -$3 to -$8 per vol point on a $5-wide"
+  },
+  "typical_dte": "30-45 DTE entry, managed at 21 DTE (tastytrade's 200k+ trade study found 45 DTE in / 21 DTE out gave the best risk-adjusted returns). 0-7 DTE for intraday scalps.",
+  "when_to_use": "IV rank >= 30 (you are selling premium) plus a bearish or neutral-to-bearish structure: price below the 20-EMA, a failed breakout, or a short strike placed above a well-tested resistance shelf. Call skew on equities is usually flat-to-cheap, so this collects less than the equivalent put spread -- demand a better technical setup to compensate.",
+  "entry_rules": [
+    "IV rank >= 30 measured over the trailing 252 days. Below 20, skip -- the credit does not pay for the tail.",
+    "Directional gate: last close < 20-EMA, OR short strike is at least 1.0 ATR(14) above the highest high of the last 10 sessions.",
+    "Short call delta between 0.16 and 0.30.",
+    "Net credit >= 33% of spread width (a $5-wide must pay >= $1.65). If the market will not pay it, widen the strike or skip the trade.",
+    "DTE between 25 and 50.",
+    "Max loss per position (width*100 - credit) <= 2% of account equity = $1,000 on $50k.",
+    "Total portfolio short-delta from all credit spreads kept within +/-0.30 delta per $1,000 of equity.",
+    "Both legs OI >= 500, bid/ask <= 10% of mid.",
+    "No entry with an earnings report inside the expiry window unless IV rank > 60 AND the short strike sits beyond the options-implied earnings move * 1.25.",
+    "Alpaca note: this is a fully covered two-leg structure and is accepted as an MLeg order at Level 3. Submit both legs in one MLeg order -- legging in creates a momentarily naked short call, which Alpaca will reject and which would be uncovered risk."
+  ],
+  "management_rules": [
+    "Take profit: buy back the spread at 50% of max profit (spread mid <= 0.50 * credit received).",
+    "Time-based exit: close at 21 DTE regardless of P/L if not already closed at the profit target. Gamma risk past 21 DTE is not compensated.",
+    "Stop loss: close if the spread's mark reaches 2.0x the credit received (i.e., unrealized loss = 1x credit), or if the underlying trades through the short strike -- whichever comes first.",
+    "Breach rule: if the underlying touches the short strike at any point with > 7 DTE remaining, either close or roll out to the next monthly expiry for a net credit; never roll for a debit and never roll down into more risk.",
+    "Never roll a tested call spread up and out more than twice on the same underlying; take the loss on the third test.",
+    "Do not add contracts to a tested position."
+  ],
+  "exit_rules": [
+    "Hard rule: the position must be flat by 15:45 ET on expiration day, without exception.",
+    "ASSIGNMENT GUARD: if at 15:30 ET on expiration day the underlying is above (short strike - $0.05), close the whole spread immediately. Pin risk at the short strike is the single largest source of accidental assignment.",
+    "ASSIGNMENT GUARD: on any day, if the short call is ITM and its extrinsic value < $0.10, close the spread that session.",
+    "DIVIDEND GUARD: if the short call is ITM and its extrinsic < 1.5 * the pending dividend, close the spread by the close of the session before ex-dividend.",
+    "If the spread ever quotes at <= $0.05 mid with > 3 DTE, close it for the nickel rather than carrying assignment risk for the last 5 cents."
+  ],
+  "assignment_risk": "The short call is the exposed leg. Assignment leaves you short 100 shares per contract; the long call caps the loss but you are still short stock overnight with a hard-to-borrow and margin-call profile. Ex-dividend is the classic trigger. Expiration-day pinning is the second. Both are fully avoidable with the guards above.",
+  "buying_power": "Alpaca holds (width * 100) - credit per contract. A $5-wide sold for $1.70 holds $330.",
+  "liquidity_needs": "OI >= 500 per leg; avoid weeklies on anything outside the top ~200 liquid optionable names. Round-trip slippage budget <= 10% of credit.",
+  "common_mistakes": "Selling call spreads in a strong uptrend because 'it looks extended'; accepting less than a third of the width in credit; legging in and sitting momentarily naked; letting an OTM spread ride to expiry to save $0.05 and getting pinned; rolling a tested spread for a debit.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Very popular intraday. On SPY/QQQ 0DTE: short strike 0.10-0.20 delta computed locally (Alpaca serves no 0DTE greeks -- use Black-Scholes with T in intraday seconds and the nearest-dated listed IV as a seed), enter 09:45-14:00 ET, target 50% of credit, stop at 2x credit, and an unconditional flatten at 15:30 ET. 0DTE short gamma is enormous in the last 45 minutes -- the flatten time matters more than the entry.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,69 @@
+{
+  "name": "Synthetic Short Put (Covered Call)",
+  "slug": "synthetic-short-put-covered-call",
+  "aliases": [
+    "covered call",
+    "buy-write",
+    "covered write"
+  ],
+  "summary": "100 long shares plus one short call has the identical payoff to a short put at the call's strike; it is the most common structure in retail and the parity twin of a cash-secured put.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares at market"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM call at delta +0.25 to +0.35 (target 0.30); ATM for maximum premium at the cost of all upside"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(call_strike - entry_spot) x 100 + call_credit, capped at the strike",
+  "max_loss": "(entry_spot x 100) - call_credit if the underlying goes to zero",
+  "greeks": {
+    "delta": "+0.65 to +0.75 per unit (100 shares less the short call delta)",
+    "gamma": "negative, from the short call",
+    "theta": "positive \u2014 the short call decays in your favour",
+    "vega": "negative"
+  },
+  "breakevens": "entry_spot - call_credit/100",
+  "when_to_use": "IV rank >= 40 so the sold call is rich, on a name that is already held or is wanted at the current price. Neutral-to-mildly-bullish only: the upside is sold away above the strike.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "LEVEL 2 legal and fully executable on Alpaca Level 3, including as a single multi-leg buy-write order (the short call is covered by the shares in the same order, which satisfies Alpaca's same-order coverage rule).",
+    "Exactly 100 shares per short call. The system must verify the share balance before submitting the call, and must never allow the share count to drop below 100 x (number of short calls) \u2014 that would create an uncovered short call, which Level 3 forbids.",
+    "Call strike selected by delta: nearest listed strike with delta in [0.25, 0.35].",
+    "Only open when IV rank >= 40 and the call credit >= 0.8% of share notional for a 30-45 DTE contract.",
+    "Skip any expiry that contains an ex-dividend date unless the call credit exceeds the dividend by 2x (see assignment_risk).",
+    "No entry with earnings inside the contract's life unless the premium is explicitly an earnings-IV trade and size is halved."
+  ],
+  "management_rules": [
+    "Close the short call at 50% of the credit received, or at 21 DTE, whichever comes first.",
+    "If the call reaches 21 DTE and is OTM, roll out to the next 30-45 DTE cycle for a net credit; never roll for a debit.",
+    "If spot > call_strike and the call delta exceeds 0.80, close the call and re-evaluate: rolling up-and-out is acceptable only for a net credit.",
+    "If the share position is down more than 15% from entry, do not keep selling calls at strikes below the share cost basis \u2014 that locks in a loss on assignment."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on expiration day if spot is within 1.0% of the strike or above it. Being assigned sells the shares, which for a system that must never be assigned is a failure state even though the shares cover it.",
+    "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic = call_mid - max(0, spot - strike) < 1.25 x declared_dividend. This is the single most common cause of surprise early assignment.",
+    "If the call is ITM at any point on expiration day, close it by 14:00 ET.",
+    "If the shares are sold for any reason, the short call must be closed in the same session \u2014 priority order: close the call first, then the shares."
+  ],
+  "assignment_risk": "On the short call, and it is genuinely covered by the shares so there is no margin event. The two triggers are (1) dividend capture: an ITM call with extrinsic below the dividend will be exercised the day before the ex-date, and (2) deep ITM near expiry with extrinsic below ~$0.05. Assignment delivers the 100 shares at the strike. For a system with a never-be-assigned mandate, the dividend rule above is not optional.",
+  "alpaca_level": 2,
+  "buying_power": "100 shares at full cost (cash) or 50% (Reg T margin); the short call adds no requirement because it is covered. Roughly $10,000 cash or $5,000 margin on a $100 underlying.",
+  "liquidity_needs": "Call OI >= 500, bid-ask <= $0.05 or 3% of mid. Share liquidity ADV >= 1,000,000.",
+  "common_mistakes": "Selling calls below the share cost basis to chase premium. Letting the share count drift below 100 per call (creating a naked call). Ignoring ex-dividend dates entirely.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "0DTE covered calls on a held position are workable but the premium is tiny and pin risk at the strike is maximal; the 15:40 ET close rule becomes the dominant consideration. Only use if the shares are genuinely wanted to be sold at the strike.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

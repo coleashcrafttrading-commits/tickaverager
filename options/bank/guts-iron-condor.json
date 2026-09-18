@@ -1,0 +1,77 @@
+{
+  "name": "Guts Iron Condor",
+  "slug": "guts-iron-condor",
+  "aliases": [
+    "ITM iron condor",
+    "guts condor",
+    "inverted iron condor (ITM shorts)"
+  ],
+  "summary": "An iron condor built from ITM shorts (short ITM call and short ITM put, i.e. a short guts strangle) with OTM long wings - structurally equivalent to a normal iron condor but with enormous early-assignment exposure. BAD IDEA on American-style equities.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM put wing, below spot by W",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ITM put: strike ABOVE spot (delta about -0.70)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ITM call: strike BELOW spot (delta about 0.70)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "OTM call wing, above spot by W",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit - the intrinsic value embedded in the ITM shorts; economically identical to the equivalent OTM iron condor",
+  "max_loss": "(wing distance - net credit) x 100, same as the equivalent OTM iron condor",
+  "breakevens": "identical to the equivalent OTM iron condor at the same strikes",
+  "greeks": {
+    "delta": "near zero",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Essentially never on US equities/ETFs. It exists because ITM strikes are occasionally more liquid or better priced on some products, and because of put-call parity the payoff is identical to the OTM version. On European cash-settled index options it is harmless; on American share-settled options it is not.",
+  "entry_rules": [
+    "DO NOT TRADE on this system. Included for completeness only.",
+    "If ever used: both shorts are deep ITM from the moment of entry, so the assignment guard fires immediately - which is why the OTM-equivalent iron condor is always the correct expression",
+    "Alpaca level 3 would technically permit it (defined risk), which is exactly the trap"
+  ],
+  "management_rules": [
+    "Not applicable - the position should not be opened. If inherited from a roll gone wrong, close it the same session."
+  ],
+  "exit_rules": [
+    "Close immediately and unconditionally; ITM shorts with extrinsic under $0.10 will be assigned, and both sides are ITM by construction",
+    "Never hold overnight; never hold over an ex-dividend date"
+  ],
+  "assignment_risk": "Maximum. Both short legs are ITM at entry. On American-style share-settled options, assignment is a question of when, not if.",
+  "buying_power": "(wing distance - credit) x 100, but brokers often hold more pending assignment resolution.",
+  "liquidity_needs": "Irrelevant - not to be traded.",
+  "common_mistakes": "Believing put-call parity makes it equivalent in practice; it is equivalent in payoff and catastrophic in settlement mechanics on American options.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Absolutely not. Guaranteed ITM shorts on expiration day means guaranteed assignment.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

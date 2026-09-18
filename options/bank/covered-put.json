@@ -1,0 +1,67 @@
+{
+  "name": "Covered Put",
+  "slug": "covered-put",
+  "aliases": [
+    "Short stock + short put",
+    "Covered put write",
+    "Bear covered write"
+  ],
+  "summary": "Short 100 shares and sell a put against the short position - the bearish mirror of a covered call, capping the downside gain and leaving unlimited upside risk.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "short 100 shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.25-0.30 delta OTM (below spot)",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "max_profit": "(short share price - put strike + credit) x 100",
+  "max_loss": "UNDEFINED - unlimited as the stock rises, because the short shares are unhedged above",
+  "breakevens": "short share price + credit",
+  "greeks": {
+    "delta": "-70 to -75 per unit",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "Bearish-to-neutral view where the system wants to collect premium on a short stock position. FLAGGED: requires short stock and, at most brokers, level 4; the unlimited upside risk plus borrow and dividend obligations make it a poor fit for an automated share-settled account.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "BLOCKED at level 3 - short stock plus a short put is treated as an uncovered position for approval purposes at most brokers; verify Alpaca's specific treatment before enabling, and assume level 4.",
+    "If enabled: require a confirmed borrow, borrow rate < 3% annualized, and no dividend inside the option's life (the short seller owes it).",
+    "Standard premium gates: IVR >= 30, credit >= 1% of strike notional, OI >= 250.",
+    "Mandatory stop on the share leg: buy to cover if spot > entry x 1.10."
+  ],
+  "management_rules": [
+    "50% profit target on the put; 21 DTE roll.",
+    "Roll the put up-and-out for a credit if the stock falls and the put goes deep ITM.",
+    "Hard risk control: the short stock leg must carry a stop - this structure has no natural upside defense."
+  ],
+  "exit_rules": [
+    "HARD: flatten the short put by 15:30 ET on expiration day if ITM. Assignment delivers 100 LONG shares, which closes the short stock - benign in isolation but unplanned.",
+    "Close the put when extrinsic < 0.05 and delta < -0.85.",
+    "Close the whole unit (buy to cover shares + buy to close put) as one combo on any upside stop trigger."
+  ],
+  "assignment_risk": "The short put is assignable; assignment buys 100 shares that close the short position at the strike, which is actually the intended max-profit outcome, but it happens at a time of the counterparty's choosing. The uncontrolled risk is not assignment, it is the naked upside on the short shares and the dividend/buy-in obligations.",
+  "buying_power": "Reg-T short stock margin (150% of proceeds) plus the put requirement. Level 4.",
+  "liquidity_needs": "Borrowable name with a liquid put chain.",
+  "common_mistakes": "Treating it as symmetric with a covered call - it is not: the covered call's worst case is owning a cheap stock, the covered put's worst case is unlimited.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not appropriate.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

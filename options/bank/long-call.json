@@ -1,0 +1,67 @@
+{
+  "name": "Long Call (standard directional)",
+  "slug": "long-call",
+  "aliases": [
+    "naked long call",
+    "buying a call"
+  ],
+  "summary": "Buy one OTM-to-ATM call to get leveraged upside with risk capped at the debit paid.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "30-40 delta OTM call (first strike with delta in 0.30-0.40); if none, nearest strike above spot",
+      "dte_rule": "single expiry, 30-60 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited: (underlying at exit - strike) x 100 - debit",
+  "max_loss": "The debit paid x 100 per contract. Fully defined.",
+  "breakevens": "strike + debit per share, at expiration only",
+  "greeks": {
+    "delta": "+0.30 to +0.40 per contract (+30 to +40 share equivalents)",
+    "gamma": "positive, small, rises as spot approaches strike and as DTE falls",
+    "theta": "negative, roughly -0.5% to -1.5% of position value per day at 45 DTE, accelerating inside 21 DTE",
+    "vega": "positive, largest at ATM; a 1-point IV drop costs roughly 0.5-1.5% of the debit"
+  },
+  "typical_dte": "30-60 DTE at entry",
+  "when_to_use": "IV rank below 35 (long premium is cheap relative to its own year), underlying above rising 20 and 50 EMA on the daily, and no earnings before the planned exit date.",
+  "entry_rules": [
+    "IV rank (IVR) of the underlying < 35; skip if IVR > 50 because vega works against you",
+    "Price > 20 EMA and 20 EMA > 50 EMA on the daily chart",
+    "No earnings, no scheduled binary event before the planned exit date",
+    "Choose 30-60 DTE; never enter a directional long call with < 21 DTE unless it is an explicit 0DTE/scalp strategy",
+    "Strike by delta: 0.30-0.40. Do not pick strikes by round-number intuition",
+    "Bid/ask spread <= 10% of the mid, and open interest >= 500 on the chosen contract",
+    "Debit per contract <= 1.5% of account equity (~$750 on $50k); max 5 concurrent long-premium positions",
+    "Enter with a limit order at the mid; walk the limit up in $0.05 steps, never cross more than 25% of the spread"
+  ],
+  "management_rules": [
+    "Take profit at +100% of the debit (contract mid >= 2.0x entry debit)",
+    "Scale rule: at +100% you may sell half and trail the rest with a stop at entry debit (free carry)",
+    "Hard stop at -50% of the debit (contract mid <= 0.5x entry debit)",
+    "Time stop: close at 21 DTE regardless of P&L; theta decay past 21 DTE is the largest single drag on long calls",
+    "If IV rank rises above 60 while the position is up, harvest - vega gains are the first thing to reverse",
+    "Do not average down. Adding to a losing long call doubles theta exposure against the same broken thesis"
+  ],
+  "exit_rules": [
+    "Close (sell to close) at +100%, -50%, or 21 DTE, whichever comes first",
+    "Never hold a long call through expiration: any long call that is ITM at expiry will be auto-exercised by OCC (the $0.01 ITM rule) and deliver 100 shares you did not size for. Sell to close no later than 15:30 ET on expiration day",
+    "If the long call is OTM at 15:30 ET on expiry day and worth < $0.05, let it expire worthless rather than paying commissions and slippage",
+    "If the underlying is halted or the option goes no-bid, escalate to manual review - do not market-order out"
+  ],
+  "assignment_risk": "No assignment risk - you are long. The real risk is auto-EXERCISE: OCC exercises any long option $0.01 or more ITM at expiry, delivering 100 shares per contract. Automation must flatten long calls before 15:30 ET on expiration day.",
+  "buying_power": "Cash debit only; no margin held beyond the premium paid.",
+  "liquidity_needs": "Underlying ADV >= 2M shares; option OI >= 500 and bid/ask <= 10% of mid. Avoid names where the chain is only monthlies.",
+  "common_mistakes": "Buying calls when IVR > 60 and then being right on direction but still losing to IV crush; buying 7-14 DTE for a 3-week thesis; holding to expiration and getting auto-exercised into 100 shares.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The 30-60 DTE version is explicitly not a 0DTE strategy. See zero-dte-long-call-scalp for the 0DTE variant with its own rules.",
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

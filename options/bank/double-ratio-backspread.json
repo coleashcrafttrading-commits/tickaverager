@@ -1,0 +1,88 @@
+{
+  "name": "Double Ratio Backspread",
+  "slug": "double-ratio-backspread",
+  "aliases": [
+    "double backspread",
+    "long double ratio spread",
+    "strangle backspread"
+  ],
+  "summary": "A call backspread (sell 1 nearer strike, buy 2 further strikes) plus a put backspread in the same expiry - four leg-lines, defined risk, strongly long volatility with convex payoffs in both tails.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "0.15-0.20 delta put (the further OTM strike)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.30-0.35 delta put (nearer the money, above the long puts)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.30-0.35 delta call (nearer the money, below the long calls)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "0.15-0.20 delta call (the further OTM strike)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "either",
+  "max_profit": "UNLIMITED on the upside (2 long calls net), and (put strikes x 100) minus cost on the downside - the payoff is convex in both tails",
+  "max_loss": "at the long strikes at expiry: on each side, (short strike - long strike) x 100 x 1 contract, plus or minus the net premium. Compute the exact worst case numerically across a spot grid at entry; it is bounded.",
+  "breakevens": "four breakevens (two per side) - compute numerically at entry and store them",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "positive in both tails, negative at the long strikes",
+    "theta": "negative",
+    "vega": "positive"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "IV rank <= 20 with steep skew (so the nearer short strikes pay well relative to the further longs) and an expectation of a large move. It is the structure to use when you want long-vol convexity without paying a straight strangle's premium.",
+  "entry_rules": [
+    "IV rank <= 20 and IV percentile <= 25",
+    "Net premium: target a credit or a debit no larger than 15% of the maximum modeled loss",
+    "Ratio exactly 2 long : 1 short per side, with the shorts CLOSER to the money than the longs (this is what makes it defined risk)",
+    "Worst-case modeled loss (evaluated at each long strike at expiry) <= 2% of equity",
+    "DTE 30-60 so the position has time to move; exit before 21 DTE",
+    "OI >= 500 on all strikes, spread <= 10% of mid",
+    "Alpaca level 3: each short is covered by a long at a strike that bounds it. Validate leg-by-leg before submit; if the broker flags any short as uncovered it becomes level 4.",
+    "Alpaca mleg supports up to 4 legs - this structure is exactly 4 leg-lines with ratios 2/1/1/2"
+  ],
+  "management_rules": [
+    "Take profit at 100% of the modeled maximum loss (i.e. when the gain equals the worst-case risk)",
+    "Hard time stop: close at 21 DTE - the maximum-loss zone sits exactly at the long strikes at expiry, which is where the position drifts",
+    "Loss stop: close at 60% of the modeled max loss",
+    "Volatility exit: if IV rank rises above 45 and the position is green, close",
+    "If spot sits within 2% of either long strike with < 30 DTE remaining, close - that is the pain point"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "Close immediately if either short leg's extrinsic < $0.10 or |delta| >= 0.85",
+    "Ex-dividend guard on the short call",
+    "Never let expiration resolve the ratio: a pinned long strike at expiry produces the worst outcome and an assignment on the short"
+  ],
+  "assignment_risk": "One short call and one short put per unit. Both are closer to the money than the longs, so they go ITM first - the assignment guard fires regularly on this structure. Treat it as high-maintenance.",
+  "buying_power": "Broker-computed maximum modeled loss, roughly (short strike - long strike) x 100 per side net of premium.",
+  "liquidity_needs": "OI >= 500 on all four strikes; the 2x long legs must be closeable in size.",
+  "common_mistakes": "Building it with the shorts FURTHER from the money (that is a naked ratio spread, level 4, unlimited risk); entering in high IV; holding into expiry where the long strikes are the maximum-pain points.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended: the structure needs a large move over time, and 0DTE decay at the long strikes is punishing. If tested intraday, use a 60-minute time stop and close by 15:30 ET.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

@@ -1,0 +1,63 @@
+{
+  "name": "Short Guts",
+  "slug": "short-guts",
+  "aliases": [
+    "sell guts",
+    "short ITM strangle"
+  ],
+  "summary": "Sell an ITM call and an ITM put in the same expiry; collects a large credit that is mostly intrinsic, with undefined risk on both sides. A bad idea wearing a clever hat.",
+  "bias": "short_vol",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ITM call below spot, delta 0.65-0.80."
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ITM put above spot, delta 0.65-0.80.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "credit received - (put strike - call strike)*100, i.e. only the extrinsic collected",
+  "max_loss": "UNDEFINED on both sides, exactly as a short strangle",
+  "breakevens": "call strike + credit per share; put strike - credit per share",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "negative",
+    "theta": "positive, but only the extrinsic decays",
+    "vega": "negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Essentially never. Identical payoff to a short strangle at mirror strikes, but with guaranteed assignment exposure on both legs from day one, a much larger credit that overstates the actual edge, and worse fills.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT and MARKED AS A BAD IDEA. Both legs are uncovered short options -- Level 4 authority, which Alpaca does not offer at all.",
+    "Both legs are ITM at entry, which means both carry immediate early-assignment risk. There is no version of this that is safe on an account that must never take delivery.",
+    "Defined-risk substitute: iron condor, or simply a short strangle if Level 4 ever existed. In practice: do not implement."
+  ],
+  "management_rules": [
+    "If it somehow existed: take profit at 50% of the EXTRINSIC collected, close at 21 DTE, stop at 2x extrinsic.",
+    "Monitor both legs' extrinsic values every session; either can be exercised the moment extrinsic dies."
+  ],
+  "exit_rules": [
+    "Would need to be closed the instant either leg's extrinsic drops below $0.10, which for ITM options happens within days.",
+    "Absolute flatten by 15:30 ET on expiry -- though by construction both legs are ITM and one will certainly be assigned if held.",
+    "DIVIDEND GUARD: the ITM short call is a prime early-exercise candidate at every ex-dividend date."
+  ],
+  "assignment_risk": "The highest in the family. BOTH legs are in the money at entry. Early assignment is not a tail risk here, it is the base case. Assignment on the call gives short stock; on the put, long stock; both at once gives you a fully offsetting stock position plus two commissions and a dividend obligation.",
+  "buying_power": "Reg-T naked on both ITM sides -- very large. Not available.",
+  "liquidity_needs": "Irrelevant; the structure is blocked.",
+  "common_mistakes": "Being seduced by the headline credit, which is 80%+ intrinsic and not profit; assuming ITM options will not be exercised early.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Absolutely not. Guaranteed double assignment.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

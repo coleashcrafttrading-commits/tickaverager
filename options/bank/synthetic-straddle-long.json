@@ -1,0 +1,69 @@
+{
+  "name": "Long Synthetic Straddle (Delta-Hedged Shares)",
+  "slug": "synthetic-straddle-long",
+  "aliases": [
+    "synthetic straddle",
+    "stock plus two puts",
+    "gamma-hedged long vol"
+  ],
+  "summary": "100 long shares plus two long ATM puts produces the payoff of a long straddle at that strike; used when the put line is cheaper than the call line or when the shares are already held.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares at market"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ATM: strike nearest spot, put delta -0.45 to -0.55. TWO contracts, not one \u2014 one hedges the shares, the second creates the short-side wing"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "UNDEFINED (unlimited) on the downside via the net short delta below the strike; unlimited on the upside via the shares. Payoff equals a long straddle at the strike less the total debit.",
+  "max_loss": "Total put debit plus (entry_spot - strike) x 100 if the underlying finishes exactly at the strike \u2014 i.e. the straddle's full premium",
+  "greeks": {
+    "delta": "~0.00 at entry (+1.00 shares, -1.00 from two ATM puts)",
+    "gamma": "strongly positive",
+    "theta": "strongly negative \u2014 two long puts decaying",
+    "vega": "strongly positive"
+  },
+  "breakevens": "strike +/- (total_put_debit/100), approximately",
+  "when_to_use": "When a long-volatility position is wanted and the put line is cheaper in vol terms than the call line \u2014 which on equity skew it usually is NOT (puts carry higher IV), making the call-side synthetic straddle (short shares plus two calls) the more common institutional version. The realistic use case here is converting an existing 100-share holding into a long-vol position without selling it.",
+  "typical_dte": "30-60 DTE",
+  "entry_rules": [
+    "LEVEL 2 LEGAL: long shares plus long puts, no short legs. Fully executable on Alpaca Level 3.",
+    "Exactly 2 puts per 100 shares, at the SAME strike, nearest to spot with |delta| in [0.45, 0.55]. A different ratio is a different trade.",
+    "Only prefer this over simply buying a listed straddle when (2 x put_ask + share_cost - strike x 100) < (call_ask + put_ask) x 100 by more than $20 per unit \u2014 otherwise buy the straddle directly and avoid the share capital.",
+    "IV rank < 30 at entry; a long-vol structure bought at high IV loses on the vol crush even when the move arrives.",
+    "Require an identified catalyst within the contract's life (earnings, FDA date, macro event) \u2014 long gamma without a catalyst just pays theta.",
+    "Size: total debit including the share capital tie-up <= 20% of equity."
+  ],
+  "management_rules": [
+    "Delta-hedge rule, if running it as a gamma scalp: re-hedge to flat by trading shares whenever net delta exceeds +/-0.30 per unit, at most twice per session to control costs.",
+    "Close at 100% of the total put debit as profit, or at 21 DTE, whichever comes first.",
+    "Hard stop: close if the total put debit has lost 50% of its value and no catalyst remains before expiry.",
+    "Do not sell one of the puts to 'reduce cost' \u2014 that converts the structure into a married put with a completely different payoff."
+  ],
+  "exit_rules": [
+    "No short option legs, therefore no assignment risk.",
+    "MANDATORY: close both puts by 15:00 ET on expiration day if ITM. Auto-exercise of two ITM puts sells 200 shares \u2014 100 held plus 100 the account does not own, creating a short share position over the weekend. This is the specific failure mode of the 2:1 ratio and it must be prevented by an unconditional expiry-day close.",
+    "If the puts are OTM at 15:40 ET, they may lapse, but the resulting unhedged 100-share position must then be explicitly re-approved by the risk layer.",
+    "Never allow the share count and the put count to drift out of the 100:2 relationship."
+  ],
+  "assignment_risk": "NONE from short legs. The critical hazard is auto-exercise of TWO long ITM puts against only 100 shares: the OCC exercises both, one covered by the shares and one naked short, leaving the account short 100 shares. This is the single most important operational rule for this structure and it is easy to miss because the position appears to have no short options at all.",
+  "alpaca_level": 2,
+  "buying_power": "Share cost (full cash or 50% Reg T) plus two put debits. Roughly $10,000 or $5,000 plus $600 on a $100 underlying \u2014 expensive for the exposure obtained versus a listed straddle.",
+  "liquidity_needs": "Put OI >= 500, bid-ask <= $0.05, share ADV >= 1,000,000.",
+  "common_mistakes": "Buying one put instead of two and believing it is a straddle. Letting both puts auto-exercise into a naked short share position. Building it when the listed straddle is cheaper, which is usually the case.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Theta at 0DTE on two ATM puts is brutal and the share leg adds nothing a listed 0DTE straddle does not do more cheaply.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

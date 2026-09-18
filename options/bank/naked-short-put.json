@@ -1,0 +1,58 @@
+{
+  "name": "Naked / Uncovered Short Put",
+  "slug": "naked-short-put",
+  "aliases": [
+    "Uncovered put write",
+    "Margin put sale"
+  ],
+  "summary": "Selling a put without reserving the full assignment cash, financed by margin. Identical payoff to a CSP but with leverage and a margin-call tail.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.15-0.30 delta OTM",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "credit x 100",
+  "max_loss": "(strike - credit) x 100, but on a fraction of the capital, so effectively unbounded relative to margin posted",
+  "breakevens": "strike - credit",
+  "greeks": {
+    "delta": "+15 to +30",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "NOT AVAILABLE ON THIS ACCOUNT. Included for completeness. Alpaca options level 4 is required for uncovered short puts; this account is level 3. Any attempted order without the cash reserve will be rejected.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the system must never submit a short put without strike x 100 of reserved cash. If the reserve is unavailable, downgrade to a put credit spread (defined risk, level 3) or skip.",
+    "If ever run at level 4: margin requirement is approximately max(20% of underlying - OTM amount, 10% of strike) + premium; size so that a 2-sigma adverse move consumes < 20% of excess liquidity."
+  ],
+  "management_rules": [
+    "Same as CSP: 50% profit, 21 DTE, roll down-and-out for credit.",
+    "Additional margin monitor: reduce size if maintenance excess < 40% of equity."
+  ],
+  "exit_rules": [
+    "Same hard assignment guard as the CSP, plus an immediate close if margin excess falls below 25%.",
+    "Close by 15:30 ET on expiration day if ITM or within 0.5% of the strike."
+  ],
+  "assignment_risk": "Same mechanics as the CSP but the assignment can exceed available cash, triggering a forced liquidation by the broker at whatever price it chooses. This is precisely the outcome the system is built to avoid.",
+  "buying_power": "Reg-T naked put margin, roughly 15-20% of notional, at level 4 only.",
+  "liquidity_needs": "Same as CSP.",
+  "common_mistakes": "Confusing 'margin efficient' with 'safe'; selling far more contracts than the account could ever take delivery of.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Uncovered 0DTE puts are the classic account-destroying trade; also not permitted at level 3.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1,
+  "also_filed_under": [
+    "single-leg"
+  ]
+}

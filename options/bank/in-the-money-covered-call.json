@@ -1,0 +1,67 @@
+{
+  "name": "In-the-Money Covered Call",
+  "slug": "in-the-money-covered-call",
+  "aliases": [
+    "Monied covered call",
+    "ITM buy-write"
+  ],
+  "summary": "Covered call written at a strike below spot, trading upside for a large downside cushion and a high probability of a small, defined gain.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.60-0.75 delta (roughly 3-8% ITM)",
+      "dte_rule": "30-60 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - share price + credit) x 100 - a small number, achieved as long as the stock stays above the strike",
+  "max_loss": "(share price - credit) x 100 to zero",
+  "breakevens": "share price - credit",
+  "greeks": {
+    "delta": "+25 to +40 per unit",
+    "gamma": "negative",
+    "theta": "strongly positive relative to the small max profit",
+    "vega": "negative"
+  },
+  "when_to_use": "When the system wants share exposure with a large cushion, in high IV, on a range-bound or mildly declining underlying, or as a way to hold a core ETF position defensively.",
+  "typical_dte": "30-60 DTE",
+  "entry_rules": [
+    "Require credit such that downside cushion (spot - breakeven)/spot >= 5%.",
+    "Require if-called return >= 1.0% for <= 45 DTE.",
+    "Strike chosen by delta in [0.60, 0.75]; never deeper than 0.80 delta (extrinsic collapses and assignment becomes near-certain).",
+    "Require extrinsic value of the short call >= 0.5% of spot at entry, else the trade earns nothing.",
+    "Require IV Rank >= 25."
+  ],
+  "management_rules": [
+    "Close at 50-60% of the extrinsic captured, not of total premium (intrinsic is not profit).",
+    "At 21 DTE, roll down-and-out only if the stock has fallen below the strike; otherwise let it be called in a controlled close.",
+    "If the stock rallies well above the strike, do nothing - max profit is already locked; just do not get assigned early around a dividend."
+  ],
+  "exit_rules": [
+    "HARD: this call will almost always be ITM. Buy it back and sell the shares as one combo no later than 15:30 ET on expiration day, or earlier when extrinsic < 0.05.",
+    "Extrinsic monitor runs continuously: if call extrinsic < 0.05, unwind the unit that session.",
+    "Ex-dividend: unwind the unit before the close the day prior to ex-date unless extrinsic > 1.10 x dividend."
+  ],
+  "assignment_risk": "Very high by design - the call is ITM, so early assignment around ex-dividend is likely and expiration assignment is the default outcome. For a system that must never be assigned, this strategy demands the tightest extrinsic monitor of the whole family.",
+  "buying_power": "Shares only; the ITM call reduces net capital at risk because of the large credit.",
+  "liquidity_needs": "ITM calls are wider; require spread <= 6% of extrinsic value, not of mid, and OI >= 250.",
+  "common_mistakes": "Treating intrinsic value as income; going deeper than 0.80 delta and earning essentially nothing while carrying full share downside; ignoring the near-certain assignment.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "A 0DTE ITM covered call is just a share sale with extra steps and near-certain assignment. Do not automate.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

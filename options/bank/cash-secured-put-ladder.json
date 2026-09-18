@@ -1,0 +1,75 @@
+{
+  "name": "Cash-Secured Put Ladder",
+  "slug": "cash-secured-put-ladder",
+  "aliases": [
+    "Laddered puts",
+    "Scale-in put writing",
+    "Staggered CSP"
+  ],
+  "summary": "Sell multiple cash-secured puts at descending strikes and staggered expiries so the system scales into shares gradually as the underlying falls.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "rung 1: 0.30 delta",
+      "dte_rule": "~21 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "rung 2: 0.20 delta",
+      "dte_rule": "~35 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "rung 3: 0.12 delta",
+      "dte_rule": "~49 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "sum of all credits",
+  "max_loss": "sum of (strike - credit) x 100 across all rungs",
+  "breakevens": "per rung: strike - credit; blended basis if all are assigned",
+  "greeks": {
+    "delta": "+50 to +65 across three rungs",
+    "gamma": "negative, spread across expiries",
+    "theta": "positive and smooth",
+    "vega": "negative"
+  },
+  "when_to_use": "A high-conviction long-term underlying where the system wants to build a position on weakness, with IV Rank >= 30. This is the natural options analogue of the tick-averager DCA ladder.",
+  "typical_dte": "21/35/49 DTE rungs",
+  "entry_rules": [
+    "Total cash reserved = sum(strike x 100) across all rungs; require that total <= 25% of account equity for one underlying.",
+    "Each rung independently passes the CSP gates (IVR >= 30, OI >= 250, credit >= 1% of strike notional annualized >= 12%).",
+    "Strikes separated by at least 1 x ATR(14) or 3% of spot, whichever is greater.",
+    "No two rungs in the same expiry."
+  ],
+  "management_rules": [
+    "Manage each rung at 50% profit / 21 DTE independently.",
+    "When a rung closes, re-open at the furthest expiry to keep the ladder shape.",
+    "Halt new rungs if aggregate short put delta across the underlying exceeds 0.80 per $10k of allocated capital.",
+    "If the underlying drops through two rungs, stop adding and shift to defense (roll down and out the deepest rung)."
+  ],
+  "exit_rules": [
+    "Per-rung hard guard: ITM short put closed by 15:30 ET on its expiration day; shares purchased deliberately in the open market if wanted.",
+    "Any rung with extrinsic < 0.05 and delta < -0.85 is closed the same session.",
+    "Whole-ladder kill switch: if the aggregate unrealized loss exceeds 4% of account equity, close all rungs."
+  ],
+  "assignment_risk": "Each rung is independently assignable; the real hazard is CORRELATED assignment - a sharp selloff can put all three rungs ITM at once, demanding the full cash reserve in one day. The ladder must be sized assuming every rung is assigned simultaneously.",
+  "buying_power": "Sum of all strikes x 100, reserved in cash.",
+  "liquidity_needs": "Multiple liquid expiries and strikes; OI >= 250 per rung.",
+  "common_mistakes": "Sizing each rung as if only one will be assigned; adding rungs into a downtrend without a trend filter; stacking all rungs in the same expiry so they all resolve together.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The ladder is about time and price diversification; a 0DTE rung contributes almost no premium and all the gamma.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 3
+}

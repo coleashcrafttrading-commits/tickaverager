@@ -1,0 +1,75 @@
+{
+  "name": "Protective Put Spread",
+  "slug": "protective-put-spread",
+  "aliases": [
+    "Hedged with a bear put spread",
+    "Partial hedge",
+    "Put debit spread hedge"
+  ],
+  "summary": "Hedge shares with a long put financed partly by a lower short put, cutting hedge cost at the price of protection below the short strike.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing shares",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.30-0.40 delta, ~5% OTM",
+      "dte_rule": "60-120 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.12-0.18 delta, ~12-15% OTM; width = 7-10% of spot",
+      "dte_rule": "same expiry as the long put"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "unlimited above breakeven (share upside)",
+  "max_loss": "(share basis - long strike + net debit) x 100 PLUS unlimited further loss below the short strike - protection stops there",
+  "breakevens": "share basis + net debit per share",
+  "greeks": {
+    "delta": "+70 to +80 per unit",
+    "gamma": "positive between the strikes",
+    "theta": "slightly negative",
+    "vega": "slightly positive"
+  },
+  "when_to_use": "When a plain protective put is too expensive (IV Rank >= 50) and the system wants protection over a defined band - typically a 5-15% decline - while accepting that a crash below the short strike is unhedged.",
+  "typical_dte": "60-120 DTE",
+  "entry_rules": [
+    "Net debit <= 1.2% of share notional per 90-day hedge.",
+    "Long strike by delta in [0.30, 0.40]; short strike by delta in [0.12, 0.18]; width >= 7% of spot.",
+    "Require cash or margin to support the short put if it is assigned (it is covered only by the long put for margin, but assignment delivers shares).",
+    "Require IV skew to favor the structure: short put IV - long put IV >= 2 vol points.",
+    "Both legs same expiry; OI >= 250 each."
+  ],
+  "management_rules": [
+    "Close the whole spread when the long put's delta exceeds 0.70 (the hedge has done its job) and re-strike lower if protection is still needed.",
+    "Roll out at DTE < 30.",
+    "If the stock rallies and the spread decays to <= 20% of the debit, close it and re-hedge higher."
+  ],
+  "exit_rules": [
+    "HARD: the SHORT put is the assignable leg. Close it by 15:30 ET on expiration day if ITM, and any time its extrinsic < 0.05 and delta < -0.85. Assignment delivers 100 MORE shares, doubling the long exposure at the worst moment.",
+    "Close the long put rather than letting it auto-exercise into a share sale.",
+    "Close both legs together as one combo order."
+  ],
+  "assignment_risk": "The short put is assignable and, if assigned, converts a hedge into a doubled share position at the short strike while the long put remains. This is the key hazard: a hedge that becomes leverage. Monitor extrinsic continuously.",
+  "buying_power": "Net debit; the spread is defined risk for margin purposes (long put covers the short put), so level 3 is sufficient.",
+  "liquidity_needs": "Two strikes with OI >= 250 each; combined spread <= 12% of net debit.",
+  "common_mistakes": "Believing the position is fully hedged; the cheapest configurations leave the tail completely open. Forgetting that short put assignment adds shares.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable as a hedge structure.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,62 @@
+{
+  "name": "LEAPS Long Call",
+  "slug": "leaps-long-call",
+  "aliases": [
+    "LEAP call",
+    "long-dated call",
+    "PMCC anchor"
+  ],
+  "summary": "Buy a call with more than a year to expiry, usually 0.70-0.80 delta, as a multi-quarter leveraged long or as the anchor leg for later call overwriting.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta 0.70-0.80 (moderately ITM)",
+      "dte_rule": "365-730 DTE; standard LEAPS expiries (January)"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unlimited",
+  "max_loss": "Debit paid x 100. Can still be a 100% loss over a 2-year horizon.",
+  "breakevens": "strike + debit per share at expiry; much lower on a mark-to-market basis",
+  "greeks": {
+    "delta": "+0.70 to +0.80",
+    "gamma": "very small",
+    "theta": "very small per day (< 0.15% of debit/day) but total extrinsic is large in dollars",
+    "vega": "large positive - LEAPS are the most vega-sensitive long single options in dollar terms"
+  },
+  "typical_dte": "365-730 DTE",
+  "when_to_use": "IVR < 25 on a name with a multi-quarter thesis. Vega dominates: buying LEAPS in a high-IV regime is the single most expensive long-premium mistake available.",
+  "entry_rules": [
+    "IVR < 25 - hard gate. LEAPS are a long-vega position first and a directional position second",
+    "DTE >= 365 at entry",
+    "Delta 0.70-0.80",
+    "Debit <= 8% of equity (~$4,000 on $50k) per name; max 3 LEAPS positions at once",
+    "Bid/ask <= 5% of mid; OI >= 100",
+    "Underlying must be a liquid large cap or major ETF - no LEAPS on illiquid single names"
+  ],
+  "management_rules": [
+    "Review quarterly, not daily",
+    "Take profit at +100% of debit, or roll up (sell, buy a higher strike at 0.70-0.80 delta) to bank half the gain",
+    "Roll out when DTE < 180: extrinsic decay accelerates and the leverage story degrades",
+    "Stop at -40% of debit or a monthly close below the 200-day SMA",
+    "If IVR rises above 70 with the position profitable, sell to close or roll up - realise the vega"
+  ],
+  "exit_rules": [
+    "Close at +100%, -40%, or when DTE < 180 (roll or exit)",
+    "Never hold into the final month. Flatten or roll with >= 30 DTE remaining to avoid auto-exercise into 100 shares"
+  ],
+  "assignment_risk": "None (long). Exercise risk at expiry only, and the share purchase would be large - the 30-DTE roll rule prevents it.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "LEAPS markets are wide. Trade only underlyings with LEAPS OI >= 100 and mid-based fills achievable.",
+  "common_mistakes": "Buying LEAPS at high IV rank; using them as set-and-forget with no roll discipline; selling short calls against them without approval for the resulting diagonal (that is a spread, not this strategy).",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

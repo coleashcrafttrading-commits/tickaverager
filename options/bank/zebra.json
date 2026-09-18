@@ -1,0 +1,67 @@
+{
+  "name": "ZEBRA (Zero Extrinsic Back Ratio)",
+  "slug": "zebra",
+  "aliases": [
+    "Zero extrinsic back ratio",
+    "Synthetic stock replacement",
+    "Stock substitute"
+  ],
+  "summary": "Buy two ~0.70-delta ITM calls and sell one ATM call so the extrinsic paid nets to roughly zero, producing a ~100-delta stock substitute with defined risk.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "0.70-0.75 delta ITM, same expiry",
+      "dte_rule": "45-120 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM (0.50 delta), same expiry",
+      "dte_rule": "same expiry as the long legs"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "unlimited above the short strike, tracking ~100 deltas",
+  "max_loss": "net debit paid",
+  "breakevens": "approximately the ATM strike plus (net debit - intrinsic)/100; effectively near the ATM strike",
+  "greeks": {
+    "delta": "+90 to +100 per unit",
+    "gamma": "slightly positive",
+    "theta": "approximately zero by construction (the whole point)",
+    "vega": "approximately zero by construction"
+  },
+  "when_to_use": "Want 100 deltas of long exposure with a hard floor and roughly no time decay. Better than owning shares when defined risk matters. The put version (buy 2 ITM puts, sell 1 ATM put) gives ~-100 deltas for a bearish view without shorting stock.",
+  "typical_dte": "45-120 DTE",
+  "entry_rules": [
+    "Select long strike so 2 x long_delta - short_delta is in [0.90, 1.05].",
+    "Require total extrinsic paid (2 x long extrinsic - short extrinsic) <= 0.10 per share.",
+    "All three legs same expiry, OI >= 250 each, combined spread <= 1.5% of net debit.",
+    "Require net debit <= 40% of the cost of 100 shares."
+  ],
+  "management_rules": [
+    "Manage like a stock position: take profit at the same target used for shares, or trail.",
+    "Roll out at 21 DTE to the next 45-90 DTE cycle when the thesis persists; the roll should be near cost-neutral in extrinsic terms.",
+    "Re-strike if net delta drifts outside [0.75, 1.15]."
+  ],
+  "exit_rules": [
+    "HARD: close the entire structure by 15:30 ET on expiration day. Auto-exercise of the two ITM longs plus assignment of the short creates a net +100 share position (or worse if the short is also ITM) that the account may not want.",
+    "Close the short call immediately if its extrinsic < 0.05 and delta > 0.85 - assignment of the short call delivers SHORT shares against long calls.",
+    "Exit on the underlying's normal stop (e.g. spot < entry x 0.92)."
+  ],
+  "assignment_risk": "The single short ATM call is assignable and, if assigned, delivers 100 short shares that are only synthetically covered by the long calls. Early assignment is unlikely while extrinsic remains, but the dividend guard applies. Also watch expiry: two ITM longs auto-exercise into 200 long shares.",
+  "buying_power": "Net debit; treated as a call back-ratio / long spread at level 3 because the short leg is covered by a long call at a lower strike.",
+  "liquidity_needs": "Three legs to fill - needs a chain with OI >= 250 across ITM and ATM strikes.",
+  "common_mistakes": "Letting the structure go to expiration and waking up with share positions; choosing strikes that leave meaningful net extrinsic, which defeats the design.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Extrinsic is already near zero at 0DTE, so the structure has no purpose; it is just leveraged directional exposure with assignment complexity.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

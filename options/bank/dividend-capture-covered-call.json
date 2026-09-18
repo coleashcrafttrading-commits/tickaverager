@@ -1,0 +1,67 @@
+{
+  "name": "Dividend Capture with Covered Call",
+  "slug": "dividend-capture-covered-call",
+  "aliases": [
+    "Dividend overwrite",
+    "Ex-div covered write"
+  ],
+  "summary": "Hold shares through an ex-dividend date while short a call, collecting both the dividend and the premium - but only if the call is kept far enough OTM to avoid early exercise.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "shares held across the ex-dividend date",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.15-0.25 delta OTM, AND extrinsic value at the ex-date must exceed 1.5 x the declared dividend",
+      "dte_rule": "expiry at least 10 days AFTER the ex-dividend date"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "(strike - basis + credit) x 100 + dividend x 100",
+  "max_loss": "(basis - credit - dividend) x 100",
+  "breakevens": "basis - credit - dividend",
+  "greeks": {
+    "delta": "+75 to +85 per unit",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "On dividend ETFs and blue chips where the system already wants the shares and the dividend is a meaningful part of total return. The whole art is avoiding early assignment on the day before ex-date.",
+  "typical_dte": "expiry 20-45 days out, positioned so the ex-date is early in the option's life",
+  "entry_rules": [
+    "Require the declared dividend, ex-date and pay-date from a reliable calendar; refuse to run this on an estimated dividend.",
+    "MANDATORY: option extrinsic value projected at the close of the day before ex-date must be >= 1.5 x the dividend per share. If not, the call will likely be exercised early. Compute extrinsic with a local BSM fit.",
+    "Choose an expiry at least 10 days after the ex-date so there is real extrinsic remaining.",
+    "Strike delta <= 0.25 - the further OTM, the safer from early exercise.",
+    "Shares must be held before the ex-date, not on it (T+1 settlement means buying ON the ex-date does not earn the dividend)."
+  ],
+  "management_rules": [
+    "Re-check extrinsic vs dividend at 15:00 ET on the day BEFORE the ex-date. If extrinsic < 1.10 x dividend, close or roll the call up-and-out immediately, before the close.",
+    "After the ex-date, manage the call normally at 50% profit / 21 DTE.",
+    "Expect a share price drop of approximately the dividend on the ex-date - this is not a loss and must not trigger the position stop; adjust the stop by the dividend amount."
+  ],
+  "exit_rules": [
+    "HARD: close or roll the short call before the close on the day before ex-date whenever it is ITM or extrinsic < 1.10 x dividend. This is the single highest-probability early-assignment window in all of options trading.",
+    "Standard expiration guard: flatten ITM short calls by 15:30 ET on expiration day.",
+    "If assigned before the ex-date, the dividend is lost and the shares are gone - reconcile the ledger and stand down for the cycle."
+  ],
+  "assignment_risk": "This is THE canonical early-assignment scenario: an ITM call whose remaining time value is less than the dividend will be exercised the day before the ex-date by any rational holder, because exercising captures the dividend and forfeits only the smaller extrinsic. The system must run an explicit dividend calendar and an extrinsic-vs-dividend comparison, not just a delta check.",
+  "buying_power": "Shares only.",
+  "liquidity_needs": "Dividend-paying large caps and ETFs with liquid chains; OI >= 250.",
+  "common_mistakes": "Writing a call whose extrinsic is smaller than the dividend and losing both the shares and the dividend; buying shares on the ex-date instead of before it; treating the ex-date price drop as a stop-loss trigger.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable; the dividend timeline is multi-day.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

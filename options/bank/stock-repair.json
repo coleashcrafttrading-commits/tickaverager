@@ -1,0 +1,81 @@
+{
+  "name": "Stock Repair Strategy",
+  "slug": "stock-repair",
+  "aliases": [
+    "Repair strategy",
+    "1x2 call ratio repair",
+    "Zero-cost doubling"
+  ],
+  "summary": "On a losing share position, buy one ATM call and sell two OTM calls (same expiry) for roughly zero cost, doubling the recovery rate between the strikes without adding capital.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "existing, underwater share position",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM (near current spot, well below the share basis)",
+      "dte_rule": "45-90 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "midway between spot and the share basis; chosen so 2 x credit >= long call cost (net zero or credit)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either",
+  "max_profit": "achieved at the upper strike: the shares recover to the upper strike AND the long call adds the same distance again, so the effective recovery point is roughly halfway back to basis. Capped above the upper strike.",
+  "max_loss": "original share downside to zero, less any net credit; upside is capped at the upper strike (one of the two short calls is covered by the shares, the other by the long call)",
+  "breakevens": "roughly spot + (share basis - spot)/2 in effective terms; the structure breaks even on the unit at a much lower price than the shares alone",
+  "greeks": {
+    "delta": "+130 to +150 immediately after entry, decaying toward +100 then toward 0 as spot approaches the upper strike",
+    "gamma": "negative above the upper strike",
+    "theta": "positive above spot",
+    "vega": "negative"
+  },
+  "when_to_use": "A share position down 15-30% where the system still believes in the name but does not want to add capital. The repair works only for a partial recovery - it caps the position at the upper strike, so it is a deliberate trade of full recovery for faster partial recovery.",
+  "typical_dte": "45-90 DTE",
+  "entry_rules": [
+    "Only on positions where spot is between 70% and 88% of the share basis.",
+    "Long call strike nearest to spot; short strikes at approximately (spot + basis)/2, requiring the strike to exist with OI >= 250.",
+    "Require net cost <= 0.1% of share notional (aim for exactly zero or a small credit).",
+    "VERIFY COVER: 2 short calls require 100 shares (covers one) PLUS the long call (covers the other, as a call debit spread). Alpaca must recognize this as a covered ratio; if it does not, the order will be rejected as uncovered - test with a preview order first.",
+    "No earnings inside the expiry.",
+    "Require IV Rank >= 35 - the two short calls need to be worth something."
+  ],
+  "management_rules": [
+    "Close the whole structure when spot reaches the upper strike and the unit's P/L is at 80% of its maximum.",
+    "At 21 DTE, close or roll the option legs out; do not let them run into gamma.",
+    "If spot rallies far past the upper strike, the structure is fully capped - close it and simply hold or sell the shares.",
+    "Do not repeat the repair more than once on the same position; a second repair usually means the thesis is wrong."
+  ],
+  "exit_rules": [
+    "HARD: TWO short calls. Flatten both by 15:30 ET on expiration day if ITM. If only the share-covered one is closed, the other becomes naked.",
+    "Extrinsic monitor on both short calls: close when extrinsic < 0.05 and delta > 0.85.",
+    "Ex-dividend guard: ITM short calls into an ex-date are likely to be assigned; assignment of BOTH would deliver 100 shares (from the position) and leave 100 shares short unless the long call is exercised - close before the ex-date.",
+    "Unwind all legs plus shares as one order when abandoning the position."
+  ],
+  "assignment_risk": "Elevated and asymmetric. One short call is share-covered; the other is covered only by the long call. Assignment on both simultaneously delivers the 100 owned shares and creates a 100-share SHORT position that must be closed by exercising the long call (forfeiting its extrinsic) or buying shares. This is the structure's central hazard and demands the same monitoring intensity as a PMCC.",
+  "buying_power": "Shares plus the call spread's width x 100 against the second short call (defined risk). Level 3 if the broker recognizes the cover; otherwise it is a level 4 ratio.",
+  "liquidity_needs": "Three strikes with OI >= 250; needs a dense chain between spot and basis.",
+  "common_mistakes": "Using it on a broken company and turning a loss into a capped loss; miscounting cover and creating a naked call; expecting full recovery when the structure explicitly caps at the upper strike.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - repair needs time for the recovery to happen.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1,
+  "also_filed_under": [
+    "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)"
+  ]
+}

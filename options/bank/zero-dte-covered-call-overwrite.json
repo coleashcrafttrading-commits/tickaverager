@@ -1,0 +1,68 @@
+{
+  "name": "0DTE Covered Call Overwrite",
+  "slug": "zero-dte-covered-call-overwrite",
+  "aliases": [
+    "daily overwrite",
+    "0DTE buy-write"
+  ],
+  "summary": "Sell a same-day-expiry call against held index-ETF shares every morning, collecting the steepest theta on the board. Extremely high gamma risk relative to the credit.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "100 shares of SPY or QQQ per contract"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta 0.10-0.20, computed locally since Alpaca returns no greeks on 0DTE",
+      "dte_rule": "0 DTE, written at the open, expires the same day"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "The credit received (typically $0.15-$0.60 on SPY), realised if the ETF closes below the strike",
+  "max_loss": "Full ETF downside for the day minus the credit, and all upside above the strike is forfeited",
+  "breakevens": "ETF price - credit for the day",
+  "greeks": {
+    "delta": "+100 minus 10-20 = +80 to +90",
+    "gamma": "extremely negative - a 0.15 delta call can become 0.90 delta in an hour on a trend day",
+    "theta": "the highest theta available per day, and 100% of it is realised by the bell",
+    "vega": "negative, negligible at 0 DTE"
+  },
+  "typical_dte": "0 DTE, written daily",
+  "when_to_use": "Only on SPY/QQQ where you hold shares long-term and want a daily income overlay. This is short gamma at its most extreme: one strong trend day can cost more than a month of credits.",
+  "entry_rules": [
+    "SPY or QQQ only, with 100 shares per contract verified at order time",
+    "Write between 09:45 and 10:15 ET (after the opening auction settles, while the day's theta is still intact)",
+    "Delta 0.10-0.20, computed locally with Black-Scholes using intraday T measured in fractions of a trading day (Alpaca returns no greeks or IV on 0DTE at any tier)",
+    "Credit >= $0.15 absolute; skip the day otherwise",
+    "SKIP the day entirely if: overnight gap > 0.75%, VIX > 25, FOMC/CPI/NFP release scheduled, or the ETF is above its upper 20-period Bollinger band",
+    "Maximum 1 write per day per 100 shares held. Never sell more calls than shares/100"
+  ],
+  "management_rules": [
+    "Buy to close at 70% of credit (0DTE decays so fast that waiting for 90% risks a late-day reversal)",
+    "Hard stop: buy to close if the call's price reaches 2.5x the credit received",
+    "Rolling is not permitted at 0 DTE - close, do not roll",
+    "If the ETF trades above the strike at any point after 14:00 ET, close the call immediately regardless of P&L"
+  ],
+  "exit_rules": [
+    "Buy to close at 70% of credit, at the 2.5x credit stop, or on the 14:00 ET above-strike trigger",
+    "ABSOLUTE NEVER-ASSIGN RULE: every 0DTE short call must be bought to close by 15:30 ET if the ETF is within 0.5% of the strike, and by 15:45 ET unconditionally if it is ITM or within 0.25%. A 0DTE short call left ITM at 16:00 is assigned that evening and sells the 100 shares - and unlike a monthly, there is no time to react",
+    "Equity-option contrary-instruction cutoffs run to 17:30 ET, so an option that looked OTM at 16:00 can still be exercised against you on a post-close move. Being flat by 15:45 is the only reliable defence"
+  ],
+  "assignment_risk": "HIGHEST cadence of any strategy in the bank - the assignment decision arrives every single trading day. Assignment is covered (shares are delivered) so it is not a margin event, but it silently liquidates the core holding, which is unacceptable for the system.",
+  "buying_power": "Shares are the collateral.",
+  "liquidity_needs": "SPY/QQQ 0DTE only - penny-wide. Nothing else qualifies.",
+  "common_mistakes": "Selling 0DTE calls on a gap-up morning and being run over by trend continuation; selling more contracts than the share count covers, which turns the position naked and Level 4; waiting until 15:55 to close an ITM call.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Short 0DTE premium has the structural edge research consistently identifies (the median daily move is smaller than what buyers need), and the covered version caps the damage to forfeited upside rather than unlimited loss. Backtest across at least 2 years including trend days before enabling.",
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

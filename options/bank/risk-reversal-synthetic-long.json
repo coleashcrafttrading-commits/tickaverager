@@ -1,0 +1,67 @@
+{
+  "name": "Risk Reversal (Synthetic Long Stock, Same Strike)",
+  "slug": "risk-reversal-synthetic-long",
+  "aliases": [
+    "synthetic long stock",
+    "long combo same strike",
+    "synthetic stock"
+  ],
+  "summary": "Buy a call and sell a put at the SAME strike and expiry; replicates 100 long shares with near-zero cash outlay and a delta of exactly 1.00.",
+  "bias": "bullish",
+  "net": "either",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike nearest spot (the ATM strike). Same strike as the put -- that is what makes it a pure synthetic."
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Identical strike to the call.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "unlimited, identical to 100 long shares from the strike",
+  "max_loss": "UNDEFINED below the strike -- (strike * 100) - net credit, i.e. the same as owning 100 shares that go to zero, but with no shares to sell",
+  "breakevens": "strike + net debit per share (or strike - net credit per share if opened for a credit)",
+  "greeks": {
+    "delta": "+1.00 per unit, by construction (put-call parity)",
+    "gamma": "approximately zero",
+    "theta": "approximately zero (the two legs' thetas cancel)",
+    "vega": "approximately zero"
+  },
+  "typical_dte": "30-90 DTE. Longer DTE increases the interest/carry embedded in the combo price.",
+  "when_to_use": "Capital-efficient stock replacement, or as a way to express a strong bullish view when put skew makes the put you sell rich relative to the call you buy. Institutionally common; for a $50k retail paper account it is unnecessary risk when a deep-ITM bull call spread gives 80% of the benefit with defined loss.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. The short put is uncovered -- Level 4 authority, which Alpaca does not offer. Alpaca's MLeg engine additionally rejects any order where a leg is not covered within the same order, so this exact structure cannot be submitted.",
+    "Defined-risk substitute the system SHOULD trade: a deep-ITM bull call spread (slug deep-itm-bull-call-spread), which gives high-delta bullish exposure with the loss capped at the debit.",
+    "If it were enabled: same strike on both legs, ATM, DTE 45-90, and the combo must price at or better than the synthetic-forward fair value (strike + combo cost ~= spot * e^(rT) - dividends). If the combo costs meaningfully more than the forward, you are paying up for nothing -- just buy the shares.",
+    "Sizing would have to treat the position as 100 shares of stock: on a $50k account, one SPY synthetic is ~$60k notional, i.e. over-leveraged before it starts."
+  ],
+  "management_rules": [
+    "If enabled: manage exactly as you would 100 long shares -- a stop below technical support, a trailing stop, or a profit target. The greeks give you nothing to manage.",
+    "Close and re-open in a later expiry (a 'roll') no later than 21 DTE to avoid the assignment window.",
+    "Do not hold through ex-dividend; the synthetic does not receive the dividend but the short put reprices for it."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: the short put is ITM whenever the trade is losing, which is exactly when you least want 100 shares. Close the whole combo the moment the short put's extrinsic value drops below $0.10.",
+    "ASSIGNMENT GUARD: close if the underlying is below (strike + $0.05) at 15:30 ET on expiry day.",
+    "Roll or close by 21 DTE as a standing rule."
+  ],
+  "assignment_risk": "The short put is naked and, because the strike is ATM at entry, it goes ITM on any adverse move. Early exercise of ITM puts is driven by interest carry and becomes likely once extrinsic is gone. Assignment delivers 100 shares per unit at the strike with no offsetting long stock -- on a $50k account this is an immediate margin breach.",
+  "buying_power": "Reg-T naked put margin: roughly max(20% of underlying - OTM amount, 10% of strike) * 100 + premium. On a $600 SPY that is ~$12,000 per contract. Not available on Alpaca.",
+  "liquidity_needs": "ATM strikes on both sides; the combo should quote within $0.05 of synthetic fair value.",
+  "common_mistakes": "Thinking the near-zero cost means near-zero risk -- the risk is identical to 100 shares; forgetting that the synthetic pays no dividend; carrying it into expiry and being assigned the shares you were trying to avoid buying.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Meaningless at 0DTE (it is just stock for a few hours) and guarantees assignment on one side. Not permitted anyway.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bullish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

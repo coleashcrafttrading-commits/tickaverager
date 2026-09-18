@@ -1,0 +1,82 @@
+{
+  "name": "Long Call Butterfly",
+  "slug": "long-call-butterfly",
+  "summary": "Buy 1 lower call, sell 2 body calls, buy 1 upper call at equal strike spacing for a debit; bets the underlying pins the body strike at expiry.",
+  "aliases": [
+    "call fly",
+    "long call fly",
+    "balanced call butterfly",
+    "1-2-1 call butterfly"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body strike minus width; width = 1.0-1.5% of spot for ETFs (e.g. $5 on SPY ~$600), or the strike nearest 65-70 delta",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "body = strike nearest the forecast pin price; default = ATM, i.e. call delta 45-55",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body strike plus the same width used for leg 1 (strictly equal wings)",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "typical_dte": "0-45 DTE; sweet spot 7-21 DTE for the classic version, 0-2 DTE for pin plays",
+  "when_to_use": "IV rank > 40 and falling, realized vol below implied, no earnings or macro event inside the holding period, and a credible magnet price (prior day VWAP, high open interest strike, gamma wall) to place the body on. Avoid when 20-day realized vol > implied vol.",
+  "max_profit": "width - net debit, realized only if the underlying settles exactly at the body strike",
+  "max_loss": "net debit paid (plus fees). Defined.",
+  "breakevens": "lower breakeven = lower strike + net debit; upper breakeven = upper strike - net debit",
+  "greeks": {
+    "delta": "near 0 when centered (|delta| < 5 per unit); becomes strongly negative above the body and positive below as expiry nears",
+    "gamma": "negative at the body, positive at the wings; magnitude explodes inside 2 DTE",
+    "theta": "positive when spot is inside the tent, negative when spot is outside the wings",
+    "vega": "negative (short vol) when spot is near the body; small positive outside the wings"
+  },
+  "entry_rules": [
+    "Net debit must be <= 20% of wing width (e.g. pay <= $1.00 on a $5-wide fly), giving a minimum 4:1 theoretical reward/risk.",
+    "Both wings must be exactly equal width; reject the order if strike spacing differs by even one increment.",
+    "Body strike delta between 0.45 and 0.55 for the neutral version; for a directional fly, body delta between 0.25 and 0.40.",
+    "Each of the 3 strikes: open interest >= 500, prior-day volume >= 100, and bid/ask spread <= max($0.05, 10% of leg mid).",
+    "Submit as a single 3-strike multi-leg (4-contract) order, limit at the natural mid, willing to pay mid + $0.02 per unit; never leg in.",
+    "Max 1.5% of account equity at risk per butterfly; max 5% of equity across all open butterflies on one underlying.",
+    "No entry if an earnings report, FOMC statement, or CPI print falls between now and expiry unless the fly is deliberately an event pin trade."
+  ],
+  "management_rules": [
+    "Close at profit >= 25% of max profit, i.e. when mark >= debit + 0.25*(width - debit), for DTE > 5.",
+    "For 0-2 DTE flies, close at profit >= 50% of max profit or when mark >= 2.0x the debit paid, whichever triggers first.",
+    "Hard stop: close if mark <= 50% of net debit (loss >= 50% of capital at risk) and spot is outside both wings.",
+    "If spot moves more than 1.0 wing-width away from the body with > 5 DTE left, close rather than adjust; do not roll the body chasing price.",
+    "Never add to a losing butterfly; one unit per thesis per expiry."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the 2 short body calls must be bought back or the whole structure closed no later than 15:45 ET on expiration day, unconditionally, at market if necessary, even at max loss.",
+    "ASSIGNMENT GUARD: close immediately at any time if the short body calls are ITM and their extrinsic value (mid - intrinsic) < $0.10 per contract.",
+    "DIVIDEND GUARD: if the underlying goes ex-dividend before expiry and the short body calls are ITM with extrinsic < the declared dividend, close the position before the close of the day prior to the ex-date.",
+    "PIN GUARD: if at 15:30 ET on expiry day |spot - body strike| < 0.25% of spot, close the entire fly immediately; do not attempt to capture the last of the tent.",
+    "Time exit: close any fly with > 0 DTE remaining at 2 DTE if neither the profit target nor the stop has been hit."
+  ],
+  "assignment_risk": "Only the 2 short body calls can be assigned. American style, share-settled. Early assignment is realistic when they go ITM with near-zero extrinsic, and very likely the day before a meaningful ex-dividend date. Pin risk at expiry is the signature danger: if the underlying settles within pennies of the body, assignment on the shorts is unpredictable and can leave a naked 100-share short position over the weekend. The 15:45 ET flatten rule exists specifically for this.",
+  "buying_power": "Net debit paid only. No margin held beyond the debit; the long wings fully cover the short body.",
+  "liquidity_needs": "Moderate-to-high. Needs a penny-wide or near-penny chain; SPY, QQQ, IWM, and $50+ large caps with weekly listings. Avoid any chain where the sum of the three leg spreads exceeds 25% of the target debit.",
+  "common_mistakes": "Paying more than 20% of width (destroys the payoff); centering the body on spot when the thesis is directional; holding into expiry hoping for the peak of the tent and getting assigned on the body; entering in low IV where the fly is cheap but has no room to expand; legging in and getting run over between fills.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "One of the best 0DTE structures: cost is tiny (often 3-8% of width), theta works all day, and a body placed on the overnight VWAP or the largest gamma strike converts intraday chop into profit. Alpaca returns no greeks or IV for 0DTE options, so compute delta locally with Black-Scholes using T = (seconds to 16:00 ET)/(252*6.5*3600) and an IV solved from the option mid. Do not hold past 15:45 ET, ever. Expect 4-6x losers to 1 winner in shape; size at 0.25-0.5% of equity per fly.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral (pin-seeking); can be skewed directional by placing the body away from spot",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

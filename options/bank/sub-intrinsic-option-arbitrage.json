@@ -1,0 +1,66 @@
+{
+  "name": "Sub-Intrinsic Option Arbitrage",
+  "slug": "sub-intrinsic-option-arbitrage",
+  "aliases": [
+    "below-parity arbitrage",
+    "immediate exercise arbitrage",
+    "free option"
+  ],
+  "summary": "Buy an American option quoted below its own intrinsic value and immediately exercise (or hedge) it for a locked profit; the purest arbitrage in the family and one that essentially never survives a second in a liquid market.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Any strike where call_ask < (spot_bid - strike), i.e. the ask is below intrinsic. Symmetrically for puts: put_ask < (strike - spot_ask)"
+    },
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares sold to lock the intrinsic, OR exercise the call instead of hedging"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(spot_bid - strike - call_ask) x 100 - fees, locked",
+  "max_loss": "Fees plus slippage if the quote was stale and the fill does not occur at the displayed price \u2014 which is the normal outcome",
+  "greeks": {
+    "delta": "0.00 after the hedge; +1.00 between the option fill and the hedge fill",
+    "gamma": "0.00",
+    "theta": "0.00",
+    "vega": "0.00"
+  },
+  "breakevens": "None \u2014 locked at entry if both fills occur.",
+  "when_to_use": "Only as an opportunistic executor attached to a real-time quote feed with exchange-grade latency. On a retail feed, a sub-intrinsic quote is a stale quote, a one-lot ghost, a halted underlying, or an adjusted contract whose deliverable is not 100 shares. Treat every hit as a data error until proven otherwise.",
+  "typical_dte": "Any; most common on deep ITM, low-OI, long-dated strikes where quotes go stale",
+  "entry_rules": [
+    "LEVEL 2 for the option purchase; the hedge leg determines the real requirement (selling shares short to hedge a sub-intrinsic call needs a borrow; exercising instead avoids that but takes a day and creates overnight risk).",
+    "MANDATORY PRE-TRADE CHECKS, all must pass: (1) option quote timestamp within 2 seconds, (2) displayed size >= 10 contracts, (3) underlying not halted and its quote timestamp within 2 seconds, (4) contract deliverable is exactly 100 shares of the underlying and there is no OCC adjustment memo, (5) no pending merger, tender offer, spinoff or special dividend.",
+    "Edge gate: (intrinsic - ask) x 100 - fees - hedge_slippage_estimate > $25 per unit.",
+    "Never chase. If the order is not filled on the first attempt at the displayed price, cancel and mark the quote as phantom.",
+    "Adjusted options are the single biggest false positive: a contract whose deliverable was changed by a corporate action will look massively sub-intrinsic against the current share price while being correctly priced against its actual deliverable. Check the OCC memo before every execution, without exception."
+  ],
+  "management_rules": [
+    "There is nothing to manage \u2014 the trade is either locked within seconds or abandoned.",
+    "If the option fills but the hedge does not, close the option immediately; do not carry an unhedged directional position that was never the intent.",
+    "Log every false positive with its cause; a rising false-positive rate indicates a degrading market data feed."
+  ],
+  "exit_rules": [
+    "If the position was hedged with short shares, unwind both legs together, or exercise the long option to close the share position (exercise is settled overnight, so the share position is carried at least one night \u2014 size accordingly).",
+    "If the long option is held to expiry it will be auto-exercised if $0.01 or more ITM; close it by 15:00 ET on expiration day instead, to keep control of the share movement.",
+    "No short option legs, therefore no assignment risk, but never leave an unhedged share leg overnight."
+  ],
+  "assignment_risk": "NONE from short options. The risk is operational: exercising a long option to capture intrinsic creates a 100-share position that settles overnight, during which the hedge may be imperfect. And on an adjusted contract, exercising delivers something other than 100 ordinary shares.",
+  "alpaca_level": 2,
+  "buying_power": "The option debit plus the hedge requirement (50% Reg T if shorting shares, or the full share cost if exercising a put and delivering shares).",
+  "liquidity_needs": "Paradoxical: the opportunity only appears in illiquid strikes, and illiquidity is why it is not real. Require displayed size >= 10 contracts before acting.",
+  "common_mistakes": "Trading an adjusted contract without reading the OCC memo \u2014 the deliverable may be 100 shares plus cash, or shares of a different company entirely. Chasing a stale one-lot quote. Assuming a fill at the displayed price.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Sub-intrinsic quotes are most common at 0DTE in the final minutes when market makers widen or step away \u2014 and that is exactly when a fill is least likely and pin risk is highest. Any 0DTE sub-intrinsic hit must be hedged with shares within seconds or abandoned.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

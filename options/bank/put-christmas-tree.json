@@ -1,0 +1,78 @@
+{
+  "name": "Put Christmas Tree Butterfly (1-3-2)",
+  "slug": "put-christmas-tree",
+  "aliases": [
+    "skip-strike butterfly (puts)",
+    "1-3-2 put butterfly",
+    "put bat spread"
+  ],
+  "summary": "Mirror of the call christmas tree in puts - buy 1 higher, sell 3 middle, buy 2 lower - a moderately bearish tent with capped downside if the geometry is set correctly.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike C: at or just ITM put (~0.55 delta), the highest strike",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 3,
+      "strike_rule": "strike B = C - W, placed at the downside price target",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "strike A = B - W/2 (lower wing sized so net delta below A is zero)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "either",
+  "max_profit": "at strike B: (C - B) x 100 minus net debit (or plus net credit)",
+  "max_loss": "upside: the net debit (zero on a credit entry). Downside below A: compute numerically from the 1-3-2 geometry - must be verified as capped before routing",
+  "breakevens": "upper BE = C - net debit per share; lower BE computed from the exact geometry at entry",
+  "greeks": {
+    "delta": "negative at entry (~-0.15 to -0.30 per unit)",
+    "gamma": "negative around B",
+    "theta": "positive when spot is above B",
+    "vega": "negative"
+  },
+  "typical_dte": "20-45 DTE",
+  "when_to_use": "Moderately bearish with a target at strike B, IV rank >= 30, exploiting rich put skew at the 3x short strike.",
+  "entry_rules": [
+    "IV rank >= 30",
+    "Strike B at a concrete downside target (20-day low, measured move, or spot x (1 - 0.75 x expected move))",
+    "Compute the payoff numerically; REJECT if downside risk below A exceeds 1.5% of equity",
+    "Net debit <= 25% of (C - B), or a net credit",
+    "OI >= 500 at all strikes, DTE 20-45",
+    "Verify leg-by-leg that every short put is covered; otherwise it is a level 4 structure and Alpaca will reject it",
+    "Alpaca level 3 when fully covered"
+  ],
+  "management_rules": [
+    "Take profit at 50% of max profit",
+    "Close at 21 DTE regardless of P/L",
+    "Loss stop at 1.0x the net debit (or 2x the credit)",
+    "Close if spot falls more than 0.5 x (B - A) below strike B"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "Close immediately if the 3x short put strike is ITM by more than 0.25 x (B - A), or its extrinsic < $0.10, or its delta <= -0.85",
+    "300 shares of purchase obligation per unit if assigned - on a $50k account a single assignment on a $200 underlying is a $60,000 debit; this is the hard cap on sizing"
+  ],
+  "assignment_risk": "Three short puts per unit = obligation to buy 300 shares per unit. Assignment can exceed account equity on higher-priced underlyings. Size by assignment notional, not just by max loss.",
+  "buying_power": "Broker-computed max modeled loss when fully covered.",
+  "liquidity_needs": "OI >= 500 at all strikes; 3x short strike must be very liquid.",
+  "common_mistakes": "Sizing off max loss and ignoring assignment notional; not computing the lower-tail payoff; treating it as a normal butterfly.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended - 3 short puts into an expiring session.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

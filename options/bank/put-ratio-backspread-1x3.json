@@ -1,0 +1,75 @@
+{
+  "name": "Put Ratio Backspread 1x3",
+  "slug": "put-ratio-backspread-1x3",
+  "aliases": [
+    "1x3 put backspread",
+    "triple put backspread",
+    "tail hedge backspread"
+  ],
+  "summary": "Sell one nearer put and buy three further-OTM puts; maximum crash convexity per dollar, with a deep defined valley. Obscure, theta-heavy, and usually inferior to the 1x2 except as an explicit tail hedge.",
+  "bias": "long_vol",
+  "net": "either",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short put ATM, 0.50 delta. Covered by one of the three long puts."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 3,
+      "strike_rule": "Three long puts at 0.10-0.20 delta, placed so the package opens near zero cost.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "very large below the long strike -- payoff slope is 2x a 1x2 backspread",
+  "max_loss": "(short strike - long strike) * 100 - net credit (or + debit), at the long strike at expiry. Defined.",
+  "breakevens": "upper: short strike - credit per share; lower: long strike - max loss per share, reached quickly given three long puts",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "strongly positive below the long strike",
+    "theta": "strongly negative",
+    "vega": "strongly positive -- the largest positive vega per dollar of any Level 3 structure in this family"
+  },
+  "typical_dte": "60-120 DTE",
+  "when_to_use": "As a portfolio tail hedge rather than a standalone trade: it pays enormously in a >15% drawdown and costs little if opened for a credit. Put skew makes credit entries rare, so check pricing before committing. Otherwise prefer the 1x2.",
+  "entry_rules": [
+    "MARKED AS SPECIALIST -- default to the 1x2 put backspread unless this is explicitly a tail hedge.",
+    "IV rank <= 20 AND 10-delta put IV minus ATM IV <= 10 vol points (otherwise the three long wings are prohibitively expensive).",
+    "Short put delta ~0.50; long puts delta 0.10-0.20.",
+    "Ratio exactly 1:3 (GCD 1). The short put is covered by one of the three long puts inside the same MLeg order -- Level 3 submittable.",
+    "Package must open for a net credit or a debit <= 5% of (short strike - long strike).",
+    "Max loss <= 1.5% of equity.",
+    "DTE >= 60.",
+    "OI >= 1000 on the long strike, quoted size >= 30.",
+    "If used as a portfolio hedge, size the number of units so that a 20% index decline produces a gain of roughly 10-15% of equity, and accept the valley cost as an insurance premium."
+  ],
+  "management_rules": [
+    "Take profit at 2.5x the max-loss amount, or on a 2.0 ATR move below the long strike.",
+    "Vol harvest: if IV rank rises above 60 with price roughly unchanged, close and re-establish further out -- vega gains are the most reliable payoff this structure produces.",
+    "Time stop: close at 30 DTE.",
+    "Valley stop: at 45 DTE, if the underlying sits within 2% of the long strike, close.",
+    "If net delta is beyond -1.50 per unit, sell one long put, converting to a 1x2.",
+    "As a standing hedge, roll to a new 60-90 DTE expiry every 30 days rather than letting the current one decay."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: short put ITM at 15:30 ET on expiry day -> close the whole package immediately; assignment would deliver 100 shares per unit.",
+    "ASSIGNMENT GUARD: short put ITM with extrinsic < $0.10 on any day -> close that session.",
+    "Mandatory close/roll at 30 DTE."
+  ],
+  "assignment_risk": "Single short put, covered by one of the three long puts. Bounded economically; operationally it would deliver 100 long shares per unit during a market decline, which the account cannot fund. The ATM short strike means this guard fires often -- it must be automated.",
+  "buying_power": "Width of the covering vertical: (short strike - long strike)*100 - credit per unit.",
+  "liquidity_needs": "OI >= 1000 and size >= 30 on the deep wing; on anything but SPY/QQQ/IWM these strikes will not support a 3-lot package.",
+  "common_mistakes": "Buying it when skew is already steep (paying up for the hedge exactly when everyone else is); letting it decay rather than rolling at 30 DTE; sizing it like a directional trade instead of insurance.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not usable. A tail hedge with no time is not a hedge.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

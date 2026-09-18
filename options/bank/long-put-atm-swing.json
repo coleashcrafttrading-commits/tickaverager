@@ -1,0 +1,58 @@
+{
+  "name": "Long Put (ATM swing)",
+  "slug": "long-put-atm-swing",
+  "aliases": [
+    "50 delta put"
+  ],
+  "summary": "Buy the ~-0.50 delta put for a 1-3 week bearish swing with maximum gamma per dollar.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike nearest -0.50 delta",
+      "dte_rule": "21-45 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(strike - spot at exit) x 100 - debit",
+  "max_loss": "Debit x 100",
+  "breakevens": "strike - debit",
+  "greeks": {
+    "delta": "-0.50",
+    "gamma": "maximal for a single long put",
+    "theta": "maximal in dollars",
+    "vega": "maximal - peak IV sensitivity"
+  },
+  "typical_dte": "21-45 DTE",
+  "when_to_use": "High-conviction short-term bearish swing with IVR < 35.",
+  "entry_rules": [
+    "IVR < 35",
+    "Trigger: daily close below a 20-day low, or price loses the 50 EMA on above-average volume",
+    "21-45 DTE, strike nearest -0.50 delta",
+    "Debit <= 2% of equity",
+    "Bid/ask <= 8% of mid"
+  ],
+  "management_rules": [
+    "Take profit at +75% of debit",
+    "Stop at -40%",
+    "Time stop at 21 DTE or 10 trading days held",
+    "If delta reaches -0.75, take profit or roll down to a fresh -0.50 strike and bank the difference"
+  ],
+  "exit_rules": [
+    "Sell to close at +75%, -40%, 21 DTE, or 10 trading days",
+    "15:30 ET expiry-day flatten to avoid auto-exercise into short stock"
+  ],
+  "assignment_risk": "None (long); auto-exercise into short 100 shares is the hazard.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Penny-wide or near; OI >= 1000.",
+  "common_mistakes": "Buying ATM puts during a VIX spike and paying peak vega for a move that is already half over.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

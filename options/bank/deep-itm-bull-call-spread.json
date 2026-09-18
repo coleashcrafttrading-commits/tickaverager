@@ -1,0 +1,72 @@
+{
+  "name": "Deep-ITM Bull Call Spread (Synthetic Stock Proxy)",
+  "slug": "deep-itm-bull-call-spread",
+  "aliases": [
+    "in-the-money debit call vertical",
+    "stock replacement spread",
+    "conservative call vertical"
+  ],
+  "summary": "A bull call spread where both strikes sit below the current price, so the trade is already at max profit if the stock merely holds still -- a capital-efficient stock substitute with defined risk.",
+  "bias": "bullish",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long strike at 0.80-0.90 delta (roughly 5-10% below spot)."
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short strike at 0.60-0.70 delta, still below spot. Width sized so debit is 70-85% of width.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "(width * 100) - debit, achieved if the underlying simply stays above the short strike",
+  "max_loss": "net debit paid",
+  "breakevens": "long strike + net debit per share (usually well below spot)",
+  "greeks": {
+    "delta": "positive, ~+0.15 to +0.25 per 1-lot (both legs high delta, so the difference is modest)",
+    "gamma": "negative -- a drop toward the strikes hurts increasingly fast",
+    "theta": "positive (typically +$0.5 to +$2/day per 1-lot), since the position is net ITM",
+    "vega": "negative and small"
+  },
+  "typical_dte": "45-90 DTE. Longer is better here because the whole point is that time decay works for you.",
+  "when_to_use": "Strongly trending names where you want stock-like upside participation with a hard floor on loss and a fraction of the buying power. Best when IV rank is 20-50; extreme low IV makes the deep ITM leg's extrinsic tiny (good) but the credit on the short leg negligible.",
+  "entry_rules": [
+    "Underlying in a confirmed uptrend: 20-EMA > 50-SMA > 200-SMA and price above all three.",
+    "Long strike delta >= 0.80, short strike delta between 0.60 and 0.72, both strikes below spot.",
+    "Net debit between 70% and 85% of width -- reward:reward ratio is intentionally low; the win rate is the edge.",
+    "Probability of profit (approximated as 1 - short strike delta... i.e. delta of short call) implies >= 65% chance of finishing above the short strike.",
+    "Extrinsic value of the long leg <= 2% of the strike (deep ITM options with fat extrinsic are a bad deal and carry the most early-assignment exposure on the short side).",
+    "DTE >= 45. Do not use this structure under 30 DTE.",
+    "Open interest >= 250 on both legs (deep ITM strikes are thinner; widen the liquidity tolerance but never skip it).",
+    "Never open across an earnings date without accepting a full-debit loss scenario."
+  ],
+  "management_rules": [
+    "Take profit at 85% of max profit, or at 21 DTE if the position is profitable at all -- whichever comes first.",
+    "Stop: close if the underlying closes below the long strike, or if the spread mid drops to 50% of the debit.",
+    "Do not roll. If the trend breaks, this structure is simply wrong; exit and re-evaluate.",
+    "Re-enter a new, further-dated spread only after price reclaims the 20-EMA for two consecutive closes."
+  ],
+  "exit_rules": [
+    "Close the entire spread by 21 DTE at the latest. The last three weeks add almost no profit and all of the assignment risk.",
+    "ASSIGNMENT GUARD: the short call is ITM by design, so check extrinsic value daily. If short-leg extrinsic < $0.15, close the spread the same session.",
+    "DIVIDEND GUARD (critical for this structure): close the entire spread the session before any ex-dividend date whenever short-leg extrinsic < 1.5 * dividend. Deep ITM short calls on dividend payers are the single most commonly assigned option in the whole family.",
+    "Absolute backstop: no open position past 15:30 ET on expiration day, ever."
+  ],
+  "assignment_risk": "High and structural -- the short call is ITM from day one. Early assignment happens around ex-dividend dates and whenever the short call's extrinsic decays below the dividend. Being assigned makes you short 100 shares per contract against a long call; economically covered, operationally unacceptable. This strategy must have its dividend calendar check automated or it should not be enabled.",
+  "buying_power": "Net debit only (e.g., a $10-wide bought for $8.00 holds $800/contract) versus ~$5,000-$10,000 of buying power for the equivalent 100 shares.",
+  "liquidity_needs": "Deep ITM strikes quote wider. Require bid/ask <= 15% of mid per leg and always route as a single MLeg spread order so the exchange prices the package, not the legs.",
+  "common_mistakes": "Ignoring the dividend calendar; using it on short DTE where there is no extrinsic cushion; treating the capped upside as if it were stock; picking a width so wide the debit approaches the width (paying 95% of width for 5% of upside).",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Do not use. At 0DTE a deep ITM vertical is a near-certain assignment event with essentially no premium to collect.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

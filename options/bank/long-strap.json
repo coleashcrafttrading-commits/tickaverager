@@ -1,0 +1,72 @@
+{
+  "name": "Long Strap",
+  "slug": "long-strap",
+  "aliases": [
+    "strap",
+    "2:1 call-heavy straddle",
+    "bullish straddle"
+  ],
+  "summary": "Buy two calls and one put at the same ATM strike and expiry; a long-volatility trade tilted bullish, twice as sensitive to an up-move as a down-move.",
+  "bias": "long_vol",
+  "net": "debit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ATM strike, call delta closest to 0.50."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike as the calls.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "unlimited on the upside (2x the slope of a straddle); (strike*100) - debit on the downside",
+  "max_loss": "net debit paid (three option premiums), if the underlying finishes exactly at the strike",
+  "breakevens": "upside: strike + debit/(2*100) per share; downside: strike - debit/100 per share",
+  "greeks": {
+    "delta": "positive, roughly +0.50 per unit at entry (2 x 0.50 call delta - 0.50 put delta)",
+    "gamma": "strongly positive, ~1.5x a straddle",
+    "theta": "strongly negative, ~1.5x a straddle",
+    "vega": "strongly positive, ~1.5x a straddle"
+  },
+  "typical_dte": "20-45 DTE, or event-dated",
+  "when_to_use": "You expect a large move, believe the upside is the more likely direction, and IV is cheap. A strap is the right answer when a binary catalyst has asymmetric upside (approval, upgrade, buyout rumor) but a real chance of a downside gap you still want protection against.",
+  "entry_rules": [
+    "IV rank <= 25.",
+    "ATM strike; |call delta - 0.50| <= 0.05.",
+    "Ratio must be exactly 2 calls : 1 put (GCD = 1, so Alpaca's MLeg engine accepts it; all legs are long so there is nothing to cover).",
+    "Total debit <= 1.5% of equity.",
+    "Upside breakeven distance (debit/2 divided by spot) must be <= 0.75 * the average absolute move for comparable catalysts.",
+    "DTE extends at least 5 days past the catalyst.",
+    "All three contracts on the same strike and expiry; OI >= 500, bid/ask <= 8% of mid.",
+    "Submit as a single MLeg order with leg_ratio 2 and 1."
+  ],
+  "management_rules": [
+    "Take profit at +50% of debit.",
+    "Stop at -40% of debit.",
+    "Vol-crush rule: close within 30 minutes of a scheduled event print.",
+    "Time stop: 10 DTE.",
+    "If the underlying rallies and net delta exceeds +1.20 per unit, sell one of the two calls to lock the directional gain and leave a straddle running."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "No short legs and therefore no assignment risk -- but all three legs are long, so any ITM leg would be auto-exercised by the OCC at $0.01 ITM, producing up to 200 long shares (calls) or 100 short shares (put) per unit. Close everything before 15:45 ET.",
+    "Close at 10 DTE if flat."
+  ],
+  "assignment_risk": "None from short legs (there are none). The risk is OCC auto-exercise of your own ITM longs at expiry creating stock positions. Eliminated by closing before 15:45 ET on expiry day.",
+  "buying_power": "Net debit only.",
+  "liquidity_needs": "ATM strike, so the most liquid on the board. OI >= 500 and package routing.",
+  "common_mistakes": "Treating it as a cheaper straddle -- it is 50% more expensive; forgetting the asymmetric breakevens (the upside breakeven is much closer than the downside one); running it in high IV.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Theta is 1.5x a 0DTE straddle's. Only defensible in the minutes around a scheduled macro print, and even then a plain 0DTE call is usually the better expression of a bullish-plus-volatile view.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

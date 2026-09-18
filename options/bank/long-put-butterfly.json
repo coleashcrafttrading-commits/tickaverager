@@ -1,0 +1,78 @@
+{
+  "name": "Long Put Butterfly",
+  "slug": "long-put-butterfly",
+  "summary": "Buy 1 higher put, sell 2 body puts, buy 1 lower put at equal spacing for a debit; identical payoff to the long call butterfly, priced off the put skew.",
+  "aliases": [
+    "put fly",
+    "long put fly",
+    "1-2-1 put butterfly"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body strike plus width; width = 1.0-1.5% of spot",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "body = target pin price; default ATM, put delta -0.45 to -0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body strike minus the identical width",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "typical_dte": "0-45 DTE; sweet spot 7-21 DTE",
+  "when_to_use": "Same conditions as the long call butterfly, but preferred on equity indexes where put skew is steep: the downside wing is relatively expensive, so a put fly placed BELOW spot costs less than the mirrored call fly. Compare both constructions and take the cheaper debit for the same strikes.",
+  "max_profit": "width - net debit at the body strike",
+  "max_loss": "net debit paid. Defined.",
+  "breakevens": "lower breakeven = lower strike + net debit; upper breakeven = upper strike - net debit",
+  "greeks": {
+    "delta": "near 0 when centered; positive above the body, negative below as expiry nears",
+    "gamma": "negative at the body, positive at the wings",
+    "theta": "positive inside the tent, negative outside the wings",
+    "vega": "negative near the body, slightly positive outside the wings"
+  },
+  "entry_rules": [
+    "Net debit <= 20% of wing width.",
+    "Price the equivalent call butterfly at the same three strikes and take whichever costs less; skew usually favors the put fly below spot and the call fly above spot.",
+    "Both wings exactly equal width.",
+    "Strike liquidity: OI >= 500, prior-day volume >= 100, per-leg bid/ask <= max($0.05, 10% of mid).",
+    "Single 3-strike multi-leg order, limit at mid, pay up to mid + $0.02.",
+    "Risk <= 1.5% of equity per position."
+  ],
+  "management_rules": [
+    "Close at profit >= 25% of max profit for DTE > 5; >= 50% of max profit for 0-2 DTE.",
+    "Hard stop at 50% loss of the debit when spot is outside both wings.",
+    "Abandon (close) rather than adjust if spot travels more than one wing width from the body with > 5 DTE remaining."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: flatten the entire structure by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short body puts are ITM with extrinsic value < $0.10.",
+    "Short puts carry no dividend-driven early assignment, but deep-ITM short puts near zero extrinsic are assigned for interest reasons; the $0.10 extrinsic rule covers this.",
+    "PIN GUARD: close at 15:30 ET if |spot - body| < 0.25% of spot on expiry day.",
+    "Time exit at 2 DTE if neither target nor stop has fired."
+  ],
+  "assignment_risk": "The 2 short body puts are the exposure. Assignment delivers 200 long shares per butterfly unit at the body strike, a five-figure cash obligation on an index ETF; it would blow through a $50k paper account's buying power. Early assignment on puts is driven by interest and deep moneyness rather than dividends. The long lower put caps the loss but does NOT prevent the share delivery.",
+  "buying_power": "Net debit only.",
+  "liquidity_needs": "Same as the call butterfly. Put chains on SPY/QQQ/IWM are the deepest available.",
+  "common_mistakes": "Assuming the put fly is identical to the call fly and ignoring skew pricing; forgetting that short put assignment means BUYING shares (cash outlay) rather than shorting them; holding a put fly through a gap-down that blows past the lower wing overnight.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Excellent for 0DTE downside pin plays; put skew makes the below-spot fly cheaper than its call twin. Same 15:45 ET flatten rule. Compute greeks locally with intraday T since Alpaca supplies none on 0DTE.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral (pin-seeking); skew the body below spot for a mildly bearish version",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

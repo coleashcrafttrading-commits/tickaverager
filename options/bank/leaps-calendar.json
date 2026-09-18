@@ -1,0 +1,76 @@
+{
+  "name": "LEAPS Calendar (Same-Strike Long-Dated Time Spread)",
+  "slug": "leaps-calendar",
+  "summary": "Buy a LEAPS at a strike and sell short-dated options at the SAME strike against it, cycle after cycle; the same-strike cousin of the PMCC, used when you want maximum premium capture and accept being tested every month.",
+  "aliases": [
+    "LEAPS time spread",
+    "long-dated calendar",
+    "synthetic covered call at the money",
+    "LEAPS diagonal at the same strike"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike at or slightly ITM by delta 0.55-0.70. The SAME strike is used for the shorts, which is what distinguishes this from the PMCC.",
+      "dte_rule": "back leg, 270-730 DTE"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Identical strike to the long. Because the short is at the same strike as the long rather than above it, there is no upside participation - all of the return comes from the collected premium.",
+      "dte_rule": "front leg, 21-45 DTE, re-sold each cycle"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "Approximately the sum of all credits collected over the life of the LEAPS, plus or minus the LEAPS' change in value. Per cycle, the maximum is the short's premium if the underlying finishes at or below the strike.",
+  "max_loss": "The net debit paid for the LEAPS minus cumulative credits collected, if the underlying falls far enough that the LEAPS goes to near zero.",
+  "breakevens": "At the LEAPS' expiry, approximately strike + (net debit - cumulative credits) per share. Each cycle's credit moves it lower.",
+  "greeks": {
+    "delta": "small positive, roughly +0.10 to +0.25 per unit (0.65 long minus 0.45 short at the same strike)",
+    "gamma": "negative - the front-month short has more gamma at the shared strike",
+    "theta": "positive, the largest per-dollar theta in the diagonal family because the short is ATM",
+    "vega": "strongly positive - the LEAPS' vega dwarfs the front-month short's"
+  },
+  "when_to_use": "Neutral-to-slightly-bullish view with an income objective and no desire for upside participation. IV rank < 30 when buying the LEAPS. The trade-off versus the PMCC is explicit: the same-strike short collects far more premium but caps the trade at the strike and is tested (ATM) every single cycle, so assignment management is constant. Best on low-beta, range-bound large caps and broad ETFs.",
+  "typical_dte": "long 270-730 DTE, short 21-45 DTE rolled monthly",
+  "entry_rules": [
+    "IV rank < 30 when buying the LEAPS; back-month IV below its own 40th percentile.",
+    "LEAPS delta 0.55-0.70, DTE >= 270; extrinsic <= 20% of premium.",
+    "Short call at the IDENTICAL strike, DTE 21-45, |delta| 0.45-0.55 at entry.",
+    "Accept explicitly that there is no upside beyond the strike; if upside participation is wanted, use the PMCC instead.",
+    "Net debit <= 4% of equity per unit; maximum 3 concurrent units.",
+    "Underlying's 20-day realized volatility below its 1-year median (range-bound).",
+    "LEVEL 3 OK: a long call at the same strike and a later expiry fully covers the short. Submit as a 2-leg mleg; BUY THE LEAPS FIRST if legging."
+  ],
+  "management_rules": [
+    "Close the short at 50-75% of the credit and re-sell the next 21-45 DTE cycle at the same strike.",
+    "If the underlying rallies more than 5% above the strike, roll the short UP and out for a net credit - this converts the position into a PMCC and restores some upside.",
+    "If the underlying falls more than 10% below the strike, the short's premium collapses; consider rolling the short DOWN (which caps the trade lower) or closing the position if the LEAPS is down 50%.",
+    "Roll the LEAPS forward when its DTE < 120 or its delta falls below 0.45.",
+    "Hard stop: close the position if the LEAPS' mark falls to 50% of purchase price.",
+    "Never sell more than one short per LEAPS."
+  ],
+  "exit_rules": [
+    "Close or roll the short call by 14:30 ET on its expiration day, unconditionally. Because the short is ATM, roughly half of all expirations will be ITM - this rule fires constantly and must be automated.",
+    "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share. On an ATM short this happens often; treat every ex-date as a scheduled close.",
+    "Do not exercise the LEAPS to cover an assignment; buy the shares back in the market.",
+    "Close the LEAPS no later than 90 DTE and only after the short is bought back."
+  ],
+  "assignment_risk": "The highest routine assignment frequency of any level-3 structure in this bank, because the short is deliberately at the money and therefore has roughly a coin-flip chance of finishing ITM each cycle. Every assignment is covered by the same-strike LEAPS, so the loss is bounded, but the operational burden is real: expect to buy back shares several times a year. This is the reason the PMCC (short above the long strike) is the default and this variant is the exception.",
+  "buying_power": "Net debit only - the same-strike later-dated long is full cover.",
+  "liquidity_needs": "LEAPS OI >= 100 at the chosen strike with a bid-ask <= 5% of mid; front-month ATM strike penny-wide. Large caps and major ETFs only.",
+  "common_mistakes": "Not appreciating that the same-strike short removes ALL upside; treating the frequent ITM finishes as failures rather than the expected cost of the higher premium; exercising the LEAPS on assignment; running it on a trending stock, where the short is tested every single month with no participation in the move.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never at 0DTE; the ATM short is already the most assignment-prone leg in the bank.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,70 @@
+{
+  "name": "Vertical Strike Arbitrage",
+  "slug": "strike-arbitrage-vertical",
+  "aliases": [
+    "strike arb",
+    "free vertical",
+    "negative-cost spread",
+    "monotonicity violation"
+  ],
+  "summary": "A vertical spread quoted for a credit larger than the strike width, or a debit spread quoted at zero or negative cost, violates option monotonicity and is riskless profit if the quotes are real.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower strike K1"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Higher strike K2 = K1 + width, where the observed credit for selling this spread exceeds (K2 - K1) x 100, or the debit for buying it is <= 0",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "credit_received - (width x 100) when the credit exceeds the width, or simply (width x 100) when a debit spread was bought for nothing",
+  "max_loss": "Zero if the quotes are real and both legs fill. In reality: the fees and the slippage from a fill that does not occur at the displayed price.",
+  "greeks": {
+    "delta": "small and irrelevant \u2014 the trade is a pricing violation, not an exposure",
+    "gamma": "small",
+    "theta": "small",
+    "vega": "small"
+  },
+  "breakevens": "None \u2014 profit at every terminal price if the violation was real.",
+  "when_to_use": "As a continuous scan on the option chain. Any credit call spread where credit > width, or any debit call spread where debit <= 0, is either an arbitrage or a data error. In 2026 on liquid names it is always a data error, a locked/crossed market, or a stale leg.",
+  "typical_dte": "Any",
+  "entry_rules": [
+    "LEVEL 3 LEGAL: a vertical spread is fully covered within the same multi-leg order, so Alpaca accepts it. This is one of the few genuinely executable arbitrage patterns in the family.",
+    "MANDATORY: submit as a SINGLE multi-leg order with a limit price. Never leg it \u2014 the violation exists for milliseconds and a half-filled spread is a naked short option, which Level 3 will reject on the second leg and which leaves an unintended exposure.",
+    "Scan gate: for a call vertical, flag when (K1_call_bid - K2_call_ask) x 100 > (K2 - K1) x 100 + fees + $10. For a put vertical, the symmetric test.",
+    "Pre-trade checks: both legs' quotes timestamped within 2 seconds, displayed size >= 10 on both, underlying not halted, no OCC contract adjustment on either strike, same expiry and same deliverable.",
+    "Both strikes must have OI >= 100. A violation involving a zero-OI strike is a phantom.",
+    "Do not chase: one limit order at the arbitrage price, cancel after 3 seconds if unfilled."
+  ],
+  "management_rules": [
+    "Nothing to manage if the violation was real \u2014 the position is worth at least zero at every price.",
+    "If only part of the intended size fills, accept the partial and do not increase the limit price.",
+    "If the spread was established at a genuine arbitrage price, it can simply be held to expiry \u2014 but the assignment guard below still applies, because the short leg is American and share-settled."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD: close the short leg no later than 15:40 ET on expiration day, unconditionally, even though it is covered by the long leg. Assignment would deliver 100 shares and force an exercise of the long leg to unwind, with settlement-timing exposure in between.",
+    "If the short leg goes ITM with extrinsic below $0.05 at any time, close the whole spread that session.",
+    "Close the short call by 15:00 ET the session before any ex-dividend date if its extrinsic value is below 1.25 x the declared dividend.",
+    "If both legs finish ITM, close the spread rather than allowing the offsetting exercise and assignment to settle."
+  ],
+  "assignment_risk": "On the short leg, and it is fully covered by the long leg in payoff terms, so there is no unbounded exposure. But covered is not the same as harmless for a never-be-assigned system: assignment creates a 100-share position that must be unwound by exercising the long leg, which takes a session and carries the shares overnight.",
+  "alpaca_level": 3,
+  "buying_power": "For a credit vertical: (width x 100) - credit received. If the credit exceeds the width, the net requirement is effectively zero or negative, which is itself a red flag worth checking against broker margin logic before assuming it.",
+  "liquidity_needs": "Both strikes need real displayed size. Violations concentrated in zero-volume strikes are quote artefacts.",
+  "common_mistakes": "Legging in. Acting on midpoint-derived 'violations' rather than executable bid/ask. Not checking for adjusted contracts, where a violation against unadjusted assumptions is normal and correct.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Apparent violations spike at 0DTE near the close when market makers widen. Almost all are stale. If one is taken, the 15:40 ET short-leg close rule becomes the same-minute close rule.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

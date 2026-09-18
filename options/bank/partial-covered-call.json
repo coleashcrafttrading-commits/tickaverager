@@ -1,0 +1,65 @@
+{
+  "name": "Partial / Half Covered Call",
+  "slug": "partial-covered-call",
+  "aliases": [
+    "Half-and-half write",
+    "Partial overwrite"
+  ],
+  "summary": "Write calls against only a fraction of the share position (e.g. 3 calls against 500 shares) so upside participation is retained on the unwritten shares.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 500,
+      "strike_rule": "existing position",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 3,
+      "strike_rule": "0.25-0.30 delta; contracts = floor(shares/100) x coverage_ratio, coverage_ratio in [0.3, 0.7]",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "unlimited on the uncovered shares plus capped gain and credits on the covered portion",
+  "max_loss": "full share downside less credits",
+  "breakevens": "blended share basis - (total credits / total shares)",
+  "greeks": {
+    "delta": "+80 to +90 per 100 shares at 50% coverage",
+    "gamma": "mildly negative",
+    "theta": "positive, scaled by coverage",
+    "vega": "negative, scaled by coverage"
+  },
+  "when_to_use": "Underlying is in a confirmed uptrend but IV is rich enough to want some income. Use when a full overwrite would too aggressively cap a trending position.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "contracts_sold = floor(shares_held / 100 x coverage_ratio); coverage_ratio configurable, default 0.5, hard cap 1.0 (never more contracts than share lots - that would be a ratio write and level 4).",
+    "All standard covered call gates apply to the contracts actually sold.",
+    "Increase coverage_ratio toward 1.0 when the 20-day realized vol percentile > 70 or the trend filter flips neutral; reduce toward 0.3 when the 50/200 SMA trend is strongly up."
+  ],
+  "management_rules": [
+    "50% profit target / 21 DTE roll, same as the standard covered call.",
+    "Re-evaluate coverage_ratio at each new cycle based on the trend filter.",
+    "Never let contracts_sold exceed floor(shares_held/100), including after a partial share sale - recheck cover before every share sale."
+  ],
+  "exit_rules": [
+    "Same hard assignment guard: ITM short calls closed by 15:30 ET on expiration day.",
+    "If shares are sold for any reason, buy back a proportional number of calls FIRST so cover is never lost.",
+    "Extrinsic < 0.05 and delta > 0.85 triggers immediate close."
+  ],
+  "assignment_risk": "Identical to the covered call on the written portion. The system-level risk is cover accounting: a share sale that drops share count below 100 x contracts converts covered calls into naked calls, which the account is not approved for.",
+  "buying_power": "Shares only, provided cover accounting is correct.",
+  "liquidity_needs": "Same as covered call.",
+  "common_mistakes": "Selling shares without reducing contracts and creating an accidental naked short call; drifting coverage upward in a rally.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Partial coverage is a sensible way to run 0DTE overwrites: write against half the lots so a surprise rally still participates.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

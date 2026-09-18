@@ -1,0 +1,72 @@
+{
+  "name": "Reverse Conversion",
+  "slug": "reverse-conversion",
+  "aliases": [
+    "Reversal",
+    "Reverse conversion arbitrage",
+    "Short stock + synthetic long"
+  ],
+  "summary": "Short 100 shares, sell a put and buy a call at the same strike - the mirror of a conversion, used to capture put-call parity dislocations on the other side.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "short 100 shares (requires locate/borrow)",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "same strike as the call",
+      "dte_rule": "30-90 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "same strike as the put, same expiry",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "fixed at entry: share proceeds + put credit - call cost - strike x 100, adjusted for borrow and dividends",
+  "max_loss": "the same constant if negative; plus unbounded operational risk from a hard-to-borrow buy-in",
+  "breakevens": "n/a - flat payoff",
+  "greeks": {
+    "delta": "approximately 0",
+    "gamma": "approximately 0",
+    "theta": "approximately 0",
+    "vega": "approximately 0"
+  },
+  "when_to_use": "When the synthetic long is cheap relative to the stock, typically in hard-to-borrow names where the borrow rate IS the dislocation. FLAGGED: not usable at level 3, requires short stock, and the short put is uncovered. Include for completeness only.",
+  "typical_dte": "30-90 DTE",
+  "entry_rules": [
+    "BLOCKED: requires (a) a margin account with short-sale capability and an available borrow, and (b) options level 4 for the uncovered short put (the short stock covers it economically but not under standard retail approval).",
+    "If ever enabled: require edge >= $0.20 per share net of borrow cost for the full holding period, and require the borrow rate to be locked, not indicative."
+  ],
+  "management_rules": [
+    "Monitor the borrow rate daily; a rate spike destroys the trade's economics.",
+    "Unwind immediately on any buy-in notice.",
+    "Nothing else to manage - the position is delta-flat."
+  ],
+  "exit_rules": [
+    "Unwind all three legs as one combo before expiration; never carry into expiry because of pin risk at the shared strike.",
+    "Close if the short put's extrinsic < 0.05 (early exercise of the put would deliver 100 long shares, closing the short stock - actually benign, but it ends the arbitrage early and forfeits remaining edge).",
+    "Unwind before any ex-dividend date: the short stock position owes the dividend."
+  ],
+  "assignment_risk": "The short put is assignable; assignment delivers 100 long shares which offset the short stock position, ending the trade. The more serious risks are the dividend obligation on the short shares and a forced buy-in on a hard-to-borrow name, which can happen at any time and at any price.",
+  "buying_power": "Short stock margin (Reg-T 150% of proceeds) plus the option requirement. Level 4.",
+  "liquidity_needs": "Tight three-leg markets plus a real borrow - rarely available to retail.",
+  "common_mistakes": "Ignoring borrow cost and dividend obligations; assuming the short stock leg is always maintainable.",
+  "alpaca_level": 4,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

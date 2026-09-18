@@ -1,0 +1,81 @@
+{
+  "name": "Bullish Seagull Spread",
+  "slug": "bullish-seagull",
+  "summary": "Buy a call spread financed by selling an OTM put; a three-strike, near-zero-cost bullish structure with downside share-purchase obligation.",
+  "aliases": [
+    "seagull",
+    "risk reversal with a wing",
+    "financed call spread",
+    "three-way"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "put delta -0.15 to -0.25, at or below a defined support level (cash-secured)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM or slightly OTM, call delta 0.45-0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "call delta 0.20-0.25, at or above the price target",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "either (target zero cost or a small credit)",
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "A name you have a genuine bullish thesis on and would be willing to own at the short put strike, with a clear technical support below and a resistance target above. Works best when skew is steep (the OTM put is expensive), which is the normal state for equities.",
+  "max_profit": "(short call strike - long call strike) x 100 + net credit (or - net debit)",
+  "max_loss": "(short put strike x 100) - net credit, on a move to zero. Large but bounded.",
+  "breakevens": "upside breakeven = long call strike + debit/100 (or none if opened for a credit); downside breakeven = short put strike - credit/100",
+  "greeks": {
+    "delta": "clearly positive (+30 to +50 per unit)",
+    "gamma": "mixed - positive around the long call, negative around the short put",
+    "theta": "slightly positive at entry",
+    "vega": "slightly negative"
+  },
+  "entry_rules": [
+    "Target a net cost between -0.10 and +0.10 per share (i.e. near zero); reject any fill costing more than 15% of the call spread width.",
+    "Short put strike must sit at or below a support level identified from at least 60 sessions of price history, and at delta between -0.15 and -0.25.",
+    "The short put MUST be fully cash-secured (reserve strike x 100 - credit). Uncollateralized is level 4.",
+    "Underlying price <= $120 so the cash-secured put is under 25% of a $50k account.",
+    "No earnings inside the expiry.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-leg order at mid, accept mid + $0.03."
+  ],
+  "management_rules": [
+    "Profit target: close at 65% of the call spread's max value.",
+    "Close at 21 DTE regardless of P/L.",
+    "Tested-down rule: if spot closes below the short put strike, close the whole structure; do not roll into a bigger obligation.",
+    "Stop: close if the short put delta reaches -0.45.",
+    "Never let the call spread expire worthless while the short put remains open - close as one package."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the short put and the short call are both assignable. Flatten every leg by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close the short put immediately if ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close the call spread before the ex-date if the short call is ITM with extrinsic below the declared dividend.",
+    "Close any ITM short leg by 2 DTE unconditionally."
+  ],
+  "assignment_risk": "Short put assignment buys 100 shares at the put strike with no offsetting long put - the defining risk of a seagull. The short call is covered by the long call, so its assignment leaves a temporary short stock position hedged by the long call. The put leg is what makes this a Level-3-with-cash-secured structure rather than a simple spread.",
+  "buying_power": "Cash-secured put (strike x 100 - credit) plus the call spread's debit. The put leg dominates.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Selling a put on a name you do not actually want to own; treating 'zero cost' as 'zero risk'; putting the short put at a strike chosen for premium rather than for support; carrying the short put into expiry.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended - the naked-equivalent short put creates same-day share delivery risk and the call spread needs time to work.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

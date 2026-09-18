@@ -1,0 +1,79 @@
+{
+  "name": "Poor Man's Covered Put (PMCP)",
+  "slug": "poor-mans-covered-put",
+  "summary": "Buy a deep-ITM long-dated put as a short-stock surrogate and sell a shorter-dated OTM put against it; the bearish mirror of the PMCC.",
+  "aliases": [
+    "PMCP",
+    "synthetic covered put",
+    "poor man's covered put",
+    "LEAPS put diagonal",
+    "put mirror of PMCC"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Deep ITM by delta |0.80-0.90| (high strike). Extrinsic <= 10% of premium; never below |0.70| delta.",
+      "dte_rule": "back leg, 270-730 DTE; minimum 180 DTE"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "OTM by delta |0.20-0.30| (lower strike). HARD CONSTRAINT: long strike - short strike >= net debit per share.",
+      "dte_rule": "front leg, 21-45 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "At or below the short strike at front expiry: approximately (long strike - short strike) x 100 - net debit + cumulative credits collected.",
+  "max_loss": "The net debit less all credits collected, if the underlying rallies and the long put decays toward zero.",
+  "breakevens": "Approximately long strike - net debit per share at the long's expiry; lower over time as credits accumulate.",
+  "greeks": {
+    "delta": "net negative -0.50 to -0.65 per unit",
+    "gamma": "slightly negative",
+    "theta": "positive but modest",
+    "vega": "net positive - the long-dated put dominates; a vol crush hurts, which is a real headwind because vol usually FALLS as the market rallies and RISES as it falls (so vega and delta work together here, unlike the PMCC)"
+  },
+  "when_to_use": "Bearish 6-18 month view on a broken underlying (spot < 50-day SMA < 200-day SMA), entered when IV rank is LOW (< 30) so the long put is not bought after a vol spike. Structurally harder than the PMCC because put skew makes the deep-ITM long put expensive and the OTM short put cheap - the financing ratio is worse. Verify the credit actually covers a meaningful fraction of the long's decay before trading it.",
+  "typical_dte": "long 270-730 DTE, short 21-45 DTE",
+  "entry_rules": [
+    "Trend filter: spot < 50-day SMA AND 50-day SMA < 200-day SMA.",
+    "IV rank < 30 at the time of the long put purchase (do not buy vega after a spike).",
+    "Long put delta |0.80-0.90|, DTE >= 180; extrinsic <= 10% of premium.",
+    "Short put delta |0.20-0.30|, DTE 21-45.",
+    "MANDATORY: long strike - short strike >= net debit per share.",
+    "Financing check: the front-month credit must be >= 3% of the net debit; if put skew makes that impossible, reject the trade.",
+    "Net debit <= 5% of equity per unit; maximum 3 concurrent PMCPs.",
+    "LEVEL 3 OK: a short put at a LOWER strike with an EARLIER expiry is covered by the long put. Submit as a 2-leg mleg; BUY THE LONG PUT FIRST if legging."
+  ],
+  "management_rules": [
+    "Close the short put at 50-75% of the credit received and sell the next 21-45 DTE cycle at delta |0.20-0.30|.",
+    "If the short put's |delta| exceeds 0.50, roll down and out for a NET CREDIT only, keeping long strike - short strike >= remaining net debit.",
+    "Roll the long put forward when its |delta| drops below 0.70 or DTE < 120.",
+    "Hard stop: close everything if the long put's mark falls to 50% of purchase price, or if spot closes above the 200-day SMA for 3 consecutive sessions.",
+    "Track the running net debit (original debit minus cumulative credits) and reference it in every strike constraint.",
+    "Never sell more short puts than long puts owned."
+  ],
+  "exit_rules": [
+    "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+    "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+    "Close any short put whose extrinsic falls below $0.10 - deep-ITM short puts are exercised early to capture interest, and this risk grows with rates.",
+    "Do NOT exercise the long put to cover an assignment; sell the assigned shares in the market and keep the long put's time value.",
+    "Close the long put no later than 90 DTE, and only after the short has been bought back.",
+    "Full exit: buy back the short put first, then sell the long put."
+  ],
+  "assignment_risk": "Only the short front-month put. Assignment delivers +100 shares at the short strike, requiring strike x 100 of buying power, hedged by a long higher-strike put. This is a cash-heavy event on a $50k account - a single $400 underlying assignment consumes $40,000. Size accordingly: cap the short strike x 100 at 40% of equity per position.",
+  "buying_power": "Net debit only while both legs are open, because the long put at a higher strike and later expiry covers the short. An assignment temporarily consumes short strike x 100 of buying power until the shares are sold.",
+  "liquidity_needs": "Long-dated deep-ITM puts are thin. OI >= 100 at the long strike, bid-ask <= 6% of mid. Restrict to SPY, QQQ, IWM and the most liquid single names.",
+  "common_mistakes": "Ignoring put skew - the financing math is materially worse than the PMCC and many candidates do not clear the 3% credit test; buying the long put after a crash (max vega, max price); being assigned on a high-priced underlying and blowing through buying power; exercising the long put to cover instead of trading the shares.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never at 0DTE; minimum short DTE 21 at entry, forced close by 14:30 ET on expiry day.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

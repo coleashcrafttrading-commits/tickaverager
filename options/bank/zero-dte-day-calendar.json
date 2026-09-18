@@ -1,0 +1,77 @@
+{
+  "name": "0DTE Day Calendar",
+  "slug": "zero-dte-day-calendar",
+  "summary": "Sell the 0DTE option and buy the same strike in the next available expiry; a single-session theta harvest on the steepest part of the decay curve, with a forced same-day close.",
+  "aliases": [
+    "day calendar",
+    "same-day calendar",
+    "0DTE time spread",
+    "overnight calendar"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Strike by delta: |delta| 0.30-0.45, placed on the side you want to fade, or ATM |delta| ~0.50 for pure pin plays. Must be at least 0.5 x ATR(14 x 5min) away from spot at entry. Put version is the mirror and is preferred on dividend-paying ETFs.",
+      "dte_rule": "0 DTE (expires today)"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same strike.",
+      "dte_rule": "next listed expiry: 1-4 DTE for SPY/QQQ/IWM, 1-7 DTE otherwise"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "Approximately the residual value of the 1-4 DTE long leg at the forced close minus the debit, maximized if spot sits at the strike at exit. Realistically 15-35% of the debit.",
+  "max_loss": "The net debit paid; in practice capped much tighter by the forced exit, because the long leg still holds one or more days of extrinsic when you close.",
+  "breakevens": "Intraday, not at expiry. Roughly strike +/- (0.8 to 1.2) x the debit in underlying points at the 14:30 ET exit, computed with the back leg's IV.",
+  "greeks": {
+    "delta": "~0 at ATM entry, but swings fast - 0DTE gamma dominates",
+    "gamma": "sharply negative and accelerating into the close; the dominant risk",
+    "theta": "strongly positive for the first half of the session, then overwhelmed by gamma",
+    "vega": "positive but small - the back leg is only days out"
+  },
+  "when_to_use": "Only on SPY, QQQ or IWM where daily expiries exist, on a quiet, non-trending session: opening range < 0.6% and VIX < 20. Strongly prefer days with no FOMC, CPI, NFP, or major earnings after-hours. This structure is short gamma on the most gamma-heavy instrument in the market; it is a small-size, high-discipline trade.",
+  "typical_dte": "front 0 DTE, back 1-4 DTE",
+  "entry_rules": [
+    "Underlying limited to SPY, QQQ, IWM (daily expiries, penny-wide markets, share-settled - so assignment discipline is mandatory).",
+    "Entry window 10:00-12:30 ET only. Never in the first 30 minutes (opening gamma) and never after 12:30 (no time left to be right).",
+    "No macro release (FOMC statement, CPI, PPI, NFP, PCE) scheduled for that session.",
+    "VIX < 20 AND the first-30-minute range < 0.6% of spot.",
+    "Short strike by delta 0.30-0.50 and at least 0.5 x the 5-minute ATR(14) away from spot.",
+    "Net debit <= $0.60 per unit, and total 0DTE calendar debit <= 0.5% of equity per session ($250 on $50k).",
+    "Bid-ask on the 2-leg package <= $0.05; reject anything wider.",
+    "Max 3 units per session; no re-entry after two stop-outs in the same session.",
+    "LEVEL 3 OK (same strike, long expires later). Single mleg order. Alpaca note: verify the mleg fills as a package - if it does not, do NOT leg into a 0DTE short first; fill the long leg first or skip the trade."
+  ],
+  "management_rules": [
+    "Profit target +20% of debit, or $0.10 per unit, whichever comes first.",
+    "Stop at -40% of debit, or if spot trades through the short strike by more than 0.3 x ATR(5min).",
+    "Absolute time stop: 14:00 ET - if not at target, begin working the close.",
+    "No rolling. A 0DTE short is never rolled into the same session; it is closed.",
+    "Hard daily loss cap: stop trading day calendars for the session after -1% of equity in this bucket."
+  ],
+  "exit_rules": [
+    "HARD RULE: the 0DTE short leg must be closed by 14:30 ET, every session, regardless of P&L or moneyness. No exceptions, no discretion, no 'it will come back'.",
+    "If the short is ITM at any point after 13:30 ET, close it immediately - do not wait for 14:30.",
+    "Close the short leg first, then decide whether to keep the 1-4 DTE long as a lottery ticket (default: close it too, same order).",
+    "If the spread mark goes to zero bid on the short, buy it back for $0.01-$0.02 and book the gain.",
+    "Never allow a 0DTE short to reach 15:55 ET. SPY/QQQ/IWM settle in shares; an ITM short at the bell means 100 shares delivered against you over the weekend or overnight."
+  ],
+  "assignment_risk": "Maximum in this family. The 0DTE short on a share-settled ETF can be assigned at expiry (automatic exercise if $0.01 ITM) delivering 100 shares long or short per contract. The long 1-4 DTE leg covers directionally but not operationally - you still wake up with an unwanted equity position and overnight gap risk. The 14:30 ET forced close is the only real defense and must be enforced by the automation, not by a human.",
+  "buying_power": "Net debit only while both legs are open. An assignment converts it into a stock position with a full margin requirement overnight - which is exactly what the 14:30 rule exists to prevent.",
+  "liquidity_needs": "SPY/QQQ/IWM only: penny-wide 0DTE ATM quotes, OI >= 5,000 on the short strike, and a quoted back-leg spread <= $0.03. Do not run this on single stocks.",
+  "common_mistakes": "Running it on a trend day (short gamma bleeds continuously); entering too late in the session; sizing it like a normal calendar; holding past 14:30 'because it is almost back to even'; assuming a 0DTE ETF option is cash-settled - it is not, SPY/QQQ/IWM deliver shares (only index products like SPX are cash-settled, and this account trades equities/ETFs).",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This IS the 0DTE variant of the family. The whole strategy is defined by the forced 14:30 ET close. A 0DTE double calendar (put day-calendar below and call day-calendar above) is the natural extension: same rules, half the size per side, same forced close.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

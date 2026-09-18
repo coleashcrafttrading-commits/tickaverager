@@ -1,0 +1,65 @@
+{
+  "name": "Short Synthetic Straddle (Covered Ratio Write)",
+  "slug": "synthetic-straddle-short",
+  "aliases": [
+    "ratio write",
+    "covered ratio call write",
+    "1x2 covered write"
+  ],
+  "summary": "100 long shares plus two short ATM calls reproduces a short straddle at that strike; one call is covered by the shares and the second is naked, which is what makes it a Level 4 structure with unlimited upside risk.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares at market"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "ATM: strike nearest spot, call delta 0.45-0.55. TWO contracts \u2014 the first covered by the shares, the SECOND UNCOVERED"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "max_profit": "call_credit x 2 x 100 + (strike - entry_spot) x 100, realised if the underlying finishes exactly at the strike",
+  "max_loss": "UNDEFINED (unlimited) above the strike \u2014 the second short call has no cover and loses 100 shares' worth per point above the breakeven",
+  "greeks": {
+    "delta": "~0.00 at entry (+1.00 shares, -1.00 from two ATM calls)",
+    "gamma": "strongly negative",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "breakevens": "Upside: strike + (total_credit/100) + (strike - entry_spot)/100, approximately. Downside: entry_spot - total_credit/100.",
+  "when_to_use": "Historically used by traders wanting short-vol exposure while holding shares. There is no use case on this account: the second call is naked. Included for completeness and as a pattern the classifier must recognise, especially because it can be created accidentally by selling a second covered call against the same 100 shares.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the second short call is uncovered. Alpaca rejects a multi-leg order containing it, and rejects it as a standalone short call. Requires Level 4.",
+    "BLOCKED BY RISK POLICY even at Level 4: unbounded upside loss on a $50k account.",
+    "CLASSIFIER REQUIREMENT: check every cycle that (number of short calls x 100) <= shares held for every underlying. A covered-call program that sells a second contract against the same 100 shares creates exactly this structure without anyone deciding to.",
+    "Level-3-legal substitute: sell one covered call and buy a further OTM call to cap the second short \u2014 i.e. a covered call plus a call credit spread, which is fully defined-risk and Level 3 legal."
+  ],
+  "management_rules": [
+    "If this exposure is ever detected, raise a critical alert and buy back the uncovered call immediately, or buy a protective further-OTM call to cap it in the same session.",
+    "No profit target or stop is specified because the position should not exist."
+  ],
+  "exit_rules": [
+    "MANDATORY: close both short calls no later than 15:40 ET on expiration day, unconditionally.",
+    "If spot > strike at any time on expiration day, close both short calls by 14:00 ET. Assignment on both delivers 200 shares \u2014 100 held and 100 short \u2014 leaving a naked short share position over the weekend.",
+    "Close both short calls by 15:00 ET the session before any ex-dividend date if extrinsic < 1.25 x declared dividend; a ratio write on a dividend payer is an early-assignment magnet on both contracts.",
+    "If assigned on one or both, flatten the resulting share imbalance at the first available print."
+  ],
+  "assignment_risk": "On both short calls, with only one of them covered. Assignment on both delivers 200 shares against 100 held, producing a naked short 100-share position. Partial assignment (one of two) is also possible and leaves an unbalanced, directional book. Dividend-driven early exercise applies to both contracts simultaneously.",
+  "alpaca_level": 4,
+  "buying_power": "Shares at full cost or 50% Reg T, plus a full naked short call requirement for the second contract (roughly 20% of underlying value less OTM amount plus premium). About $7,000+ per unit on a $100 name.",
+  "liquidity_needs": "Irrelevant \u2014 do not trade.",
+  "common_mistakes": "Creating it accidentally in a covered-call program by not reconciling short call count against share count. Believing the shares 'mostly' cover two calls.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never \u2014 unbounded risk plus certain assignment on at least one contract if the underlying closes above the strike.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

@@ -1,0 +1,88 @@
+{
+  "name": "Long Call Condor",
+  "slug": "long-call-condor",
+  "aliases": [
+    "call condor",
+    "long condor spread (calls)",
+    "debit call condor"
+  ],
+  "summary": "Four calls at four ascending strikes - buy the lowest, sell the two middles, buy the highest - for a net debit; a butterfly with a flat top, profiting if the underlying finishes between the middle strikes.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike A: lowest, roughly 0.70 delta (ITM)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike B = A + W1, roughly 0.55 delta",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "strike C = B + body width (body straddles spot), roughly 0.40 delta",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "strike D = C + W1 (outer widths equal: D - C = B - A)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(W1 - net debit) x 100, where W1 = B - A = D - C; realized between B and C",
+  "max_loss": "net debit x 100, outside A and D",
+  "breakevens": "A + net debit; D - net debit (per share)",
+  "greeks": {
+    "delta": "near zero when the body is centered on spot",
+    "gamma": "negative inside the body",
+    "theta": "positive inside the body",
+    "vega": "negative"
+  },
+  "typical_dte": "20-45 DTE",
+  "when_to_use": "Range-bound expectation with IV rank >= 30. Economically the same payoff as an iron condor at the same strikes; choose whichever is priced better (compare the call condor debit to the equivalent iron condor credit: debit + IC credit should equal W1; take the cheaper side).",
+  "entry_rules": [
+    "IV rank >= 30",
+    "Net debit <= 45% of W1 (outer wing width)",
+    "Body (B to C) centered within 0.25 x body width of spot; body width >= 0.75 x expected move",
+    "Outer widths equal: B - A == D - C",
+    "DTE 20-45",
+    "All four strikes with OI >= 500 and spread <= 10% of mid",
+    "Debit <= 1.5% of equity",
+    "Alpaca level 3",
+    "Price check against the equivalent iron condor and the put condor at the same strikes; route the cheapest of the three"
+  ],
+  "management_rules": [
+    "Take profit at 50% of max profit ((W1 - debit) x 0.50)",
+    "Time stop at 14 DTE - condors need time to converge but gamma near expiry is dangerous with two short legs",
+    "Loss stop: close at 50% of the debit lost",
+    "If spot leaves the A-D range, close; the structure is at max loss and further waiting only adds assignment risk"
+  ],
+  "exit_rules": [
+    "Force-close the whole structure by 15:45 ET on expiration day, always",
+    "Close immediately if either short strike (B or C) goes ITM by more than 0.25 x W1, or a short delta >= 0.85, or short extrinsic < $0.10 - note strike B is ITM at entry by construction, so this structure requires active monitoring from day one",
+    "Ex-dividend guard: both shorts are calls; if either short call's extrinsic < projected dividend, close before the ex-date close",
+    "Never carry the ITM short call (strike B) over an ex-dividend date"
+  ],
+  "assignment_risk": "High relative to an iron condor: the lower short call (B) is typically ITM or near-ITM for the entire life of the trade, and short calls carry dividend-driven early assignment. This is the main practical reason to prefer the iron condor expression of the same payoff.",
+  "buying_power": "Net debit x 100 per contract (all shorts covered by longs at wider strikes).",
+  "liquidity_needs": "Four strikes, all penny-wide; ITM call strikes often have wider markets - check the ITM leg specifically.",
+  "common_mistakes": "Ignoring that the payoff equals an iron condor and overpaying; ignoring dividend assignment on the ITM short call; body too narrow to be reachable.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Avoid. An ITM short call on expiration day is an assignment waiting to happen, and the all-call construction has no offsetting benefit over a 0DTE iron condor.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

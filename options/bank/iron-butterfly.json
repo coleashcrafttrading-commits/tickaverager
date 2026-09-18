@@ -1,0 +1,92 @@
+{
+  "name": "Iron Butterfly",
+  "slug": "iron-butterfly",
+  "summary": "Sell an ATM straddle and buy equidistant OTM wings (short ATM call + short ATM put + long OTM call + long OTM put) for a large credit across three strikes; a high-credit, narrow-profit-zone short-vol trade.",
+  "aliases": [
+    "iron fly",
+    "ironfly",
+    "short iron butterfly"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body minus width; width = 1.0-2.0% of spot, or the strike at -0.15 delta",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "body strike, ATM, put delta -0.45 to -0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SAME body strike as the short put (this is what makes it a butterfly rather than a condor)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "body plus the identical width",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "credit",
+  "typical_dte": "0-45 DTE; classic swing version 30-45 DTE, managed at 21 DTE; 0DTE version very common on SPY/QQQ",
+  "when_to_use": "IV rank > 50, implied vol above 20-day realized vol by at least 3 vol points, no earnings inside the expiry, and price sitting in the middle of a defined range. The structure is the highest-credit three-strike short-vol trade available under Level 3.",
+  "max_profit": "net credit received, only if the underlying settles exactly at the body strike",
+  "max_loss": "(wing width x 100) - net credit, per unit. Defined.",
+  "breakevens": "body strike - credit, and body strike + credit",
+  "greeks": {
+    "delta": "near 0 at entry; flips hard and fast as spot leaves the body",
+    "gamma": "strongly negative at the body - the dominant risk",
+    "theta": "strongly positive, the profit engine",
+    "vega": "negative; an IV spike is an immediate mark-to-market loss"
+  },
+  "entry_rules": [
+    "Credit received >= 25% of wing width; target 30-40% (e.g. >= $1.50 on a $5-wide fly).",
+    "IV rank >= 50 computed over a 252-day IV history.",
+    "Short strike = the listed strike nearest spot; both short legs MUST share that identical strike.",
+    "Wings exactly equidistant from the body.",
+    "No earnings, no FOMC, no CPI inside the expiry unless the trade is explicitly an IV-crush trade opened the session before the event.",
+    "All four contracts: OI >= 500, prior-day volume >= 100, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 4-leg order, limit at mid, accept mid - $0.03.",
+    "Max risk <= 2% of equity per position; max 3 concurrent iron flies across the whole account."
+  ],
+  "management_rules": [
+    "Profit target: close at 25% of max profit for the 30-45 DTE version (iron flies rarely reach 50% because the profit zone is a point, not a range).",
+    "Time management: close or roll at 21 DTE regardless of P/L - gamma risk past 21 DTE is not compensated.",
+    "Stop: close if the mark-to-market loss reaches 2.0x the credit received.",
+    "Delta drift: if net position delta exceeds +/-20 per unit, close; do not defend a directional iron fly.",
+    "Optional single roll: if spot breaches a breakeven with > 21 DTE left, roll the untested short leg to the body of the new range once only, never twice."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: both an ATM short call and an ATM short put exist, and at expiry one of them is ITM by definition unless spot lands exactly on the strike. Flatten the entire structure no later than 15:45 ET on expiration day, unconditionally, at market if the spread will not fill.",
+    "ASSIGNMENT GUARD: close immediately if either short leg is ITM with extrinsic value < $0.10.",
+    "DIVIDEND GUARD: if the short call is ITM and its extrinsic is less than the declared dividend, close before the prior day's close.",
+    "PIN GUARD: at 15:30 ET on expiry day, if |spot - body| < 0.30% of spot, close everything; a pin is the single worst operational outcome because assignment on the short straddle is a coin flip.",
+    "Never allow the long wings to expire while a short leg lives; close the whole structure as one order."
+  ],
+  "assignment_risk": "This is the highest assignment-risk structure that Level 3 permits, because one of the two ATM short legs is essentially always ITM at expiry. Assignment on the short call delivers -100 shares; on the short put, +100 shares at the strike. The long wings cap the economic loss but do not prevent the share delivery or the resulting margin call on a $50k account. Automated 15:45 ET flattening is mandatory, not optional.",
+  "buying_power": "(wing width x 100) - net credit, per unit. Only one side is charged; the broker does not double-count.",
+  "liquidity_needs": "High. Four legs in and four legs out; needs penny-wide chains. SPY, QQQ, IWM, and top-50 large caps only.",
+  "common_mistakes": "Chasing the big credit and ignoring that max profit requires a perfect pin; taking iron flies in low IV; holding past 21 DTE; not closing before expiry and getting assigned on the short straddle; trading them on underlyings whose chains are $0.05 wide (the slippage alone eats 20% of the credit).",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Very popular 0DTE structure on SPY/QQQ, usually opened 10:00-11:00 ET after the opening range sets, with wings at 1.0-1.5% and a credit of 30-40% of width. Theta is enormous but so is gamma: a 0.5% move against the body typically takes the position to a full loss in minutes. Mandatory: an intraday stop at 1.5x credit and an unconditional 15:45 ET flatten. Alpaca gives no 0DTE greeks/IV, so solve IV from the mid and compute delta/gamma locally with T measured in seconds to the 16:00 ET close.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral / short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2,
+  "also_filed_under": [
+    "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)"
+  ]
+}

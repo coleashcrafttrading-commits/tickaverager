@@ -1,0 +1,64 @@
+{
+  "name": "Leveraged Covered Call on Margin",
+  "slug": "leveraged-covered-call-margin",
+  "aliases": [
+    "Margined buy-write"
+  ],
+  "summary": "A buy-write where the shares are purchased on Reg-T margin, roughly doubling both the yield on equity and the drawdown. FLAGGED: high risk for an automated system.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "purchased using ~50% margin",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.30 delta OTM",
+      "dte_rule": "30-45 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "same dollar max profit as a cash buy-write but on half the equity, so ~2x return on equity, less margin interest",
+  "max_loss": "same dollar loss on ~half the equity, so ~2x drawdown; margin call risk below maintenance",
+  "breakevens": "share price - credit + accrued margin interest per share",
+  "greeks": {
+    "delta": "+70 per unit, but ~+140 per dollar of equity",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "when_to_use": "Rarely justified. Only on very low-beta, high-liquidity ETFs, with total portfolio margin usage capped. FLAGGED: leverage plus a capped upside is an asymmetric bad trade - the cap stays, the losses double.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "Only enable if account is a margin account and total gross exposure <= 1.5x equity.",
+    "Require the underlying's 1-year max drawdown x leverage < 35% of account equity.",
+    "Require the call credit annualized to exceed the margin interest rate by >= 6 percentage points.",
+    "Maintain maintenance excess >= 35% of equity at all times."
+  ],
+  "management_rules": [
+    "Deleverage first on any drawdown: if maintenance excess < 30%, sell shares (after buying back a proportional number of calls) before doing anything else.",
+    "50% profit / 21 DTE as usual.",
+    "Never add leverage to defend a loser."
+  ],
+  "exit_rules": [
+    "Hard assignment guard as per covered call, plus: exit the whole unit if maintenance excess < 25%.",
+    "Always buy back calls before liquidating shares so cover is never broken."
+  ],
+  "assignment_risk": "Same as covered call, with the added hazard that assignment removes the shares while the margin loan remains until settlement, temporarily distorting buying power.",
+  "buying_power": "~50% of share notional as Reg-T initial; maintenance typically 25-30%.",
+  "liquidity_needs": "Highly liquid ETFs only.",
+  "common_mistakes": "Treating the capped-upside covered call as a levered growth vehicle; getting margin-called in the drawdown that the call premium barely cushioned.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Do not combine leverage with 0DTE gamma.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

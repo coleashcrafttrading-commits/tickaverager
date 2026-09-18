@@ -1,0 +1,52 @@
+{
+  "name": "0DTE Naked Short Call",
+  "slug": "zero-dte-naked-short-call",
+  "aliases": [
+    "0DTE uncovered call"
+  ],
+  "summary": "Sell a same-day uncovered call for a few cents of premium against unlimited intraday risk. Level 4, blocked, and the worst risk-per-dollar structure available.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta 0.05-0.15",
+      "dte_rule": "0 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "max_profit": "The credit, typically $0.10-$0.40 on SPY",
+  "max_loss": "UNDEFINED. A single intraday melt-up can produce a loss 20-50x the credit before the bell, with no time to recover.",
+  "breakevens": "strike + credit",
+  "greeks": {
+    "delta": "-0.05 to -0.15 at entry, can reach -0.95 within an hour",
+    "gamma": "the most negative gamma available anywhere",
+    "theta": "the highest per-day theta available",
+    "vega": "negligible"
+  },
+  "typical_dte": "0 DTE",
+  "when_to_use": "Never. Documented so the automation refuses it and so backtests can quantify exactly how bad the tail is.",
+  "entry_rules": [
+    "BLOCKED: Level 4 required; Alpaca offers levels 1-3 only and this account is Level 3",
+    "Even if permitted, an unhedged 0DTE short call violates the system's core mandate of defined risk"
+  ],
+  "management_rules": [
+    "Not applicable - blocked"
+  ],
+  "exit_rules": [
+    "Any detected uncovered 0DTE short call is bought to close at market immediately",
+    "An ITM 0DTE short call left at the bell is assigned that evening, creating a short 100-share position that settles against an account with no borrow arrangement"
+  ],
+  "assignment_risk": "EXTREME with same-day finality. There is no roll, no repair and no time.",
+  "buying_power": "Naked call margin; unavailable at Level 3.",
+  "liquidity_needs": "Not applicable - blocked.",
+  "common_mistakes": "Thinking a 5-delta 0DTE call is a 95% win rate. The 5% costs more than the 95% earns without a long wing.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 4,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

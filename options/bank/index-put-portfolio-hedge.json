@@ -1,0 +1,69 @@
+{
+  "name": "Index Put Portfolio Hedge",
+  "slug": "index-put-portfolio-hedge",
+  "aliases": [
+    "Beta-weighted hedge",
+    "Macro overlay",
+    "Cross hedge"
+  ],
+  "summary": "Hedge a basket of correlated share positions with beta-weighted SPY or QQQ puts instead of hedging each name individually.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "the existing multi-name share book",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "SPY/QQQ put at 0.25-0.35 delta; contracts = (portfolio_value x portfolio_beta) / (index_price x 100 x hedge_ratio)",
+      "dte_rule": "45-90 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "grows as the index falls; offsets book losses to the extent beta holds",
+  "max_loss": "premium paid, plus basis risk if the book falls while the index does not",
+  "breakevens": "index level = strike - premium per share",
+  "greeks": {
+    "delta": "negative index delta sized to offset a chosen fraction of the book's beta-weighted delta",
+    "gamma": "positive",
+    "theta": "negative",
+    "vega": "positive"
+  },
+  "when_to_use": "When the share book has 4+ correlated positions and hedging each individually is too expensive or illiquid. Especially good for a TickAverager-style multi-ticker fleet that is structurally long many correlated names.",
+  "typical_dte": "45-90 DTE",
+  "entry_rules": [
+    "Compute portfolio beta to SPY over the trailing 60 trading days; require R-squared >= 0.60 or the hedge has too much basis risk.",
+    "contracts = round((portfolio_value x beta x hedge_ratio) / (SPY_price x 100)), hedge_ratio default 0.5 (half hedge).",
+    "Require IV Rank on the index <= 45.",
+    "Premium budget <= 1.5% of portfolio value per 60-day hedge.",
+    "SPY/QQQ only - OI >= 2000, penny-wide."
+  ],
+  "management_rules": [
+    "Rebalance the contract count whenever portfolio value or beta drifts by more than 20% from the hedge sizing.",
+    "Roll at DTE < 25.",
+    "Monetize at 3x premium: sell half and re-strike.",
+    "Reduce hedge_ratio to 0.25 when the index is more than 10% below its 200-day SMA (the hedge is expensive and the damage is done); raise toward 0.75 when the index is above its 200-day SMA and VIX < 15."
+  ],
+  "exit_rules": [
+    "Close ITM index puts before expiration - SPY/QQQ are share-settled ETFs and auto-exercise creates a SHORT ETF position of 100 shares per contract, which the account does not hold.",
+    "Remove the hedge when the underlying share book is reduced below the hedge's notional.",
+    "Hard close by 15:30 ET on expiration day."
+  ],
+  "assignment_risk": "No short leg. Critical nuance: SPY, QQQ and IWM options are AMERICAN and settle in SHARES, unlike SPX/XSP which are European and cash-settled. An ITM long ETF put that auto-exercises delivers short ETF shares. If the system ever wants true cash settlement it must use index options (SPX/XSP/NDX), which are a different product and a different approval path.",
+  "buying_power": "Premium in full.",
+  "liquidity_needs": "SPY/QQQ - the most liquid options in the world; no constraint.",
+  "common_mistakes": "Ignoring basis risk (hedging small caps with SPY); over-hedging so the book cannot make money in a rally; forgetting ETF options are physically settled.",
+  "alpaca_level": 1,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "0DTE index puts hedge only the current session and are better replaced by reducing share exposure directly.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

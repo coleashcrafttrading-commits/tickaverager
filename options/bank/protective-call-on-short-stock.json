@@ -1,0 +1,61 @@
+{
+  "name": "Protective Call (short-stock hedge)",
+  "slug": "protective-call-on-short-stock",
+  "aliases": [
+    "married call",
+    "call hedge on short"
+  ],
+  "summary": "Hold a short stock position and buy a call against it to cap the unlimited upside risk. The mirror image of a protective put; obscure in retail practice.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "100 shares short already held"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta 0.20-0.30, strike above the short entry",
+      "dte_rule": "30-90 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(short entry - 0) x 100 - call debit",
+  "max_loss": "(call strike - short entry + call debit) x 100. This converts an unlimited-risk short into a defined-risk one.",
+  "breakevens": "short entry price - call debit per share",
+  "greeks": {
+    "delta": "-100 from the short plus +20 to +30 from the call = -70 to -80 net",
+    "gamma": "positive from the call",
+    "theta": "negative (insurance cost)",
+    "vega": "positive"
+  },
+  "typical_dte": "30-90 DTE",
+  "when_to_use": "Only if the system ever carries short equity - which it should not. Documented so the machine knows the correct repair if an unintended short appears, e.g. from an auto-exercised long put.",
+  "entry_rules": [
+    "Requires an existing short equity position, which this system does not intend to hold",
+    "If an unintended short stock position appears (auto-exercised long put), the FIRST action is to buy the shares back, not to hedge with a call. Use this only if the buyback cannot be executed immediately (halt, no liquidity)",
+    "Call delta 0.20-0.30, 30-90 DTE, nearest liquid strike above the short entry"
+  ],
+  "management_rules": [
+    "Treat as a temporary bandage: close the entire structure within 1 trading day",
+    "Roll the call down as the short becomes profitable, in 0.20-0.30 delta increments"
+  ],
+  "exit_rules": [
+    "Close the short stock and sell the call within 1 trading day of establishing the hedge",
+    "If the call is ITM at expiry it auto-exercises and BUYS 100 shares, closing the short - acceptable but not a plan"
+  ],
+  "assignment_risk": "None on the call (you are long it). The short stock itself carries hard-to-borrow, buy-in and dividend-liability risk.",
+  "buying_power": "Short stock margin (50% Reg T initial) plus the call debit. Short equity is not permitted under normal operation of this system.",
+  "liquidity_needs": "Standard: OI >= 250, spread <= 10% of mid.",
+  "common_mistakes": "Using this as an excuse to tolerate a short stock position rather than flattening it immediately.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

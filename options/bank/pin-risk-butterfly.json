@@ -1,0 +1,80 @@
+{
+  "name": "Pin-Risk Butterfly (Expiration Pin Play)",
+  "slug": "pin-risk-butterfly",
+  "aliases": [
+    "max pain fly",
+    "expiration pin fly",
+    "0DTE ATM butterfly"
+  ],
+  "summary": "A long at-the-money butterfly placed into expiration to profit from the underlying pinning near a high-open-interest strike; defined risk, with the pin itself being both the thesis and the operational hazard.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Lower wing = pin_strike - width, where width is 1-2 strikes on a liquid ETF"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Body at the pin strike: the strike with the largest combined call+put open interest within 1.5% of spot",
+      "dte_rule": "same expiry, 0-2 DTE"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Upper wing = pin_strike + width (equidistant)",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "bias": "neutral",
+  "net": "debit",
+  "max_profit": "(width x 100) - net_debit, realised only if the underlying finishes exactly at the body strike",
+  "max_loss": "net_debit, if the underlying finishes outside either wing",
+  "greeks": {
+    "delta": "near zero at entry if the body is at spot; becomes violently directional as expiry approaches",
+    "gamma": "large NEGATIVE at the body, large positive at the wings \u2014 the dominant risk near expiry",
+    "theta": "strongly positive when spot is at the body",
+    "vega": "negative"
+  },
+  "breakevens": "lower_wing + net_debit/100 and upper_wing - net_debit/100",
+  "when_to_use": "Expiration-day mean reversion around a heavy open-interest strike, typically on SPY or QQQ. Conditions: realised intraday range already below the 20-day average, no scheduled macro release after entry, and the candidate strike carrying at least 3x the open interest of its neighbours. This is a low-probability, high-payoff structure: the modal outcome is losing the debit.",
+  "typical_dte": "0-2 DTE",
+  "entry_rules": [
+    "LEVEL 3 LEGAL: the two short body contracts are covered by the two long wings within the same multi-leg order. Alpaca accepts it as a single order.",
+    "MANDATORY single multi-leg order; never leg into a butterfly.",
+    "Body strike selected by OPEN INTEREST, not by delta: choose the strike within 1.5% of spot with the highest combined call+put OI, requiring that OI >= 3x the median OI of the five nearest strikes.",
+    "Entry window: no earlier than 11:00 ET and no later than 14:00 ET on expiration day. Before 11:00 the morning range is unresolved; after 14:00 the risk/reward inverts as gamma explodes.",
+    "Net debit must be <= 15% of the wing width (e.g. <= $0.15 on a $1-wide fly, <= $0.75 on a $5-wide fly). Above that the payoff ratio is not worth the pin risk.",
+    "No entry if a macro release (CPI, FOMC, NFP) or the underlying's earnings falls after the entry time.",
+    "Underlying must be SPY, QQQ or IWM class liquidity: penny-wide strikes, OI >= 5,000 on all three legs.",
+    "Size: maximum total debit per expiration day <= 1% of equity ($500 on a $50k account). The modal outcome is a total loss of the debit."
+  ],
+  "management_rules": [
+    "Close at 4x the debit paid (e.g. $0.15 in, $0.60 out) or at 15:15 ET, whichever comes first. Do not hold for the full width.",
+    "Hard time stop: close the entire structure no later than 15:15 ET regardless of P/L. This is earlier than the general 15:40 rule because the body is deliberately placed at the money, which is the maximum-assignment-uncertainty location.",
+    "Close immediately if the underlying moves beyond either wing by more than 0.25% \u2014 the thesis is dead and the remaining value is negligible.",
+    "Never roll a pin fly. Never add to it intraday.",
+    "If the debit was under $0.10 and the position is worthless by 14:30 ET, close it anyway to remove the short body from the book \u2014 do not leave a 'worthless' short option outstanding into the close."
+  ],
+  "exit_rules": [
+    "MANDATORY ASSIGNMENT GUARD, tightened for this structure: all legs closed by 15:15 ET on expiration day, unconditionally, at market if necessary.",
+    "THE PIN IS THE HAZARD: if the underlying finishes at or within $0.05 of the body strike, the two short body calls may be partially assigned (holders exercise unpredictably when an option finishes at the money). Partial assignment leaves 100 short shares plus an unbalanced option position over the weekend, with Monday gap risk against it. This is the single scenario the never-be-assigned mandate exists to prevent.",
+    "If both wings finish ITM and the body is ITM, the structure nets to the width \u2014 but only after four separate exercise/assignment events. Close instead.",
+    "If for any reason a leg cannot be closed by 15:15 ET (halted underlying, no bid), escalate immediately and hedge the resulting directional exposure with shares before the close."
+  ],
+  "assignment_risk": "Concentrated and unusual: the body is deliberately placed where assignment is most uncertain. Two short contracts at a strike that finishes exactly at the money can be assigned on zero, one or two contracts, and the holder's decision is unknowable. One assignment leaves 100 short shares held over the weekend against an option structure that no longer hedges it linearly. The wings limit the payoff but do not prevent the share movement. This is textbook pin risk and it is the reason the close time is 15:15 ET rather than 15:40 ET.",
+  "alpaca_level": 3,
+  "buying_power": "Net debit only for a standard long butterfly \u2014 typically $15-$75 per unit. The capital efficiency is what makes it attractive and what makes oversizing tempting.",
+  "liquidity_needs": "Penny-wide markets on all three strikes into the final hour, OI >= 5,000 each. Six contract fees round trip on a $15 debit is a 35% cost drag, so wider flies (>= $2 wings) are preferred on fee grounds.",
+  "common_mistakes": "Holding for the full width \u2014 the probability of finishing exactly at the body is tiny, and the attempt trades a 4x exit for a pin-risk weekend. Choosing the body by delta instead of by open interest. Entering after 14:00 ET when gamma makes the position unmanageable.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "This is a 0DTE-native structure \u2014 but the 15:15 ET hard close is what makes it survivable. A 0DTE butterfly held to settlement is not a defined-risk trade in any operational sense, because partial assignment on the body converts it into an overnight share position.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

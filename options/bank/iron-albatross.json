@@ -1,0 +1,88 @@
+{
+  "name": "Iron Albatross (Wide Iron Condor)",
+  "slug": "iron-albatross",
+  "aliases": [
+    "albatross spread",
+    "iron stretcher",
+    "wide-wing iron condor",
+    "far-OTM iron condor"
+  ],
+  "summary": "An iron condor with very far OTM short strikes (5-8 delta) and wide wings - a high-probability, low-credit tail-selling structure.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short put minus wing width W (W >= 2x the strike increment; typically $10 on SPY)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.05-0.08 delta put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.05-0.08 delta call",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "short call plus the same wing width W",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "net credit x 100 (small)",
+  "max_loss": "(W - net credit) x 100 (large relative to the credit)",
+  "breakevens": "short put - credit; short call + credit",
+  "greeks": {
+    "delta": "essentially zero",
+    "gamma": "negative, very small until a tail event",
+    "theta": "positive but small in absolute terms",
+    "vega": "negative"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "IV rank >= 40 with a steep volatility skew that makes far-OTM puts rich. It is a tail-selling trade: high win rate, occasional large loss. Only run it with strict sizing.",
+  "entry_rules": [
+    "IV rank >= 40",
+    "Net credit >= 12% of the wing width W (far-OTM credit is thin; below this the risk/reward is indefensible)",
+    "Short strikes at 0.05-0.08 delta both sides",
+    "DTE 30-60",
+    "Max loss <= 1% of equity per position AND total albatross max loss <= 5% of equity across all positions",
+    "No earnings or macro binary inside the expiry",
+    "Far-OTM strikes still need OI >= 250 and a quotable bid (a wing you cannot sell is not a wing)",
+    "Alpaca level 3"
+  ],
+  "management_rules": [
+    "Take profit at 50% of credit, or at 21 DTE, whichever first",
+    "Loss stop: close if the buy-back cost >= 3x the credit received (the loss multiple must be larger than an iron condor's because the credit is small relative to the width)",
+    "If either short's delta reaches 0.20, close the whole structure - do not roll a tail trade toward the money",
+    "Never add size after a win streak; the payoff distribution is negatively skewed by design"
+  ],
+  "exit_rules": [
+    "Force-close by 15:45 ET on expiration day, always",
+    "Close immediately if any short strike is breached intraday (spot beyond the short strike) regardless of the model price",
+    "Close if a short leg's extrinsic < $0.10 or delta >= 0.85",
+    "Ex-dividend guard on the short call"
+  ],
+  "assignment_risk": "Low frequency, high severity: the shorts are far OTM most of the time, but a gap through a short strike leaves an ITM short with real assignment exposure. The close-on-breach rule exists for this.",
+  "buying_power": "(W - credit) x 100 per contract - capital-inefficient relative to the credit collected.",
+  "liquidity_needs": "Far-OTM strikes are often wide; require a two-sided quote with spread <= $0.10 and OI >= 250 on every leg.",
+  "common_mistakes": "Treating a 95% win rate as a strategy; oversizing because 'it never gets tested'; wings so wide the single loss erases a year of credits; strikes so far out the bid is $0.01 and slippage eats everything.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended. 0DTE far-OTM credits are a few cents while a single intraday breach costs the full width; the risk/reward is indefensible and slippage alone exceeds the edge.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

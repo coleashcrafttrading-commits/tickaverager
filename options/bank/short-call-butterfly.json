@@ -1,0 +1,77 @@
+{
+  "name": "Short Call Butterfly",
+  "slug": "short-call-butterfly",
+  "summary": "Sell 1 lower call, buy 2 body calls, sell 1 upper call for a credit; a defined-risk bet that the underlying leaves the tent in either direction.",
+  "aliases": [
+    "reverse call butterfly",
+    "short call fly"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "body minus width; width 1.0-2.0% of spot",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "body = ATM, call delta 45-55 (placed where you expect price NOT to be)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "body plus the identical width",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "either",
+  "net": "credit",
+  "typical_dte": "3-30 DTE; usually placed 1-10 days ahead of a known catalyst",
+  "when_to_use": "IV rank < 25, a scheduled binary catalyst (earnings, FDA, Fed) inside the expiry, and a chart that has been compressing (Bollinger band width in the bottom quartile of the last 100 days). It is a poor standalone strategy because max profit equals the credit, which is small relative to the risk.",
+  "max_profit": "net credit received (achieved if spot finishes at or below the lower strike, or at or above the upper strike)",
+  "max_loss": "width - net credit, at the body strike. Defined.",
+  "breakevens": "lower breakeven = lower strike + credit; upper breakeven = upper strike - credit",
+  "greeks": {
+    "delta": "near 0 when centered",
+    "gamma": "positive at the body, negative at the wings",
+    "theta": "negative when spot is inside the tent (the usual case at entry)",
+    "vega": "positive near the body"
+  },
+  "entry_rules": [
+    "Credit received must be >= 25% of wing width; otherwise the risk/reward is not worth the assignment exposure.",
+    "IV rank of the underlying < 25 at entry (read from a 252-day IV percentile computed locally).",
+    "A dated catalyst must exist inside the expiry; no catalyst, no trade.",
+    "Equal wings; OI >= 500 and per-leg spread <= max($0.05, 10% of mid) on all three strikes.",
+    "Single multi-leg order at the natural mid, accept mid - $0.02.",
+    "Max risk (width - credit) <= 1% of equity per position."
+  ],
+  "management_rules": [
+    "Close at 50% of max profit, i.e. when the structure can be bought back for <= 50% of the credit received.",
+    "Close the day after the catalyst resolves regardless of P/L; the vol crush destroys the position from that point on.",
+    "Hard stop: close if the mark-to-market loss reaches 2.0x the credit received.",
+    "No adjustments; this is a one-shot event structure."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: two short calls exist (lower and upper). Flatten the entire structure by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if either short call is ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before the ex-dividend date whenever the lower short call is ITM and its extrinsic value is below the declared dividend. This is the highest-probability early assignment path for this structure.",
+    "Close no later than 2 DTE in all cases; the tent's max loss zone sharpens exactly when gamma is largest."
+  ],
+  "assignment_risk": "Two separate short call strikes can be assigned, and the lower one is ITM in the most common winning scenario (a rally). Assignment delivers -100 shares per assigned contract. The long body calls cover the shorts economically but not operationally. Ex-dividend early assignment on the lower short call is the single most likely bad outcome.",
+  "buying_power": "(wing width x 100) - credit received, per unit.",
+  "liquidity_needs": "High; you are paying two spreads to get in and two to get out on a structure whose max profit is the credit.",
+  "common_mistakes": "Trading it without a catalyst (negative theta bleeds it out); treating it as 'the opposite of a long fly' and expecting symmetric edge (it is not - max gain is capped at the credit while max loss is the rest of the width); holding through expiry and getting assigned on the ITM lower call.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended. At 0DTE the credit is tiny, the gamma risk at the body is violent, and two short strikes must be actively monitored into the close. If ever used, it must be intraday only with a hard 15:45 ET flatten, and the credit must exceed 30% of width.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "long-vol / breakout either direction",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

@@ -1,0 +1,69 @@
+{
+  "name": "Call Ratio Spread 1x2 (Call Front Spread)",
+  "slug": "call-ratio-spread-1x2",
+  "aliases": [
+    "call front spread",
+    "1x2 call ratio",
+    "short call ratio spread",
+    "ratio write"
+  ],
+  "summary": "Buy one nearer call and sell two further-OTM calls in the same expiry, usually for a credit; profits most if the underlying drifts up to the short strike, with unlimited risk above it.",
+  "bias": "neutral",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long call at-the-money or slightly ITM, 0.45-0.60 delta."
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "Two short calls at 0.20-0.30 delta, far enough out that the structure opens for a net credit.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "(short strike - long strike) * 100 + net credit, achieved exactly at the short strike at expiry",
+  "max_loss": "UNDEFINED above the short strike -- one of the two short calls is uncovered and loses without limit",
+  "breakevens": "lower: long strike - credit per share (if opened for credit there is no lower breakeven -- the credit is kept); upper: short strike + (max profit per share)",
+  "greeks": {
+    "delta": "slightly positive at entry (+0.05 to +0.15 per unit), turning sharply negative as price approaches the short strike",
+    "gamma": "negative, and increasingly so near the short strike",
+    "theta": "positive while price is below the short strike",
+    "vega": "negative -- you are net short one option"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "When you expect a slow drift higher that stalls at a known resistance level, and IV rank is elevated so the two short calls pay well. A favorite of experienced premium sellers; structurally a trap for automated systems because the profit peak sits exactly where the risk begins.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT. Of the two short calls, only one is covered by the long call; the second is naked. That is Level 4 authority, which Alpaca does not offer, and Alpaca's MLeg engine explicitly rejects orders containing an uncovered short call leg.",
+    "Defined-risk substitute: a call broken-wing butterfly (buy 1 lower call, sell 2 middle calls, buy 1 further-out call) -- same shape, capped upside risk, and Level 3 legal as a four-leg MLeg.",
+    "If it were enabled: IV rank >= 40; net credit > $0.00; short strike at or above a resistance level tested at least twice in the last 60 sessions; DTE 30-45; upper breakeven at least 1.5 ATR(20) above spot.",
+    "Alpaca ratio note: leg_ratio values must reduce to GCD 1, so 1:2 is a valid ratio shape -- the rejection here is about coverage, not about the ratio itself."
+  ],
+  "management_rules": [
+    "If enabled: take profit at 50% of max profit, or close for any credit once the underlying is within 1% of the short strike.",
+    "Close at 21 DTE unconditionally.",
+    "Stop: close the entire structure if the underlying trades above the upper breakeven, or if position delta reaches -0.50 per unit.",
+    "Never let it run into expiry hoping to pin the short strike."
+  ],
+  "exit_rules": [
+    "Flat by 15:45 ET on expiration day.",
+    "ASSIGNMENT GUARD: if the short calls are ITM at 15:30 ET on expiry day, closing is mandatory -- assignment on two contracts against one long call leaves 100 short shares per unit.",
+    "ASSIGNMENT GUARD: close whenever the short calls are ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before ex-dividend whenever the short calls are ITM and extrinsic < 1.5 * dividend."
+  ],
+  "assignment_risk": "High. Two short calls, only one covered. Assignment on both delivers 200 short shares per unit against 100 shares of long-call coverage, leaving 100 naked short shares.",
+  "buying_power": "The covered pair holds the vertical's width; the extra short call holds Reg-T naked call margin. Not available on Alpaca.",
+  "liquidity_needs": "OI >= 500 on both strikes; the 2-lot short leg needs quoted size >= 20.",
+  "common_mistakes": "Being drawn in by 'free' upside to the short strike; not realizing the peak profit point is also the danger point; running it into earnings; assuming a credit entry means no risk.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not permitted, and 0DTE ratio spreads have the sharpest possible transition from max profit to unbounded loss.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

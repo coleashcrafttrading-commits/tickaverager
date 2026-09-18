@@ -1,0 +1,59 @@
+{
+  "name": "Deep ITM Long Put (short-stock replacement)",
+  "slug": "deep-itm-long-put-short-stock-replacement",
+  "aliases": [
+    "synthetic short via put",
+    "-80 delta put"
+  ],
+  "summary": "Buy a -0.80 to -0.90 delta put as a defined-risk substitute for shorting 100 shares, with no borrow fee and no unlimited upside risk.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta -0.80 to -0.90 (typically 10-20% ITM)",
+      "dte_rule": "60-180 DTE"
+    }
+  ],
+  "bias": "bearish",
+  "net": "debit",
+  "max_profit": "(strike - 0) x 100 - debit if the underlying goes to zero; tracks the short nearly 1:1 below the strike",
+  "max_loss": "Debit x 100 - the key advantage over shorting stock, where losses are unlimited.",
+  "breakevens": "strike - debit",
+  "greeks": {
+    "delta": "-0.80 to -0.90",
+    "gamma": "small positive",
+    "theta": "small negative - only the thin extrinsic decays",
+    "vega": "small positive"
+  },
+  "typical_dte": "60-180 DTE",
+  "when_to_use": "When you want short exposure without borrow cost, hard-to-borrow risk or unlimited upside. Especially valuable on hard-to-borrow names, though that borrow cost is embedded in the put's price.",
+  "entry_rules": [
+    "Extrinsic value = put mid - max(0, strike - spot); require extrinsic <= 2.5% of strike",
+    "Delta -0.80 to -0.90; 60-180 DTE",
+    "Bid/ask <= 3% of mid; OI >= 100",
+    "Debit <= 6% of equity per position",
+    "Check the put-call parity implied borrow rate: if the embedded borrow exceeds 15% annualised, the synthetic short is priced against you - skip"
+  ],
+  "management_rules": [
+    "Manage like a short stock position: hold while price is below the 50 EMA",
+    "Roll out when DTE < 45 into the same delta 90+ days out, as a single net order",
+    "Stop at -35% of debit or a daily close above the 50 EMA",
+    "Take partial profit at +50% of debit; trail the remainder 1.5 ATR above price"
+  ],
+  "exit_rules": [
+    "Sell to close on the stop, the trend break, or at 45 DTE",
+    "Never carry into expiration week. An ITM put at expiry auto-exercises into SHORT 100 shares, an uncovered short equity position with unlimited risk and potential buy-in. Hard flatten/roll 5 trading days before expiry"
+  ],
+  "assignment_risk": "None (long). Auto-exercise into short stock is the critical hazard and the single worst unintended outcome available in this family.",
+  "buying_power": "Debit only - no short-stock margin, no borrow.",
+  "liquidity_needs": "Deep ITM put markets are wide. Reject above 3% of mid.",
+  "common_mistakes": "Ignoring the embedded borrow cost in hard-to-borrow names; letting it expire ITM and inheriting a short equity position.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bearish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

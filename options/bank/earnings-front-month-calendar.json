@@ -1,0 +1,75 @@
+{
+  "name": "Earnings (Front-Month) Calendar Spread",
+  "slug": "earnings-front-month-calendar",
+  "summary": "Sell the expiry that contains the earnings print and buy the next expiry that does not, at the same strike; harvests the fact that the event month's IV crushes far more than the following month's.",
+  "aliases": [
+    "IV crush calendar",
+    "earnings time spread",
+    "event calendar"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM, |delta| 0.45-0.55, at the strike nearest the post-earnings expected close (usually just spot). Use puts instead of calls if the put side is tighter or the name pays a dividend in the window - the structure is identical.",
+      "dte_rule": "first expiry AFTER the earnings date, typically 1-8 DTE at entry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Same strike as leg 1.",
+      "dte_rule": "the next expiry that does NOT contain another event; 21-45 DTE, at least 14 days beyond the front"
+    }
+  ],
+  "bias": "short_vol",
+  "net": "debit",
+  "max_profit": "Realized the morning after the print if spot opens near the strike: the back month retains most of its value while the front month collapses. Typically 20-60% of the debit; occasionally 100%+ when front IV was extremely elevated.",
+  "max_loss": "The net debit paid. Realized when the stock gaps beyond roughly 1x the implied move, which flattens the value differential between the two months.",
+  "breakevens": "Approximately strike +/- (0.6 to 0.9) x the front-month implied move. If the implied move is larger than your breakeven band, the trade has a negative expectancy - skip it.",
+  "greeks": {
+    "delta": "~0 at entry",
+    "gamma": "strongly negative across the event - this is the risk",
+    "theta": "positive but irrelevant over a 1-day hold; the P&L is vol, not theta",
+    "vega": "net positive overall, but decomposed: short front vega (the point of the trade) and long back vega"
+  },
+  "when_to_use": "Only when the term structure is steeply backwardated into the event: front_IV - back_IV >= 8 vol points, ideally >= 12. Best on large, liquid names with a history of the realized move being smaller than the implied move. Do not run it on names with a history of 2x-implied-move gaps (high-beta small caps, biotech binary events, meme names).",
+  "typical_dte": "front 1-8 DTE (first post-event expiry), back 21-45 DTE",
+  "entry_rules": [
+    "Confirmed earnings date and confirmed that the front expiry contains it and the back expiry contains no second event.",
+    "front_IV - back_IV >= 8.0 vol points at the ATM strike.",
+    "Front-month implied move (ATM straddle / spot) <= 8%; skip anything above.",
+    "Historical check: over the last 8 prints, the median |actual move| must be < 0.8 x the current implied move.",
+    "Enter in the last 60 minutes of the session BEFORE the print (between 15:00 and 15:50 ET), never days early - the front IV ramp is the payment.",
+    "Strike = the strike nearest spot at entry, |delta| 0.45-0.55.",
+    "Net debit <= 1% of equity per unit; maximum 2 earnings calendars open at once.",
+    "Combined bid-ask <= 8% of debit; reject wide event-week markets.",
+    "LEVEL 3 OK (same-strike, long back covers short front). Single mleg order; long leg first if legging."
+  ],
+  "management_rules": [
+    "This is a one-session trade. There is no 'management' - there is an exit the next morning.",
+    "Do not adjust, roll, or 'give it time' after the print. The edge is the single IV-crush event.",
+    "Do not add size after the print regardless of direction.",
+    "If the print is delayed or moved past the front expiry, close the position the same day for whatever it fetches."
+  ],
+  "exit_rules": [
+    "Close the FULL spread between 09:45 and 10:30 ET on the session after the print, unconditionally, win or lose. Waiting past 10:30 gives the gamma back.",
+    "If the front leg is 0DTE the morning after, the 14:30 ET forced-close rule applies as a hard backstop, but the trade should already be flat by 10:30.",
+    "Close the short leg immediately if it goes ITM with extrinsic <= $0.05 - a post-earnings ITM short is an assignment candidate the same day.",
+    "Emergency: if the stock gaps more than 1.5x the implied move, close on the open; do not wait for the 09:45 window.",
+    "Leg out short-first if the mleg close does not fill within 3 minutes; then work the long."
+  ],
+  "assignment_risk": "The short front leg for one overnight session while it may be deep ITM after the gap. This is the highest per-trade assignment risk in the whole calendar family because the short is nearly expiring and can move deep ITM overnight. The covering long back-month leg means the worst case is a covered stock position, but it must be flattened the same morning.",
+  "buying_power": "Net debit only.",
+  "liquidity_needs": "Front expiry OI >= 1,000 and back expiry OI >= 500 at the chosen strike; underlying ADV >= 5M shares; penny or nickel quotes. Event-week spreads widen - measure at entry, not from a stale chain.",
+  "common_mistakes": "Entering days before the print (paying for the IV ramp instead of selling it); choosing names where the realized move routinely exceeds the implied move; holding past the morning after; using an OTM strike to be directional and then being right about direction but wrong about magnitude; ignoring that the back month also crushes a few points, which eats the theoretical profit.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "The front leg is often 0DTE on the morning after the print. Treat that morning as an assignment-risk session: exit by 10:30 ET, hard backstop 14:30 ET.",
+  "alpaca_level": 3,
+  "family": "Calendar and diagonal spreads (time spreads): same-strike calendars, different-strike diagonals, double/triple calendars, double diagonals, PMCC and its put mirror, LEAPS diagonals, calendarized straddles/butterflies, ratio time spreads, and the reverse (short) time spreads",
+  "bias_note": "short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

@@ -1,0 +1,64 @@
+{
+  "name": "Deep In-the-Money Buy-Write",
+  "slug": "deep-itm-buy-write",
+  "aliases": [
+    "Bond-equivalent covered call",
+    "Synthetic short put"
+  ],
+  "summary": "Buy shares and sell a deep ITM call (0.85+ delta) for a tiny, bond-like return; risk-equivalent to a short put and mostly a bad idea for an automated account.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "buy",
+      "ratio": 100,
+      "strike_rule": "n/a",
+      "dte_rule": "n/a"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "0.85-0.95 delta, 10%+ ITM",
+      "dte_rule": "14-60 DTE"
+    }
+  ],
+  "bias": "neutral",
+  "net": "credit",
+  "max_profit": "extrinsic value captured only, typically 0.2-0.5% of notional",
+  "max_loss": "(share price - credit) x 100 - full downside below the strike with almost no upside",
+  "breakevens": "share price - credit",
+  "greeks": {
+    "delta": "+5 to +15 per unit",
+    "gamma": "negative, small",
+    "theta": "tiny positive",
+    "vega": "slightly negative"
+  },
+  "when_to_use": "Rarely. Historically used to park cash at a small premium or to capture a mispriced deep call. Risk-identical to selling a cash-secured put at the same strike but with more commissions, more assignment exposure and worse fills. FLAGGED: generally a bad idea - prefer the equivalent cash-secured put.",
+  "typical_dte": "14-60 DTE",
+  "entry_rules": [
+    "Only enable if the equivalent short put at the same strike/expiry is NOT available or is priced worse after fees.",
+    "Require extrinsic captured >= 0.25% of notional; reject below that.",
+    "Never deeper than 0.95 delta.",
+    "Require IV Rank >= 40 - there is no point at low vol."
+  ],
+  "management_rules": [
+    "There is nothing to manage but assignment; monitor extrinsic every minute.",
+    "Close the unit as soon as 70% of the extrinsic is captured."
+  ],
+  "exit_rules": [
+    "HARD: unwind the entire unit as one combo when extrinsic < 0.05 or by 15:30 ET on expiration day, whichever comes first.",
+    "Unwind before any ex-dividend date: a deep ITM call is almost always exercised into a dividend."
+  ],
+  "assignment_risk": "Extreme. Deep ITM short calls are assigned early as a matter of routine, especially into dividends. This is the single highest-assignment-probability structure in the family.",
+  "buying_power": "Shares in full; the credit offsets most of the cost.",
+  "liquidity_needs": "Deep ITM options are thin and wide; require spread <= 0.10 absolute or skip.",
+  "common_mistakes": "Believing the high credit means high income - it is almost all intrinsic. Taking full downside risk for a 0.3% return.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not usable - zero extrinsic to capture and guaranteed assignment.",
+  "family": "Stock/ETF Shares Combined With Options (covered writes, protective hedges, collars, synthetics, repairs, conversions)",
+  "bias_note": "neutral",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

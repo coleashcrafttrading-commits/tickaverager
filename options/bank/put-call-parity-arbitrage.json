@@ -1,0 +1,73 @@
+{
+  "name": "Put-Call Parity Mispricing Trade",
+  "slug": "put-call-parity-arbitrage",
+  "aliases": [
+    "parity arbitrage",
+    "synthetic vs actual arbitrage",
+    "parity scan"
+  ],
+  "summary": "A scanner-plus-executor pattern: detect violations of C - P = S - PV(K) - PV(dividends) and monetise them by trading the cheap side against the rich side \u2014 which resolves to a conversion when the synthetic is rich and a reversal when it is cheap.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Strike K with the largest absolute parity residual; buy the call when the synthetic long is cheap"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same strike K, same expiry",
+      "dte_rule": "same expiry as leg 1"
+    },
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 100 shares, the hedge that locks the residual (direction flips for the conversion case: long stock, short call, long put)"
+    }
+  ],
+  "bias": "neutral",
+  "net": "either",
+  "max_profit": "The parity residual: |(C - P) - (S - PV(K) - PV(div))| x 100, minus all costs. On liquid US names in 2026 this is typically under $0.02 per share.",
+  "max_loss": "The residual if the sign or the discounting is computed wrong, plus early assignment on whichever option leg is short, plus borrow costs on the reversal side.",
+  "greeks": {
+    "delta": "0.00 by construction",
+    "gamma": "0.00",
+    "theta": "0.00 net; the residual IS the carry term",
+    "vega": "0.00"
+  },
+  "breakevens": "None \u2014 the payoff is locked at entry.",
+  "when_to_use": "Educational and diagnostic. The scan is genuinely useful as a data-quality check: a large apparent parity violation on a liquid name almost always means stale quotes, a pending contract adjustment, a hard borrow, or an upcoming special dividend \u2014 not free money. Use it as an alert, not as a trade signal.",
+  "typical_dte": "Any; residuals are largest in long-dated and illiquid strikes, which is exactly where they are least tradable",
+  "entry_rules": [
+    "EXECUTION IS BLOCKED AT LEVEL 3 for the reversal half (naked short put against short stock), and economically blocked for the conversion half (edge smaller than costs). Classify as scan-only.",
+    "Scanner formula: residual = (call_mid - put_mid) - (spot_mid - strike/(1 + r x T/365) - PV(declared_dividends_before_expiry)). Flag when |residual| > $0.10 per share.",
+    "Every flagged residual must be triaged before any trade is contemplated: (1) are both option quotes fresh within 5 seconds, (2) is the underlying halted, (3) is there an OCC contract adjustment memo, (4) is the borrow rate above 1%, (5) is there an undeclared or special dividend. If any check fails, the residual is explained and not tradable.",
+    "Execution gate if all checks pass: residual x 100 - fees - 0.5 x (sum of leg bid-ask widths x 100) > $25 per unit. This will essentially never clear on a liquid name.",
+    "Never treat a wide bid-ask midpoint as a price. Compute the residual twice: once at mid and once at executable prices (buy the ask, sell the bid). Only the executable version counts."
+  ],
+  "management_rules": [
+    "As a scanner: log every flagged residual with its triage outcome, and use persistent unexplained residuals as a signal that market data is broken, not that an opportunity exists.",
+    "If a position is ever established, manage it per the conversion or reversal entry as applicable, including the extrinsic-value assignment watch.",
+    "Never scale up on a residual that persists \u2014 persistence means it is not a mispricing."
+  ],
+  "exit_rules": [
+    "If a conversion or reversal was established, follow that slug's exit rules exactly: unwind all legs by 15:30 ET on expiration day, short option leg first.",
+    "Unwind immediately if the residual that justified entry disappears and the position can be closed at or above entry value.",
+    "Unwind if either option leg's extrinsic value drops below $0.10."
+  ],
+  "assignment_risk": "Whichever leg is short. In the conversion case, the short call (dividend-driven early exercise). In the reversal case, the short put (interest-driven early exercise). Both deliver 100 shares in an American, share-settled market. The parity relation itself holds only for European options; for American options the relation is an INEQUALITY, and the 'violation' the scanner sees is often just the early-exercise premium correctly priced in.",
+  "alpaca_level": 4,
+  "buying_power": "Depends on which side triggers; budget the conversion or reversal requirement, $5,000-$10,000 per unit on a $100 underlying.",
+  "liquidity_needs": "Sub-penny effective spreads across three or four legs simultaneously. Not achievable retail.",
+  "common_mistakes": "The biggest: applying the European put-call parity EQUATION to American options, where only the inequality holds. Second: using mid prices. Third: omitting the dividend term or the discount factor, which manufactures phantom residuals of exactly the size of the interest.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "At 0DTE the carry term is zero, so parity residuals collapse to bid-ask noise and pin risk.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "neutral",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

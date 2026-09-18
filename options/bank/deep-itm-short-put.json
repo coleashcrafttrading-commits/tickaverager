@@ -1,0 +1,58 @@
+{
+  "name": "Deep ITM Short Put",
+  "slug": "deep-itm-short-put",
+  "aliases": [
+    "in-the-money put write"
+  ],
+  "summary": "Sell a put that is already well in the money to collect a large credit. Mostly a bad idea: near-certain assignment for very little extrinsic value.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Delta -0.70 to -0.90 (ITM)",
+      "dte_rule": "30-60 DTE"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit",
+  "max_profit": "The extrinsic portion of the credit only - typically a small fraction of the large premium received",
+  "max_loss": "(strike - credit) x 100. Similar downside to owning the stock, with all upside capped at the strike.",
+  "breakevens": "strike - credit, usually near or below current spot",
+  "greeks": {
+    "delta": "+0.70 to +0.90 - essentially a stock proxy",
+    "gamma": "negative, small",
+    "theta": "positive but small in dollars (little extrinsic to decay)",
+    "vega": "negative, small"
+  },
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "Rarely. The only defensible use is as a cheaper-to-execute synthetic equivalent of a deep ITM covered call when the call side has a worse market. Otherwise it accepts stock-like downside for a bond-like return with near-certain assignment.",
+  "entry_rules": [
+    "Cash >= strike x 100 x contracts",
+    "Extrinsic value = credit - max(0, strike - spot); require extrinsic >= 0.6% of strike per 30 days, otherwise there is no return at all",
+    "Delta -0.70 to -0.90, 30-60 DTE",
+    "Bid/ask <= 4% of mid - deep ITM put markets are wide",
+    "Flag as LOW PRIORITY: in almost every case a -0.25 delta CSP or a deep ITM covered call offers better risk-adjusted terms"
+  ],
+  "management_rules": [
+    "Close at 60% of the available extrinsic, not 60% of the total credit - the intrinsic portion is not profit",
+    "Roll down and out for a net credit if delta exceeds -0.92",
+    "Do not hold for the last 14 days; the remaining extrinsic does not pay for the assignment risk"
+  ],
+  "exit_rules": [
+    "Close at 60% of extrinsic captured or at 14 DTE, whichever first",
+    "NEVER-ASSIGN RULE, tightened because the position is ITM by design: close immediately whenever extrinsic value falls below $0.05, whenever delta exceeds -0.92, and unconditionally by 14:00 ET on expiration day. Backstop 15:45 ET",
+    "Early assignment probability here is materially higher than for OTM puts because deep ITM puts lose extrinsic quickly and carry an interest-rate-driven early exercise incentive"
+  ],
+  "assignment_risk": "VERY HIGH by construction. Assignment delivers 100 shares at a strike above the market - an immediate paper loss equal to the intrinsic value, offset by the credit already received.",
+  "buying_power": "Full cash securing: strike x 100.",
+  "liquidity_needs": "Wide markets are the norm; reject above 4% of mid.",
+  "common_mistakes": "Mistaking the large credit for a large profit - only the extrinsic is ever earned; underestimating how quickly interest-rate-driven early exercise hits deep ITM short puts.",
+  "zero_dte_suitable": false,
+  "alpaca_level": 1,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

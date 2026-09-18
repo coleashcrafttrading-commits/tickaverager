@@ -1,0 +1,83 @@
+{
+  "name": "Broken-Wing Call Butterfly",
+  "slug": "broken-wing-call-butterfly",
+  "summary": "A call butterfly with the upper wing pushed further out so the structure is opened for a credit or a tiny debit; removes all risk on the downside and concentrates it above the upper strike.",
+  "aliases": [
+    "skip-strike call butterfly",
+    "BWB call",
+    "unbalanced call butterfly",
+    "call BWB"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "inner long: strike at call delta 0.30-0.40 (just OTM)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "body: inner long strike + narrow width W1; W1 = 1.0-1.5% of spot, body delta 0.20-0.25",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "outer long: body + wide width W2, where W2 = 2 x W1 (skip one or two strikes); outer delta 0.08-0.12",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit (preferred) or small debit",
+  "typical_dte": "14-45 DTE; managed hard at 21 DTE",
+  "when_to_use": "IV rank > 35, an underlying in an uptrend or range where a slow grind to the body is plausible, and call skew flat enough that the wide wing is cheap. The signature use: collect a credit so that a move DOWN is a scratch, and the only real risk is a fast rally through the outer strike.",
+  "max_profit": "W1 (narrow width) x 100 + net credit, at the body strike",
+  "max_loss": "(W2 - W1) x 100 - net credit, above the outer long strike. Defined, but larger than the credit - never treat a credit BWB as risk-free.",
+  "breakevens": "single upper breakeven = body + W1 + (credit/100) adjusted for the unbalanced wing; if opened for a credit there is NO lower breakeven - the trade scratches to a small gain on any decline",
+  "greeks": {
+    "delta": "slightly positive at entry (+3 to +10 per unit)",
+    "gamma": "negative around the body, sharply negative between body and outer strike",
+    "theta": "positive when spot is below the body",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "Open for a net CREDIT, or a debit no larger than 3% of W1. A credit BWB has no downside risk; a debit BWB does.",
+    "Wing ratio: W2 = 2 x W1 (skip exactly one strike interval on the far side). Reject W2 > 3 x W1 - the tail risk stops being worth the credit.",
+    "Inner long delta 0.30-0.40; body delta 0.20-0.25; outer long delta 0.08-0.12.",
+    "Max loss (W2 - W1) x 100 - credit must be <= 1.5% of equity per unit.",
+    "IV rank >= 35.",
+    "No earnings inside the expiry.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-strike 4-contract multi-leg order at the natural mid; accept mid - $0.03 on a credit."
+  ],
+  "management_rules": [
+    "Profit target: close at 25-50% of max profit; default trigger is mark >= 0.30 x (W1 x 100 + credit).",
+    "Alternative mechanical target used widely: rest a GTC closing order at 2% of W1 the moment the fill reports, which typically executes with 7-8 DTE remaining.",
+    "Time rule: close at 21 DTE regardless of P/L.",
+    "Breach rule: close if the short body delta exceeds 0.40 (price has come to the body too fast, gamma now dominates).",
+    "Do not roll the outer wing in to collect more credit; that converts a capped tail into a bigger one."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: the 2 short body calls are the exposure. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short body calls are ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before the ex-dividend date if the short body calls are ITM with extrinsic below the declared dividend.",
+    "TAIL GUARD: close the entire structure if spot trades above the outer long strike at any time - past that point the position is at max loss and only pin risk remains.",
+    "Never hold to expiry; the zone between body and outer strike is where both max loss and assignment live."
+  ],
+  "assignment_risk": "Two short body calls; assignment yields -200 shares per unit, hedged by only one inner long call plus one far outer long. If the body is assigned while spot sits between body and outer strike, the remaining exposure is effectively a naked short call on 100 shares until the outer long is exercised - unacceptable on a $50k account. The 15:45 ET flatten and the $0.10-extrinsic rule are the defense.",
+  "buying_power": "((W2 - W1) x 100) - net credit, per unit.",
+  "liquidity_needs": "Moderate-to-high; three strikes, one of them fairly far OTM, so the outer long must still have OI >= 500.",
+  "common_mistakes": "Believing 'credit BWB = free money' and ignoring the upside tail; skipping too many strikes to inflate the credit; putting it on ahead of earnings; holding past 21 DTE; failing to close when price reaches the body early (max profit only exists AT expiry, not before).",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Usable 0DTE as a directional-lean structure: the credit makes a wrong-way move a scratch, and the capped tail is only reached on a large intraday trend move. Keep W2 = 2 x W1 and place the inner long around 0.30 delta using locally computed greeks (Alpaca provides none at 0DTE). Close on any print above the outer strike; flatten everything by 15:45 ET.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral-to-mildly-bullish with capped upside risk; downside risk-free when opened for a credit",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

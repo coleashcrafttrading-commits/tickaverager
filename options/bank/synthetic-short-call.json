@@ -1,0 +1,62 @@
+{
+  "name": "Synthetic Short Call",
+  "slug": "synthetic-short-call",
+  "aliases": [
+    "covered put",
+    "short stock plus short put"
+  ],
+  "summary": "100 short shares plus one short put at the same strike replicates a naked short call; unlimited upside risk plus borrow risk, and a structure with essentially no retail use case.",
+  "legs": [
+    {
+      "right": "stock",
+      "action": "sell",
+      "ratio": 100,
+      "strike_rule": "n/a \u2014 short 100 shares at market"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Strike at or below spot, put delta -0.30 to -0.50"
+    }
+  ],
+  "bias": "bearish",
+  "net": "credit",
+  "max_profit": "(entry_spot - put_strike) x 100 + put_credit, capped at the put strike",
+  "max_loss": "UNDEFINED (unlimited) \u2014 the short shares lose without limit as the underlying rises and the short put provides only the premium as offset",
+  "greeks": {
+    "delta": "-0.50 to -0.70 per unit",
+    "gamma": "negative",
+    "theta": "positive",
+    "vega": "negative"
+  },
+  "breakevens": "entry_spot + put_credit/100",
+  "when_to_use": "There is no good retail use case. It is the mirror of a covered call but the 'cover' is a short stock position, which is not capital-efficient, incurs borrow fees, owes dividends, and carries buy-in risk. Listed here for completeness of the family.",
+  "typical_dte": "30-45 DTE",
+  "entry_rules": [
+    "PERMANENT DENYLIST RECOMMENDATION. The short put is not covered by short stock in the sense Alpaca's Level 3 coverage rule requires, so the multi-leg order is rejected; and the combined position has unbounded loss. Requires Level 4 plus short-stock capability.",
+    "Even at Level 4 the structure should be rejected by the risk layer: unbounded loss on a $50k account with a share-settled American underlying.",
+    "Documented here so the strategy classifier can recognise it and refuse it if a leg combination accidentally produces it (e.g. a covered call whose shares were sold, leaving a naked call, is the same exposure by a different route)."
+  ],
+  "management_rules": [
+    "If the classifier ever detects this exposure in the live book (short shares plus short put, or any naked short call equivalent), raise a critical alert and flatten both legs in the same session, options leg first.",
+    "No profit target or stop is specified because the position should not exist."
+  ],
+  "exit_rules": [
+    "MANDATORY: close the short put no later than 15:40 ET on expiration day, unconditionally.",
+    "If spot < put_strike at any time on expiration day, close the short put by 14:00 ET \u2014 assignment would buy 100 shares, covering the short, which is an uncontrolled unwind at the strike.",
+    "Close the short shares before any ex-dividend date; the short owes the full dividend."
+  ],
+  "assignment_risk": "On the short put, which is assigned when ITM with extrinsic below ~$0.05. Assignment buys 100 shares at the strike and closes out the short stock automatically \u2014 a forced unwind at a price the system did not choose. Plus borrow buy-in risk on the share leg at any time.",
+  "alpaca_level": 4,
+  "buying_power": "Reg T short stock margin (50% of proceeds) plus naked short put margin, netted by the broker to roughly the short stock requirement. About $5,000+ per unit on a $100 name.",
+  "liquidity_needs": "Irrelevant \u2014 do not trade.",
+  "common_mistakes": "Reaching this exposure accidentally, by selling the shares out from under a covered call or by having a long stock leg assigned away. The position monitor must check for it explicitly every cycle.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never.",
+  "family": "synthetics_and_arbitrage",
+  "bias_note": "bearish",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 1
+}

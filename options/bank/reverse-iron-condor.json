@@ -1,0 +1,88 @@
+{
+  "name": "Long (Reverse) Iron Condor",
+  "slug": "reverse-iron-condor",
+  "aliases": [
+    "long iron condor",
+    "reverse iron condor",
+    "RIC",
+    "debit iron condor"
+  ],
+  "summary": "Buy the inner strikes and sell the outer strikes of both a call and put spread for a net debit; a defined-risk long-volatility bet that the underlying breaks out of a range.",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "long put strike minus wing width W",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.30-0.35 delta put (inner strike)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "0.30-0.35 delta call (inner strike)",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "long call strike plus the same wing width W",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "long_vol",
+  "net": "debit",
+  "max_profit": "(wing width W - net debit) x 100 per contract, achieved beyond either outer strike",
+  "max_loss": "net debit x 100 per contract, if the underlying finishes between the two inner strikes",
+  "breakevens": "lower BE = long put strike - net debit per share; upper BE = long call strike + net debit per share",
+  "greeks": {
+    "delta": "near zero at entry",
+    "gamma": "positive",
+    "theta": "negative, roughly -1% to -2% of the debit per day at 45 DTE",
+    "vega": "positive"
+  },
+  "typical_dte": "20-45 DTE, exit before 10 DTE",
+  "when_to_use": "IV rank <= 25 AND an identifiable catalyst inside the expiry (earnings, FDA date, macro print) or a volatility-compression setup: Bollinger Band width(20) in the bottom 15% of its 1-year range",
+  "entry_rules": [
+    "IV rank <= 25 and IV percentile <= 30",
+    "Net debit <= 45% of the wing width W (otherwise the risk/reward is not worth it)",
+    "Inner strikes at 0.30-0.35 delta, wings equal width",
+    "Expected move (ATM straddle price / spot) must be LARGER than the distance from spot to the nearest inner strike, otherwise the structure can never pay",
+    "DTE 20-45; for an earnings play, the expiry immediately after the event",
+    "Debit paid <= 1% of equity per position",
+    "Alpaca level 3 (defined risk, net debit)"
+  ],
+  "management_rules": [
+    "Take profit at 100% of the debit paid (sell for 2x) or at 60% of max profit, whichever comes first",
+    "Volatility exit: if IV rank rises above 50 while the position is profitable, close immediately - the vega gain is the edge and it decays fast",
+    "Hard time stop: close at 10 DTE regardless of P/L; theta and the widening between the inner strikes destroy this structure late",
+    "Event exit: close within 30 minutes of the market open following a scheduled catalyst - IV crush after the event kills the position even if the move was right",
+    "No adjustments; this structure is either working or it is not"
+  ],
+  "exit_rules": [
+    "Force-close the entire structure by 15:45 ET on expiration day, always (the two short outer legs are assignable)",
+    "Close immediately if either SHORT outer strike goes ITM by more than 0.25 x W or its delta >= 0.85 - at that point the structure is at max profit anyway and holding only adds assignment risk",
+    "Ex-dividend guard on the short call",
+    "Abandon rule: if the position is down 70% of the debit with < 15 DTE, close and stop paying for time"
+  ],
+  "assignment_risk": "The two OUTER legs are short. They only go ITM when the trade is already at maximum profit, so the standard behaviour is: when a short outer strike goes ITM, take the profit and close, never wait.",
+  "buying_power": "Net debit paid x 100 per contract (no additional margin; long inner strikes cover the short outer strikes).",
+  "liquidity_needs": "Four legs must all be closeable; OI >= 500 per leg, spread <= 10% of mid. Wide markets eat the entire edge on a debit structure.",
+  "common_mistakes": "Buying it when IV is already elevated; inner strikes too far apart so the required move is unrealistic; holding through the catalyst and getting crushed by the IV drop; paying more than half the width.",
+  "alpaca_level": 3,
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Viable as a 0DTE breakout play on SPY/QQQ around 09:45-10:15 ET with inner strikes ~0.35 delta, but decay is brutal: set a hard 45-minute time stop and a 50% debit loss stop. Expect a low hit rate with large winners.",
+  "family": "four-leg structures (iron condors, iron butterflies, condors, double calendars/diagonals, boxes, jelly rolls, conversions/reversals, double verticals, double ratio spreads)",
+  "bias_note": "long-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

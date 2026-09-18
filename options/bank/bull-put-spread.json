@@ -1,0 +1,78 @@
+{
+  "name": "Bull Put Spread (Short Put Vertical / Put Credit Spread)",
+  "slug": "bull-put-spread",
+  "aliases": [
+    "short put vertical",
+    "put credit spread",
+    "short put spread",
+    "bull put credit spread"
+  ],
+  "summary": "Sell a nearer-the-money put and buy a further OTM put for a net credit; the workhorse defined-risk bullish/neutral premium-selling trade.",
+  "bias": "bullish",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Short put at 0.16-0.30 delta. 0.16 delta for high-probability income, 0.30 delta when you also want directional participation."
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Long put = short strike - width. Width chosen so (width*100 - credit) <= 2% of equity.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "net credit received, if the underlying finishes above the short put strike",
+  "max_loss": "(width * 100) - net credit received",
+  "breakevens": "short put strike - net credit per share",
+  "greeks": {
+    "delta": "positive, roughly +0.10 to +0.20 per 1-lot at a 20-delta short strike",
+    "gamma": "negative; accelerates against you below the short strike",
+    "theta": "positive, +$1 to +$4/day per 1-lot at 30-45 DTE",
+    "vega": "negative, and larger than the equivalent call spread because equity put skew is steep"
+  },
+  "typical_dte": "30-45 DTE in, 21 DTE out. Also the most common 0DTE income structure.",
+  "when_to_use": "IV rank >= 30 with a neutral-to-bullish tape: price above the 20-EMA, or a short strike placed under a multi-touch support shelf and below the lower Bollinger band. Put skew means these collect meaningfully more credit than the mirror-image call spread -- this is the highest-expectancy entry in the whole family for a systematic seller.",
+  "entry_rules": [
+    "IV rank >= 30 over 252 days; prefer IV rank > 50 for full size.",
+    "Directional gate: last close > 20-EMA, OR the short strike is at least 1.0 ATR(14) below the lowest low of the last 10 sessions.",
+    "Short put delta between 0.16 and 0.30.",
+    "Net credit >= 33% of width. A $5-wide must pay >= $1.65.",
+    "DTE 25-50 for swing entries.",
+    "Max loss (width*100 - credit) <= 2% of equity = $1,000 on $50k; position count limited so that total defined risk across all open spreads <= 25% of equity.",
+    "No more than 2 concurrent bull put spreads on correlated underlyings (SPY/QQQ/IWM count as one).",
+    "Both legs OI >= 500 and bid/ask <= 10% of mid.",
+    "Earnings: no entry with earnings inside the expiry unless IV rank > 60 and the short strike is beyond 1.25 * the implied move.",
+    "Alpaca: fully covered two-leg structure, accepted as MLeg at Level 3. Always submit as one MLeg order."
+  ],
+  "management_rules": [
+    "Take profit: close at 50% of max profit (spread mid <= 0.50 * credit).",
+    "Time exit: close at 21 DTE regardless of P/L if the profit target has not hit.",
+    "Stop: close when the spread mark = 2.0x credit received, or when the underlying closes below the short strike, whichever first.",
+    "Breach rule: if the underlying trades below the short strike with > 7 DTE, roll out to the next monthly for a net credit (same or lower strikes only), or close. Never roll for a debit.",
+    "Maximum of two rolls per underlying per trade; on the third test, take the loss.",
+    "In a fast selloff (underlying down > 2 ATR in 3 sessions), close rather than roll -- rolling into a crash compounds the same trade."
+  ],
+  "exit_rules": [
+    "Hard rule: flat by 15:45 ET on expiration day, every time.",
+    "ASSIGNMENT GUARD: at 15:30 ET on expiration day, if the underlying is below (short strike + $0.05), close the whole spread immediately.",
+    "ASSIGNMENT GUARD: any day the short put is ITM with extrinsic value < $0.10, close that session. Deep ITM American puts are exercised early once extrinsic dies, especially in high-rate environments where the holder earns interest on the proceeds.",
+    "Interest-rate note: unlike calls, early exercise of puts is driven by carry, not dividends. Treat any ITM short put with extrinsic < $0.10 as assignable tonight.",
+    "Close for $0.05 rather than holding the last nickel to expiry."
+  ],
+  "assignment_risk": "The short put is the exposed leg. Assignment means buying 100 shares per contract at the strike -- on a $50k paper account a single assigned SPY put is ~$60k of stock and an instant margin breach. The long put caps the economic loss but not the operational problem. Early exercise risk rises as extrinsic goes to zero and is highest on deep ITM puts near expiry.",
+  "buying_power": "(width * 100) - credit per contract. A $5-wide sold for $1.70 holds $330.",
+  "liquidity_needs": "OI >= 500 per leg, quoted size >= 10, round-trip slippage <= 10% of credit. On SPY/QQQ this is never a constraint; on single names under $10 average option volume, skip.",
+  "common_mistakes": "Selling puts into a downtrend because IV looks 'high'; taking less than 1/3 of width; sizing by contract count instead of max loss; rolling a broken trade indefinitely; holding to expiry and getting assigned 100 shares the system cannot fund.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "The single most-traded 0DTE structure. SPY/QQQ, short strike 0.10-0.20 delta computed locally, $1-$5 wide, entry window 09:45-14:00 ET, profit target 50% of credit, stop at 2x credit, unconditional flatten at 15:30 ET. Expect a high win rate with fat left-tail days -- position size must assume full max loss. Because Alpaca serves no 0DTE greeks or IV, compute delta and IV locally from the option mid using intraday T; refresh at least every 60 seconds while a position is open.",
+  "alpaca_level": 3,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}

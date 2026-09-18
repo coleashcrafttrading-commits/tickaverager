@@ -1,0 +1,80 @@
+{
+  "name": "Big Lizard",
+  "slug": "big-lizard",
+  "summary": "Sell an ATM straddle and buy one OTM call; a jade lizard with the short strikes pulled to the money, collecting a very large credit with no upside risk when that credit exceeds the call spread width.",
+  "aliases": [
+    "big lizard spread"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM strike, put delta -0.45 to -0.55 (cash-secured)",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "SAME ATM strike as the short put",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "ATM strike + Wc, where Wc satisfies total credit > Wc x 100; typically Wc = 1.5-3.0% of spot",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "credit (large)",
+  "typical_dte": "21-45 DTE; often deployed the session before earnings on a high-IV name",
+  "when_to_use": "IV rank > 70, typically as a pre-earnings IV-crush trade on a name you are willing to own at the ATM strike. The big credit from the ATM straddle makes the credit > Wc condition easy to satisfy, which is the whole point.",
+  "max_profit": "net credit received, only at the ATM strike",
+  "max_loss": "(ATM strike x 100) - net credit on a move to zero. No upside loss when credit > Wc x 100.",
+  "breakevens": "downside breakeven = ATM strike - credit/100; no upside breakeven when the credit condition holds",
+  "greeks": {
+    "delta": "slightly positive at entry (short ATM straddle is near delta-neutral, the long call adds a few deltas)",
+    "gamma": "strongly negative - the dominant risk",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "entry_rules": [
+    "MANDATORY: net credit x 100 > Wc x 100 (credit in points must exceed the call spread width in points); reject otherwise.",
+    "Both short legs on the identical ATM strike (delta 0.45-0.55 / -0.45 to -0.55).",
+    "IV rank >= 70.",
+    "Short put fully cash-secured: reserve (ATM strike x 100) - credit before submission. Level 3 requires this; an uncollateralized ATM short put is Level 4.",
+    "Underlying price <= $120 so a single unit's cash-secured put stays under 25% of a $50k account.",
+    "Position size: maximum 1 big lizard open account-wide at any time.",
+    "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid).",
+    "Single 3-leg limit order at mid, accept mid - $0.05 only if the credit > Wc condition survives."
+  ],
+  "management_rules": [
+    "Profit target: close at 25% of the credit received (an ATM short straddle rarely gives back 50% without a big directional move).",
+    "Pre-earnings version: close the morning after the report, at the open, regardless of P/L.",
+    "Time rule: close at 21 DTE.",
+    "Stop: close if the short put delta reaches -0.65, i.e. the underlying has fallen roughly one expected-move unit.",
+    "Rolling: if tested down, roll the ATM short put down and out for a credit once; never roll the call spread down."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: an ATM short put and an ATM short call both exist - one of them is ITM at expiry with near-certainty. Flatten every leg by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close the short put immediately if ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close the call spread before the ex-date if the short ATM call is ITM with extrinsic below the dividend - an ATM short call before a dividend is a near-certain early assignment.",
+    "PIN GUARD: at 15:30 ET on expiry day, close if |spot - ATM strike| < 0.5% of spot.",
+    "Close any ITM short leg by 2 DTE unconditionally."
+  ],
+  "assignment_risk": "Very high. Because the shorts are ATM, one of them is ITM at expiry essentially always. The short put delivers 100 long shares at the ATM strike; the short call delivers -100 shares covered only by the far OTM long call. In a $50k paper account, a single assignment on a $100 underlying consumes $10,000 of buying power instantly. Automated flatten is mandatory.",
+  "buying_power": "Cash-secured put (ATM strike x 100 - credit) plus (Wc x 100 - call-side credit). The largest BP consumer in this family relative to credit collected.",
+  "liquidity_needs": "Moderate-to-high; the ATM strikes are the most liquid in any chain, the long call must still show OI >= 500.",
+  "common_mistakes": "Running it on a $400+ underlying and locking up the whole account in the cash-secured put; taking the trade with credit <= Wc, which quietly reintroduces upside risk; holding through the ATM pin at expiry; treating it as neutral when it is really a short-gamma bomb.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended. An ATM short straddle at 0DTE combines maximum gamma with near-certain ITM assignment on one side. The system should refuse this slug for 0DTE expiries.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "neutral with a bullish tilt, aggressively short-vol",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

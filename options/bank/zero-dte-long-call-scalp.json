@@ -1,0 +1,64 @@
+{
+  "name": "0DTE Long Call Scalp",
+  "slug": "zero-dte-long-call-scalp",
+  "aliases": [
+    "0DTE call scalp",
+    "intraday call momentum"
+  ],
+  "summary": "Buy a near-ATM call on expiration day and hold it for minutes, not hours, harvesting an intraday momentum burst before theta eats it.",
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "Delta 0.40-0.55 (ATM to one strike OTM); on SPY use the strike nearest spot",
+      "dte_rule": "0 DTE - same-day expiration only"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "max_profit": "Unbounded intraday, but realistically 30-100% of debit on a clean momentum leg",
+  "max_loss": "Debit paid x 100, and 0DTE ATM options go to zero routinely. Assume full loss on every stop.",
+  "breakevens": "strike + debit; irrelevant in practice because this is exited on P&L, not held to expiry",
+  "greeks": {
+    "delta": "+0.40 to +0.55, moves violently",
+    "gamma": "extremely high - the dominant greek; delta can go 0.40 to 0.80 on a 0.3% move",
+    "theta": "catastrophic - an ATM 0DTE option loses roughly 8-15% of its value per 15 minutes midday, accelerating into the close",
+    "vega": "small in dollars but IV collapses through the day (vol crush into the close)"
+  },
+  "typical_dte": "0 DTE",
+  "when_to_use": "Only on SPY/QQQ/IWM, only 10:00-15:00 ET, only with a mechanical momentum trigger. Best on trend days; worst on chop days, where theta plus spread is a guaranteed bleed.",
+  "entry_rules": [
+    "Underlying restricted to SPY, QQQ, IWM (penny-wide 0DTE chains). No single names",
+    "Time window 10:00-15:00 ET. No entries in the 09:30-10:00 opening auction noise, none after 15:00 ET",
+    "Momentum trigger required: 5-minute close above the opening range high AND VWAP, with the 5-min bar volume >= 1.5x the 20-bar average",
+    "Strike delta 0.40-0.55 computed locally (Alpaca returns no greeks or IV on 0DTE at any tier - use Black-Scholes with T in fractions of a trading day and a locally estimated IV)",
+    "Bid/ask <= $0.03 absolute; reject the trade otherwise",
+    "Debit <= 0.5% of equity per scalp (~$250 on $50k); max 3 scalps per day; stop trading for the day after 2 consecutive losses",
+    "Daily 0DTE loss limit: -1.5% of equity (~$750). Hitting it disables 0DTE for the session"
+  ],
+  "management_rules": [
+    "Take profit at +30% of debit. This is deliberately small - 0DTE edge decays in minutes",
+    "Hard stop at -35% of debit",
+    "Hard time stop: 15 minutes in the position. Flat regardless of P&L",
+    "Trail after +30%: stop moves to +10% and follows in 10% steps",
+    "Never add to a losing 0DTE scalp, and never roll a 0DTE option"
+  ],
+  "exit_rules": [
+    "Sell to close at +30%, -35%, or 15 minutes elapsed, whichever comes first",
+    "Absolute hard flatten at 15:45 ET: no 0DTE long option may be held past 15:45 ET. Anything $0.01 ITM at 16:00 ET is auto-exercised into 100 shares overnight, which is the exact outcome this system must never produce",
+    "If the option is worthless (bid = 0) before 15:45, abandon it and log the full loss"
+  ],
+  "assignment_risk": "No assignment (long), but the auto-exercise hazard is at its most acute here: a 0DTE call that closes $0.01 ITM delivers 100 shares plus a large settlement obligation. The 15:45 ET flatten is non-negotiable.",
+  "buying_power": "Debit only.",
+  "liquidity_needs": "Penny-wide only. SPY/QQQ 0DTE ATM strikes qualify; almost nothing else does.",
+  "common_mistakes": "Holding for the big move and watching theta erase a winner; trading 0DTE on chop days; trading 0DTE single names with $0.20 spreads; letting a winner expire ITM instead of selling it.",
+  "zero_dte_suitable": true,
+  "zero_dte_notes": "Research consensus: long 0DTE premium has negative expectancy across a large sample because the median SPY daily move is smaller than what buyers need. This strategy only survives with a strict momentum filter, a 15-minute time stop and a daily loss cap. Backtest it before trusting it.",
+  "alpaca_level": 2,
+  "family": "single-leg",
+  "bias_note": "bullish",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 0
+}

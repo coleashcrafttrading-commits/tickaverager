@@ -1,0 +1,65 @@
+{
+  "name": "Short Strap / Short Strip (Ratio Short Straddle)",
+  "slug": "short-ratio-straddle",
+  "aliases": [
+    "short strap",
+    "short strip",
+    "ratio short straddle",
+    "2:1 naked straddle"
+  ],
+  "summary": "Sell two of one right and one of the other at the same ATM strike -- a short straddle with a deliberate directional lean. Unlimited risk, doubled on one side.",
+  "bias": "short_vol",
+  "net": "credit",
+  "legs": [
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 2,
+      "strike_rule": "ATM strike. (For the short STRIP, flip: sell 2 puts and 1 call at the same ATM strike.)"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "Same ATM strike.",
+      "dte_rule": "same expiry as leg 1"
+    }
+  ],
+  "max_profit": "total credit received, if the underlying finishes exactly at the strike",
+  "max_loss": "UNDEFINED, and doubled on the heavy side. A short strap loses at 2x the rate above the strike, without limit.",
+  "breakevens": "heavy side: strike + credit/(2*100) per share; light side: strike - credit/100 per share",
+  "greeks": {
+    "delta": "negative ~-0.50 per unit for a short strap at entry",
+    "gamma": "strongly negative, 1.5x a short straddle",
+    "theta": "strongly positive",
+    "vega": "strongly negative"
+  },
+  "typical_dte": "30-45 DTE",
+  "when_to_use": "Never on this account. Included only for family completeness. It is a short straddle with the tail risk deliberately doubled on one side, which is the opposite of what a risk-managed automated system should do.",
+  "entry_rules": [
+    "BLOCKED ON THIS ACCOUNT and MARKED AS A BAD IDEA. Every leg is uncovered; this requires Level 4 naked authority, which Alpaca does not offer at any tier.",
+    "Defined-risk substitute that expresses the same view: a broken-wing iron butterfly, or an ATM credit vertical on the side you want to lean.",
+    "The router must hard-reject any order matching this shape."
+  ],
+  "management_rules": [
+    "If it existed: take profit at 25% of credit, close at 21 DTE, stop at 1.5x credit (tighter than a symmetric short straddle because the heavy side loses twice as fast).",
+    "Delta band +/-0.40 per unit."
+  ],
+  "exit_rules": [
+    "Would require a flatten by 15:30 ET on expiry, since one side is always ITM at expiry by construction.",
+    "Close any ITM short leg whose extrinsic drops below $0.10.",
+    "DIVIDEND GUARD on the call side."
+  ],
+  "assignment_risk": "Extreme and doubled. The heavy side, when ITM, delivers 200 shares per unit. No covering legs exist.",
+  "buying_power": "Reg-T naked on 3 contracts per unit; not available on Alpaca.",
+  "liquidity_needs": "N/A -- blocked.",
+  "common_mistakes": "Selling the extra contract for 'a little more credit' without noticing the tail doubled; running it because backtests of symmetric short straddles looked good.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not permitted, and 0DTE would make the doubled negative gamma catastrophic.",
+  "alpaca_level": 4,
+  "family": "Two-leg verticals and same-expiry two-leg combos (call/put verticals, straddles, strangles, guts, synthetics/risk reversals, ratio verticals and backspreads)",
+  "bias_note": "short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

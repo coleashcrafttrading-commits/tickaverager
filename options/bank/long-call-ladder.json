@@ -1,0 +1,72 @@
+{
+  "name": "Long Call Ladder (Bull Call Ladder)",
+  "slug": "long-call-ladder",
+  "summary": "Buy 1 lower call, sell 1 middle call, sell 1 higher call; a bull call spread financed by an extra short call, which leaves unlimited risk above the top strike.",
+  "aliases": [
+    "bull call ladder",
+    "short call ladder (UK usage)",
+    "call ladder write"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 1,
+      "strike_rule": "K1 = ATM or slightly ITM, call delta 0.50-0.60",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "K2 = K1 + W, call delta 0.30-0.35",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "K3 = K2 + W, call delta 0.15-0.20 (UNCOVERED)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit (small) or credit",
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "COMPLETENESS / LEVEL 4: IV rank > 50 with a target price between K2 and K3. Two short calls against one long leaves one uncovered - unlimited risk above the upper breakeven. Under Level 3, use a call butterfly or a call BWB instead.",
+  "max_profit": "(K2 - K1) x 100 - net debit (or + credit), flat between K2 and K3",
+  "max_loss": "UNDEFINED above K3",
+  "breakevens": "lower = K1 + debit/100; upper = K3 + (K2 - K1) - debit/100",
+  "greeks": {
+    "delta": "positive at entry, sharply negative above K3",
+    "gamma": "negative",
+    "theta": "positive once spot is above K1",
+    "vega": "negative"
+  },
+  "entry_rules": [
+    "BLOCKED AT LEVEL 3: the K3 short call is uncovered; requires Alpaca level 4. The router must reject this slug at Level 3.",
+    "Level 4 version: IV rank >= 50; K3 delta <= 0.20; hard-coded protective stop above the upper breakeven.",
+    "Level-3 substitute: buy a fourth call above K3 to create a call condor, or drop to a call BWB."
+  ],
+  "management_rules": [
+    "Level 4 only: close at 50% of max profit.",
+    "Level 4 only: close immediately if spot trades above K3, and always close at 21 DTE."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: two short calls, one uncovered; flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if either short call is ITM with extrinsic < $0.10.",
+    "DIVIDEND GUARD: close before every ex-dividend date when either short call is ITM."
+  ],
+  "assignment_risk": "Assignment on both shorts delivers -200 shares per unit, hedged by only 1 long call; the residual is a naked 100-share short at unlimited risk.",
+  "buying_power": "Naked short call margin on the uncovered contract plus the debit spread cost.",
+  "liquidity_needs": "Moderate.",
+  "common_mistakes": "Trading it at Level 3 by miscounting the legs; believing the profit plateau between K2 and K3 makes it safe.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Never - uncovered short call.",
+  "alpaca_level": 4,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "moderately bullish with a capped target; short-vol",
+  "permitted": false,
+  "blocked_because": "needs Alpaca options level 4; this account is level 3. Alpaca rejects it with 'account not eligible to trade uncovered option contracts'. Raising the level is an Alpaca approval, not a code change.",
+  "short_legs": 2
+}

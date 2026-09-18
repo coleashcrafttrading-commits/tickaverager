@@ -1,0 +1,74 @@
+{
+  "name": "Short Put Butterfly",
+  "slug": "short-put-butterfly",
+  "summary": "Sell 1 higher put, buy 2 body puts, sell 1 lower put for a credit; the put-side mirror of the short call butterfly, profiting on a move out of the tent.",
+  "aliases": [
+    "reverse put butterfly",
+    "short put fly"
+  ],
+  "legs": [
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "body plus width",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "put",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "body = ATM, put delta -0.45 to -0.55",
+      "dte_rule": "same expiry"
+    },
+    {
+      "right": "put",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "body minus the identical width",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "either",
+  "net": "credit",
+  "typical_dte": "3-30 DTE, event-driven",
+  "when_to_use": "Same as the short call butterfly: IV rank < 25 plus a dated catalyst. Choose the put version when put skew makes the credit larger for the same three strikes; compare both and take the bigger credit.",
+  "max_profit": "net credit received",
+  "max_loss": "width - net credit at the body. Defined.",
+  "breakevens": "lower breakeven = lower strike + credit; upper breakeven = upper strike - credit",
+  "greeks": {
+    "delta": "near 0 when centered",
+    "gamma": "positive at the body",
+    "theta": "negative inside the tent",
+    "vega": "positive near the body"
+  },
+  "entry_rules": [
+    "Credit >= 25% of wing width.",
+    "IV rank < 25 and a dated catalyst inside the expiry.",
+    "Equal wings; OI >= 500 and per-leg spread <= max($0.05, 10% of mid).",
+    "Single multi-leg limit order at mid, accept mid - $0.02.",
+    "Max risk <= 1% of equity."
+  ],
+  "management_rules": [
+    "Close at 50% of the credit captured.",
+    "Close the session after the catalyst resolves regardless of P/L.",
+    "Hard stop at 2.0x the credit in mark-to-market loss."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: two short put strikes exist; flatten the entire structure by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if either short put is ITM with extrinsic < $0.10.",
+    "Close no later than 2 DTE."
+  ],
+  "assignment_risk": "Two short put strikes. The upper short put is ITM in the winning downside scenario, and assignment means buying 100 shares per contract at that strike - on a $600 ETF that is $60,000 of stock against a $50k account. Early assignment risk rises as extrinsic decays toward zero.",
+  "buying_power": "(wing width x 100) - credit received.",
+  "liquidity_needs": "High.",
+  "common_mistakes": "Same as the short call butterfly, plus underestimating the cash impact of a short put assignment on a large-notional ETF.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not recommended for the same reasons as the short call butterfly.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "long-vol / breakout either direction",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 2
+}

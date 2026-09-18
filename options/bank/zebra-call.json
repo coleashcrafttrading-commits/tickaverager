@@ -1,0 +1,72 @@
+{
+  "name": "ZEBRA (Zero Extrinsic Back Ratio) - Call",
+  "slug": "zebra-call",
+  "summary": "Buy 2 deep ITM calls and sell 1 ATM call; a three-contract package with roughly 100 deltas and essentially zero net extrinsic value, used as a defined-risk stock replacement.",
+  "aliases": [
+    "zero extrinsic back ratio",
+    "call ZEBRA",
+    "synthetic long stock replacement"
+  ],
+  "legs": [
+    {
+      "right": "call",
+      "action": "buy",
+      "ratio": 2,
+      "strike_rule": "ITM strike at call delta 0.70-0.75",
+      "dte_rule": "all legs same expiry"
+    },
+    {
+      "right": "call",
+      "action": "sell",
+      "ratio": 1,
+      "strike_rule": "ATM strike, call delta 0.48-0.52 (covered by the 2 longs)",
+      "dte_rule": "same expiry"
+    }
+  ],
+  "bias": "bullish",
+  "net": "debit",
+  "typical_dte": "30-60 DTE",
+  "when_to_use": "When a bullish directional view is wanted with about 100 deltas but far less capital than 100 shares and no theta bleed. The extrinsic paid on the 2 longs is approximately offset by the extrinsic sold on the 1 short, so time decay is near zero - the defining property.",
+  "max_profit": "UNLIMITED (behaves like 100 long shares above the ATM strike)",
+  "max_loss": "net debit paid. Defined - this is the main advantage over actual shares.",
+  "breakevens": "approximately the ATM strike plus (net debit/100) minus the intrinsic already embedded; in practice close to spot at entry",
+  "greeks": {
+    "delta": "approximately +100 per unit at entry (2 x 0.72 - 0.50 = 0.94, scaled by 100)",
+    "gamma": "slightly positive",
+    "theta": "near zero by construction - the whole point of the structure",
+    "vega": "near zero"
+  },
+  "entry_rules": [
+    "Long strike delta between 0.70 and 0.75; short strike delta between 0.48 and 0.52.",
+    "Net extrinsic check: (2 x long extrinsic) - (1 x short extrinsic) must be <= $0.15 per share; reject the fill otherwise - if it is not near-zero-extrinsic it is not a ZEBRA.",
+    "Net delta between 0.90 and 1.05 per unit.",
+    "Debit (the max loss) <= 3% of equity per unit.",
+    "30-60 DTE; avoid weeklies where the ITM strikes are illiquid.",
+    "Both strikes: OI >= 500, per-leg spread <= max($0.10, 10% of mid) - ITM strikes are wider, so the threshold is loosened.",
+    "Single 3-contract multi-leg order at mid, pay up to mid + $0.05."
+  ],
+  "management_rules": [
+    "Manage it like a stock position: take profit at a defined price target or a trailing stop, not at a percentage of premium.",
+    "Default profit target: close when the package gains 50% of the debit paid; default stop: close at 35% loss of the debit.",
+    "Roll out at 14 DTE to keep the near-zero-theta property; ITM extrinsic collapses in the final two weeks and the short leg's assignment risk rises.",
+    "Re-strike if the underlying moves so far that the long delta exceeds 0.90 (the structure has become 200 deltas)."
+  ],
+  "exit_rules": [
+    "ASSIGNMENT GUARD: 1 short ATM call, covered by 2 long ITM calls. Flatten by 15:45 ET on expiration day, unconditionally.",
+    "ASSIGNMENT GUARD: close immediately if the short call is ITM with extrinsic < $0.10 - which happens routinely because the whole structure is built on near-zero extrinsic.",
+    "DIVIDEND GUARD: this structure is unusually exposed - ITM/ATM calls with near-zero extrinsic are the classic early-assignment target. Close or roll the entire package before every ex-dividend date.",
+    "Close no later than 14 DTE."
+  ],
+  "assignment_risk": "Elevated relative to its simple appearance. The short ATM call carries minimal extrinsic by design, which is precisely the condition that triggers early exercise, especially ahead of dividends. Assignment delivers -100 shares hedged by 2 long ITM calls; the economics hold, but the system ends up short stock. Roll ahead of ex-dividend dates as a rule, not an exception.",
+  "buying_power": "Net debit paid only; the 2 longs cover the 1 short.",
+  "liquidity_needs": "Moderate; deep ITM strikes have wider spreads and thinner open interest, so restrict to SPY, QQQ, IWM and mega-caps.",
+  "common_mistakes": "Picking strikes without verifying the near-zero net extrinsic condition (turning it into an expensive ratio); holding into the final two weeks where the property breaks down; ignoring dividend assignment on the short leg.",
+  "zero_dte_suitable": false,
+  "zero_dte_notes": "Not applicable - deep ITM 0DTE options have no extrinsic to balance and the assignment risk is immediate.",
+  "alpaca_level": 3,
+  "family": "three-leg-structures (butterflies, broken-wing butterflies, lizards, three-strike ratio spreads, ladders/tree spreads, christmas trees, and three-leg stock+option hybrids)",
+  "bias_note": "bullish, delta-1 replacement",
+  "permitted": true,
+  "blocked_because": "",
+  "short_legs": 1
+}
