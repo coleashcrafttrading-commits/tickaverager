@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-engine.py -- ONE TickAverager DCA ladder. The fleet runs many of them.
+engine.py -- ONE Tick Avenger DCA ladder. The fleet runs many of them.
 
 Port of the NinjaTrader TickAverager rules (reference_TickAverager.cs), built
 the same way the IBKR version was: this process decides ENTRIES, but every

@@ -69,20 +69,9 @@ def text(html):
     return re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", html)).strip()
 
 
-def open_pl(js):
-    """Just the Open P/L stat's value -- the one number this section is about.
-
-    Searching the whole page would let an em dash from Net delta, or a $0.00
-    from somewhere else, answer for this cell.
-    """
-    m = re.search(r'stat-k">Open P/L</div><div class="stat-v num">(.*?)</div>',
-                  js.html("opBody") or "", re.S)
-    return text(m.group(1)) if m else "<no Open P/L stat>"
-
-
 # ======================================================== building the bundle
 # Functions Duktape's Babel cannot compile; see the caveat in the docstring.
-TOO_DEEP = ("paintDoc", "structCard", "paintSweep", "gradedRows")
+TOO_DEEP = ("paintDoc", "paintSweep", "gradedRows")
 
 
 def view_source() -> str:
@@ -424,57 +413,6 @@ DEAD_EXPIRIES = {
 }
 
 
-def _leg(occ, contracts, pl):
-    return {
-        "occ": occ, "contracts": contracts, "strike": 600.0, "right": "P",
-        "mid": 1.25, "iv": 0.19, "delta": -0.31, "gamma": 0.02,
-        "theta": -0.4, "vega": 0.05, "solved": True, "skipped": "",
-        "unrealized_pl": pl,
-        "guard": {"state": "ok", "why": "", "rules": [], "itm": False,
-                  "intrinsic": 0.0, "extrinsic": 0.85, "pin_risk": False,
-                  "dte": 0, "expired": False,
-                  "flatten_deadline": "2026-09-18T15:00:00"},
-    }
-
-
-CLEAR_STRUCT = {
-    "id": "SPY:2026-09-18", "underlying": "SPY", "expiry": "2026-09-18",
-    "dte": 0, "legs": [], "contracts": 2, "market_value": -83.0,
-    "unrealized_pl": 42.0, "cost_basis": -125.0, "short_legs": 1,
-    "guard": "ok", "guard_why": "outside the pin band",
-    "grouping": "underlying and expiry",
-}
-
-UNREADABLE = [{"symbol": "SPY1 260918P00612000",
-               "why": "not an OCC symbol: stray space"}]
-
-# The reviewer's own failing input, in app.py's shape: three verticals on one
-# SPY expiry, grouped by underlying and expiry into a six-leg "structure" no
-# mleg order can carry. Every leg's guard is legitimately "ok" -- clear AND
-# unflattenable is the pair the page used to render as a green CLEAR card.
-BLOCKED_WHY = ("SPY:2026-09-18 is 6 legs grouped only by underlying and "
-               "expiry, which is more than one structure: an mleg order "
-               "carries 2 to 4 legs, so this group cannot be closed "
-               "atomically and this route will not leg out of it in an order "
-               "nobody chose. Close the structures the engine's ledger names, "
-               "or close the legs at the broker.")
-BLOCKED_STRUCT = dict(CLEAR_STRUCT, id="SPY:2026-09-18", contracts=6,
-                      short_legs=3, closeable=False,
-                      close_blocked=BLOCKED_WHY)
-
-# A ledger-grouped diagonal: two expiries in one structure, the LONG leg
-# first and carrying the LATER deadline. app.py's own header expiry is the
-# max, so the deadline cell is the only place 2026-09-18 can appear at all.
-CALENDAR_LEGS = [
-    dict(_leg("SPY261016P00600000", 1, -24.0),
-         guard=dict(_leg("SPY261016P00600000", 1, -24.0)["guard"],
-                    flatten_deadline="2026-10-16T15:00:00")),
-    dict(_leg("SPY260918P00600000", -1, 58.0),
-         guard=dict(_leg("SPY260918P00600000", -1, 58.0)["guard"],
-                    flatten_deadline="2026-09-18T12:00:00")),
-]
-
-
 def main() -> int:
     js = JS()
 
@@ -503,8 +441,8 @@ def main() -> int:
 
     # ----------------------------------------------------------------------
     print("\n2. The chain renders Spr% as a percentage of mid")
-    js.plan({"/api/options/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run('VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
     js.run("1")                          # let the awaits resolve
     js.run("1")
@@ -525,37 +463,7 @@ def main() -> int:
           "o-thin" in (tight.group(0) if tight else "o-thin"), False)
 
     # ----------------------------------------------------------------------
-    print("\n3. A position nobody could name is not a clear book")
-    clean = {"now": "2026-09-18T14:30:00+00:00", "structures": [CLEAR_STRUCT],
-             "unreadable": []}
-    blind = dict(clean, unreadable=UNREADABLE)
-    js.run("__clean = " + json.dumps(clean) + "; __blind = "
-           + json.dumps(blind) + "; 1")
-    green = js.run("guardBanner([], [], __clean.structures, __clean)")
-    check("a genuinely clear book is green",
-          "Every short leg is clear" in green, True)
-    banner = js.run("guardBanner([], [], __blind.structures, __blind)")
-    check("one unreadable position stops the green",
-          "Every short leg is clear" in banner, False)
-    check("and the banner is amber", 'class="note warn"' in banner, True)
-    check("and it says what is unguarded",
-          "could not be read as an option symbol" in text(banner), True)
-    check("and it names the symbol",
-          "SPY1 260918P00612000" in banner, True)
-    loud = js.run('guardBanner([{underlying:"SPY",expiry:"2026-09-18",'
-                  'guard_why:"past the flatten deadline"}], [], '
-                  "__blind.structures, __blind)")
-    check("a flatten alarm still outranks it",
-          "flattened now" in loud, True)
-    check("and the alarm still names the unguarded position",
-          "could not be read as an option symbol" in text(loud), True)
-    check("and says to count it as unguarded",
-          "as unguarded, not as clear" in text(loud), True)
-    empty = js.run('guardBanner([], [], [], {now: "x", unreadable: []})')
-    check("an empty book says nothing at all", empty, "")
-
-    # ----------------------------------------------------------------------
-    print("\n4. A mark that has not formed prints as an em dash, never $0.00")
+    print("\n3. A mark that has not formed prints as an em dash, never $0.00")
     check("mny(null) is an em dash",
           js.run('mny(null).indexOf("—") >= 0'), True)
     # Duktape's toLocaleString ignores the digit options core.js passes, so
@@ -567,30 +475,8 @@ def main() -> int:
           js.run('pnl(null).indexOf("—") >= 0'), True)
     check("pnl(0) is still a real zero",
           js.run('pnl(0).indexOf("$0") >= 0'), True)
-    nomark = {"now": "2026-09-18T14:30:00+00:00", "structures": [],
-              "unreadable": [], "unsolved": [], "greeks": None,
-              "greeks_cover": {"solved": 0, "of": 2},
-              "legs": [_leg("SPY260918P00600000", -1, None),
-                       _leg("SPY260918P00595000", 1, None)]}
-    js.run("PS = {data: " + json.dumps(nomark) + ', err: ""}; '
-           'NODES["view"].innerHTML = \'<div id="opBody"></div>\'; '
-           "paintPositions(); 1")
-    check("the top-line P/L is the em dash", open_pl(js), "—")
-    check("and never a fabricated zero", "$" in open_pl(js), False)
-    check("and it says how many legs were left out",
-          "2 leg(s) have no mark and are not in this total"
-          in js.txt("opBody"), True)
-    half = dict(nomark, legs=[_leg("A", -1, 61.0), _leg("B", 1, None)])
-    js.run("PS = {data: " + json.dumps(half) + ', err: ""}; '
-           'NODES["view"].innerHTML = \'<div id="opBody"></div>\'; '
-           "paintPositions(); 1")
-    check("a partial book totals only the legs it has",
-          open_pl(js).startswith("+$61"), True)
-    check("and still says one was excluded",
-          "1 leg(s) have no mark" in js.txt("opBody"), True)
-
     # ----------------------------------------------------------------------
-    print("\n5. A re-mount kills the previous mount's timer")
+    print("\n4. A re-mount kills the previous mount's timer")
     js.run("TIMERS = {}; TIMER_ID = 0; __hits = 0; 1")
     # Seven visits to the tab, each building a fresh host with the same id --
     # which is what made the old isConnected test pass for every dead timer.
@@ -611,17 +497,13 @@ def main() -> int:
           js.run("__liveTimers()"), 0)
 
     # ----------------------------------------------------------------------
-    print("\n6. A paint that lands after its host is gone is a no-op")
+    print("\n5. A paint that lands after its host is gone is a no-op")
     check("put on a missing host is false, not a throw",
           js.run('put("nothingHere", "<b>x</b>")'), False)
     check("put on a live host writes",
           js.run('NODES["view"].innerHTML = \'<div id="opBody"></div>\'; '
                  'put("opBody", "<b>x</b>")'), True)
-    js.run('PS = {data: {now: "x", structures: [], legs: [], unreadable: []}, '
-           'err: ""}; NODES["view"].innerHTML = ""; 1')
-    check("paintPositions with no host does not throw",
-          js.run("(function () { try { paintPositions(); return \"quiet\"; } "
-                 'catch (e) { return "threw: " + e.message; } })()'), "quiet")
+    js.run('NODES["view"].innerHTML = ""; 1')
     check("paintChain with no host does not throw",
           js.run("(function () { CH = {data: {contracts: []}, sym: \"SPY\", "
                  'expiry: "2026-09-18", side: "", err: "", centred: false}; '
@@ -629,10 +511,10 @@ def main() -> int:
                  'catch (e) { return "threw: " + e.message; } })()'), "quiet")
 
     # ----------------------------------------------------------------------
-    print("\n7. A transient failure of the expiry list is recoverable")
-    js.plan({"/api/options/expirations/": {"err": "mock: expirations blew up",
+    print("\n6. A transient failure of the expiry list is recoverable")
+    js.plan({"/api/optlab/expirations/": {"err": "mock: expirations blew up",
                                            "status": 502},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
     js.run("1")
     js.run("1")
@@ -643,8 +525,8 @@ def main() -> int:
     check("no expiry was invented", js.run('CH.expiry'), "")
     before = js.run('__getCount("/expirations/")')
     # The server is healthy again. Refresh is the button the operator presses.
-    js.plan({"/api/options/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run("loadChain(); 1")
     js.run("1")
     js.run("1")
@@ -658,8 +540,8 @@ def main() -> int:
     check("the earlier attempt really had failed", before >= 1, True)
 
     # a quiet tick must not hammer the trading budget while it is still down
-    js.plan({"/api/options/expirations/": {"err": "still down", "status": 429},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+    js.plan({"/api/optlab/expirations/": {"err": "still down", "status": 429},
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run('CH.expiry = ""; CH.expAt = Date.now(); 1')
     js.run("loadChain({quiet: true}); 1")
     js.run("1")
@@ -672,9 +554,9 @@ def main() -> int:
           js.run('__getCount("/expirations/")'), 1)
 
     # ----------------------------------------------------------------------
-    print("\n8. Nothing tradable means nothing is requested")
-    js.plan({"/api/options/expirations/": {"ok": DEAD_EXPIRIES},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+    print("\n7. Nothing tradable means nothing is requested")
+    js.plan({"/api/optlab/expirations/": {"ok": DEAD_EXPIRIES},
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
     js.run("1")
     js.run("1")
@@ -689,9 +571,9 @@ def main() -> int:
           in js.txt("ocBody"), True)
 
     # ----------------------------------------------------------------------
-    print("\n9. A refresh keeps the operator where they were looking")
-    js.plan({"/api/options/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+    print("\n8. A refresh keeps the operator where they were looking")
+    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
     js.run("1")
     js.run("1")
@@ -709,99 +591,13 @@ def main() -> int:
           js.run('NODES["ocScroll"].scrollTop'), 0)
 
     # ----------------------------------------------------------------------
-    print("\n10. A structure the close route refuses is never green")
-    js.run("__blocked = " + json.dumps(BLOCKED_STRUCT) + "; __clear = "
-           + json.dumps(CLEAR_STRUCT) + "; 1")
-    check("a structure with no opinion on closeability is not blocked",
-          js.run("closeBlocked(__clear)"), "")
-    check("closeable true is not blocked",
-          js.run("closeBlocked(Object.assign({}, __clear, "
-                 "{closeable: true, close_blocked: \"\"}))"), "")
-    check("closeable false is blocked, with app.py's own sentence",
-          js.run("closeBlocked(__blocked)"), BLOCKED_WHY)
-    check("and a flag with no sentence still says something true",
-          "closeable: false" in js.run(
-              "closeBlocked(Object.assign({}, __clear, {closeable: false}))"),
-          True)
-    d = {"now": "2026-09-18T14:30:00+00:00", "unreadable": []}
-    js.run("__d = " + json.dumps(d) + "; 1")
-    banner = js.run("guardBanner([], [], [__blocked], __d)")
-    check("a blocked structure stops the green banner",
-          "Every short leg is clear" in banner, False)
-    check("and the banner is amber", 'class="note warn"' in banner, True)
-    check("and it says the structure cannot be closed atomically",
-          "cannot be closed atomically" in text(banner), True)
-    check("and it carries app.py's reason verbatim",
-          "an mleg order carries 2 to 4 legs" in text(banner), True)
-    check("and it names the structure",
-          "SPY 2026-09-18" in text(banner), True)
-    green = js.run("guardBanner([], [], [__clear], __d)")
-    check("a structure nobody blocked is still green",
-          "Every short leg is clear" in green, True)
-    # The worst pair: flatten now AND no single order can do it. The generic
-    # "flatten the whole structure in one multi-leg order" tip is then advice
-    # nobody can take, so it must be gone rather than sitting under the alarm.
-    loud = js.run('guardBanner([Object.assign({}, __blocked, '
-                  '{guard: "flatten_now", guard_why: "past the deadline"})], '
-                  "[], [__blocked], __d)")
-    check("an alarm on a blocked structure drops the one-order instruction",
-          "in one multi-leg order" in text(loud), False)
-    check("and says so in as many words",
-          "cannot be closed by one order at all" in text(loud), True)
-    check("and says it must be flattened now too",
-          "including one that must be flattened now" in text(loud), True)
-    check("and still carries the reason",
-          "an mleg order carries 2 to 4 legs" in text(loud), True)
-    # A blocked structure that is NOT the alarming one must still be named:
-    # the amber branch that would have said so is skipped while an alarm is up.
-    other = js.run('guardBanner([Object.assign({}, __clear, '
-                   '{guard: "flatten_now", guard_why: "past the deadline"})], '
-                   "[], [__clear, __blocked], __d)")
-    check("a blocked structure is named even when something else alarms",
-          "cannot be closed by one order at all" in text(other), True)
-    check("and it is not miscounted as the alarming one",
-          "including one that must be flattened now" in text(other), False)
-    ok_loud = js.run('guardBanner([Object.assign({}, __clear, '
-                     '{guard: "flatten_now", guard_why: "past the deadline"})],'
-                     " [], [__clear], __d)")
-    check("with nothing blocked the one-order instruction is still taught",
-          "in one multi-leg order" in text(ok_loud), True)
-
-    # ----------------------------------------------------------------------
-    print("\n11. The flatten deadline shown is the earliest, never the first")
-    js.run("__cal = " + json.dumps(CALENDAR_LEGS) + "; 1")
-    check("the long leg's later deadline is not what the card gets",
-          js.run("earliestDeadline(__cal).at"), "2026-09-18T12:00:00")
-    check("and the structure is known to hold two of them",
-          js.run("earliestDeadline(__cal).count"), 2)
-    check("the order of the legs makes no difference",
-          js.run("earliestDeadline(__cal.slice().reverse()).at"),
-          "2026-09-18T12:00:00")
-    same = js.run("earliestDeadline([__cal[0], __cal[0]])")
-    check("one deadline on two legs counts once", same["count"], 1)
-    check("and is the one they share", same["at"], "2026-10-16T15:00:00")
-    check("no deadline at all is null, not a fabricated time",
-          js.run("earliestDeadline([{guard: {}}, {}]) === null"), True)
-    check("an empty structure is null too",
-          js.run("earliestDeadline([]) === null"), True)
-    junk = js.run('earliestDeadline([{guard: {flatten_deadline: "soon"}}])')
-    check("a deadline nobody can order is reported, not dropped",
-          junk["unreadable"], ["soon"])
-    check("and is never printed as if it were a time", junk["at"], None)
-    mixed = js.run('earliestDeadline([{guard: {flatten_deadline: "soon"}}, '
-                   '{guard: {flatten_deadline: "2026-09-18T12:00:00"}}])')
-    check("a readable deadline beside an unreadable one still shows",
-          mixed["at"], "2026-09-18T12:00:00")
-    check("and the unreadable one is still counted", mixed["count"], 2)
-
-    # ----------------------------------------------------------------------
-    print("\n12. Refresh re-centres the chain; the 20-second tick does not")
+    print("\n9. Refresh re-centres the chain; the 20-second tick does not")
     # The reviewer's measurements: the ATM row at offsetTop 177 in a 49px
     # viewport, so a centred box sits at 177 - 49/2 + 30 = 182.5.
     js.run("__BOX = {h: 49, w: 900}; "
            "__LAYOUT = {atmTop: 177, atmHeight: 30, kLeft: 640, kWidth: 60}; 1")
-    js.plan({"/api/options/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/options/chain/": {"ok": WIDE_CHAIN}})
+    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
+             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
     js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
     js.run("1")
     js.run("1")
@@ -845,7 +641,7 @@ def main() -> int:
     js.run("__BOX = {h: 420, w: 900}; __LAYOUT = null; 1")
 
     # ----------------------------------------------------------------------
-    print("\n13. Invariants over the whole file")
+    print("\n10. Invariants over the whole file")
     src = VIEW.read_text(encoding="utf-8")
     # Comments name these functions in prose; only real calls are counted.
     code = re.sub(r"//[^\n]*", "", re.sub(r"/\*[\s\S]*?\*/", "", src))
@@ -857,15 +653,12 @@ def main() -> int:
     check("no write goes round put()'s null check", raw, [])
     # money()/sgn() coerce null to 0. Only the guarded wrappers may call them.
     calls = re.findall(r"(?<![A-Za-z_])(money|sgn)\(", code)
-    check("money() and sgn() are called three times and only three",
-          len(calls), 3)
-    check("and only from mny(), pnl() and the guarded total",
+    # Two now, not three: the third was the positions page's own book total,
+    # which left with the Positions room.
+    check("money() and sgn() are called twice and only twice", len(calls), 2)
+    check("and only from mny() and pnl()",
           bool(re.search(r"const mny = \(v, dp = 2\) => has\(v\) \? money\(", src))
-          and bool(re.search(r"const pnl = \(v, dp = 2\) => has\(v\) \? sgn\(", src))
-          and "plHave ? sgn(plSum) : DASH" in src, True)
-    check("structCard reads its money through the guarded helpers",
-          "mny(st.market_value)" in src and "pnl(st.unrealized_pl)" in src
-          and "mny(st.cost_basis)" in src and "pnl(leg.unrealized_pl)" in src,
+          and bool(re.search(r"const pnl = \(v, dp = 2\) => has\(v\) \? sgn\(", src)),
           True)
     check("the strategy page no longer teaches a bare 15:00",
           "no short leg open after\n        <b>15:00 ET on its expiry</b>" in src,
@@ -874,42 +667,35 @@ def main() -> int:
           "<b>session close minus one hour</b>" in src, True)
     check("and names the half-day",
           "12:00 ET on a 13:00 half-day" in src, True)
-    # The Positions tip used to say a 15:00 was "an hour late" on a half-day.
-    # It is three: a 13:00 close makes the real deadline 12:00. Two different
-    # numbers for the same rule on the same page is how one of them gets used.
-    check("the positions tip no longer says a half-day is an hour late",
-          "half-day close it is an hour late" in src, False)
     check("and gives the half-day arithmetic",
-          "three hours after the real deadline of 12:00" in src, True)
+          "gets wrong by three hours" in src, True)
     check("a failed strategy document still renders a way back",
           bool(re.search(r"DOC = null;\s*\n\s*if \(!put\(\"osBody\",\s*\n\s*"
                          r"`<button class=\"o-back\" id=\"osBack\">", src)),
           True)
-    # The two HIGHs of round two were both "app.py computes a safety fact and
-    # the view never reads it", so the invariant is that the view reads it --
-    # asserted on the source because structCard is outside the bundle.
-    check("structCard reads closeable through the one helper",
-          "const stuck = closeBlocked(st);" in src, True)
-    check("the guard banner reads it too",
-          "const stuck = (sts || []).filter((s) => closeBlocked(s));" in src,
-          True)
-    check("the card renders the reason rather than swallowing it",
-          "${esc(stuck)}" in src, True)
-    check("closeBlocked is strict about the flag it trusts",
-          "st.closeable === false" in src, True)
-    check("the deadline cell no longer takes the first leg with one",
-          "(st.legs || []).find((L) => (L.guard || {}).flatten_deadline)"
-          in src, False)
-    check("it takes the earliest across the legs",
-          "const dead = earliestDeadline(st.legs);" in src, True)
-    check("and says so when a structure holds more than one expiry",
-          "earliest of ${dead.count}" in src, True)
+    # The Positions room moved to the engine's own /options page. What is
+    # asserted here is that it left CLEANLY: no tab, no route, no orphaned
+    # renderer -- and a line saying where it went, so the next reader does not
+    # go looking for a page they think was lost.
+    check("no Positions tab is offered", '["positions", "Positions"]' in src,
+          False)
+    # on `code`, not `src`: the header comment SAYS where positions went, and
+    # that sentence is the point rather than a leftover call
+    check("and nothing calls the route that is gone",
+          "/api/options/positions" in code or "/api/optlab/positions" in code,
+          False)
+    check("no orphaned positions renderer is left behind",
+          any(w in src for w in ("mountPositions", "paintPositions",
+                                 "structCard", "guardBanner", "closeBlocked",
+                                 "earliestDeadline")), False)
+    check("and the header says where live positions live now",
+          "/options (optapi.py + static/options.html)" in src, True)
+    check("every route it does call is on the optlab namespace",
+          sorted(set(re.findall(r"/api/[a-z]+/", code))), ["/api/optlab/"])
     check("centreChain tells a surviving box from a rebuilt one",
           "if (CH.centred && keep) {" in src, True)
     check("the API note states the spread unit",
           "spread_pct is a FRACTION of mid" in src, True)
-    check("and documents the closeability pair",
-          "closeable, close_blocked" in src, True)
     check("no raw spread_pct reaches a renderer",
           bool(re.search(r"pc1\(leg\.spread_pct\)", src)), False)
 

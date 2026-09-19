@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 CACHE = ROOT / "research" / "float"
 CACHE.mkdir(parents=True, exist_ok=True)
 
-UA = {"User-Agent": "TickAverager Research glenn@gamedaymenshealth.com"}
+UA = {"User-Agent": "Tick Avenger Research glenn@gamedaymenshealth.com"}
 RATE = 0.11          # SEC asks for <= 10 requests/second
 
 

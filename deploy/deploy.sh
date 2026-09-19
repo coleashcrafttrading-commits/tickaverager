@@ -52,10 +52,15 @@ git push origin master
 echo "local master: $(git rev-parse --short HEAD)"
 
 echo "== vm =="
-# fetch first, then run the freshly pushed updater (not the one on disk)
+# fetch first, then run the freshly pushed updater (not the one on disk).
+# The staging file is per-UID because /tmp is shared and sticky: the `>`
+# redirect runs as the CALLING user, not as $OWNER, so a fixed name would
+# belong to whoever deployed first and every later deployer would fail the
+# redirect with "Permission denied" -- unable to overwrite it and, thanks to
+# the sticky bit, unable to delete it either.
 remote_cmd="sudo -n -u $OWNER git -C '$DIR' fetch -q origin master \
-  && sudo -n -u $OWNER git -C '$DIR' show origin/master:deploy/vm_update.sh > /tmp/vm_update.sh \
-  && sudo -n bash /tmp/vm_update.sh"
+  && sudo -n -u $OWNER git -C '$DIR' show origin/master:deploy/vm_update.sh > /tmp/vm_update.\$(id -u).sh \
+  && sudo -n bash /tmp/vm_update.\$(id -u).sh"
 # `echo y` answers PuTTY/plink's host-key prompt on Windows; OpenSSH (macOS,
 # Linux) ignores the extra input, so one line serves both. The SSH itself is
 # retried: the tunnel drops often enough that a single blip should not look

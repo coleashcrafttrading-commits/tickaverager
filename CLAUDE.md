@@ -1,4 +1,4 @@
-# Operating rules — TickAverager fleet
+# Operating rules — Tick Avenger fleet
 
 This file loads into every session in this repo. It is the standing brief for
 any agent, human-driven or scheduled.
@@ -280,14 +280,21 @@ If two disagree, say so loudly rather than picking the convenient one.
   share. The health check reports an off-book fractional exit as `medium`,
   not `critical`. Whole-share tickers are byte-identical
   (`test_fractional.py` section 17 replays the golden capture).
-- **The full test loop** after any change: `test_rules test_reconcile
-  test_reverse test_unwind test_short test_trail test_entry_rule test_presets
-  test_engine_strategy test_latency test_refresh_trend test_accounts
-  test_app_accounts test_btcode test_trend_v2 test_strategy test_trend
-  test_research test_indicators test_touch_adds test_review_fixes
-  test_fractional test_report test_bank test_supertrend test_optsym
-  test_greeks test_optdata test_optbank test_optbacktest test_optengine
-  test_options_api`, each printing
+- **The full test loop** after any change:
+  `test_accounts test_app_accounts test_bank test_btcode test_engine_strategy
+  test_entry_rule test_fractional test_greeks test_indicators test_latency
+  test_optapi test_optbacktest test_optbank test_optbook test_optcal
+  test_optdata test_optengine test_optexec test_optgates test_optgrade
+  test_options test_options_api test_optquotes test_optrun
+  test_optstructures test_optsym test_optview test_optvol test_presets
+  test_reconcile test_refresh_trend test_report test_research test_reverse
+  test_review_fixes test_rules test_short test_strategy test_supertrend
+  test_touch_adds test_trail test_trend test_trend_v2 test_unwind`,
+  each printing `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a
+  scratch file. Two people build in this repo at once, so this list is the
+  union of both stacks and it is the one that has to stay green -- a change
+  to the share ladder still has to keep the options suites passing, and the
+  reverse.
   `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a scratch file.
   `deploy/vm_update.sh` runs thirteen of them on the VM and keeps the old
   process if one is red.

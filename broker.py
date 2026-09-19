@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-broker.py -- thin Alpaca REST client for the TickAverager ladder.
+broker.py -- thin Alpaca REST client for the Tick Avenger ladder.
 
 Only the endpoints the strategy actually needs. Every call raises AlpacaError
 with the server's own message on a non-2xx, so failures are never silent.

@@ -1,0 +1,6 @@
+{
+  "_comment": "PRESENCE OF THE KEY IS THE ASSERTION. An empty dates list means KNOWN to have no earnings; a symbol that is ABSENT is UNKNOWN, and unknown BLOCKS short premium. Keys starting with _ are ignored. Past dates are ignored rather than trusted, so a stale file reads as 'known, nothing upcoming' -- keeping this current is an operational duty, not a code property.",
+  "IWM": {"dates": [], "note": "iShares Russell 2000 index ETF -- a fund, not a company; it does not report earnings"},
+  "SPY": {"dates": [], "note": "SPDR S&P 500 index ETF -- same"},
+  "QQQ": {"dates": [], "note": "Invesco QQQ index ETF -- same"}
+}

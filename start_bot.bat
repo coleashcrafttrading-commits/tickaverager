@@ -1,5 +1,5 @@
 @echo off
-title TickAverager - Alpaca  (close this window to stop the dashboard)
+title Tick Avenger - Alpaca  (close this window to stop the dashboard)
 cd /d "%~dp0"
 
 REM --- already running? just bring the dashboard up, don't start a second one
@@ -23,7 +23,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 echo.
 echo   ================================================
-echo     TickAverager Fleet  -  Alpaca paper account
+echo     Tick Avenger Fleet  -  Alpaca paper account
 echo     Dashboard:  http://127.0.0.1:8010
 echo   ================================================
 echo.

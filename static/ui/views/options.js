@@ -1,8 +1,15 @@
 /* ============================================================================
-   options.js -- the Options tab: the chain, the shelf, what is open, and what
-   the sweep actually proved.
+   options.js -- the Options tab: the chain, the shelf, and what the sweep
+   actually proved.
 
-   Four rooms, and each one exists because a number that matters has nowhere
+   LIVE POSITIONS ARE NOT HERE ANY MORE. They live on the engine's own page
+   at /options (optapi.py + static/options.html), which is the stack that
+   trades; this tab lost its Positions room when app.py's positions route was
+   removed, and nothing was lost with it. Everything below reads
+   /api/optlab/* -- the research side: a bank, a chain with greeks computed in
+   the dashboard process, and the saved sweeps.
+
+   Three rooms, and each one exists because a number that matters has nowhere
    else to live:
 
      Chain       Alpaca returns no greeks and no implied volatility, ever, at
@@ -18,36 +25,30 @@
                  send. The other 57 stay on the shelf, visibly blocked with
                  the reason, because a bank that hides what it cannot do
                  teaches nothing.
-     Positions   the page someone stares at when something is wrong. The
-                 assignment guard is therefore the loudest thing on it: a
-                 short leg past its flatten deadline, inside the pin band, or
-                 under $0.05 of extrinsic is shouted rather than tabulated,
-                 and a leg the guard could not read is amber, never green.
      Backtest    the sweep, with the fill rate and the spread robustness in
                  the table beside the profit instead of behind a tooltip.
                  Those two numbers decide whether a result is real, and hiding
                  them is how a curve fit gets deployed.
 
-   This module only reads. It calls none of the write routes -- no proposal,
-   no submit, no close -- on purpose: the limit-price sign on a multi-leg
-   order is the most dangerous field in the Alpaca API (a positive price on a
-   credit structure is accepted, and filled, as an instruction to PAY), and
-   the assertions that catch it live in optengine and in app.py's own
-   _sign_refusal. A second, prettier copy of that logic in display code is how
-   the two end up disagreeing.
+   This module only reads, and there is no write route left for it to call.
+   That is on purpose: the limit-price sign on a multi-leg order is the most
+   dangerous field in the Alpaca API (a positive price on a credit structure
+   is accepted, and FILLED, as an instruction to PAY), and the assertions that
+   catch it live in optengine and optexec. A second, prettier copy of that
+   logic in display code is how the two end up disagreeing.
 
    ---------------------------------------------------------------- the API
    app.py owns these; this file only consumes them, and treats every field as
    optional. A missing number prints as an em dash and a missing guard prints
    as UNKNOWN -- never as zero and never as OK.
 
-     GET /api/options/expirations/{sym}?min_dte&max_dte   (account-scoped)
+     GET /api/optlab/expirations/{sym}?min_dte&max_dte   (account-scoped)
        {symbol, now, expirations:[{expiry, dte, expired, tradable,
         expiry_moment, seconds_left, t_years}], first_tradable, budget}
        first_tradable is what the picker preselects. Never the first row: an
        expiry that has already passed is not a smaller version of a live one.
 
-     GET /api/options/chain/{sym}?expiry&pct&right                (scoped)
+     GET /api/optlab/chain/{sym}?expiry&pct&right                (scoped)
        {symbol, expiry, count, solved, expiration:{dte, expired, ...},
         spot, forward, priced_off, rate, as_of, as_of_from, t_years,
         contracts:[{occ, strike, right:"C"|"P", bid, ask, mid, spread,
@@ -63,39 +64,13 @@
        0.07 -- uncloseable, 54.5% of mid -- once printed as 0.5%, the tightest
        row on the board. Nothing here reads the field raw; see fracPc1().
 
-     GET /api/options/bank[?permitted=1]                       (machine-wide)
+     GET /api/optlab/bank[?permitted=1]                       (machine-wide)
        {level, max_legs, count, stats, strategies:[optbank.listing() rows]}
-     GET /api/options/bank/{slug}                              (machine-wide)
+     GET /api/optlab/bank/{slug}                              (machine-wide)
        {slug, strategy:{the document}, permitted, blocked_because,
         short_legs, assignment_legs, requires_share_leg}
 
-     GET /api/options/positions                                    (scoped)
-       {account, frozen, now, spots:{SYM:price}, greeks|null,
-        greeks_cover:{solved, of}, unsolved:[{occ, why}],
-        unreadable:[{symbol, why}], legs:[LEG],
-        structures:[{id, underlying, expiry, dte, legs:[LEG], contracts,
-                     market_value, unrealized_pl, cost_basis, short_legs,
-                     guard:"ok"|"watch"|"pending_expiry_confirmation"|
-                           "unknown"|"flatten_now",
-                     guard_why, grouping, closeable, close_blocked}]}
-       LEG carries a signed `contracts`, the quote, the solved greeks, and
-       guard:{state, why, rules:[ids from options/mechanics.json], itm,
-       intrinsic, extrinsic, pin_risk, dte, expired, flatten_deadline}.
-
-       closeable:false is a SECOND safety fact, independent of `guard`: the
-       group is larger than one mleg order can carry (2 to 4 legs), so there
-       is no atomic close of it and app.py's own close route answers it 409
-       with close_blocked as the message. A structure can be guard:"ok" and
-       closeable:false at the same time, and that pair is the dangerous one --
-       it is the position that will still be unflattenable at 15:00. A fact
-       app.py computes and this page does not read is the same as a fact
-       nobody computed, so both fields are rendered: see closeBlocked().
-
-       flatten_deadline is PER LEG and a structure can hold two expiries (the
-       ledger groups a calendar as one), so the card shows the EARLIEST of
-       them: see earliestDeadline().
-
-     GET /api/options/sweep?top=N                              (machine-wide)
+     GET /api/optlab/sweep?top=N                              (machine-wide)
        {sweeps:[{file, underlying, sessions, combinations, survivors,
                  min_trades_to_rank, entries, spread_mults, rules,
                  top:[ranked rows]}],
@@ -106,7 +81,7 @@ import {
   VIEWS, GET, SHARED_API, el, esc, card, stat, tableHTML, money, sgn,
 } from "../core.js";
 
-/* Two of the six routes are machine-wide rather than account-scoped, the way
+/* Two of the five routes are machine-wide rather than account-scoped, the way
    /api/presets and /api/strategies are: the shelf of strategies and the saved
    sweeps are the same artefacts whichever account is on screen, and app.py
    registers them without the /api/a/<id> prefix. core.js applies that prefix
@@ -114,21 +89,23 @@ import {
    them from here keeps the whole tab in one file; adding the two strings to
    core.js's own SHARED_API literal is equally correct and is the better move
    the moment anything outside this view needs them. */
-for (const p of ["/api/options/bank", "/api/options/sweep"]) {
+for (const p of ["/api/optlab/bank", "/api/optlab/sweep"]) {
   if (!SHARED_API.includes(p)) SHARED_API.push(p);
 }
 
+/* No Positions tab. /api/options/positions was app.py's and it is gone: the
+   engine's own page at /options owns live positions, the assignment guard and
+   the close button now. A second view of open risk, fed by a second grouping
+   of the same legs, is how two pages disagree about what is held. */
 const TABS = [
   ["chain", "Chain"],
   ["strategies", "Strategies"],
-  ["positions", "Positions"],
   ["backtest", "Backtest"],
 ];
 
 const SUB = {
   chain: "Alpaca's quotes; the IV and the greeks are solved here",
   strategies: "every structure on the shelf, and what this account may send",
-  positions: "open structures, their greeks, and the assignment guard",
   backtest: "what survived a second market and a doubled spread",
 };
 
@@ -144,7 +121,6 @@ VIEWS.options = {
     ensureStyle();
     const t = v.tab || "chain";
     if (t === "strategies") return mountStrategies();
-    if (t === "positions") return mountPositions();
     if (t === "backtest") return mountBacktest();
     return mountChain();
   },
@@ -272,23 +248,6 @@ const CSS = `
 .o-dl dd { margin: 0; color: var(--muted); }
 @media (max-width: 560px) { .o-dl { grid-template-columns: 1fr; gap: 2px 0; }
                             .o-dl dd { margin-bottom: 10px; } }
-
-/* ---- the guard ---------------------------------------------------------
-   Red here is not "a number went down". It is "this position can deliver 100
-   shares nobody sized for", which is the one thing on this dashboard worth an
-   alarm. */
-.o-alarm { border-color: rgba(255, 107, 138, .55) !important;
-           box-shadow: 0 0 0 1px rgba(255, 107, 138, .3),
-                       0 0 34px -8px rgba(255, 107, 138, .5) !important; }
-.o-alarm-h { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-             font-size: 15px; font-weight: 660; color: var(--down); }
-.o-alarm-h .o-dot { width: 10px; height: 10px; border-radius: 50%;
-                    background: var(--down); flex: none;
-                    animation: o-pulse 1.25s ease-in-out infinite; }
-@keyframes o-pulse { 50% { opacity: .2; } }
-@media (prefers-reduced-motion: reduce) { .o-alarm-h .o-dot { animation: none; } }
-.o-leg-alarm td { background: rgba(255, 107, 138, .1) !important; }
-.o-leg-watch td { background: rgba(255, 192, 97, .09) !important; }
 
 .o-bars { display: grid; gap: 7px; }
 .o-btrack { height: 7px; border-radius: 4px; background: var(--hairline);
@@ -510,7 +469,7 @@ async function loadExpiries() {
   CH.expAt = Date.now();
   let r;
   try {
-    r = await GET(`/api/options/expirations/${encodeURIComponent(sym)}`
+    r = await GET(`/api/optlab/expirations/${encodeURIComponent(sym)}`
       + `?min_dte=0&max_dte=365`);
   } catch (e) {
     if (sym !== CH.sym) return;
@@ -598,7 +557,7 @@ async function loadChain({ quiet = false } = {}) {
   CH.busy = true;
   if (!quiet) put("ocBody", loading(`${sym} ${exp}`));
   try {
-    const r = await GET(`/api/options/chain/${encodeURIComponent(sym)}`
+    const r = await GET(`/api/optlab/chain/${encodeURIComponent(sym)}`
       + `?expiry=${encodeURIComponent(exp)}`);
     if (sym !== CH.sym || exp !== CH.expiry) return;
     CH.data = r;
@@ -862,7 +821,7 @@ function mountStrategies() {
 }
 
 async function loadBank() {
-  try { BK = await GET("/api/options/bank"); }
+  try { BK = await GET("/api/optlab/bank"); }
   catch (e) { put("osBody", errNote(e)); return; }
   paintStrategies();
 }
@@ -1002,7 +961,7 @@ function paintGrid() {
 async function openDoc(slug) {
   if (!put("osBody", loading(slug))) return;
   try {
-    const r = await GET(`/api/options/bank/${encodeURIComponent(slug)}`);
+    const r = await GET(`/api/optlab/bank/${encodeURIComponent(slug)}`);
     /* The document is nested under `strategy`, and the three answers the
        engine asks of it ride alongside it. They are folded together here so
        the render below reads one object rather than two. */
@@ -1142,379 +1101,6 @@ function paintDoc() {
   if (sc) sc.scrollTop = 0;
 }
 
-/* ============================================================== positions */
-let PS = null;
-
-function mountPositions() {
-  PS = { data: null, err: "" };
-  el("view").innerHTML = `<div id="opBody">${loading("open structures")}</div>`;
-  every(10000, "opBody", loadPositions);
-  loadPositions();
-}
-
-async function loadPositions() {
-  try {
-    PS.data = await GET("/api/options/positions");
-    PS.err = "";
-  } catch (e) {
-    PS.err = e.message || String(e);
-    if (!PS.data) { put("opBody", errNote(e)); return; }
-  }
-  paintPositions();
-}
-
-/* app.py's guard vocabulary. The STATES are never re-derived in the browser:
-   app.py evaluates the mechanics.json rules against the quote, the clock and
-   the expiry moment, and a second opinion computed here from a subset of that
-   would eventually disagree with the first — at which point nobody knows
-   which one is the guard. Where the server says nothing, this page says
-   UNKNOWN rather than filling the gap in. */
-const GUARD_LABEL = {
-  ok: "clear", watch: "watch", pending_expiry_confirmation: "pending expiry",
-  unknown: "unknown", flatten_now: "flatten now",
-};
-const loud = (s) => s === "flatten_now";
-const amber = (s) => s === "watch" || s === "unknown"
-  || s === "pending_expiry_confirmation";
-
-/* Why this structure cannot be closed by one order, or "" if it can.
-
-   app.py marks a group closeable:false when it is more than one mleg order
-   can carry -- three verticals on one SPY expiry arrive from /v2/positions as
-   six independent legs and get grouped by underlying and expiry, which is not
-   one structure -- and its own close route answers 409 with this sentence.
-   The page used to read neither field, so a position the engine had ALREADY
-   refused to close rendered as a green CLEAR card with the instruction
-   "flatten the whole structure in one multi-leg order" above it. That
-   instruction cannot be carried out, and an instruction that cannot be
-   carried out is worse than no instruction: it is read as reassurance.
-
-   Strictly `=== false`. An older server, or a payload that predates the
-   field, says nothing about closeability rather than saying no -- and
-   inventing a blocked state for every structure would bury the one real one.
-   Where the flag is set but the sentence is not, the page still says the
-   thing that matters rather than nothing. */
-const closeBlocked = (st) => (st && st.closeable === false)
-  ? String(st.close_blocked || "app.py marked this structure closeable: false "
-      + "and gave no reason. Its close route will refuse it either way.")
-  : "";
-
-/* The EARLIEST flatten deadline across the legs, never the first one found.
-
-   `flatten_deadline` is per leg, and _structures() groups by the optengine
-   ledger, which holds a calendar or a diagonal -- two expiries -- as ONE
-   structure. find() returned whichever leg the list happened to start with:
-   on a put calendar whose long October leg sorted first, the card printed
-   2026-10-16 15:00 and said nothing about the front short's 2026-09-18 12:00,
-   four weeks and three hours earlier. Showing the later of two deadlines is
-   worse than showing none at all, because it reads as permission to wait past
-   the one that matters. The structure is as safe as its worst leg (app.py
-   :2255) and its deadline is therefore its earliest.
-
-   Returns {at, count, unreadable} or null. `at` is the raw server string,
-   never a re-formatted local time: these are exchange-clock strings and a
-   browser that parsed one into its own zone would move it by hours. Date
-   .parse is used ONLY to order them, and a value it cannot order is reported
-   rather than silently dropped -- a deadline nobody could read is not a
-   deadline that does not exist. */
-function earliestDeadline(legs) {
-  const seen = [];
-  for (const L of legs || []) {
-    const raw = (L.guard || {}).flatten_deadline;
-    if (raw == null || raw === "") continue;
-    const s = String(raw);
-    if (seen.some((x) => x.s === s)) continue;   // one deadline, many legs
-    const ms = Date.parse(s);
-    seen.push({ s, ms: Number.isFinite(ms) ? ms : null });
-  }
-  if (!seen.length) return null;
-  const ordered = seen.filter((x) => x.ms != null).sort((a, b) => a.ms - b.ms);
-  return {
-    at: ordered.length ? ordered[0].s : null,
-    count: seen.length,
-    unreadable: seen.filter((x) => x.ms == null).map((x) => x.s),
-  };
-}
-
-function paintPositions() {
-  const d = PS.data || {};
-  const sts = d.structures || [];
-  const legs = d.legs || [];
-  const alarms = sts.filter((s) => loud(s.guard));
-  const warns = sts.filter((s) => amber(s.guard));
-  const pf = d.greeks;
-  const cover = d.greeks_cover || {};
-  /* A leg whose mark has not arrived is LEFT OUT of the total and counted,
-     never folded in as zero: app.py returns None whenever Alpaca omits the
-     field or sends a non-number, and a book total that silently drops a leg
-     is a wrong number wearing the costume of a right one. greeks_cover says
-     the same thing about the greeks two stats along. */
-  let plSum = 0, plHave = 0;
-  for (const L of legs) {
-    if (!has(L.unrealized_pl)) continue;
-    plSum += Number(L.unrealized_pl);
-    plHave += 1;
-  }
-  const plGap = legs.length - plHave;
-  const shorts = legs.filter((L) => Number(L.contracts) < 0).length;
-
-  put("opBody", `
-    ${PS.err ? `<div class="note warn"><b>Last refresh failed:</b> ${esc(PS.err)}
-      <span class="faint">— everything below is from
-      ${esc(ago(d.now) || "the previous fetch")}.</span></div>` : ""}
-    ${d.frozen ? `<div class="note warn"><b>This account is FROZEN.</b>
-      Nothing arms and no position opens while <code>state/FROZEN</code>
-      exists. Open positions are unaffected and still need managing.</div>` : ""}
-    ${guardBanner(alarms, warns, sts, d)}
-    <div class="stats" style="margin-bottom:18px">
-      ${stat("Open structures", String(sts.length),
-             `${legs.length} leg${legs.length === 1 ? "" : "s"}, ${shorts} short`)}
-      ${stat("Open P/L", plHave ? sgn(plSum) : DASH,
-             plGap ? `<span class="warn">${plGap} leg(s) have no mark and are
-               not in this total</span>`
-               : "the broker's mark, not a local one")}
-      ${stat("Net delta", pf ? n2(pf.delta, 1) : DASH,
-             pf ? `Γ ${n2(pf.gamma, 4)} · Θ ${n2(pf.theta, 1)} · `
-                  + `V ${n2(pf.vega, 1)}`
-                : "no leg solved, so the book has no total")}
-      ${stat("Greeks cover",
-             cover.of ? `${cover.solved == null ? 0 : cover.solved}<span
-               class="faint" style="font-size:14px">/${cover.of}</span>` : DASH,
-             (cover.of && cover.solved !== cover.of)
-               ? `<span class="warn">an unsolved leg is unknown risk, not
-                  zero</span>` : "every leg solved")}
-    </div>
-    ${unsolvedNote(d)}
-    ${sts.length ? sts.map(structCard).join("")
-      : `<div class="note info" style="margin-top:0"><b>No option positions.</b>
-         <span class="faint">These come from the fleet's own
-         <code>/v2/positions</code> snapshot, so anything the broker holds
-         appears here whether or not this dashboard opened it.</span></div>`}
-    ${card("What the guard is watching for", `<div class="tip" style="margin-top:0">
-      Every one of these contracts is <b>American and settles in shares</b>, so
-      a short leg is not a price risk, it is a delivery risk. The states come
-      from <code>options/mechanics.json</code>, and each row above names the
-      rule it tripped.<br><br>
-      <b>Flatten deadline</b> — no short leg on a share-settled option may be
-      open after the session close minus an hour on its expiry day, whatever
-      the P/L. Alpaca stops accepting closing orders shortly after that and
-      takes control of what is left.<br>
-      <b>Extrinsic ≤ $0.05</b> — the leg has stopped being an option, and early
-      assignment is the holder's rational move rather than a tail risk. If the
-      quoted spread is <i>wider</i> than the extrinsic, the extrinsic is not a
-      measurement at all, and the conservative reading is the one that
-      counts.<br>
-      <b>Pin band</b> — a short strike within <b>max(0.5% of spot, $0.50)</b>
-      of spot inside the last 90 minutes of its expiry day. The band widens as
-      the clock runs; it never narrows.<br>
-      <b>In the money is $0.01</b> — the OCC exercises by exception at a single
-      cent. There is no safe margin on the wrong side of a strike.<br>
-      <b>Pending expiry</b> — out of the money is not settled. Capital behind an
-      expired leg is not free until the next session's activity poll confirms
-      it.<br><br>
-      A leg the guard could not read shows <b>UNKNOWN</b> in amber and is never
-      counted as safe: a guard that goes quiet looks exactly like a guard with
-      nothing to say, and a position whose symbol could not be parsed at all is
-      counted as unguarded rather than left out of the tally.<br>
-      <b>No atomic close</b> — the group is more than one mleg order can carry
-      (2 to 4 legs), so there is no single order that closes it and the close
-      route answers it 409. It is a separate fact from the guard: a structure
-      can be clear and unflattenable at the same time, and that is the one to
-      deal with before its deadline rather than at it.<br><br>
-      The <b>Flatten by</b> time on each card is the server's, read off the
-      exchange calendar, and it is the <b>earliest</b> deadline across the
-      legs — a calendar or a diagonal holds two expiries in one structure, and
-      the later of the two is not the one that matters. Where the server could
-      not read one it falls back to the regular-session <b>15:00 ET</b> —
-      which on a <b>13:00 half-day</b> is
-      three hours after the real deadline of 12:00. Read a 15:00 as the outer
-      bound, never as permission to wait.</div>`)}`);
-}
-
-function unsolvedNote(d) {
-  const bad = d.unreadable || [];
-  const un = d.unsolved || [];
-  if (!bad.length && !un.length) return "";
-  return `<div class="note ${bad.length ? "bad" : "warn"}" style="margin-top:0">
-    ${bad.length ? `<b>${bad.length} position(s) could not be read as an option
-      symbol</b>, and are therefore not guarded at all:
-      ${bad.map((b) => `<code>${esc(b.symbol)}</code> (${esc(b.why)})`)
-        .join(", ")}.<br>` : ""}
-    ${un.length ? `<b>${un.length} leg(s) have no greeks.</b> They are in no
-      book total — a contract whose IV will not solve has unknown risk, not no
-      risk: ${un.slice(0, 6).map((u) =>
-        `<code>${esc(u.occ)}</code> ${esc(u.why || "")}`).join("; ")}${
-        un.length > 6 ? ` and ${un.length - 6} more` : ""}.` : ""}</div>`;
-}
-
-function guardBanner(alarms, warns, sts, d) {
-  /* A position whose OCC symbol app.py could not parse is guarded by nothing:
-     there is no strike, no right and no expiry to evaluate a rule against, so
-     it appears in no structure and reaches neither `alarms` nor `warns`. It
-     therefore has to count against the green path in its own right. Leaving
-     it out put the green note at the top of the screen and the red count
-     three cards below the fold, which is exactly the failure the tip at the
-     bottom of this page names: a guard that goes quiet looks exactly like a
-     guard with nothing to say. */
-  const blind = (d.unreadable || []).length;
-  /* Derived here rather than passed in: app.py is the only thing that decides
-     closeability, this is the one place the page turns that decision into a
-     banner, and a second caller computing its own list is how the card and
-     the banner end up disagreeing about the same structure. */
-  const stuck = (sts || []).filter((s) => closeBlocked(s));
-  const stuckList = stuck.map((s) => `<li><b>${esc(s.underlying || "")}
-    ${esc(s.expiry || "")}</b> — ${esc(closeBlocked(s))}</li>`).join("");
-  if (alarms.length) {
-    /* The worst pair on this page: the guard says flatten now and no single
-       order can do it. The generic "flatten the whole structure in one
-       multi-leg order" tip below is then advice nobody can take, so whenever
-       ANY structure on the page is blocked it is replaced by what is actually
-       left -- and the reason is on screen instead of only in a 409 nobody
-       sees, because this module never calls the close route.
-
-       Every blocked structure is named here, not only the alarming ones: the
-       amber branch that would otherwise have said so is skipped while an
-       alarm is up, and a structure that cannot be closed is worth knowing
-       about BEFORE its own deadline arrives, not at it. */
-    const rows = alarms.map((s) => `<li><b>${esc(s.underlying || "")}
-      ${esc(s.expiry || "")}</b> — ${esc(s.guard_why
-        || "the guard says to flatten now")}</li>`).join("");
-    return `<div class="card o-alarm" style="margin-bottom:18px"><div class="card-b">
-      <div class="o-alarm-h"><span class="o-dot"></span>
-        ${alarms.length} structure${alarms.length === 1 ? "" : "s"} must be
-        flattened now</div>
-      <ul class="o-rules" style="margin-top:12px">${rows}</ul>
-      ${blind ? `<div class="tip"><b>And ${blind} position${blind === 1 ? ""
-        : "s"} could not be read as an option symbol</b>, so nothing evaluated
-        ${blind === 1 ? "it" : "them"} at all — ${(d.unreadable || []).map((b) =>
-        `<code>${esc(b.symbol)}</code>`).join(", ")}. Count
-        ${blind === 1 ? "it" : "them"} as unguarded, not as clear.</div>` : ""}
-      ${stuck.length ? `<div class="tip"><b>${stuck.length} structure${
-        stuck.length === 1 ? "" : "s"} on this page cannot be closed by one
-        order at all${alarms.some((s) => closeBlocked(s))
-          ? ", including one that must be flattened now" : ""}:</b>
-        <ul class="o-rules" style="margin:6px 0 0">${stuckList}</ul>
-        The close route answers ${stuck.length === 1 ? "it" : "them"}
-        <b>409</b>, so the flatten has to be driven from the engine's own
-        ledger structures or leg by leg at the broker — and legging out of a
-        defined-risk position means closing the SHORT side first, never the
-        long.</div>`
-        : `<div class="tip">Flatten the <b>whole structure</b> in one
-        multi-leg order. Closing the long leg first turns a defined-risk
-        position into a naked short — the one state this account cannot hold,
-        and the one Alpaca will refuse to let it re-enter.</div>`}
-      </div></div>`;
-  }
-  if (warns.length || blind || stuck.length) {
-    return `<div class="note warn" style="margin-top:0;margin-bottom:18px">
-      ${stuck.length ? `<b>${stuck.length} structure${stuck.length === 1
-        ? "" : "s"} cannot be closed atomically</b>, whatever the guard says
-        about ${stuck.length === 1 ? "it" : "them"}:
-        <ul class="o-rules" style="margin:6px 0 0">${stuckList}</ul>
-        ${warns.length || blind ? "" : "Everything else on this page is clear."}
-        ` : ""}
-      ${blind ? `<b>${blind} position${blind === 1 ? "" : "s"} could not be
-        read as an option symbol</b>, so ${blind === 1 ? "it is" : "they are"}
-        guarded by nothing: ${(d.unreadable || []).map((b) =>
-          `<code>${esc(b.symbol)}</code>`).join(", ")}. The reason is below.
-        ${warns.length ? "<br>" : ""}` : ""}
-      ${warns.length ? `<b>${warns.length} structure${warns.length === 1
-        ? "" : "s"} need watching.</b> ${warns.map((s) =>
-        `${esc(s.underlying || "")} ${esc(s.expiry || "")}: ${esc(s.guard_why
-          || GUARD_LABEL[s.guard] || s.guard || "")}`).join(" · ")}` : ""}
-      </div>`;
-  }
-  if (!sts.length) return "";
-  return `<div class="note good" style="margin-top:0;margin-bottom:18px">
-    <b>Every short leg is clear.</b> <span class="faint">Outside the pin band,
-    holding more than $0.05 of extrinsic, and inside its flatten deadline.
-    Every position the broker reported was readable and evaluated, and every
-    structure is small enough for one multi-leg order to close.
-    Checked ${esc(ago(d.now) || "just now")}.</span></div>`;
-}
-
-function structCard(st) {
-  const g = st.guard || "unknown";
-  const stuck = closeBlocked(st);
-  const pill = (loud(g) ? `<span class="o-tag bad">flatten now</span>`
-    : g === "ok" ? `<span class="o-tag good">clear</span>`
-    : `<span class="o-tag warn">${esc(GUARD_LABEL[g] || g)}</span>`)
-    /* Beside the guard pill, never instead of it: they answer two different
-       questions, and a structure can be clear AND unflattenable. */
-    + (stuck ? ` <span class="o-tag bad">no atomic close</span>` : "");
-
-  const rows = (st.legs || []).map((leg) => {
-    const lg = leg.guard || {};
-    const state = lg.state || "unknown";
-    const cls = loud(state) ? "o-leg-alarm" : amber(state) ? "o-leg-watch" : "";
-    const short = Number(leg.contracts) < 0;
-    const qty = Math.abs(Number(leg.contracts) || 0);
-    return `<tr class="${cls}">
-      <td style="text-align:left" class="o-mono">${esc(leg.occ || "")}</td>
-      <td style="text-align:left" class="${short ? "down" : ""}"><b>${
-        short ? "SHORT" : "LONG"}</b> ${qty}</td>
-      <td>${has(leg.strike) ? Number(leg.strike).toFixed(2) : "—"}
-        ${esc(String(leg.right || ""))}</td>
-      <td>${dol(leg.mid)}</td>
-      <td>${ivTxt(leg.iv)}</td>
-      <td>${n2(leg.delta, 3)}</td>
-      <td>${n2(leg.gamma, 4)}</td>
-      <td>${n2(leg.theta, 3)}</td>
-      <td>${n2(leg.vega, 3)}</td>
-      <td class="${short && has(lg.extrinsic) && Number(lg.extrinsic) <= 0.05
-        ? "down" : ""}">${dol(lg.extrinsic)}</td>
-      <td>${pnl(leg.unrealized_pl)}</td>
-      <td style="text-align:left;white-space:normal">${state === "ok"
-        ? `<span class="faint">ok</span>`
-        : `<span class="${loud(state) ? "down" : "warn"}"><b>${
-            esc((GUARD_LABEL[state] || state).toUpperCase())}</b></span>
-           <span class="faint">${esc(lg.why || "")}${(lg.rules || []).length
-             ? ` [${esc(lg.rules.join(", "))}]` : ""}</span>`}
-        ${!leg.solved && leg.skipped
-          ? `<div class="faint">no greeks — ${esc(leg.skipped)}</div>` : ""}</td>
-    </tr>`;
-  });
-
-  const dead = earliestDeadline(st.legs);
-  const deadCell = !dead ? ""
-    : `<span>Flatten by <b class="${loud(g) ? "down" : ""}">${
-        dead.at == null ? "unreadable"
-          : esc(dead.at.replace("T", " ").slice(0, 16))}</b>${
-        dead.count > 1 ? ` <span class="warn">earliest of ${dead.count} — this
-          structure holds more than one expiry</span>` : ""}${
-        dead.unreadable.length ? ` <span class="warn">and ${
-          dead.unreadable.length} the page could not order</span>` : ""}</span>`;
-  return `<div class="card ${loud(g) || stuck ? "o-alarm" : ""}"
-    style="margin-bottom:18px">
-    <div class="card-h">
-      <div class="card-t">${esc(st.underlying || "")} · ${esc(st.expiry || "")}</div>
-      <div class="card-x">${pill} <span class="faint">${
-        Number(st.dte) === 0 ? `<b class="down">0DTE</b>`
-          : `${st.dte == null ? "—" : st.dte}d`} · ${st.short_legs || 0} short ·
-        ${(st.legs || []).length} legs</span></div></div>
-    <div class="card-b flush">
-      <div style="padding:0 18px 12px" class="o-flags">
-        <span>Market value <b>${mny(st.market_value)}</b></span>
-        <span>Open P/L <b>${pnl(st.unrealized_pl)}</b></span>
-        <span>Cost basis <b>${mny(st.cost_basis)}</b></span>
-        ${deadCell}
-      </div>
-      ${stuck ? `<div style="padding:0 18px 12px"><div class="note bad"
-        style="margin:0"><b>This structure cannot be closed by one order.</b>
-        ${esc(stuck)} The close route answers it <b>409</b>, so nothing on
-        this page and nothing in the engine will flatten it as a unit: close
-        the structures the ledger names, or close the legs at the broker,
-        shorts first.</div></div>` : ""}
-      ${tableHTML(["Contract", "Side", "Strike", "Mid", "IV", "Δ", "Γ", "Θ", "V",
-                   "Extrinsic", "P/L", "Guard"], rows, "No legs reported.")}
-      <div style="padding:10px 18px 4px" class="tip">
-        Grouped by ${esc(st.grouping || "underlying and expiry")}. The broker
-        does not say which legs were opened by the same order, so this grouping
-        is inferred — two unrelated spreads on the same underlying and expiry
-        would be shown here as one structure.</div>
-    </div></div>`;
-}
-
 /* =============================================================== backtest */
 let SW = null;
 
@@ -1526,7 +1112,7 @@ function mountBacktest() {
 async function loadSweep() {
   // top=40 rather than the default 10: the graded table IS this page, and a
   // top-ten of a 200-row grading hides the D tail that makes the point
-  try { SW = await GET("/api/options/sweep?top=40"); }
+  try { SW = await GET("/api/optlab/sweep?top=40"); }
   catch (e) { put("obBody", errNote(e)); return; }
   paintSweep();
 }

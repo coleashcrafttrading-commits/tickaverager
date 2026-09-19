@@ -104,7 +104,7 @@ def build_report(fleet: Any, kind: str = "daily", days: int = 1,
     doc = SimpleDocTemplate(str(out), pagesize=letter,
                             leftMargin=0.7 * inch, rightMargin=0.7 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch,
-                            title=f"TickAverager {kind} report {stamp}")
+                            title=f"Tick Avenger {kind} report {stamp}")
     F = []
     titles = {"daily": "Daily report", "weekly": "Weekly report",
               "inventory": "Open inventory", "full": "Full history"}

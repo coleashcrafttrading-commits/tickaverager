@@ -163,3 +163,5 @@ Two things worth saying to it at the start of a session:
   work, it must be against a scratch state directory and never with the real
   keys. Every UI change in this repo is built against a mock server for exactly
   this reason.
+
+Glenn's Mac set up and deploying, 2026-09-15.

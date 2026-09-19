@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fleet.py -- runs MANY TickAverager ladders on one Alpaca account.
+fleet.py -- runs MANY Tick Avenger ladders on one Alpaca account.
 
 Every ticker gets its own Engine: its own ledger, its own thread, its own
 independent strategy settings (adds, take-profit, sessions, entry pricing).
