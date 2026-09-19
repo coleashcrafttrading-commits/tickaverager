@@ -402,7 +402,58 @@ def main() -> int:
            lambda: od.historical_chain_symbols("SPY", "2026-02-16", 1, 2, 0),
            "strike spacing")
 
-    print("\n11. Live check against Alpaca (skipped without keys or network)")
+    print("\n11. The broker's own greeks and IV come off the snapshot")
+    # The repo used to state, in capitals and in four files, that Alpaca
+    # returns no greeks and no IV ever. It does return them -- on everything
+    # except 0DTE. These rows are Alpaca's real payload shape, copied from a
+    # live SPY260921P00786000 snapshot.
+    full = dict(snap(1.20, 1.30, 12, 30),
+                greeks={"delta": -0.9372, "gamma": 0.008, "rho": -0.0607,
+                        "theta": -0.2376, "vega": 0.0852},
+                impliedVolatility=0.2225)
+    c = O._contract_from_snapshot("SPY260921P00786000", full)
+    check("broker_iv is carried through", c["broker_iv"], 0.2225)
+    check("broker delta is carried through", c["broker_greeks"]["delta"], -0.9372)
+    check("broker theta is carried through", c["broker_greeks"]["theta"], -0.2376)
+    check("all five greeks are present",
+          sorted(c["broker_greeks"]), sorted(O.BROKER_GREEK_NAMES))
+    check("the quote is still parsed alongside them", c["mid"], 1.25)
+
+    # 0DTE: quoted, two-sided, and no greeks object at all. This is the case
+    # the original wrong claim was generalised from, and the case our own
+    # maths exists for.
+    zero_dte = O._contract_from_snapshot("SPY260918C00745000",
+                                         snap(16.38, 16.65, 5, 5))
+    check("0DTE: no broker greeks", zero_dte["broker_greeks"], None)
+    check("0DTE: no broker IV", zero_dte["broker_iv"], None)
+    check("0DTE: but the quote is real", zero_dte["mid"], 16.515)
+
+    # Shapes that must not become a half-filled dict downstream.
+    part = O._contract_from_snapshot(
+        "SPY260921C00760000",
+        dict(snap(1.20, 1.30), greeks={"delta": 0.55, "gamma": 0.01},
+             impliedVolatility=0.21))
+    check("a partial greeks object keeps its keys",
+          part["broker_greeks"]["delta"], 0.55)
+    check("and the absent ones are None, never 0.0",
+          part["broker_greeks"]["theta"], None)
+    empty = O._contract_from_snapshot(
+        "SPY260921C00761000", dict(snap(1.20, 1.30), greeks={}))
+    check("an empty greeks object is no greeks at all",
+          empty["broker_greeks"], None)
+    junk = O._contract_from_snapshot(
+        "SPY260921C00762000",
+        dict(snap(1.20, 1.30), greeks={"delta": "x", "gamma": None,
+                                       "theta": None, "vega": None,
+                                       "rho": None}))
+    check("an unparseable greek is None, not a crash",
+          junk["broker_greeks"], None)
+    ivonly = O._contract_from_snapshot(
+        "SPY260921C00763000", dict(snap(1.20, 1.30), impliedVolatility=0.19))
+    check("IV without a greeks object still surfaces", ivonly["broker_iv"], 0.19)
+    check("and greeks stay None", ivonly["broker_greeks"], None)
+
+    print("\n12. Live check against Alpaca (skipped without keys or network)")
     live_ok = _live_check()
     if not live_ok:
         print("  SKIP  no credentials or no network -- offline suite is complete")

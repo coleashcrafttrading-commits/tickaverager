@@ -141,7 +141,7 @@ the Alpaca API topic.
 | | |
 |---|---|
 | `optsym.py` | contract identity. OCC symbols are parsed from the RIGHT (the root is the variable-length part). `year_fraction` is the 0DTE-critical one: on expiry day it shrinks through the session and floors at a second rather than reaching zero. |
-| `greeks.py` | Black-Scholes-Merton, greeks in stated units (theta per calendar day, vega per vol point), IV, and `implied_forward`. Alpaca returns NO greeks and NO IV, ever, at any feed. |
+| `greeks.py` | Black-Scholes-Merton, greeks in stated units (theta per calendar day, vega per vol point), IV, `implied_forward`, and `chain_greeks_merged` which prefers Alpaca's greeks and computes only the rest. See "Alpaca DOES send greeks" below. |
 | `optdata.py` | the only path to Alpaca for options data, plus a liquidity quality gate. |
 | `optbank.py` | the shelf: 231 structures under `options/bank/`, with `permitted()` and `assignment_legs()`. |
 | `optengine.py` | the automated trader and the assignment guard. |
@@ -212,6 +212,74 @@ Rank by profit per dollar of drawdown and read `robustness` (P/L at 2x spread
 over P/L at 1x) next to it. A row can be "positive at every spread" and still
 keep only $9 of $1,783 when the spread doubles, which is not an edge.
 
+### Alpaca DOES send greeks -- correcting what this file used to say
+
+This file, `greeks.py`, `optdata.py`, `options.py`, both options docs and
+several commit messages all stated that **"Alpaca returns NO greeks and NO
+implied volatility, ever, at any feed"**. That was wrong, and it is worth
+knowing exactly how it got here: it was measured against ONE expiry,
+`2026-09-18`, on `2026-09-18` -- so the single sample was a 0DTE chain, and
+0DTE is the one case that returns nothing. One probe of the only case that
+could produce that conclusion became a rule stated in capitals in six places.
+
+Re-measured 18 Sep 2026 ~20:50 ET, SPY, all strikes within +/-7% of spot, both
+feeds, counting snapshots carrying a `greeks` object:
+
+| expiry | DTE | opra | indicative |
+|---|---|---|---|
+| 2026-09-18 | 0 | **0 / 214** | **0 / 214** |
+| 2026-09-21 | 3 | 120 / 192 | 124 / 192 |
+| 2026-09-22 | 4 | 136 / 196 | 138 / 196 |
+| 2026-09-23 | 5 | 140 / 192 | 146 / 192 |
+| 2026-09-24 | 6 | 160 / 192 | 154 / 192 |
+| 2026-09-30 | 12 | 208 / 214 | 206 / 214 |
+| 2027-06-30 | 285 | 142 / 142 | 142 / 142 |
+
+So: **full coverage far out, thinning as expiry approaches, zero at 0DTE on
+both feeds.** The feed barely matters; DTE does. The gaps are not arbitrary --
+the greeked rows are always a subset of the two-sided-quoted rows, and the
+quoted-but-greekless remainder is near-zero-extrinsic ITM calls, which is the
+same rowset our own solver refuses as "iv did not solve". Alpaca is not
+withholding those; it cannot solve them either.
+
+**What the code does now.** `optdata._contract_from_snapshot` surfaces
+`broker_greeks` and `broker_iv`. `greeks.chain_greeks_merged` prefers the
+broker's values and computes only the holes, stamping every row with
+`source` = `alpaca` | `computed` | null. A row is one source's or the other's,
+never a blend -- a broker row missing any of the five greeks is recomputed
+whole. `/api/optlab/chain/{sym}` returns `source` per contract and a `sources`
+count for the board.
+
+**The two disagree slightly and it is not a bug.** On 116 SPY contracts at
+3 DTE where both had an answer: IV median +0.0012, delta median **-0.0207**
+(worst -0.082), gamma/vega/theta near zero. The systematic delta sign is the
+tell -- we price off the chain's implied forward (762.31), Alpaca off the spot
+print (761.69). 62 cents of underlying moves every delta the same way.
+Consequence: **do not pick a strike by delta across a mixed chain.** Pass
+`prefer="computed"` to get one ruler for the whole board. The merge does not
+re-base automatically, because "re-base onto Alpaca" is impossible where
+Alpaca has nothing and "re-base onto ours" is just `prefer="computed"`.
+
+**Why 0DTE specifically is empty.** Not the market being shut -- every other
+expiry above was measured in the same closed market and returned greeks.
+**Alpaca measures time-to-expiry in WHOLE DAYS**, so on expiration day their
+T is 0, their Black-Scholes divides by zero, and the `greeks` and
+`impliedVolatility` keys are silently omitted rather than erroring. Alpaca
+staff confirmed this on their forum. No subscription tier changes it.
+
+That cause comes from an 8 Sep 2026 probe in a *different* repo
+(`C:\Users\Cole\claude-trader`), not from today's measurement -- today's
+sample cannot separate "0DTE" from "already expired", because the 0DTE expiry
+had expired hours before the probe. The whole-day-T explanation accounts for
+both today's numbers and that earlier one, and nothing in the code depends on
+it being right. If you want it verified in this repo, run the probe intraday
+against that session's own 0DTE expiry.
+
+**Note the wider lesson.** The correct fact was already written down, in
+Cole's own notes, ten days before this repo asserted the opposite in capitals
+in six files. Nobody checked. A claim about a vendor's API that is stated as
+a rule should carry the probe that produced it.
+
 ## STANDING NOTE FOR GLENN'S SESSION (18 Sep 2026, from Cole)
 
 **Pause options work.** Cole's instruction, verbatim in substance: hold off on
@@ -240,12 +308,36 @@ claim it in this file first. We collided on exactly one path,
 other -- there is now a test asserting nothing in app.py may shadow a path in
 optapi.router, and it should stay.
 
-**The dashboard IS very slow and it is real, but do not fix it yet.** Measured
-on the VM with nothing else requesting: a 70 KB static CSS file takes 3.2-6.3
-seconds and `/api/overview` took 45 s. Load average 1.96 on a 2-core box, one
-uvicorn process, the fleet engines as threads in it -- so the GIL starves the
-web server thread. `state/option_quotes.jsonl` is 237 MB with no rotation.
-Cole wants this queued, not started.
+**The pause was lifted by Cole on 18 Sep 2026** for two items, both now done:
+the greeks source fix above, and a *diagnosis* (not a fix) of the slowness.
+
+**The dashboard slowness, now actually diagnosed.** The earlier note blamed
+the GIL and a 2-core box. That is a contributing factor, not the cause -- the
+cause is `/api/overview` re-reading and re-parsing the whole trade journal on
+almost every request:
+
+* `state/journal.jsonl` on the VM is **21 MB / 39,946 rows**. `journal.load()`
+  plus `journal.stats()` over it measures **5.9-6.5 s**, single-threaded.
+* `fleet.portfolio()` calls `realized_total()`, which does exactly that, behind
+  a **10-second** cache.
+* `/api/overview` measured on an otherwise-quiet VM: **10-39 s**, floor ~10 s,
+  median ~21 s over 28 consecutive calls. `/api/health`, which touches the same
+  fleet objects but never the journal, is **0.5 s**. That gap is the journal.
+* The cache cannot help. The dashboard polls every **2 s** (`ui_refresh_ms`),
+  the handler takes 10-39 s, so the 10 s cache has always expired by the time
+  the next request is served -- and requests arrive ~10x faster than they
+  complete, so they queue. That queue is why the number climbs to 39 s rather
+  than sitting at 6 s. The GIL matters only because it makes the queue strictly
+  serial.
+
+So the fix is not a bigger box. In rough order of payoff: cache `realized_total`
+for far longer than the poll interval (it is all-time realized P/L -- it barely
+moves), or keep a running total instead of re-reading the file; rotate or index
+`journal.jsonl`; and decouple the poll interval from the handler's service time.
+`state/option_quotes.jsonl` is separately **248 MB** with no rotation -- it is
+not in the `/api/overview` path, but it will become a problem on its own.
+
+**Still not started, still Cole's call:** the actual slowness fix.
 
 ## Two machines, one fleet
 

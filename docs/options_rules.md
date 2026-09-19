@@ -25,7 +25,10 @@ not a comment.
 * Multi-leg is 2 to 4 legs; outside that is a 422.
 * Option market orders are rejected outside 09:30-16:00 ET. Limit orders,
   day or GTC, are accepted while the market is closed and rest until the open.
-* Alpaca returns no greeks and no implied volatility, ever, at any feed.
+* Alpaca returns greeks and implied volatility on the snapshot for every
+  expiry EXCEPT 0DTE, thinning as expiry nears (0/214 at 0DTE, 120/192 at
+  3 DTE, 142/142 at 285 DTE, both feeds, 18 Sep 2026). The old line here --
+  "no greeks, ever, at any feed" -- was generalised from one 0DTE expiry.
 * `/v2/options/contracts` silently returns only the nearest expiry unless
   `expiration_date_gte` is passed, and never returns an expired contract.
 * Market data (10,000/min) is a separate rate-limit budget from trading
@@ -65,7 +68,7 @@ not a comment.
 5. SIZING -- never Kelly as the sizer: Do not compute position size from the Kelly criterion. If a Kelly estimate is computed at all, it may only be used as a multiplier in [0, 0.25] applied to the cap above, may never increase size above the cap, and must be disabled until at least 300 closed trades exist on the same strategy and underlying. Kelly under normal assumptions oversizes negatively-skewed payoffs.
 6. SIZING -- no martingale: Position size must be a pure function of current equity and the caps above. It must never reference recent P&L, loss streaks, or 'recovery' targets. Assert in code that the sizing function does not read the trade history.
 7. SIZING -- minimum viable size: If the computed contract count rounds to 0, do not open the position. Never round up to 1.
-8. GREEKS -- compute locally: Alpaca returns no greeks or IV on 0DTE at any tier. Compute all greeks locally using intraday time-to-expiry in years (not whole days). If a greek cannot be computed for any open or candidate leg, treat the portfolio greek check as FAILED, not as zero.
+8. GREEKS -- prefer the broker's, compute the rest: Alpaca returns no greeks or IV on 0DTE at any tier, and thinning coverage in the days either side; it returns them in full further out. Use the broker's values where present and compute the rest locally, and keep the two distinguishable per row (`source`) -- never blend them within one contract. Compute all greeks locally using intraday time-to-expiry in years (not whole days). If a greek cannot be computed for any open or candidate leg, treat the portfolio greek check as FAILED, not as zero.
 9. GREEKS -- beta-weighted net delta: Beta-weight every position's delta to SPY and cap |net portfolio beta-weighted delta| at 0.30 * (equity / SPY_price) shares-equivalent -- at $50k with SPY near $600 that is about +/-25 SPY-equivalent deltas, i.e. a 1% SPY move moves the book about $150. Reject any order that would breach it. This cap is a convention with no authoritative source; log it as a tunable.
 10. GREEKS -- net vega: Cap net portfolio vega at -0.10% of equity per vol point (about -$50 per 1 vol point at $50k) and at +0.05% on the long side. A short-premium book will run short vega; the cap exists so a VIX move of 20 points (observed twice in the last decade: +20 pts on 2018-02-05, +40 pts on 2024-08-05) costs at most ~$1,000 in vega terms.
 11. GREEKS -- gamma: Cap |net portfolio gamma| such that the change in net beta-weighted delta from a 2% adverse SPY move stays inside the delta cap above. Implement as: simulate spot -2% and +2%, recompute net delta, reject the order if either simulated net delta breaches the delta cap.

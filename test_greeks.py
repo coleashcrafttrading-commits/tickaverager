@@ -520,6 +520,140 @@ def main() -> int:
     check("a string expiry is refused rather than guessed",
           _raises(lambda: optsym.year_fraction("2026-09-25", now)), True)
 
+    print("\n14. Alpaca's greeks are PREFERRED, ours fill the holes")
+    # The premise: Alpaca publishes greeks on everything except 0DTE, thinning
+    # as expiry approaches. So a near-dated chain is MIXED, and a row that
+    # cannot say which source it came from is worse than either source alone.
+    #
+    # The values below are deliberately nothing like what the maths would
+    # produce, so "did the broker's number survive" cannot pass by accident.
+    S14, r14, q14, T14 = 641.0, 0.043, 0.012, 3.0 * DAY
+    BROKER = {"delta": 0.4242, "gamma": 0.0303, "theta": -0.1717,
+              "vega": 0.0505, "rho": 0.0101}
+
+    def _row(sym, K, right, *, broker=False, quote=True, **extra):
+        mid = G.price(S14, K, T14, r14, 0.19, right, q14)
+        c = {"symbol": sym, "strike": K, "right": right, "T": T14,
+             "bid": (mid - 0.02) if quote else 0.0,
+             "ask": (mid + 0.02) if quote else 0.15}
+        if broker:
+            c["broker_greeks"] = dict(BROKER)
+            c["broker_iv"] = 0.3131
+        c.update(extra)
+        return c
+
+    chain = [
+        _row("A_BROKER", 620.0, "c", broker=True),      # broker has it
+        _row("B_LOCAL", 641.0, "c"),                    # broker does not
+        _row("C_BROKER", 660.0, "p", broker=True),
+        _row("D_LOCAL", 660.0, "c"),
+        _row("E_NOQUOTE", 700.0, "c", quote=False),     # nobody has it
+    ]
+    m = G.chain_greeks_merged(chain, S14, r14, q=q14)
+    check("every contract still comes back", len(m), 5)
+    check("a broker row is labelled 'alpaca'", m[0].source, "alpaca")
+    check("and carries the BROKER's delta, not ours", m[0].delta, 0.4242)
+    check("and the broker's IV", m[0].iv, 0.3131)
+    check("and the broker's theta", m[0].theta, -0.1717)
+    check("a row the broker skipped is labelled 'computed'", m[1].source, "computed")
+    check("and its delta is ours, near the 0.19 mids", 0.4 < m[1].delta < 0.7, True)
+    check("the second broker row is also taken whole", m[2].delta, 0.4242)
+    check("a row nobody could price has no source", m[4].source, None)
+    check("and still reports why", m[4].skipped, "no two-sided quote")
+    check("T stays OURS even on a broker row", m[0].T, T14)
+    check("and so does the mid", abs(m[0].mid - chain[0]["bid"] - 0.02) < 1e-9, True)
+
+    counts = G.chain_sources(m)
+    check("sources: alpaca counted", counts["alpaca"], 2)
+    check("sources: computed counted", counts["computed"], 2)
+    check("sources: the unpriced row counted", counts["none"], 1)
+    check("sources: the chain is flagged mixed", counts["mixed"], True)
+
+    print("\n15. Nothing is silently overwritten, in either direction")
+    # The failure this guards against: a merge that recomputes a broker row
+    # and quietly keeps its own answer, or stamps 'alpaca' on one of ours.
+    plain = G.chain_greeks(chain, S14, r14, q=q14)
+    check("chain_greeks alone still says 'computed'", plain[0].source, "computed")
+    check("and its delta is NOT the broker's",
+          abs(plain[0].delta - 0.4242) > 0.01, True)
+    check("every 'alpaca' row equals the payload exactly",
+          all(m[i].delta == BROKER["delta"] and m[i].vega == BROKER["vega"]
+              for i in (0, 2)), True)
+    check("no 'computed' row carries a broker value",
+          any(m[i].delta == BROKER["delta"] for i in (1, 3)), False)
+    forced = G.chain_greeks_merged(chain, S14, r14, q=q14, prefer="computed")
+    check("prefer='computed' ignores the broker entirely",
+          [x.source for x in forced if x.source], ["computed"] * 4)
+    check("and gives one ruler for the whole board",
+          G.chain_sources(forced)["mixed"], False)
+    check("an unknown prefer is refused, not guessed",
+          _raises(lambda: G.chain_greeks_merged(chain, S14, r14, prefer="best")),
+          True)
+
+    print("\n16. A broker row missing ANY greek is computed whole, not glued")
+    # Never observed on the wire (0 partial rows in 120 measured at 3 DTE),
+    # but a row that mixed their delta with our gamma would be internally
+    # inconsistent in a way nothing downstream could detect.
+    for missing in ("delta", "gamma", "theta", "vega", "rho"):
+        g = dict(BROKER)
+        g[missing] = None
+        one = G.chain_greeks_merged(
+            [_row("P", 641.0, "c", broker=True, broker_greeks=g)],
+            S14, r14, q=q14)[0]
+        check(f"a broker row with no {missing} falls back to ours",
+              one.source, "computed")
+        check(f"  and keeps none of the broker's numbers ({missing})",
+              one.delta == BROKER["delta"], False)
+    no_iv = G.chain_greeks_merged(
+        [_row("Q", 641.0, "c", broker=True, broker_iv=None)],
+        S14, r14, q=q14)[0]
+    check("greeks without an IV are refused too", no_iv.source, "computed")
+    zero_iv = G.chain_greeks_merged(
+        [_row("R", 641.0, "c", broker=True, broker_iv=0.0)],
+        S14, r14, q=q14)[0]
+    check("a zero IV is not a vol", zero_iv.source, "computed")
+    junk = G.chain_greeks_merged(
+        [_row("S", 641.0, "c", broker=True,
+              broker_greeks=dict(BROKER, delta="oops"))], S14, r14, q=q14)[0]
+    check("an unparseable greek falls back rather than raising",
+          junk.source, "computed")
+    not_a_dict = G.chain_greeks_merged(
+        [_row("T", 641.0, "c", broker=True, broker_greeks=[1, 2, 3])],
+        S14, r14, q=q14)[0]
+    check("a greeks field of the wrong type is ignored",
+          not_a_dict.source, "computed")
+
+    print("\n17. A 0DTE chain still comes back fully computed")
+    # This is the case the whole module now exists for. Alpaca returns nothing
+    # at 0DTE -- measured 0 of 214 SPY contracts on both feeds, while 116 of
+    # them had a two-sided quote -- so if the merge broke the local path, the
+    # only expiry the owner trades would go blank and nothing else would.
+    T0 = 4.0 * HOUR
+    zchain = []
+    for K in (636.0, 638.0, 641.0, 644.0, 646.0):
+        for right in ("c", "p"):
+            mid = G.price(S14, K, T0, r14, 0.35, right, q14)
+            zchain.append({"symbol": f"SPY260918{right.upper()}{int(K)}",
+                           "strike": K, "right": right, "T": T0,
+                           "bid": mid - 0.01, "ask": mid + 0.01,
+                           # exactly what optdata puts on a 0DTE row
+                           "broker_greeks": None, "broker_iv": None})
+    z = G.chain_greeks_merged(zchain, S14, r14, q=q14)
+    check("every 0DTE row comes back", len(z), len(zchain))
+    check("all ten solved from our own maths",
+          sum(1 for x in z if x.solved), 10)
+    check("and every one says 'computed'",
+          all(x.source == "computed" for x in z), True)
+    check("not one claims to be Alpaca's",
+          any(x.source == "alpaca" for x in z), False)
+    check("the 0DTE chain is not flagged mixed",
+          G.chain_sources(z)["mixed"], False)
+    for x in z:
+        if not (0.28 < x.iv < 0.43):
+            globals()["FAIL"] += 1
+            print(f"  FAIL  0DTE {x.symbol} solved to iv {x.iv}")
+    print("  PASS  each 0DTE IV is near the 0.35 the mids were built from")
+
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
     return 1 if FAIL else 0
 

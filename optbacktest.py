@@ -37,6 +37,13 @@ Three more honesty rules, enforced in code rather than remembered:
   * Strikes are chosen by DELTA, computed from the chain itself at the entry
     minute via the implied forward (see greeks.implied_forward). They are never
     chosen using anything from later in the day.
+  * Those deltas are COMPUTED, always, and deliberately so. Alpaca does
+    publish greeks on live snapshots (the repo used to claim it never does --
+    see greeks.py for the correction), but this backtester replays HISTORICAL
+    bars and trade prints, and a historical bar carries no greeks at any age.
+    There is nothing to prefer here, so `chain_greeks` is called directly
+    rather than `chain_greeks_merged`: a backtest that silently mixed live
+    broker greeks into a historical replay would be looking ahead.
 
     .venv/Scripts/python optbacktest.py --list
     .venv/Scripts/python optbacktest.py iron_condor --underlying SPY --days 250

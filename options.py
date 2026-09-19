@@ -57,11 +57,19 @@ QUOTE_LOG = STATE_DIR / "option_quotes.jsonl"
 
 
 # ------------------------------------------------------------- greeks ----
-# Alpaca returns NO greeks and NO implied volatility on this plan -- verified
-# against both the indicative and opra feeds on 15 Sep 2026, where a snapshot
-# carries latestQuote/latestTrade/bars and nothing else. So they are computed
-# here from the quoted mid by Black-Scholes, which means every greek in the
-# dataset is only as good as the mid it was solved from: a contract quoted
+# CORRECTION (18 Sep 2026). This comment used to say Alpaca returns NO greeks
+# and NO implied volatility on this plan, "verified against both feeds". It was
+# not verified against both feeds so much as against one EXPIRY -- the 0DTE one
+# -- which is the single case that returns nothing. Alpaca does publish greeks
+# and impliedVolatility on the snapshot for every expiry except 0DTE, with
+# coverage thinning as expiry nears; optdata.py holds the measured counts.
+#
+# What is computed below is UNCHANGED and still correct for this module: these
+# rows are the recorder's dataset, they must be reproducible from the quote
+# alone, and at 0DTE -- the expiry this system trades -- Alpaca gives nothing
+# anyway. The preference logic lives in greeks.chain_greeks_merged, which this
+# file deliberately does not use. Every greek in the dataset is therefore
+# only as good as the mid it was solved from: a contract quoted
 # 0.23 x 0.33 has a mid that is 36% wide, and its greeks inherit that. Rows
 # carry `iv_source` so a screen can insist on a tight quote before trusting
 # a number derived from it.

@@ -39,9 +39,21 @@ tells us whether the gates are calibrated.
 
 Chain fetch on the `opra` consolidated feed, joined to live quotes.
 
-Alpaca supplies **no greeks and no implied volatility** on this plan (verified
-against both feeds), so implied volatility is solved from the mid by bisection
-and the greeks follow. Measured at ~40,000 contracts per second; a 98-contract
+Alpaca supplies greeks and implied volatility on the snapshot for **every
+expiry except 0DTE**, with coverage thinning as expiry approaches (measured
+18 Sep 2026: 142/142 at 285 DTE, 208/214 at 12 DTE, 120/192 at 3 DTE, and
+**0/214 at 0DTE** on both feeds). This document previously said Alpaca supplies
+none of it, "verified against both feeds" -- that claim came from probing a
+single expiry which happened to be 0DTE that day, i.e. from the only sample
+that could have produced it.
+
+So the broker's values are **preferred where present** and implied volatility
+is solved from the mid by bisection only where they are absent -- which at
+0DTE, the expiry this system actually trades, is everywhere.
+`greeks.chain_greeks_merged` does the merge and stamps every row with a
+`source` of `alpaca` or `computed`; the two disagree by about 0.02 of delta
+because we price off the chain's implied forward and Alpaca off the spot
+print. Measured at ~40,000 contracts per second; a 98-contract
 SPY chain resolves in 0.08 s. Real time is not a constraint.
 
 **Every greek inherits the quality of the mid it came from.** A contract quoted

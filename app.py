@@ -1766,13 +1766,23 @@ def options_expirations(sym: str, min_dte: int = 0, max_dte: int = 60,
 
 # -------------------------------------------------------------------- chains
 def _chain_rows(data, sym: str, exp, pct: float, right: str) -> dict:
-    """One expiry, quoted, with IV and greeks solved locally.
+    """One expiry, quoted, with IV and greeks from Alpaca where it has them
+    and solved locally where it does not.
 
-    Alpaca returns no greeks and no IV, on any feed, at any tier, ever -- so
-    everything here past the quote is computed in this process. Rows that did
-    not solve are RETURNED carrying the reason, never dropped: a dropped
-    contract looks exactly like a contract that does not exist, and a screener
-    that cannot see the strike it wanted cannot say why it passed on it.
+    EVERY ROW CARRIES A `source`: "alpaca", "computed", or null when nothing
+    could be established. Alpaca publishes greeks on the snapshot for
+    everything except 0DTE, with coverage thinning as expiry approaches (see
+    optdata.py for the measured counts), so a near-dated chain is genuinely
+    mixed and a reader who cannot tell which row is which is worse off than
+    with either source alone. Rows that did not solve are RETURNED carrying
+    the reason, never dropped: a dropped contract looks exactly like a
+    contract that does not exist, and a screener that cannot see the strike it
+    wanted cannot say why it passed on it.
+
+    The two sources disagree slightly -- we price off the chain's implied
+    forward, Alpaca off the spot print -- and greeks.chain_greeks_merged has
+    the measured size of it and the argument for not re-basing one onto the
+    other. `sources` in the response counts the mix.
 
     THIS IS NOT A DUPLICATE OF /api/options/chain/{symbol}, and neither of the
     two is the tidy-up of the other. optapi's chain prices off the SPOT print;
@@ -1804,9 +1814,14 @@ def _chain_rows(data, sym: str, exp, pct: float, right: str) -> dict:
     # and every contract on the board reads as unpriced.
     priced = [{**c, "symbol": c["occ"]} for c in rows]
     by_symbol: dict = {}
+    solved_rows: list = []
     if rows and (spot or forward):
-        for g in _greeks.chain_greeks(priced, float(spot or forward), OPT_RATE,
-                                      now=now):
+        # _merged, not chain_greeks: the broker's values win where it has
+        # them. The broker_greeks/broker_iv keys the merge reads are already
+        # on `c` -- optdata puts them there straight off the snapshot.
+        solved_rows = _greeks.chain_greeks_merged(
+            priced, float(spot or forward), OPT_RATE, now=now)
+        for g in solved_rows:
             by_symbol[g.symbol] = g
 
     out = []
@@ -1823,6 +1838,8 @@ def _chain_rows(data, sym: str, exp, pct: float, right: str) -> dict:
             "t_years": None if g is None else round(g.T, 8),
             "iv": None, "delta": None, "gamma": None, "theta": None,
             "vega": None, "rho": None, "solved": False,
+            # "alpaca", "computed", or null -- never a blend of the two
+            "source": None if g is None else g.source,
             # the reason this row has no greeks, carried BY the row
             "skipped": ("no underlying price, so nothing can be priced"
                         if g is None else g.skipped),
@@ -1842,7 +1859,13 @@ def _chain_rows(data, sym: str, exp, pct: float, right: str) -> dict:
                        else ("spot" if spot else None)),
         "rate": OPT_RATE, "convention": "calendar",
         "as_of": now.isoformat(), "as_of_from": clock_from,
-        "t_years": round(t_years, 8), "contracts": out,
+        "t_years": round(t_years, 8),
+        # How this board is made up. `mixed` true means strikes on it were
+        # measured with two different rulers that differ by about 0.02 of
+        # delta -- fine for reading one contract, a trap for picking a strike
+        # by delta across the board.
+        "sources": _greeks.chain_sources(solved_rows),
+        "contracts": out,
     }
 
 

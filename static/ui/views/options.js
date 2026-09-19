@@ -12,12 +12,15 @@
    Three rooms, and each one exists because a number that matters has nowhere
    else to live:
 
-     Chain       Alpaca returns no greeks and no implied volatility, ever, at
-                 any feed and at any tier. Every IV and every greek on this
-                 page was solved by greeks.py in the dashboard process, priced
-                 off the forward the chain itself implies -- so the page shows
-                 that forward and says which of the two it priced off, because
-                 the answer moves every delta on the board. A row whose IV did
+     Chain       Alpaca DOES publish greeks and implied volatility -- on
+                 everything except 0DTE, where it returns none at all, and
+                 thinning as expiry approaches (measured on SPY: 0 of 30 rows
+                 at 0DTE, 14-17 at 3 DTE, 30 of 30 from 12 DTE out). So the
+                 board shows the broker's numbers where they exist and ours
+                 where they do not, and labels every row with which. Ours are
+                 priced off the forward the chain itself implies rather than a
+                 spot print, which is why they sit a hair away from Alpaca's
+                 -- that gap is the forward, not an error. A row whose IV did
                  not solve keeps its quotes and says WHY: a dropped contract
                  looks like a contract that does not exist, and a blank cell
                  reads as a zero.
@@ -702,12 +705,14 @@ function paintChain() {
       budgetHTML(d.budget), { flush: true })}
     ${card("Where these numbers come from", `
       <div class="tip" style="margin-top:0">
-        Alpaca returns <b>no implied volatility and no greeks</b>, at any feed
-        and at any tier — on 0DTE least of all. Every IV, delta, gamma, theta
-        and vega above was solved in the dashboard from the quoted mid, with
+        Alpaca publishes implied volatility and greeks for most expiries, and
+        <b>none at all for 0DTE</b> — coverage thins as expiry approaches (on
+        SPY: none at 0DTE, about half at 3 days, complete from 12 days out).
+        Rows marked <b>alpaca</b> are the broker's own numbers, untouched.
+        Rows marked <b>computed</b> were solved here from the quoted mid, with
         the time to expiry in <b>years measured to the minute</b> rather than
         in whole days: at 0DTE a day-resolution clock is not a rounding error,
-        it is the entire number.<br><br>
+        it is the entire number. The two are never blended in one row.<br><br>
         They are priced off the <b>${esc(d.priced_off || "forward")}</b>${
           d.priced_off === "forward"
             ? ` the chain itself gives up through put-call parity${basis == null

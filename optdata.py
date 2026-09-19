@@ -17,10 +17,52 @@ is shaped the way it is:
     ladder does not have. So chain polling goes to the data host and only the
     contract *registry* (/v2/options/contracts) touches the trading host. The
     module counts what it spent on each: see `stats()`.
-  * SNAPSHOTS CARRY NO GREEKS AND NO IMPLIED VOLATILITY. Confirmed across a
-    whole SPY chain: a snapshot is dailyBar / prevDailyBar / minuteBar /
-    latestQuote / latestTrade and nothing else. Greeks are computed locally
-    (greeks.py); this module never pretends to have them.
+  * SNAPSHOTS DO CARRY GREEKS AND IMPLIED VOLATILITY -- EXCEPT ON 0DTE.
+    This module used to say the opposite, in capitals, and it was WRONG. The
+    original claim came from probing exactly one expiry, 2026-09-18, which was
+    the 0DTE expiry on the day it was probed; a single sample of the one case
+    that returns nothing was generalised into "never, at any feed".
+
+    Re-measured 2026-09-18 ~20:50 ET, SPY, every strike within +/-7% of spot,
+    both feeds, counting contracts whose snapshot carried a `greeks` object:
+
+        expiry        DTE   opra        indicative
+        2026-09-18      0     0 / 214      0 / 214
+        2026-09-21      3   120 / 192    124 / 192
+        2026-09-22      4   136 / 196    138 / 196
+        2026-09-23      5   140 / 192    146 / 192
+        2026-09-24      6   160 / 192    154 / 192
+        2026-09-30     12   208 / 214    206 / 214
+        2027-06-30    285   142 / 142    142 / 142
+
+    So coverage is total far out and thins as expiry approaches, and 0DTE is
+    a hard zero on both feeds even though 116 of those 214 contracts had a
+    two-sided quote. The feed barely matters; DTE is what matters.
+
+    The gaps are not random. In every row above, the set of contracts with
+    greeks is a SUBSET of the contracts with a two-sided quote, and the
+    quoted-but-greekless remainder is near-zero-extrinsic ITM calls (e.g.
+    SPY260921C00748000, mid 13.69 against 13.69 of intrinsic). That is the
+    same rowset our own solver refuses as "iv did not solve", for the same
+    reason: there is no vol in the price. Alpaca is not withholding those,
+    it cannot compute them either.
+
+    WHY 0DTE IS EMPTY, which is not the market being shut -- every other
+    expiry above was measured in the same closed market. ALPACA MEASURES
+    TIME-TO-EXPIRY IN WHOLE DAYS. On expiration day that is 0, their
+    Black-Scholes divides by zero, and the keys are silently omitted rather
+    than erroring. Alpaca staff confirmed it on their forum; no subscription
+    tier changes it. That cause comes from an 8 Sep 2026 probe in another
+    repo, not from the measurement above -- today's 0DTE sample was taken
+    after that expiry had already expired and so cannot separate "0DTE" from
+    "expired" on its own. Verify it here by probing intraday against the
+    session's own 0DTE expiry if it ever matters.
+
+    It does not matter to this code either way: `broker_greeks` is used where
+    it is present and greeks.py computes where it is not. It DOES matter to
+    the system, because whole-day T is the same bug our optsym.year_fraction
+    exists to avoid, and it is why our 0DTE numbers are not merely a
+    substitute for Alpaca's but better-founded than they would be.
   * limit=1000 IS THE CEILING on snapshots. limit=5000 is answered with
     HTTP 400 "invalid limit: larger than the allowed maximum of 1000".
   * /v2/options/contracts LIES BY OMISSION without expiration_date_gte: it
@@ -463,9 +505,12 @@ class OptionData:
         Returned dicts carry occ, underlying, expiry, strike, right, bid, ask,
         mid, bid_size, ask_size, spread, spread_pct, last, last_at, last_size,
         volume, prev_volume, day_close, prev_close, quote_at and open_interest
-        (None unless enriched -- snapshots do not carry it). There are NO
-        greeks and no IV here; snapshots do not carry those either, and this
-        module will not invent them. greeks.py computes them.
+        (None unless enriched -- snapshots do not carry it), plus `greeks` and
+        `implied_volatility` WHEN ALPACA SENDS THEM. It does for most expiries
+        and never for 0DTE, thinning as expiry approaches -- measured on SPY,
+        0 of 30 rows at 0DTE against 30 of 30 from 12 DTE out. This module
+        passes through whatever arrived and invents nothing; greeks.py fills
+        the gaps and labels which row came from where.
         """
         sym = underlying.upper()
         exp = _as_date(expiry)
@@ -684,6 +729,7 @@ def _contract_from_snapshot(occ: str, snap: dict) -> Optional[dict]:
     t = snap.get("latestTrade") or {}
     day = snap.get("dailyBar") or {}
     prev = snap.get("prevDailyBar") or {}
+    bg, biv = _broker_greeks(snap)
 
     bid, ask = _pos(q.get("bp")), _pos(q.get("ap"))
     # A 0.00 bid is not a typo, it is a strike nobody will buy back. Treating it
@@ -714,11 +760,50 @@ def _contract_from_snapshot(occ: str, snap: dict) -> Optional[dict]:
         "prev_volume": _num(prev.get("v")),
         "day_close": _num(day.get("c")),
         "prev_close": _num(prev.get("c")),
-        # snapshots carry NO open interest, NO greeks and NO IV -- all three
-        # have to come from somewhere else, and pretending otherwise here is
-        # what would put a made-up delta into a sizing calculation
+        # Snapshots carry no open interest -- that one really does have to
+        # come from the trading host's contract rows, and filling it here
+        # would put a made-up number into a gate.
         "open_interest": None,
+        # What ALPACA said about this contract, kept under its own names so
+        # nothing downstream can confuse it with what greeks.py worked out.
+        # Both are None on 0DTE and on any strike Alpaca could not solve; see
+        # the module docstring for the measured coverage. greeks.chain_greeks
+        # reads exactly these two keys.
+        "broker_greeks": bg,
+        "broker_iv": biv,
     }
+
+
+# The five Alpaca publishes, in the order the docstring lists them. There is
+# no sixth: no lambda, no charm, and no vanna.
+BROKER_GREEK_NAMES = ("delta", "gamma", "theta", "vega", "rho")
+
+
+def _broker_greeks(snap: dict) -> tuple[Optional[dict], Optional[float]]:
+    """Alpaca's own greeks and IV off one snapshot, or (None, None).
+
+    Returns the greeks as a dict of the five names with a float or None
+    against each, NOT a dict with holes -- a caller that has to ask whether a
+    key exists before reading it will one day forget, and a missing delta
+    that reads as absent is the whole point of the exercise.
+
+    UNITS ARE ALPACA'S, PASSED THROUGH UNCONVERTED. Measured against our own
+    solver on 116 SPY contracts at 3 DTE, theirs and ours agree to a median
+    of 0.0012 in IV and -0.021 in delta, which is only possible if the units
+    already match: theta per calendar day, vega per vol point, per share.
+    Rescaling would show up immediately as a factor of 365 or 100 and does
+    not. Do not "fix" these into our conventions -- they are already in them.
+    """
+    raw = snap.get("greeks")
+    iv = _num(snap.get("impliedVolatility"))
+    if not isinstance(raw, dict):
+        return None, iv
+    out = {k: _num(raw.get(k)) for k in BROKER_GREEK_NAMES}
+    # An object that came back with nothing usable in it is not data. Saying
+    # None here keeps "Alpaca had no opinion" as one state rather than two.
+    if all(v is None for v in out.values()):
+        return None, iv
+    return out, iv
 
 
 def apply_open_interest(rows: Iterable[dict], oi: dict[str, int]) -> list[dict]:

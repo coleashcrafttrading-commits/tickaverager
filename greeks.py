@@ -2,13 +2,30 @@
 """
 greeks.py -- Black-Scholes-Merton pricing, greeks and implied volatility.
 
-This module exists because ALPACA SUPPLIES NONE OF IT. The chain snapshot
-(/v1beta1/options/snapshots/{underlying}) carries dailyBar, minuteBar,
-latestQuote and latestTrade and nothing else -- no greeks field and no
-impliedVolatility field, at any feed and at any options level, verified across
-a whole SPY chain. So every greek this system sizes, hedges or exits on is
-computed HERE, from the mid of the quote Alpaca does give us. If a number in
-the options tab has a Greek letter on it, it came out of this file.
+WHY THIS MODULE EXISTS -- and the correction that changed the answer.
+
+This file used to open by saying "ALPACA SUPPLIES NONE OF IT": no greeks and
+no impliedVolatility, ever, at any feed, at any options level. THAT WAS WRONG,
+and it was wrong in the most ordinary way -- it was measured once, against the
+2026-09-18 expiry, on 2026-09-18, which made the single sample a 0DTE chain.
+0DTE is the one case Alpaca returns nothing for, so the one probe that was run
+was the only probe that could have produced that conclusion.
+
+What is actually true, re-measured across seven expiries on both feeds (the
+per-expiry counts live in optdata.py's docstring): Alpaca DOES publish greeks
+and impliedVolatility on the snapshot, total coverage far out (142/142 at 285
+DTE, 208/214 at 12 DTE), thinning as expiry approaches (120/192 at 3 DTE), and
+ZERO at 0DTE on both feeds even where the contract is quoted two-sided.
+
+So this module is no longer the only source of a greek -- it is the FALLBACK,
+and at 0DTE it is the only source there is. That is a promotion rather than a
+demotion: 0DTE is what this system actually trades, so the case these formulas
+exist for is now precisely the case the broker does not cover.
+
+`chain_greeks_merged()` is the function that puts the two together and stamps
+every row with which one it came from. Read its docstring before trusting a
+mixed chain, because ours and theirs do not agree exactly and the reason is
+not a bug in either.
 
 Pure stdlib on purpose: this venv has neither numpy nor scipy, and the whole
 options stack would otherwise inherit a dependency for one normal CDF.
@@ -514,6 +531,16 @@ class ContractGreeks:
     tell "no two-sided quote" from "priced below intrinsic" instead of seeing
     a hole. Rows are never dropped -- a dropped contract looks like a
     contract that does not exist.
+
+    `source` says WHERE THE NUMBERS ON THIS ROW CAME FROM and is the field
+    that makes a mixed chain readable:
+
+        "computed"  solved here, by this module, off the quote mid
+        "alpaca"    taken whole from the broker's snapshot
+        None        nothing was established, so there is no source to name
+
+    It is never a blend. A row is one source's or the other's, all six
+    numbers together -- see chain_greeks_merged() for why.
     """
     symbol: str
     right: str
@@ -527,6 +554,7 @@ class ContractGreeks:
     vega: Optional[float] = None
     rho: Optional[float] = None
     skipped: Optional[str] = None
+    source: Optional[str] = None
 
     @property
     def solved(self) -> bool:
@@ -635,8 +663,188 @@ def chain_greeks(contracts: Sequence[dict], S: float, r: float,
             continue
         g = greeks(S_eff, strike, T, r, iv, kind, q_eff)
         out.append(ContractGreeks(sym, kind, strike, T, mid, iv, g.delta,
-                                  g.gamma, g.theta, g.vega, g.rho))
+                                  g.gamma, g.theta, g.vega, g.rho,
+                                  source="computed"))
     return out
+
+
+# --------------------------------------------------- broker / local merge
+# The names a broker row must carry, and the order print statements use.
+_GREEK_NAMES = ("delta", "gamma", "theta", "vega", "rho")
+
+# What optdata puts the broker's answer under. Named here so the coupling
+# between the two modules is one constant and not a string in four places.
+BROKER_GREEKS_KEY = "broker_greeks"
+BROKER_IV_KEY = "broker_iv"
+
+
+def broker_row(c: dict) -> Optional[tuple[float, dict]]:
+    """(iv, greeks) off one contract dict if the BROKER gave a COMPLETE set.
+
+    Complete means an IV and all five greeks. A partial row is refused, and
+    that refusal is the single most arguable decision in this file, so:
+
+    A row is one instrument's risk at one instant. Alpaca's delta and our
+    gamma on the same strike are not two halves of a description, they are
+    two descriptions -- priced off different underlyings (see
+    chain_greeks_merged) and solved off different vols. Gluing them together
+    produces a row that is internally inconsistent in a way NOTHING
+    downstream can detect, because the row looks complete. Recomputing the
+    whole row locally produces a row that is merely slightly different from
+    the broker's, which is a thing the `source` flag already announces.
+
+    Measured, so the reader knows what this costs: across 120 SPY contracts
+    at 3 DTE carrying greeks, ZERO were partial -- Alpaca sends all five or
+    sends no `greeks` object at all, and IV and greeks are always present
+    together (0 rows with one and not the other). So this branch is a guard
+    against a shape we have never seen, not a routine path, and refusing the
+    partial row costs nothing measured.
+    """
+    raw = c.get(BROKER_GREEKS_KEY)
+    iv = c.get(BROKER_IV_KEY)
+    if not isinstance(raw, dict) or iv is None:
+        return None
+    try:
+        vals = {k: float(raw[k]) for k in _GREEK_NAMES if raw.get(k) is not None}
+        iv = float(iv)
+    except (TypeError, ValueError):
+        return None
+    if len(vals) != len(_GREEK_NAMES) or iv <= 0.0:
+        return None
+    return iv, vals
+
+
+def chain_greeks_merged(contracts: Sequence[dict], S: float, r: float,
+                        now: Any = None, q: float = 0.0,
+                        convention: str = "calendar",
+                        use_forward: bool = True,
+                        prefer: str = "alpaca") -> list[ContractGreeks]:
+    """A chain priced from the BROKER where it has an answer, from us where it
+    does not, with every row stamped with which.
+
+    `prefer` is the whole switch:
+
+        "alpaca"    (default) broker values win; we fill only the holes.
+                    This is what a screener or a position view wants: the
+                    broker's number is the one the account will be marked
+                    against, and it covers most of a chain past 0DTE.
+        "computed"  ignore the broker entirely and solve every row here.
+                    This is what a caller wants when it is COMPARING STRIKES
+                    -- see "one chain, two rulers" below.
+
+    Nothing is ever silently overwritten in either direction. A broker row is
+    taken whole or not at all, a computed row is computed whole, and `source`
+    on the row says which happened. There is no third state.
+
+    ------------------------------------------------------------------
+    OURS AND THEIRS DISAGREE SLIGHTLY, AND IT IS NOT A BUG IN EITHER.
+
+    Measured on 116 SPY contracts at 3 DTE where both had an answer:
+
+        iv      median  +0.0012   worst  -0.082
+        delta   median  -0.0207   worst  -0.082
+        gamma   median  -0.00002  worst  -0.017
+        vega    median  -0.0017   worst  -0.102
+        theta   median  -0.0021   worst  +0.271
+
+    The delta median is systematically negative and that is the tell. We
+    price off the IMPLIED FORWARD that put-call parity extracts from the
+    chain itself; Alpaca appears to price off the spot print. On that sample
+    the forward was 762.31 against a spot of 761.69 -- 62 cents of difference
+    in the underlying, which moves every delta on the board by a small
+    consistent amount in one direction, exactly as observed. Neither is
+    wrong. The forward is the better input when spot and quotes are not
+    time-aligned (after the close, or on a stale print), which is why
+    chain_greeks defaults to it; spot is the better input when they are.
+
+    So a difference of this size between a broker row and one of ours is the
+    two models disagreeing about the underlying, NOT a defect to chase.
+
+    ------------------------------------------------------------------
+    ONE CHAIN, TWO RULERS -- and why this does NOT re-base automatically.
+
+    A mixed chain measures different strikes with different instruments. Pick
+    a short strike by "closest to 0.30 delta" across a chain that is Alpaca's
+    near the money and ours in the wings, and the systematic ~0.02 of delta
+    above can hand back a strike one or two ticks away from the one meant.
+    That is a real hazard and it is why `source` exists.
+
+    It is NOT fixed by re-basing here, and the reason is arithmetic rather
+    than taste. "Re-base onto Alpaca" is impossible -- the rows Alpaca does
+    not cover are exactly the rows that need a value, and at 0DTE that is the
+    entire chain. "Re-base onto ours" is possible but it is just
+    `prefer="computed"`, i.e. throwing the broker's data away, which would
+    make this function pointless on every chain where it does anything. So
+    re-basing is not a third option; it is one of the two existing ones.
+
+    The decision: DO NOT re-base implicitly. A function that silently
+    discarded the broker's values because one wing of the chain was missing
+    would be doing the exact silent overwrite this design forbids, and it
+    would do it invisibly, whereas a mixed chain with a `source` on every row
+    is a fact the caller can see and act on. Callers that compare strikes
+    against each other should pass prefer="computed" and get one ruler for
+    the whole board; callers that want the best available number per contract
+    should leave the default. `chain_sources()` counts the mix so a caller
+    can decide without walking the rows itself.
+    """
+    if prefer not in ("alpaca", "computed"):
+        raise ValueError(
+            f"prefer must be 'alpaca' or 'computed', got {prefer!r}")
+
+    # Every row is solved locally FIRST, even the ones the broker covers and
+    # whose local answer is then dropped. That is deliberate: the wasted work
+    # is a bisection over a chain that measures in single-digit milliseconds
+    # (chain_greeks' own docstring has the number), against a page that spends
+    # seconds elsewhere, and it buys a merge with one code path instead of two
+    # and a `local` list a future comparison can be run straight off. If this
+    # ever shows up in a profile, skip the solve where broker_row() is not
+    # None -- but measure before believing it matters.
+    local = chain_greeks(contracts, S, r, now=now, q=q, convention=convention,
+                         use_forward=use_forward)
+    if prefer == "computed":
+        return local
+
+    # chain_greeks returns exactly one row per contract, in order, on every
+    # branch including the skips -- the merge is positional and depends on it.
+    # Checked rather than assumed, because the day that stops being true the
+    # symptom is a chain whose greeks belong to the neighbouring strike, which
+    # is far worse than a crash and would not look wrong on screen.
+    if len(local) != len(contracts):
+        raise RuntimeError(
+            f"chain_greeks returned {len(local)} rows for {len(contracts)} "
+            "contracts; the merge is positional and cannot align them")
+
+    out: list[ContractGreeks] = []
+    for c, row in zip(contracts, local):
+        got = broker_row(c)
+        if got is None:
+            # No broker answer, so ours stands -- including ours being
+            # nothing. `skipped` already says why on an unsolved row.
+            out.append(row)
+            continue
+        iv, g = got
+        # T, mid, strike and right stay OURS on purpose: they are facts about
+        # the contract and the clock, not opinions about its risk, and the
+        # row's own T is what every downstream expiry check reads.
+        out.append(ContractGreeks(
+            row.symbol, row.right, row.strike, row.T, row.mid, iv,
+            g["delta"], g["gamma"], g["theta"], g["vega"], g["rho"],
+            skipped=None, source="alpaca"))
+    return out
+
+
+def chain_sources(rows: Sequence[ContractGreeks]) -> dict:
+    """How a merged chain is made up: {'alpaca': n, 'computed': n, 'none': n}.
+
+    'none' counts rows that got no greeks from anywhere, which is a different
+    fact from a row nobody asked about and is worth surfacing next to the
+    other two. `mixed` is the flag a caller acts on.
+    """
+    counts = {"alpaca": 0, "computed": 0, "none": 0}
+    for row in rows:
+        counts[row.source if row.source in counts else "none"] += 1
+    return {**counts, "total": len(rows),
+            "mixed": counts["alpaca"] > 0 and counts["computed"] > 0}
 
 
 # --------------------------------------------------------------- portfolio
