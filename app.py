@@ -1892,7 +1892,16 @@ def options_chain(sym: str, expiry: str = "", pct: float = 0.10,
 
 # --------------------------------------------------------------------- sweep
 def _sweep_files() -> list:
-    return sorted((ROOT / "research" / "options").glob("sweep_*.json"))
+    # options/sweeps/ first, research/options/ second. The sweeps are RESULTS
+    # -- a few hundred KB of them -- and research/options/ is gitignored
+    # because it also holds 336 MB of option bars, so a sweep left only there
+    # never reaches the VM and the Backtest tab renders empty on the one
+    # machine anyone actually looks at.
+    out = sorted((ROOT / "options" / "sweeps").glob("sweep_*.json"))
+    seen = {p.name for p in out}
+    out += [p for p in sorted((ROOT / "research" / "options").glob("sweep_*.json"))
+            if p.name not in seen]
+    return out
 
 
 def _newest_per_market(files: list, loaded: list) -> list:
@@ -2008,7 +2017,7 @@ def options_sweep(top: int = 10):
     files = _sweep_files()
     if not files:
         return {"ok": True, "sweeps": [], "graded": [], "grades": {},
-                "note": "no sweep_*.json under research/options/ yet"}
+                "note": "no sweep_*.json under options/sweeps/ or research/options/ yet"}
     loaded = [_sweep_load(p) for p in files]
     sweeps = []
     for p, d in zip(files, loaded):
