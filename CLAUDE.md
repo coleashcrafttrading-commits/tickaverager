@@ -212,6 +212,41 @@ Rank by profit per dollar of drawdown and read `robustness` (P/L at 2x spread
 over P/L at 1x) next to it. A row can be "positive at every spread" and still
 keep only $9 of $1,783 when the spread doubles, which is not an edge.
 
+## STANDING NOTE FOR GLENN'S SESSION (18 Sep 2026, from Cole)
+
+**Pause options work.** Cole's instruction, verbatim in substance: hold off on
+further options changes and on the dashboard slowness until he says go. The
+first version is now pushed and deployed and he wants to LOOK at it before
+anything else moves.
+
+**Why this note exists.** We both built an options system at the same time,
+neither of us pulled first, and they collided. Nothing was lost -- Cole chose
+to keep both -- but it cost a merge that should never have been needed:
+
+- **Glenn's stack is the one that TRADES** and is untouched: options.py,
+  optengine.py, optexec.py, optstructures.py, optvol.py, optgates.py,
+  optgrade.py, optcal.py, optquotes.py, optbook.py, optrun.py, optapi.py,
+  static/options.html, and `/options` plus every `/api/options/*` path.
+  optexec.py is the ONLY code in the repo that may place an option order.
+- **Cole's stack is the evidence layer**, all additive: the 231-document
+  strategy bank, 19 months of cached option history, a backtester and sweep,
+  and `/api/optlab/*` for a bank, chain, expirations and backtest results.
+
+**So that this does not happen again:** `git pull --ff-only origin master`
+before starting, and again before deploying. If you are about to create a
+module or a route in a namespace the other person could plausibly also use,
+claim it in this file first. We collided on exactly one path,
+`/api/options/chain/{symbol}`, where one would have silently shadowed the
+other -- there is now a test asserting nothing in app.py may shadow a path in
+optapi.router, and it should stay.
+
+**The dashboard IS very slow and it is real, but do not fix it yet.** Measured
+on the VM with nothing else requesting: a 70 KB static CSS file takes 3.2-6.3
+seconds and `/api/overview` took 45 s. Load average 1.96 on a 2-core box, one
+uvicorn process, the fleet engines as threads in it -- so the GIL starves the
+web server thread. `state/option_quotes.jsonl` is 237 MB with no rotation.
+Cole wants this queued, not started.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
