@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mockserver.py -- the Options tab's harness: the six read routes, faked.
+"""mockserver.py -- the Options tab's harness: the five read routes, faked.
 
 This exists so `static/ui/views/options.js` can be looked at, and asserted
 against, WITHOUT starting the real dashboard. The real one holds live Alpaca
@@ -27,26 +27,23 @@ each one that could be read two ways says which unit it is. `_wire_spread_pct`
 below is the single place the chain's spread is computed, and it is a copy of
 optdata.py's line with the reference in the comment.
 
+------------------------------------------------------- where positions went
+There is no positions route and no positions scenario here any more. The
+Options tab lost that room when app.py's /api/options/positions was removed:
+live positions, the assignment guard and the close button belong to the
+engine's own page at /options (optapi.py + static/options.html), which is the
+stack that trades. A second harness for a second view of the same open risk is
+how two pages come to disagree about what is held.
+
 -------------------------------------------------------------- the scenarios
 Each one is a reviewer's failing input, reproducible in a browser:
 
-  default      healthy chain, healthy positions, the guard legitimately green
+  default      a healthy chain and a healthy shelf
   wide         a chain whose spreads are 54.5%, 46.2% and 19.4% of mid
-  unreadable   every structure guard=ok, plus one position app.py could not
-               name -- the green-banner-over-a-blind-spot case
-  nomarks      unrealized_pl and market_value null on every leg and structure
   expfail      GET /expirations answers 502 until /mock/heal is called
   expired      first_tradable null and every listed expiry already passed
   slow         a 3-second delay on the chain route, for the tab-change race
   bankfail     GET /bank/{slug} answers 404, for the stranded-detail case
-  flatten      a structure past its deadline AND an unnameable position, so
-               the loudest banner and the blind spot are on screen together
-  uncloseable  six legs grouped only by underlying and expiry, every leg's
-               guard "ok", closeable:false -- the structure app.py's own close
-               route answers 409 and the page used to show as green and CLEAR
-  calendar     one ledger-grouped structure holding TWO expiries, the LATER
-               deadline on the leg that sorts first -- the case where taking
-               the first leg's flatten_deadline hid the front short's
   deep         61 strikes, so the chain is taller than its scroll box and the
                ATM centring is observable at all
 """
@@ -71,9 +68,8 @@ STATIC = os.path.join(ROOT, "static")
 STATE = {"scenario": "default", "log": []}
 LOCK = threading.Lock()
 
-SCENARIOS = ["default", "wide", "unreadable", "nomarks", "expfail",
-             "expired", "slow", "bankfail", "flatten", "uncloseable",
-             "calendar", "deep"]
+SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
+             "bankfail", "deep"]
 
 
 # ============================================================ the wire units
@@ -212,158 +208,6 @@ def expirations(scen):
             "first_tradable": rows[0]["expiry"], "budget": {"trading_calls": 1}}
 
 
-def _leg(occ, contracts, strike, right, state="ok", why="", mid=1.25,
-         pl=42.0, extrinsic=0.85, deadline=None):
-    """One option position leg.
-
-    `contracts` is SIGNED here on purpose: app.py signs it from Alpaca's
-    separate `side` field, because Alpaca's own qty is unsigned and a page that
-    read it raw would show every short as a long.
-    """
-    return {
-        "occ": occ, "contracts": contracts, "strike": strike, "right": right,
-        "mid": mid, "iv": 0.191, "delta": -0.31, "gamma": 0.021,
-        "theta": -0.402, "vega": 0.055, "solved": True, "skipped": "",
-        "unrealized_pl": pl,
-        "guard": {"state": state, "why": why, "rules": [] if state == "ok"
-                  else ["assignment_2"], "itm": False,
-                  "intrinsic": 0.0, "extrinsic": extrinsic, "pin_risk": False,
-                  "dte": 0, "expired": False,
-                  "flatten_deadline": deadline or (_expiry(0) + "T15:00:00")},
-    }
-
-
-def positions(scen):
-    legs = [
-        _leg("SPY260918P00600000", -1, 600.0, "P", pl=61.0),
-        _leg("SPY260918P00595000", 1, 595.0, "P", pl=-19.0, mid=0.42,
-             extrinsic=0.42),
-    ]
-    struct = {
-        "id": "SPY:" + _expiry(0), "underlying": "SPY", "expiry": _expiry(0),
-        "dte": 0, "legs": legs, "contracts": 2,
-        "market_value": -83.0, "unrealized_pl": 42.0, "cost_basis": -125.0,
-        "short_legs": 1, "guard": "ok",
-        "guard_why": "outside the pin band, extrinsic 0.85",
-        "grouping": "underlying and expiry",
-        # app.py:2243 sets both on every structure, so the harness does too.
-        # Omitting them is what let the view ignore closeable:false for a
-        # whole review round: the page verified clean against a payload that
-        # never carried the field the real route has always sent.
-        "closeable": True, "close_blocked": "",
-    }
-    body = {
-        "account": "paper", "frozen": False, "now": _now_iso(),
-        "spots": {"SPY": 612.34},
-        "greeks": {"delta": -12.4, "gamma": 0.31, "theta": -18.2, "vega": 4.1},
-        "greeks_cover": {"solved": 2, "of": 2},
-        "unsolved": [], "unreadable": [],
-        "legs": legs, "structures": [struct],
-    }
-    if scen == "unreadable":
-        # Every structure is clear AND one position could not be named. app.py
-        # reports it because a position we cannot name is not a position we can
-        # guard; the banner has to stop being green because of it.
-        body["unreadable"] = [{"symbol": "SPY1 260918P00612000",
-                               "why": "not an OCC symbol: stray space"}]
-    if scen == "flatten":
-        # The alarm and the blind spot together: the red banner must name the
-        # position nobody could parse as well as the structure to flatten.
-        struct["guard"] = "flatten_now"
-        struct["guard_why"] = ("0DTE short put past 15:00 ET, inside the pin "
-                               "band [assignment_1, assignment_7]")
-        legs[0]["guard"]["state"] = "flatten_now"
-        legs[0]["guard"]["why"] = "past the flatten deadline"
-        legs[0]["guard"]["rules"] = ["assignment_1"]
-        legs[0]["guard"]["extrinsic"] = 0.03
-        body["unreadable"] = [{"symbol": "SPY1 260918P00612000",
-                               "why": "not an OCC symbol: stray space"}]
-    if scen == "uncloseable":
-        # Three put verticals opened on one SPY expiry. Alpaca returns six
-        # independent contract rows and app.py's fallback groups them by
-        # underlying and expiry, which is not one structure: an mleg order
-        # carries 2 to 4 legs, so nothing can close this group atomically and
-        # app.py:2951 answers its own close route 409 for it. Every leg's
-        # guard is legitimately "ok" -- that pair, clear AND unflattenable, is
-        # the whole point of the scenario.
-        legs = []
-        for i, (lo, hi) in enumerate(((600.0, 595.0), (590.0, 585.0),
-                                      (580.0, 575.0))):
-            legs.append(_leg(f"SPY{_expiry(0)[2:].replace('-', '')}P"
-                             f"{int(lo * 1000):08d}", -1, lo, "P",
-                             pl=61.0 - i))
-            legs.append(_leg(f"SPY{_expiry(0)[2:].replace('-', '')}P"
-                             f"{int(hi * 1000):08d}", 1, hi, "P",
-                             pl=-19.0 + i, mid=0.42, extrinsic=0.42))
-        sid = "SPY:" + _expiry(0)
-        struct.update(
-            id=sid, legs=legs, contracts=6, short_legs=3,
-            closeable=False,
-            # word for word app.py:2265, with OPT_MAX_LEGS at 4
-            close_blocked=(
-                f"{sid} is 6 legs grouped only by underlying and expiry, "
-                f"which is more than one structure: an mleg order carries 2 "
-                f"to 4 legs, so this group cannot be closed atomically and "
-                f"this route will not leg out of it in an order nobody chose. "
-                f"Close the structures the engine's ledger names, or close "
-                f"the legs at the broker."))
-        body["legs"] = legs
-        body["greeks_cover"] = {"solved": 6, "of": 6}
-    if scen == "calendar":
-        # One ledger-grouped structure holding TWO expiries. The LONG leg
-        # sorts first and carries the later deadline; the front short's is
-        # today at 12:00, a 13:00 half-day. Taking the first leg with a
-        # deadline printed the long leg's and hid the short's -- four weeks
-        # and three hours of permission the guard never gave.
-        far = _expiry(28)
-        legs = [
-            _leg("SPY" + far[2:].replace("-", "") + "P00600000", 1, 600.0,
-                 "P", pl=-24.0, mid=9.15, extrinsic=9.15,
-                 deadline=far + "T15:00:00"),
-            _leg("SPY" + _expiry(0)[2:].replace("-", "") + "P00600000", -1,
-                 600.0, "P", pl=58.0, mid=1.05, extrinsic=0.61,
-                 deadline=_expiry(0) + "T12:00:00"),
-        ]
-        struct.update(
-            id="bull-put-diagonal:1", slug="bull-put-diagonal", legs=legs,
-            # app.py takes the MAX expiry for the header, so the card's title
-            # is the far one and the deadline cell is the only place the front
-            # short's date can appear at all.
-            expiry=far, dte=0, contracts=2, short_legs=1,
-            grouping="the engine's own ledger (bull-put-diagonal)")
-        body["legs"] = legs
-    if scen == "nomarks":
-        # app.py's _optf returns None whenever Alpaca omits the field or sends
-        # a non-number. None must print as an em dash: "$0.00" on this page is
-        # indistinguishable from a real flat position.
-        for leg in legs:
-            leg["unrealized_pl"] = None
-        struct["market_value"] = None
-        struct["unrealized_pl"] = None
-        struct["cost_basis"] = None
-    return body
-
-
-BANK_ROWS = [
-    {"slug": "zero-dte-broken-wing-butterfly",
-     "name": "0DTE broken wing butterfly", "legs": 4, "bias": "neutral",
-     "net": "credit", "zero_dte": True, "has_short_leg": True,
-     "permitted": True, "alpaca_level": 3, "family": "butterflies",
-     "summary": "Three strikes, unequal wings, opened for a credit so the "
-                "upside wing cannot lose."},
-    {"slug": "put-credit-spread", "name": "Put credit spread", "legs": 2,
-     "bias": "bullish", "net": "credit", "zero_dte": True,
-     "has_short_leg": True, "permitted": True, "alpaca_level": 3,
-     "family": "verticals",
-     "summary": "Sell a put, buy a further one. Defined risk, which is the "
-                "only reason this account may send it."},
-    {"slug": "naked-put", "name": "Naked put", "legs": 1, "bias": "bullish",
-     "net": "credit", "zero_dte": False, "has_short_leg": True,
-     "permitted": False, "alpaca_level": 4, "family": "singles",
-     "summary": "One short put, uncovered. Level 4."},
-]
-
-
 def bank():
     return {"level": 3, "max_legs": 4, "count": len(BANK_ROWS),
             "stats": {"total": 231, "permitted": 174, "forbidden": 57,
@@ -497,7 +341,7 @@ function show(tab) {
 }
 function el(id) { return document.getElementById(id); }
 
-const TABS = ["chain", "strategies", "positions", "backtest"];
+const TABS = ["chain", "strategies", "backtest"];
 el("mkTabs").innerHTML = TABS.map((t) =>
   `<button data-tab="${t}" class="btn sm">${t}</button>`).join("");
 el("mkTabs").onclick = (e) => {
@@ -618,11 +462,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, fh.read(), ctype + "; charset=utf-8")
 
         # ------------------------------------------------------ the six reads
-        if "/options/expirations/" in p:
+        if "/optlab/expirations/" in p:
             if scen == "expfail":
                 return self._fail(502, "mock: expirations blew up")
             return self._json(expirations(scen))
-        if "/options/chain/" in p:
+        if "/optlab/chain/" in p:
             if scen == "slow":
                 # long enough to change tab underneath it, which is what the
                 # live trading host's latency does on its own
@@ -630,20 +474,18 @@ class Handler(BaseHTTPRequestHandler):
             if not q.get("expiry"):
                 return self._fail(400, "expiry is required (YYYY-MM-DD)")
             return self._json(chain(scen))
-        if p.rstrip("/").endswith("/options/bank"):
+        if p.rstrip("/").endswith("/optlab/bank"):
             return self._json(bank())
-        if "/options/bank/" in p:
+        if "/optlab/bank/" in p:
             slug = p.rsplit("/", 1)[-1]
             if scen == "bankfail":
                 return self._fail(404, "mock: no such strategy document "
-                                       f"{slug} under options/bank")
+                                       f"{slug} under optlab/bank")
             doc = bank_doc(slug)
             if doc is None:
                 return self._fail(404, f"no such strategy document {slug}")
             return self._json(doc)
-        if p.endswith("/options/positions"):
-            return self._json(positions(scen))
-        if "/options/sweep" in p:
+        if "/optlab/sweep" in p:
             return self._json(sweep())
         if p == "/api/accounts":
             # core.js asks once; an empty account leaves every path unprefixed,
@@ -706,26 +548,7 @@ const tightCell = cells.find((td) => td.textContent.trim() === "1.0%");
 check("a 1.0% spread is not marked", tightCell
       && tightCell.classList.contains("o-thin"), false);
 
-section(2, "an unnameable position stops the banner going green");
-await scen("unreadable");
-await mount("positions");
-check("no green all-clear", /Every short leg is clear/.test(text()), false);
-check("the banner says what is unguarded",
-      /could not be read as an option symbol/.test(text()), true);
-await scen("default");
-await mount("positions");
-check("a genuinely clear book is still green",
-      /Every short leg is clear/.test(text()), true);
-
-section(3, "a mark that has not formed is an em dash, never $0.00");
-await scen("nomarks");
-await mount("positions");
-check("no fabricated $0.00", /\\$0\\.00/.test(text()), false);
-check("the em dash is used", /—/.test(text()), true);
-check("the excluded legs are counted",
-      /have no mark and are not in this total/.test(text()), true);
-
-section(4, "the half-day flatten deadline is taught, not just 15:00");
+section(2, "the half-day flatten deadline is taught, not just 15:00");
 await scen("default");
 await mount("strategies");
 document.querySelector("[data-slug='zero-dte-broken-wing-butterfly']").click();
@@ -734,7 +557,7 @@ check("the half-day is named", /12:00 ET on a 13:00 half-day/.test(text()), true
 check("15:00 is no longer unconditional",
       /no short leg open after 15:00 ET on its expiry/.test(text()), false);
 
-section(5, "a failed strategy document leaves a way back");
+section(3, "a failed strategy document leaves a way back");
 await scen("bankfail");
 await mount("strategies");
 document.querySelector("[data-slug='put-credit-spread']").click();
@@ -746,42 +569,7 @@ await sleep(50);
 check("and it returns to the grid",
       !!el("view").querySelector("[data-slug]"), true);
 
-section(6, "a structure the close route refuses is never green");
-await scen("uncloseable");
-await mount("positions");
-check("no green all-clear", /Every short leg is clear/.test(text()), false);
-check("the page says it cannot be closed atomically",
-      /cannot be closed atomically/.test(text()), true);
-check("and carries app.py's own reason",
-      /an mleg order carries 2 to 4 legs/.test(text()), true);
-const tags = [...el("view").querySelectorAll(".o-tag")]
-  .map((t) => t.textContent.trim());
-check("the card is tagged for it", tags.includes("no atomic close"), true);
-// The two facts answer different questions and both belong on the card: the
-// guard is about assignment, closeable is about whether anything can act.
-check("and the guard pill is still beside it", tags.includes("clear"), true);
-await scen("default");
-await mount("positions");
-check("a closeable book goes green again",
-      /Every short leg is clear/.test(text()), true);
-check("and carries no blocked tag", /no atomic close/.test(text()), false);
-
-section(7, "the flatten deadline shown is the earliest leg's, not the first");
-await scen("calendar");
-await mount("positions");
-const pos = await (await fetch("/api/options/positions")).json();
-const deads = pos.structures[0].legs
-  .map((L) => L.guard.flatten_deadline).sort();
-const fmt = (s) => s.replace("T", " ").slice(0, 16);
-const shownDead = /Flatten by ([0-9-]+ [0-9:]+)/.exec(text());
-check("the card shows the front short's deadline",
-      shownDead && shownDead[1], fmt(deads[0]));
-check("and never the long leg's, four weeks later",
-      text().includes(fmt(deads[deads.length - 1])), false);
-check("and says the structure holds more than one expiry",
-      /earliest of 2/.test(text()), true);
-
-section(8, "Refresh re-centres the chain on the ATM row");
+section(4, "Refresh re-centres the chain on the ATM row");
 // This section is the only one that needs layout, so it is the only one that
 // un-hides #view: offsetTop and clientHeight are all zero inside a
 // display:none subtree, and every check below would pass on any code.
