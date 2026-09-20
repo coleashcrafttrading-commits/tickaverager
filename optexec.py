@@ -218,6 +218,21 @@ def open_option_positions(alpaca: Any) -> list[dict]:
     return out
 
 
+def _signed_contracts(p: dict) -> float:
+    """Contracts, negative for a short leg. One definition, shared."""
+    try:
+        from greeks import _signed_qty
+        return float(_signed_qty(p))
+    except Exception:
+        qty = _num(p.get("qty")) or 0.0
+        side = str(p.get("side") or "").lower()
+        if side.startswith(("short", "sell")):
+            return -abs(qty)
+        if side.startswith(("long", "buy")):
+            return abs(qty)
+        return qty
+
+
 def live_assignment_notional(positions: Sequence[dict]) -> float:
     """What the open book would owe if every short option assigned at once.
 
@@ -228,7 +243,16 @@ def live_assignment_notional(positions: Sequence[dict]) -> float:
     """
     total = 0.0
     for p in positions:
-        qty = _num(p.get("qty")) or 0.0
+        # Sign through the shared helper, not off `qty` alone. Alpaca reports a
+        # position's direction in a separate `side` field and the qty it serves
+        # alongside it is a MAGNITUDE -- the two long equity positions on this
+        # account both come back as a positive qty with side "long". Reading
+        # only qty therefore skipped every short, and this function's whole job
+        # is the number `plan()` checks the assignment cap against: it would
+        # have reported zero owed on a book full of short legs and the cap
+        # would never have refused anything. greeks._signed_qty already
+        # resolves both conventions and lets `side` win.
+        qty = _signed_contracts(p)
         if qty >= 0:                      # long options owe nothing on assignment
             continue
         strike = _occ_strike(str(p.get("symbol", "")))

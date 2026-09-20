@@ -1,18 +1,57 @@
 /* ============================================================================
-   options.js -- the Options tab: the chain, the shelf, and what the sweep
+   options.js -- the Options tab: the board, the shelf, and what the sweep
    actually proved.
 
-   LIVE POSITIONS ARE NOT HERE ANY MORE. They live on the engine's own page
+   NOTHING ON THIS PAGE IS ARMED AND NOTHING ON IT CAN TRADE. There is no
+   options position, no order path behind any route it calls, and no arm
+   switch on it. The Board says so in its first line, and that line is a
+   constant on the server too, because it is a fact about the code rather
+   than a reading -- when it stops being true it has to change in the same
+   commit that makes it untrue.
+
+   LIVE POSITIONS ARE NOT HERE. They live on the engine's own page
    at /options (optapi.py + static/options.html), which is the stack that
    trades; this tab lost its Positions room when app.py's positions route was
    removed, and nothing was lost with it. Everything below reads
-   /api/optlab/* -- the research side: a bank, a chain with greeks computed in
-   the dashboard process, and the saved sweeps.
+   /api/optlab/* -- the research and evidence side.
 
    Three rooms, and each one exists because a number that matters has nowhere
    else to live:
 
-     Chain       Alpaca DOES publish greeks and implied volatility -- on
+     Board       THE LANDING ROOM, and it replaced the live chain. One card
+                 per watched ticker: spot, IV, IV rank with the number of
+                 sessions of recorded history behind it, realised vol, VRP,
+                 term slope, skew, liquidity grade, earnings and ex-dividend
+                 proximity, the next expiry, and a regime badge that carries
+                 the sentence justifying it. Every number says WHO SUPPLIED
+                 IT -- a filled badge for one Alpaca published, a hollow one
+                 for one nobody serves and we solved here -- because the
+                 owner asked why we compute so much and the only honest
+                 answer is per number. A fact that never formed is a dashed
+                 empty cell with the reason on hover, never a zero: on a
+                 volatility board those two look identical and only one of
+                 them is information.
+
+                 IV RANK IS THE ONE THAT MOSTLY REFUSES, on purpose. It needs
+                 a year of daily implied volatility that no endpoint serves,
+                 the recorder holds days rather than a year, and "IV rank 40"
+                 off six days is a lie with a decimal point on it. So the
+                 rank is absent with its day count until there is enough, and
+                 marked thin until there is a year.
+
+     Strategies  231 documents, 174 of which this level-3 account may actually
+                 send. The other 57 stay on the shelf, visibly blocked with
+                 the reason, because a bank that hides what it cannot do
+                 teaches nothing.
+     Backtest    the sweep, with the fill rate and the spread robustness in
+                 the table beside the profit instead of behind a tooltip.
+                 Those two numbers decide whether a result is real, and hiding
+                 them is how a curve fit gets deployed.
+
+   The CHAIN is no longer a room -- see TABS. It is still rendered at
+   #/options/chain for debugging, and what it taught is worth keeping here:
+
+                 Alpaca DOES publish greeks and implied volatility -- on
                  everything except 0DTE, where it returns none at all, and
                  thinning as expiry approaches (measured on SPY: 0 of 30 rows
                  at 0DTE, 14-17 at 3 DTE, 30 of 30 from 12 DTE out). So the
@@ -44,6 +83,42 @@
    app.py owns these; this file only consumes them, and treats every field as
    optional. A missing number prints as an em dash and a missing guard prints
    as UNKNOWN -- never as zero and never as OK.
+
+     GET /api/optlab/board                                       (scoped)
+       {armed: false, status:{level, headline, detail},
+        watchlist:{count, enabled, share_fleet, conflicts, disjoint},
+        rows:[{symbol, tier, cadence_s, enabled, why, added_at,
+               shares_conflict, conflict_reason, measured, as_of,
+               regime, regime_reason, missing, stale, errors,
+               trading_calls, data_calls,
+               facts:{<name>:{value, unit, source, as_of, age_s,
+                              quality, reason, computed, note}}}],
+        regimes:{<regime>: n}, registry:[optfacts.registry() rows],
+        refreshed_at, age_s, stale, refreshing, seconds,
+        cost:{trading_calls, data_calls, budget_stopped, errors, cost_note},
+        min_refresh_s, ttl_s, budget}
+       NEVER BLOCKS. The server measures on a background thread, so the first
+       answer after a restart carries the watchlist with `measured` false and
+       `refreshing` true -- which this file renders as "measuring", because
+       "we are watching eight names and have not measured them yet" and "we
+       are watching nothing" are different answers.
+       `facts` is optfacts' CLOSED VOCABULARY and `registry` describes it:
+       `computed` on a registry row says whether anybody serves that fact at
+       all, `source` on a fact says who supplied it this time. The two are
+       different questions and the drawer shows both.
+       UNITS ARE PER FACT AND ARE NOT THE `unit` STRING. See FACT_FMT.
+
+     POST /api/optlab/board/refresh                              (scoped)
+       Same body. Rate-limited SERVER-SIDE to one forced refresh every
+       `min_refresh_s`; a 429 here is the limiter working, because the expiry
+       registry is on the 200/min trading host the live share ladders spend
+       from. The page shows the refusal rather than swallowing it.
+
+     POST /api/optlab/watch  {symbol, action, why?, tier?}       (scoped)
+       action is add | remove | enable | disable. `why` is REQUIRED on an add
+       and the server refuses without it. 409 when the symbol is one the
+       share ladder trades -- an assignment there would sell shares its lot
+       ledger believes it owns.
 
      GET /api/optlab/expirations/{sym}?min_dte&max_dte   (account-scoped)
        {symbol, now, expirations:[{expiry, dte, expired, tradable,
@@ -81,7 +156,8 @@
    ========================================================================= */
 "use strict";
 import {
-  VIEWS, GET, SHARED_API, el, esc, card, stat, tableHTML, money, sgn,
+  VIEWS, GET, POST, SHARED_API, ask, el, esc, card, stat, tableHTML, toast,
+  money, sgn,
 } from "../core.js";
 
 /* Two of the five routes are machine-wide rather than account-scoped, the way
@@ -100,13 +176,28 @@ for (const p of ["/api/optlab/bank", "/api/optlab/sweep"]) {
    engine's own page at /options owns live positions, the assignment guard and
    the close button now. A second view of open risk, fed by a second grouping
    of the same legs, is how two pages disagree about what is held. */
+/* THE CHAIN IS NO LONGER A ROOM. It was the landing tab and it answered a
+   question the BACKEND has, not one a person has -- the owner's words were
+   "i dont think that we need a real time chain shown, the backend just needs
+   to know that stuff. what we need is to replace the chain tab with our
+   options dashboard of what tickers we are looking at." So Board is the
+   landing tab and the chain is gone from the bar.
+
+   It is still REACHABLE, at #/options/chain, and mountChain is still below.
+   That is deliberate and it is not a hedge: /api/optlab/chain/{sym} is the
+   one place a human can put a quote, a locally solved IV and Alpaca's own IV
+   side by side when a board number looks wrong, and deleting the only
+   renderer for a debugging endpoint means the next person reads JSON in a
+   terminal. It is not in TABS, so nothing navigates there by accident, and
+   activeTab below lights Board for anyone arriving on an old bookmark. */
 const TABS = [
-  ["chain", "Chain"],
+  ["board", "Board"],
   ["strategies", "Strategies"],
   ["backtest", "Backtest"],
 ];
 
 const SUB = {
+  board: "the tickers we watch, and what we actually know about each one",
   chain: "Alpaca's quotes; the IV and the greeks are solved here",
   strategies: "every structure on the shelf, and what this account may send",
   backtest: "what survived a second market and a doubled spread",
@@ -114,18 +205,25 @@ const SUB = {
 
 VIEWS.options = {
   title: () => "Options",
-  sub: (ov, v) => SUB[v.tab || "chain"] || SUB.chain,
+  sub: (ov, v) => SUB[v.tab || "board"] || SUB.board,
   tabs: TABS,
+
+  /* An old link to #/options/chain still renders the chain, and lights Board
+     -- the tab it now lives behind -- rather than leaving the bar with
+     nothing highlighted at all. core.js's MOVED map cannot do this one: it
+     rewrites a whole view, and the chain is still a real page in this one. */
+  activeTab: (v) => (v.tab === "chain" ? "board" : (v.tab || "board")),
 
   mount(v) {
     /* Every timer this view starts is stamped with the mount that started it
        and dies when a newer one exists. See every(). */
     MOUNT += 1;
     ensureStyle();
-    const t = v.tab || "chain";
+    const t = v.tab || "board";
     if (t === "strategies") return mountStrategies();
     if (t === "backtest") return mountBacktest();
-    return mountChain();
+    if (t === "chain") return mountChain();
+    return mountBoard();
   },
 
   /* No paint(). The fleet poll runs every two seconds and repainting a
@@ -259,6 +357,102 @@ const CSS = `
 .o-blab { display: flex; justify-content: space-between; gap: 10px;
           color: var(--muted); margin-bottom: 3px; font-size: 12px; }
 
+/* ---- the board ---------------------------------------------------------
+   Cards, not a table. Eleven numbers plus a badge and two buttons do not fit
+   a table row at 400px without a sideways scroll, and a board you have to
+   scroll sideways to read is not a five-second answer. The cells are an
+   auto-fill grid, so the same markup is four columns on a phone and eight on
+   a desktop, with no second layout to keep in step. */
+.b-honest { display: flex; flex-direction: column; gap: 3px;
+            border: 1px solid var(--hairline2);
+            border-left: 3px solid var(--up); background: var(--surface);
+            border-radius: var(--radius-sm); padding: 11px 14px;
+            margin-bottom: 14px; font-size: 12.5px; line-height: 1.55; }
+.b-honest b { font-size: 13px; }
+.b-honest span { color: var(--muted); }
+/* If this page ever renders armed, it must not look like the calm one. */
+.b-honest.hot { border-left-color: var(--down); }
+
+/* Two rows, not one. .stats is an auto-fit grid at minmax(186px, 1fr), so
+   putting it in a flex row beside the controls collapses it to a single
+   column of tall tiles and pushes the first ticker below the fold. */
+.b-head { margin-bottom: 4px; }
+.b-stats { margin-bottom: 13px; }
+.b-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.b-tools .o-chips { margin-right: auto; }
+.b-legend { font-size: 11px; color: var(--faint); margin: 10px 0 14px;
+            display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+            line-height: 1.7; }
+.b-dash { color: var(--faint); }
+
+.b-rows { display: grid; gap: 10px; }
+.b-row { border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+         background: var(--surface); padding: 11px 13px; min-width: 0; }
+.b-row.off { opacity: .62; }
+.b-top { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; }
+.b-spacer { flex: 1 1 8px; }
+.b-sym { appearance: none; border: 0; background: transparent; font: inherit;
+         color: var(--text); font-weight: 700; font-size: 14px;
+         letter-spacing: .02em; cursor: pointer; padding: 0 2px 0 0; }
+.b-caret { color: var(--faint); font-size: 10px; }
+.b-age { font-size: 11px; color: var(--faint); }
+
+.b-cells { display: grid; gap: 6px 10px; margin-top: 9px;
+           grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
+.b-cell { min-width: 0; display: flex; flex-direction: column; gap: 1px;
+          padding: 5px 7px; border-radius: 6px; background: var(--surface-2); }
+/* A fact that never formed is a DASHED OUTLINE with no fill. It must not
+   read as a cell that happens to hold a small number. */
+.b-cell.none { background: transparent; border: 1px dashed var(--hairline); }
+.b-cell.thin { box-shadow: inset 2px 0 0 0 var(--warn); }
+.b-cell.stale { box-shadow: inset 2px 0 0 0 var(--down); }
+.b-lab { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
+         color: var(--faint); white-space: nowrap; overflow: hidden;
+         text-overflow: ellipsis; }
+.b-val { font-size: 13px; font-weight: 620; display: flex; gap: 4px;
+         align-items: baseline; min-width: 0; }
+.b-unit { font-size: 9.5px; font-weight: 500; color: var(--faint);
+          margin-left: 2px; }
+
+/* PROVENANCE. Filled accent = Alpaca's number, hollow outline = one we
+   computed. It is a FILL and not a letter colour because the two have to be
+   separable at arm's length: the owner asked why we compute so much, and the
+   answer has to be visible without reading. */
+.b-src { font-size: 8.5px; font-weight: 700; line-height: 1; padding: 2px 3px;
+         border-radius: 3px; letter-spacing: .02em; }
+.b-src.s-alpaca { background: var(--accent-dim); color: var(--accent); }
+.b-src.s-computed { background: transparent; color: var(--faint);
+                    border: 1px solid var(--hairline2); }
+.b-src.s-mixed { background: rgba(255, 192, 97, .16); color: var(--warn); }
+.b-src.s-recorded, .b-src.s-calendar { background: var(--hairline);
+                                       color: var(--muted); }
+
+.b-why { margin-top: 8px; font-size: 11.5px; color: var(--muted);
+         line-height: 1.5; }
+.b-drawer { margin-top: 11px; padding-top: 11px;
+            border-top: 1px solid var(--hairline); }
+.b-note { font-size: 12px; color: var(--muted); line-height: 1.55;
+          margin: 0 0 9px; }
+.b-note.bad { color: var(--down); }
+/* app.css right-aligns every table cell, which is right for a ledger and
+   wrong for six columns of prose: the reasons ended up ragged-left against
+   the page edge and unreadable. Only the value column is a number. */
+.b-drawer th, .b-drawer td { text-align: left; }
+.b-drawer th:nth-child(2), .b-drawer td:nth-child(2) { text-align: right; }
+.b-drawer td:nth-child(3), .b-drawer td:nth-child(4) { white-space: nowrap; }
+.b-reason { color: var(--faint); font-size: 11.5px; white-space: normal;
+            min-width: 180px; }
+.b-add { margin-top: 14px; padding: 12px 13px; background: var(--surface);
+         border: 1px solid var(--hairline2); border-radius: var(--radius-sm); }
+@media (max-width: 560px) {
+  .b-cells { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
+  .b-tools { width: 100%; }
+  .b-tools .o-chips { flex: 1 1 100%; }
+  /* The two per-row buttons wrap onto their own line on a phone. Kept, but
+     quieter: they are housekeeping, and the facts are the page. */
+  .b-row .row-btns .btn { font-size: 11px; padding: 3px 9px; }
+}
+
 .o-back { appearance: none; border: 0; background: transparent; cursor: pointer;
           color: var(--accent); font: inherit; font-size: 12.5px; padding: 0;
           margin-bottom: 12px; }
@@ -370,6 +564,551 @@ const LS = {
   get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private */ } },
 };
+
+/* ================================================================= board */
+/* THE LANDING ROOM. "Are we watching the right tickers, and what do we know
+   about each one" -- answerable in five seconds, with nothing on screen that
+   the backend did not actually measure.
+
+   Everything here reads /api/optlab/board, which is a join of optwatch (which
+   names are on the board, and why each one is) and optfacts (the closed
+   vocabulary of facts, each with its source, its age and, when it is absent,
+   the reason). This file adds no opinion to either: a second idea about what
+   an IV rank means, living in display code, is how two answers to the same
+   question come to disagree. It formats, it explains, and it refuses to draw
+   a number nobody measured. */
+
+const REGIME = {
+  rich_vol: ["Premium rich", "good"],
+  cheap_vol: ["Premium cheap", "acc"],
+  neutral: ["Neutral", ""],
+  event_risk: ["Event risk", "warn"],
+  unusable: ["Not usable", "bad"],
+  off: ["Disabled", ""],
+  unmeasured: ["Measuring…", ""],
+};
+
+/* WHICH FACTS GET A CELL ON THE CARD, in reading order. The rest are in the
+   drawer. This is the five-second answer, so it stops at eleven. */
+const CARD_FACTS = [
+  ["spot", "Spot"],
+  ["iv", "IV"],
+  ["iv_rank", "IV rank"],
+  ["realized_vol_20", "Realised"],
+  ["vrp", "VRP"],
+  ["term_slope", "Term /30d"],
+  ["skew_25d", "Skew 25d"],
+  ["liquidity_grade", "Liquidity"],
+  ["earnings_in_days", "Earnings"],
+  ["ex_div_in_days", "Ex-div"],
+  ["next_expiry", "Next expiry"],
+];
+
+/* FORMATTING IS BY FACT NAME, NEVER BY THE `unit` STRING, and that is not
+   fussiness. optfacts labels both `iv_rank` and `atm_spread_pct` "pct", and
+   they are in different units: a rank is already 0-100 while a spread is a
+   FRACTION of mid, 0.026 for 2.6%. This repo has shipped that exact bug once
+   -- an uncloseable 54.5% wing printed as 0.5% because a fraction was read as
+   a percentage -- so the conversion lives per name, next to the name, where
+   it can be checked against optfacts.py line by line. */
+const FACT_FMT = {
+  spot: (v) => dol(v),
+  iv: (v) => ivTxt(v),                     // ratio -> percent
+  iv_rank: (v) => n2(v, 0),                // already 0-100
+  iv_percentile: (v) => n2(v, 0),          // already 0-100
+  iv_rank_days: (v) => n0(v),
+  realized_vol_20: (v) => ivTxt(v),
+  parkinson_vol_20: (v) => ivTxt(v),
+  vrp: (v) => volPts(v),                   // vol POINTS, signed
+  vrp_ratio: (v) => has(v) ? Number(v).toFixed(2) + "×" : DASH,
+  term_slope: (v) => volPts(v),            // per 30 days
+  skew_25d: (v) => volPts(v),
+  put_skew: (v) => volPts(v),
+  liquidity_grade: (v) => v ? esc(String(v)) : DASH,
+  atm_spread_pct: (v) => fracPc1(v),       // a FRACTION of mid. See above.
+  open_interest_atm: (v) => n0(v),
+  earnings_in_days: (v) => days(v),
+  ex_div_in_days: (v) => days(v),
+  dte_to_next: (v) => days(v),
+  next_expiry: (v) => v ? esc(String(v).slice(5)) : DASH,
+  greeks_source: (v) => v ? esc(String(v)) : DASH,
+  chain_rows: (v) => n0(v),
+};
+
+/* Volatility points, signed, AND CARRYING THE UNIT. A VRP of 0.031 is
+   "+3.1 pts" and never "0.03": three hundredths of nothing named is the
+   number nobody reads, and beside an IV printed as 18.4% an unlabelled 3.1
+   reads as another percentage of the same thing, which it is not. */
+const volPts = (v) => has(v)
+  ? (Number(v) >= 0 ? "+" : "") + (Number(v) * 100).toFixed(1)
+    + `<span class="b-unit">pts</span>` : DASH;
+const days = (v) => has(v) ? Number(v) + "d" : DASH;
+
+const factText = (name, f) => {
+  if (!f || f.value == null) return DASH;
+  const fn = FACT_FMT[name];
+  return fn ? fn(f.value) : esc(String(f.value));
+};
+
+/* PROVENANCE, AT A GLANCE. The owner asked why we compute so much, so the
+   answer is on every number rather than in a paragraph somewhere: A means
+   Alpaca published it and we passed it through, C means nobody serves it and
+   we solved it here, M means the reading was assembled from rows of both
+   kinds -- which is what a near-dated chain genuinely is. No badge means the
+   fact never formed, and then the cell is a dash with a reason on hover. */
+const SRC = { alpaca: ["A", "Alpaca published this; we did not recompute it"],
+              computed: ["C", "Nobody serves this — solved in the dashboard"],
+              mixed: ["M", "Part published by Alpaca, part solved here"],
+              recorded: ["R", "From our own recorded history"],
+              calendar: ["K", "From the event calendar"] };
+
+function srcBadge(f) {
+  if (!f || f.value == null) return "";
+  const hit = SRC[f.source];
+  if (!hit) return "";
+  return `<span class="b-src s-${esc(f.source)}" title="${esc(hit[1])}"
+    >${hit[0]}</span>`;
+}
+
+/* IV RANK NEVER APPEARS WITHOUT ITS DAY COUNT. It is the one number on this
+   board with no endpoint behind it, and the one most easily lied about: a
+   rank is a statement about a year, and the same "62" means something
+   entirely different off 94 sessions than off 252. So the confidence is
+   printed beside the value rather than hidden in a tooltip, and the cell
+   stays marked `thin` until a full year backs it. A bare rank is the lie. */
+function rankTail(name, facts) {
+  if (name !== "iv_rank" || !facts) return "";
+  const d = facts.iv_rank_days;
+  if (!d || d.value == null) return "";
+  return `<span class="b-unit" title="sessions of recorded IV history behind
+    this rank">${n0(d.value)}d</span>`;
+}
+
+/* Every cell that has no number says WHY in its tooltip, and a cell whose
+   number is thin or stale is marked rather than presented as clean. */
+function factCell(name, label, f, facts) {
+  const bad = !f || f.value == null;
+  const q = (f && f.quality) || "missing";
+  const tip = bad ? ((f && f.reason) || "not measured")
+    : [(f.reason || ""), q === "ok" ? "" : q].filter(Boolean).join(" · ");
+  const cls = bad ? " none" : q === "thin" ? " thin" : q === "stale"
+    ? " stale" : "";
+  return `<div class="b-cell${cls}" title="${esc(tip)}">
+    <span class="b-lab">${esc(label)}</span>
+    <span class="b-val">${factText(name, f)}${srcBadge(f)}${rankTail(name,
+      facts)}</span></div>`;
+}
+
+const agoEpoch = (sec) => {
+  if (!has(sec)) return "";
+  const s = Math.max(0, Math.round(Date.now() / 1000 - Number(sec)));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago`
+    : `${(s / 3600).toFixed(1)}h ago`;
+};
+
+/* setTimeout with the same mount-token guard every() uses. Without it the
+   "come back for the measurement" retry outlives the tab that started it,
+   and seven visits to Board mean seven retries racing each other -- the
+   identical bug every() was written for, on a different timer. */
+function later(ms, fn) {
+  const mine = MOUNT;
+  setTimeout(() => { if (mine === MOUNT) fn(); }, ms);
+}
+
+let BD = null;
+
+function mountBoard() {
+  BD = {
+    data: null,
+    err: "",
+    busy: false,
+    filter: LS.get("ta-opt-regime", "") || "",
+    sort: LS.get("ta-opt-sort", "regime") || "regime",
+    open: {},          // symbol -> the detail drawer is open
+    adding: false,
+  };
+  el("view").innerHTML = `
+    <div id="obHonest"></div>
+    <div id="obHead"></div>
+    <div id="obBody">${loading("the board")}</div>`;
+  /* Slow on purpose. These facts move on the scale of a session -- an IV
+     rank, a realised vol, days to an earnings print -- and the server
+     refreshes at its own TTL anyway, so a faster poll would only redraw the
+     same numbers while spending the shared trading budget. */
+  every(30000, "obBody", () => loadBoard({ quiet: true }));
+  loadBoard();
+}
+
+async function loadBoard({ quiet = false } = {}) {
+  if (!BD || BD.busy) return;
+  BD.busy = true;
+  if (!quiet && !BD.data) put("obBody", loading("the board"));
+  try {
+    BD.data = await GET("/api/optlab/board");
+    BD.err = "";
+  } catch (e) {
+    BD.err = e.message || String(e);
+  } finally {
+    BD.busy = false;
+  }
+  paintBoard();
+  /* The server measures on a background thread, so the first answer after a
+     restart is honestly empty. Come back for it rather than making the
+     operator press Refresh to see a board that is already being built. */
+  if (BD.data && BD.data.refreshing) later(2500, () => loadBoard({ quiet: true }));
+}
+
+async function boardRefresh() {
+  const b = el("obGo");
+  if (b) { b.disabled = true; b.textContent = "Measuring…"; }
+  try {
+    BD.data = await POST("/api/optlab/board/refresh", {});
+    BD.err = "";
+  } catch (e) {
+    /* A 429 here is the rate limiter doing its job, not a fault: the expiry
+       registry is on the 200/min host the live share ladders spend from. Say
+       so where the operator is looking instead of in a console. */
+    BD.err = e.message || String(e);
+  }
+  paintBoard();
+  if (BD.data && BD.data.refreshing) later(2000, () => loadBoard({ quiet: true }));
+}
+
+/* Said in words, not "addd". Pausing and removing are different acts and
+   the confirmation has to say which one happened -- a paused ticker keeps
+   its row and the sentence that put it there. */
+const DID = {
+  add: (s) => `${s} is on the board. It will be measured on the next refresh.`,
+  remove: (s) => `${s} is off the board.`,
+  enable: (s) => `${s} resumed — data is being gathered on it again.`,
+  disable: (s) => `${s} paused. Its row stays, with the reason it was added.`,
+};
+
+async function watchAct(symbol, action, extra) {
+  const body = Object.assign({ symbol, action }, extra || {});
+  try {
+    const r = await POST("/api/optlab/watch", body);
+    const say = DID[action] || ((x) => `${x} ${action}`);
+    toast(esc(say(symbol)), "ok");
+    if (r && r.watchlist) BD.adding = false;
+  } catch (e) {
+    toast(esc(e.message || String(e)), "err", 9000);
+    return false;
+  }
+  await loadBoard({ quiet: true });
+  return true;
+}
+
+function paintBoard() {
+  if (!BD) return;
+  const d = BD.data;
+  paintHonest(d);
+  paintBoardHead(d);
+  if (BD.err && !d) return void put("obBody", errNote({ message: BD.err }));
+  if (!d) return void put("obBody", loading("the board"));
+  const rows = boardRows(d);
+  const body = rows.length
+    ? rows.map((r) => rowCard(r, d)).join("")
+    : `<div class="note"><b>Nothing matches that filter.</b>
+       <span class="faint">${d.rows.length} ticker(s) are on the
+       board.</span></div>`;
+  if (!put("obBody", `<div class="b-rows">${body}</div>` + addForm()))
+    return;
+  wireBoard();
+}
+
+/* The one line that must never overstate what this page is. It is a constant
+   on the server too -- `armed` is a fact about the code, not a reading -- and
+   it is drawn before anything else on the page for the same reason. */
+const HONEST = ["Nothing is armed. No option is being traded.",
+  "This is the data layer: the tickers we watch and the facts we can "
+  + "measure about them. There is no options position, no order path behind "
+  + "this page and no arm switch on it. Every route it calls is a read."];
+
+function paintHonest(d) {
+  const s = (d && d.status) || {};
+  /* The fallback is the same two sentences, not a shorter version of them.
+     When the board cannot be fetched the page has LESS information, not
+     less obligation, and a one-line "Nothing is armed." beside a red error
+     reads as a system that half-knows what it is doing. */
+  put("obHonest", `<div class="b-honest ${d && d.armed ? "hot" : ""}">
+    <b>${esc(s.headline || HONEST[0])}</b>
+    <span>${esc(s.detail || HONEST[1])}</span></div>`);
+}
+
+function paintBoardHead(d) {
+  if (!d) return void put("obHead", "");
+  const w = d.watchlist || {};
+  const cost = d.cost || {};
+  const when = d.refreshing ? "measuring now…"
+    : d.refreshed_at ? `${ago(d.refreshed_at)}${d.stale ? " · stale" : ""}`
+      : "not yet";
+  /* The trading number alone in the big type, because it is the only one
+     that is scarce: it comes out of the same 200/min the live share ladders
+     spend from. The data host is 10,000/min and ours, so it is a footnote. */
+  const spend = has(cost.trading_calls) ? `${cost.trading_calls} trading`
+    : "—";
+  const spendSub = has(cost.trading_calls)
+    ? `+ ${cost.data_calls || 0} market-data · shared 200/min host`
+    : "nothing measured yet";
+  const on = w.enabled != null ? w.enabled : "—";
+  const all = w.count != null ? w.count : "—";
+  const stats = [
+    stat("Watched", `${on} / ${all}`, "enabled / on the board"),
+    stat("Last refresh", when, d.seconds ? `took ${d.seconds}s` : ""),
+    stat("That cost", spend, spendSub),
+  ].join("");
+  const err = BD.err ? `<div class="note bad" style="margin-top:10px">
+    <b>${esc(BD.err)}</b><br><span class="faint">Nothing was sent and no
+    position changed — this page has no order path.</span></div>` : "";
+  put("obHead", `<div class="b-head">
+    <div class="stats b-stats">${stats}</div>
+    <div class="b-tools">${regimeChips(d)}${sortChips()}
+      <button class="btn sm" id="obAdd">Add ticker</button>
+      <button class="btn sm primary" id="obGo">Refresh</button></div>
+    </div>${conflictNote(w)}${budgetNote(d)}${err}${legend()}`);
+}
+
+function legend() {
+  return `<div class="b-legend"><span class="b-src s-alpaca">A</span>
+    Alpaca published it <span class="b-src s-computed">C</span> we computed it
+    <span class="b-src s-mixed">M</span> both, on one chain ·
+    <span class="b-dash">—</span> not measured, with the reason on hover</div>`;
+}
+
+function conflictNote(w) {
+  const bad = (w && w.conflicts) || {};
+  const names = Object.keys(bad);
+  if (!names.length) return "";
+  return `<div class="note bad"><b>${names.length} watched ticker(s) are also
+    traded by the share ladder: ${esc(names.join(", "))}.</b>
+    <span class="faint">${esc(bad[names[0]] || "")} Nothing may ever be armed
+    on these — an assignment would sell shares the ladder's own ledger
+    believes it owns.</span></div>`;
+}
+
+function budgetNote(d) {
+  const stop = (d.cost && d.cost.budget_stopped) || [];
+  const errs = (d.cost && d.cost.errors) || [];
+  let out = "";
+  if (stop.length) {
+    out += `<div class="note warn"><b>The trading-API budget stopped open
+      interest on ${esc(stop.join(", "))}.</b> <span class="faint">Those rows
+      carry the fact as absent rather than as zero. The 200/min host is shared
+      with the live share ladders.</span></div>`;
+  }
+  if (errs.length) {
+    out += `<div class="note warn"><b>${errs.length} measurement(s) failed on
+      the last refresh.</b> <span class="faint">${esc(errs[0])}</span></div>`;
+  }
+  return out;
+}
+
+function regimeChips(d) {
+  const counts = d.regimes || {};
+  const keys = Object.keys(counts).sort();
+  const total = d.rows ? d.rows.length : 0;
+  const one = (k, label, n) => `<button class="o-chip
+    ${BD.filter === k ? "on" : ""}" data-reg="${esc(k)}">${esc(label)}
+    <span class="faint">${n}</span></button>`;
+  return `<div class="o-chips">${one("", "All", total)}${keys.map((k) =>
+    one(k, (REGIME[k] || [k])[0], counts[k])).join("")}</div>`;
+}
+
+/* Worst first, because the rows worth looking at are the ones that cannot be
+   used and the ones with an event in the window. A board sorted
+   alphabetically buries the row that needs a decision -- which is why this
+   is the default and A-Z is the option, not the other way round. */
+const REGIME_ORDER = { unusable: 0, event_risk: 1, rich_vol: 2, cheap_vol: 3,
+                       neutral: 4, unmeasured: 5, off: 6 };
+
+function boardRows(d) {
+  const rows = (d.rows || []).slice();
+  const byName = (a, b) => String(a.symbol).localeCompare(String(b.symbol));
+  if (BD.sort === "az") rows.sort(byName);
+  else {
+    rows.sort((a, b) => {
+      const ra = REGIME_ORDER[a.regime] != null ? REGIME_ORDER[a.regime] : 9;
+      const rb = REGIME_ORDER[b.regime] != null ? REGIME_ORDER[b.regime] : 9;
+      return ra - rb || byName(a, b);
+    });
+  }
+  return BD.filter ? rows.filter((r) => r.regime === BD.filter) : rows;
+}
+
+function sortChips() {
+  const one = (k, label) => `<button class="o-chip
+    ${BD.sort === k ? "on" : ""}" data-sort="${k}">${label}</button>`;
+  return `<div class="o-chips">${one("regime", "Worst first")}
+    ${one("az", "A–Z")}</div>`;
+}
+
+function rowCard(r, d) {
+  const sym = String(r.symbol || "");
+  const facts = r.facts || {};
+  const cells = CARD_FACTS.map(([k, lab]) =>
+    factCell(k, lab, facts[k], facts)).join("");
+  const open = !!BD.open[sym];
+  return `<div class="b-row ${r.enabled === false ? "off" : ""}">
+    ${rowTop(r, sym, open)}
+    <div class="b-cells">${cells}</div>
+    <div class="b-why">${esc(r.regime_reason || "")}</div>
+    ${open ? drawer(r, d) : ""}</div>`;
+}
+
+/* Split out of rowCard, and not only for length: the header is the part a
+   reader scans down the page, so it is one function to change when the
+   five-second answer changes. */
+function rowTop(r, sym, open) {
+  const reg = REGIME[r.regime] || [r.regime || "unknown", ""];
+  const clash = r.shares_conflict
+    ? `<span class="o-tag bad" title="${esc(r.conflict_reason || "")}"
+       >share ladder</span>` : "";
+  const age = r.measured === false ? ""
+    : `<span class="b-age">${esc(agoEpoch(r.as_of))}</span>`;
+  return `<div class="b-top">
+    <button class="b-sym" data-open="${esc(sym)}">${esc(sym)}
+      <span class="b-caret">${open ? "▾" : "▸"}</span></button>
+    <span class="o-tag ${reg[1]}" title="${esc(r.regime_reason || "")}"
+      >${esc(reg[0])}</span>
+    ${clash}<span class="o-tag">tier ${esc(r.tier || "?")}</span>
+    ${age}<span class="b-spacer"></span>${rowButtons(r)}</div>`;
+}
+
+function rowButtons(r) {
+  const sym = esc(String(r.symbol || ""));
+  const on = r.enabled !== false;
+  return `<span class="row-btns">
+    <button class="btn sm" data-watch="${on ? "disable" : "enable"}"
+      data-sym="${sym}">${on ? "Pause" : "Resume"}</button>
+    <button class="btn sm" data-watch="remove" data-sym="${sym}">Remove</button>
+    </span>`;
+}
+
+/* THE DRAWER IS WHERE THE OWNER'S QUESTION IS ANSWERED IN FULL. One line per
+   fact: what it is, what it says, who supplied it, how old it is, and -- from
+   the server's own registry -- whether anybody serves it at all. Nothing here
+   is written in this file; `computed` and `note` come straight off
+   optfacts.registry(), so the page cannot drift from the module. */
+function drawer(r, d) {
+  const reg = {};
+  for (const x of (d.registry || [])) reg[x.name] = x;
+  const names = Object.keys(r.facts || {}).sort();
+  const rows = names.map((n) => factRow(n, r.facts[n], reg[n]));
+  const why = r.why ? `<p class="b-note"><b>Why it is watched.</b>
+    ${esc(r.why)}${r.added_at ? ` <span class="faint">(added
+    ${esc(String(r.added_at).slice(0, 10))})</span>` : ""}</p>` : "";
+  const errs = (r.errors || []).length
+    ? `<p class="b-note bad">${esc((r.errors || []).join(" · "))}</p>` : "";
+  const cost = `<p class="b-note faint">This row cost
+    ${n0(r.trading_calls)} trading-API call(s) and ${n0(r.data_calls)} on the
+    market-data host at the last refresh.</p>`;
+  return `<div class="b-drawer">${why}${errs}
+    ${tableHTML(["Fact", "Value", "Source", "Age", "Served?", "Reason"], rows,
+      "This ticker has no facts yet.")}
+    ${cost}</div>`;
+}
+
+/* tableHTML joins pre-built rows, so this returns a <tr>, not cells. */
+function factRow(name, f, spec) {
+  const served = !spec ? DASH
+    : spec.computed ? `<span class="faint">nobody — we compute it</span>`
+      : `<span class="faint">Alpaca serves it</span>`;
+  const src = f.source ? `${srcBadge(f)} ${esc(f.source)}`
+    : `<span class="faint">—</span>`;
+  const note = esc(f.reason || (spec ? spec.note : "") || "");
+  return `<tr><td><code class="o-mono">${esc(name)}</code></td>
+    <td class="num"><b>${factText(name, f)}</b></td><td>${src}</td>
+    <td class="num">${esc(agoEpoch(f.as_of) || "—")}</td>
+    <td>${served}</td><td class="b-reason">${note}</td></tr>`;
+}
+
+function addForm() {
+  if (!BD.adding) return "";
+  /* `why` is required, and the server refuses without it. That is optwatch's
+     rule and it is a good one: six months from now the only defensible reason
+     to keep or prune a name is the sentence that put it there. */
+  return `<div class="b-add">
+    <div class="o-bar">
+      <label class="f o-w-sym"><span>Ticker</span>
+        <input id="obSym" maxlength="8" autocomplete="off"
+               spellcheck="false"></label>
+      <label class="f"><span>Tier</span>
+        <select id="obTier"><option value="A">A — every 60s</option>
+        <option value="B" selected>B — every 5m</option>
+        <option value="C">C — every 15m</option></select></label>
+      <label class="f" style="flex:1 1 260px"><span>Why it is worth the data
+        budget</span><input id="obWhy" autocomplete="off"></label>
+      <button class="btn sm primary" id="obSave">Add</button>
+      <button class="btn sm" id="obCancel">Cancel</button>
+    </div>
+    <div class="faint">A ticker the share ladder trades is refused: an
+      assignment would sell shares its lot ledger believes it owns.</div>
+  </div>`;
+}
+
+function wireBoard() {
+  const v = el("view");
+  if (!v) return;
+  v.querySelectorAll("[data-open]").forEach((b) => {
+    b.onclick = () => {
+      const s = b.dataset.open;
+      BD.open[s] = !BD.open[s];
+      paintBoard();
+    };
+  });
+  v.querySelectorAll("[data-watch]").forEach((b) => {
+    b.onclick = async () => {
+      const act = b.dataset.watch;
+      const sym = b.dataset.sym;
+      if (act === "remove") {
+        const yes = await ask({
+          title: `Remove ${sym} from the board?`,
+          body: `<p>It stops being watched and its reason for being on the
+                 board is forgotten. <b>Pause</b> keeps both and only stops
+                 gathering data.</p>`,
+          ok: "Remove", danger: true,
+        });
+        if (!yes) return;
+      }
+      b.disabled = true;
+      await watchAct(sym, act);
+    };
+  });
+  const add = el("obAdd");
+  if (add) add.onclick = () => { BD.adding = !BD.adding; paintBoard(); };
+  const go = el("obGo");
+  if (go) go.onclick = () => boardRefresh();
+  const save = el("obSave");
+  if (save) {
+    save.onclick = async () => {
+      const sym = (el("obSym").value || "").trim().toUpperCase();
+      const why = (el("obWhy").value || "").trim();
+      if (!sym) return void toast("A ticker is required.", "err");
+      if (!why) return void toast("A reason is required — the server refuses "
+        + "a row with no provenance.", "err");
+      save.disabled = true;
+      await watchAct(sym, "add", { why, tier: el("obTier").value });
+      save.disabled = false;
+    };
+  }
+  const cancel = el("obCancel");
+  if (cancel) cancel.onclick = () => { BD.adding = false; paintBoard(); };
+  v.querySelectorAll("[data-reg]").forEach((b) => {
+    b.onclick = () => {
+      BD.filter = b.dataset.reg;
+      LS.set("ta-opt-regime", BD.filter);
+      paintBoard();
+    };
+  });
+  v.querySelectorAll("[data-sort]").forEach((b) => {
+    b.onclick = () => {
+      BD.sort = b.dataset.sort;
+      LS.set("ta-opt-sort", BD.sort);
+      paintBoard();
+    };
+  });
+}
 
 /* ================================================================= chain */
 /* Underlyings worth one tap. Anything else is typed: an allowlist here would

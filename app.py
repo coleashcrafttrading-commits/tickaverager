@@ -48,6 +48,9 @@ Routes
   GET    /api/optlab/expirations/{sym} listed expiries, dead ones marked
   GET    /api/optlab/chain/{sym}       one expiry, with local IV and greeks
   GET    /api/optlab/sweep             the saved backtests and their grades
+  GET    /api/optlab/board             the watched tickers and what we know
+  POST   /api/optlab/board/refresh     force a measurement (rate-limited)
+  POST   /api/optlab/watch             add/remove/enable/disable a symbol
 
   /api/options/* and the /options page belong to optapi.py's router, which is
   the engine that trades. Nothing in THIS file registers a path under it.
@@ -2078,6 +2081,379 @@ def options_sweep(top: int = 10):
             "note": ("grade A needs a positive result at every spread on BOTH "
                      "markets, 100+ trades each, and better than 60% of the "
                      "profit kept when the spread assumption is doubled")}
+
+
+# --------------------------------------------------------------------- board
+# THE WATCHED TICKERS, AND WHAT WE ACTUALLY KNOW ABOUT EACH ONE.
+#
+# This is the Options tab's landing room and it replaced the live chain. A
+# streaming chain is something the BACKEND needs; the question a human has in
+# front of this page is "are we watching the right names, and is the data on
+# them good enough to decide anything yet". The chain route above stays, for
+# debugging, and is no longer a room on the page.
+#
+# NOTHING HERE ARMS, SIZES, PRICES OR SENDS ANYTHING. There is no order path
+# on the other side of any of these three routes.
+#
+# THIS SECTION MEASURES NOTHING ITSELF. It is a join, and that is the whole
+# design: optwatch.py owns which names are on the board and the disjointness
+# stamp against the share fleet; optfacts.py owns the closed vocabulary of
+# facts and what each one cost. A second opinion about IV rank or about a
+# liquidity grade living in a route handler is how two answers to the same
+# question come to disagree, and this page exists to stop exactly that.
+#
+# WHAT IT DOES OWN, because nothing else can:
+#   * the cache and the background thread, so a GET never waits on Alpaca.
+#     docs/options_design_v2.md 2.1 wants every dashboard handler to be a
+#     SELECT off the daemon's state. There is no daemon yet (increments 5+),
+#     so the refresh runs here -- on a thread, behind a TTL, rate-limited --
+#     rather than inside the request. A handler that blocks on six symbols'
+#     worth of Alpaca is the 21-second /api/overview increment 0 just fixed.
+#   * the rate limit, because the expiry registry is on the 200/min trading
+#     host that the LIVE share ladders spend from, and a person leaning on a
+#     button in a browser must not be able to be the reason a lot cannot be
+#     covered.
+OPT_BOARD_TTL = 90.0
+# The floor between two FORCED refreshes. Separate from the TTL on purpose:
+# the TTL is how old data may get on its own, this is how fast a human may
+# spend the shared trading budget.
+OPT_BOARD_MIN_REFRESH = 20.0
+# How long a forced refresh blocks before answering with whatever is there.
+# core.js gives a POST much longer than this; the page polls afterwards and
+# never depends on the refresh having finished inside the request.
+OPT_BOARD_WAIT = 9.0
+# The hard stop optfacts.refresh_all applies to its own optional trading-host
+# spend. Past it the remaining symbols lose open interest and SAY so, rather
+# than the refresh quietly running the ladders' budget down.
+OPT_BOARD_TRADING_BUDGET = 40
+
+_BOARD: dict = {}                    # account id -> the last completed board
+_BOARD_BUSY: dict = {}               # account id -> True while a refresh runs
+# optwatch.load() SEEDS on first use -- it writes the watchlist file. Two
+# callers reaching that at the same instant (the request thread rendering the
+# board while the refresh thread measures it, which is exactly what the first
+# GET after a restart does) both build the same temp file and race the atomic
+# rename; on Windows the loser raises PermissionError and the board renders
+# empty on a fresh install. Serialised here rather than in optwatch, because
+# this is the only place two threads read it at once.
+_BOARD_WATCH_LOCK = threading.Lock()
+
+
+def _watch_board() -> dict:
+    """optwatch's board, one caller at a time. See _BOARD_WATCH_LOCK."""
+    import optwatch
+    with _BOARD_WATCH_LOCK:
+        return optwatch.board()
+
+
+def _board_refresh(f: Fleet) -> None:
+    """Measure every ENABLED watched symbol. Runs on a thread, never in a
+    request.
+
+    A disabled row is still refreshed into the board as a row -- it just is
+    not measured. Hiding it would make "we decided not to watch this" look
+    exactly like "we never thought of it", and only the second is worth
+    fixing.
+    """
+    import optfacts
+    import time as _time
+    started = _time.time()
+    try:
+        watch = _watch_board()
+    except Exception as e:                                # pragma: no cover
+        LOG.warning("board: the watchlist would not load: %r", e)
+        return
+    rows = watch.get("rows") or []
+    live = [r["symbol"] for r in rows if r.get("enabled")]
+    # state_dir is passed, never defaulted. EventCalendar resolves
+    # earnings.json inside whatever state dir it is handed, so omitting it
+    # reads the DEFAULT account's file no matter which account is asking --
+    # and in a test it reaches past the fixture into production state, which
+    # is how a row with no asserted earnings still formed a regime.
+    result = optfacts.refresh_all(
+        f.broker, live, od=_optdata(f), state_dir=f.state_dir,
+        trading_budget=OPT_BOARD_TRADING_BUDGET).to_dict()
+    vectors = result.pop("vectors", {})
+    out = []
+    for r in rows:
+        row = dict(r)
+        vec = vectors.get(r["symbol"])
+        row["measured"] = vec is not None
+        if vec is None:
+            # Two different absences, and they must not read alike: a symbol
+            # switched off, and a symbol whose whole fact vector failed.
+            row["regime"] = "off" if not r.get("enabled") else "unusable"
+            row["regime_reason"] = (
+                "disabled on the watchlist -- no data is being gathered on it"
+                if not r.get("enabled") else
+                "the fact vector failed entirely; see errors")
+            row["facts"] = {}
+            row["missing"] = []
+            row["stale"] = []
+            row["errors"] = []
+            row["as_of"] = None
+            row["trading_calls"] = 0
+            row["data_calls"] = 0
+        else:
+            row.update(vec)
+        out.append(row)
+    with _OPT_LOCK:
+        _BOARD[f.account_id] = {
+            "rows": out,
+            "watchlist": {k: v for k, v in watch.items() if k != "rows"},
+            "refreshed_at": _opt_now().isoformat(),
+            "seconds": round(_time.time() - started, 2),
+            "cost": result,
+        }
+
+
+def _board_start(f: Fleet) -> bool:
+    """Kick off a refresh unless one is already running. True if this call
+    started it. One at a time per account: two overlapping sweeps would
+    double the trading-host spend for one board."""
+    with _OPT_LOCK:
+        if _BOARD_BUSY.get(f.account_id):
+            return False
+        _BOARD_BUSY[f.account_id] = True
+
+    def run():
+        try:
+            _board_refresh(f)
+        except Exception as e:                            # pragma: no cover
+            LOG.warning("board refresh failed: %r", e)
+        finally:
+            with _OPT_LOCK:
+                _BOARD_BUSY[f.account_id] = False
+
+    threading.Thread(target=run, name="optboard", daemon=True).start()
+    return True
+
+
+def _board_age(cached: dict, now: datetime):
+    if not cached:
+        return None
+    t = _opt_time(cached.get("refreshed_at"))
+    return None if t is None else (now - t).total_seconds()
+
+
+def _board_payload(f: Fleet) -> dict:
+    """The whole board, out of the cache. Computes nothing."""
+    import optfacts
+    now = _opt_now()
+    with _OPT_LOCK:
+        cached = dict(_BOARD.get(f.account_id) or {})
+        busy = bool(_BOARD_BUSY.get(f.account_id))
+    age = _board_age(cached, now)
+    rows = cached.get("rows") or []
+    watch = cached.get("watchlist")
+    if watch is None:
+        # Nothing has been measured yet. The WATCHLIST is still knowable and
+        # still worth showing: "we are watching eight names and have not
+        # measured them yet" and "we are watching nothing" are different
+        # answers and the first screenful must not confuse them.
+        try:
+            full = _watch_board()
+            watch = {k: v for k, v in full.items() if k != "rows"}
+            rows = [dict(r, measured=False, regime="unmeasured",
+                         regime_reason="no refresh has completed yet",
+                         facts={}, missing=[], stale=[], errors=[],
+                         as_of=None, trading_calls=0, data_calls=0)
+                    for r in full.get("rows") or []]
+        except Exception as e:                            # pragma: no cover
+            watch = {"count": 0, "enabled": 0, "conflicts": {},
+                     "disjoint": True, "error": str(e)}
+    regimes: dict = {}
+    for r in rows:
+        code = r.get("regime")
+        if code:
+            regimes[code] = regimes.get(code, 0) + 1
+    cost = cached.get("cost") or {}
+    return {
+        "ok": True,
+        "now": now.isoformat(),
+        # THE HONEST LINE, and it is a constant because it is a fact about the
+        # code rather than a reading: nothing in this repository has ever
+        # placed an option order, there is no arm switch behind this page and
+        # every route it calls is a read. When that stops being true, this
+        # string has to change in the same commit that makes it untrue.
+        "armed": False,
+        "status": {
+            "level": "info",
+            "headline": "Nothing is armed. No option is being traded.",
+            "detail": ("This is the data layer: the tickers we watch and the "
+                       "facts we can measure about them. There is no options "
+                       "position, no order path behind this page and no arm "
+                       "switch on it. Every route it calls is a read."),
+        },
+        "watchlist": watch,
+        "rows": rows,
+        "regimes": regimes,
+        # The closed vocabulary, so the page can say what a number IS and
+        # whether anybody serves it, without a second request and without a
+        # second copy of the answer in Javascript.
+        "registry": optfacts.registry(),
+        "regime_labels": list(optfacts.REGIMES),
+        "refreshed_at": cached.get("refreshed_at"),
+        "age_s": None if age is None else round(age, 1),
+        "stale": age is None or age > OPT_BOARD_TTL,
+        "refreshing": busy,
+        "seconds": cached.get("seconds"),
+        "cost": cost,
+        "min_refresh_s": OPT_BOARD_MIN_REFRESH,
+        "ttl_s": OPT_BOARD_TTL,
+        "budget": _optdata(f).stats() if f.broker else None,
+        "note": ("IV rank needs a year of daily implied volatility that no "
+                 "endpoint serves, so it is the one number here that "
+                 "genuinely must be computed -- and every row carries how "
+                 "many sessions of recorded history are behind it."),
+    }
+
+
+@app.get("/api/a/{acct}/optlab/board")
+@app.get("/api/optlab/board")
+def options_board(f: Fleet = Depends(cur)):
+    """The watched tickers and what we know about each. Never blocks.
+
+    Answers out of the cache and starts a background refresh when the cache
+    is stale. The first call after a restart therefore returns the watchlist
+    with unmeasured rows and `refreshing` true, which the page renders as
+    "measuring" -- that must never look like "nothing is watched".
+    """
+    with _OPT_LOCK:
+        cached = dict(_BOARD.get(f.account_id) or {})
+    age = _board_age(cached, _opt_now())
+    if f.broker and (age is None or age > OPT_BOARD_TTL):
+        _board_start(f)
+    return _board_payload(f)
+
+
+@app.post("/api/a/{acct}/optlab/board/refresh")
+@app.post("/api/optlab/board/refresh")
+def options_board_refresh(f: Fleet = Depends(cur)):
+    """Force a refresh, rate-limited HERE rather than in the browser.
+
+    OPT_BOARD_MIN_REFRESH between forced refreshes. The expiry registry is on
+    the same 200/min trading host the live share ladders spend from, so a
+    person holding down a button must not be able to be the reason a lot
+    cannot be covered. Refused with a 429 and the seconds left, never
+    silently ignored -- a button that does nothing teaches nothing.
+    """
+    import time as _time
+    if not f.broker:
+        raise HTTPException(503, "Broker not connected.")
+    now = _opt_now()
+    with _OPT_LOCK:
+        cached = dict(_BOARD.get(f.account_id) or {})
+    age = _board_age(cached, now)
+    if age is not None and age < OPT_BOARD_MIN_REFRESH:
+        raise HTTPException(
+            429, f"The board was refreshed {age:.0f}s ago. It may be forced "
+                 f"once every {OPT_BOARD_MIN_REFRESH:.0f}s -- the expiry "
+                 f"registry spends the same 200/min the live share ladders "
+                 f"do.")
+    _board_start(f)
+    # A short wait so the button feels like a button, then answer whatever is
+    # there. The page polls; it never depends on this having finished.
+    deadline = _time.monotonic() + OPT_BOARD_WAIT
+    while _time.monotonic() < deadline:
+        with _OPT_LOCK:
+            if not _BOARD_BUSY.get(f.account_id):
+                break
+        _time.sleep(0.15)
+    return _board_payload(f)
+
+
+@app.post("/api/a/{acct}/optlab/watch")
+@app.post("/api/optlab/watch")
+def options_watch(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Add, remove, enable or disable one watched symbol.
+
+    Every rule here is optwatch's, called rather than restated. Two of them
+    are worth naming because the UI has to carry them:
+
+      `why` IS REQUIRED ON AN ADD. optwatch.add refuses a row with no
+      sentence, and it is right to: six months from now the only defensible
+      reason to keep or prune a name is the sentence that put it there.
+
+      A SYMBOL THE SHARE LADDER TRADES IS REFUSED. design v2, 6.5 -- an
+      assignment on a shared name would flatten shares out from under
+      state/lots_{SYM}.json during the one event when nobody is thinking
+      clearly. optwatch has a typed-out escape hatch for deliberately
+      watching one anyway; this route does NOT expose it, because increment 2
+      has no reason to want it and an escape hatch on a web form is not a
+      typed-out one.
+
+    Nothing here arms anything. A watched symbol is a symbol we gather data
+    on; there is no order path on the other side of this route.
+    """
+    import optwatch
+    sym = str(body.get("symbol") or "").strip().upper()
+    action = str(body.get("action") or "add").strip().lower()
+    if not sym:
+        raise HTTPException(400, "A symbol is required.")
+    if action not in ("add", "remove", "enable", "disable"):
+        raise HTTPException(400, f"action {action!r} is not add, remove, "
+                                 f"enable or disable.")
+    known = {r["symbol"] for r in (_watch_board().get("rows") or [])}
+    if action != "add" and sym not in known:
+        # 404 rather than optwatch's WatchlistError -> 409: "that row is not
+        # there" is a different answer from "that row may not be there", and
+        # a page that cannot tell them apart offers the wrong fix.
+        raise HTTPException(404, f"{sym} is not on the watchlist.")
+    try:
+        if action == "add":
+            why = str(body.get("why") or "").strip()
+            if not why:
+                raise HTTPException(
+                    400, "Adding a ticker needs a reason -- one sentence "
+                         "saying why it is worth the data budget. A "
+                         "watchlist whose rows have no provenance becomes a "
+                         "pile nobody dares prune.")
+            optwatch.add(sym, why, tier=str(body.get("tier") or "B"),
+                         notes=str(body.get("notes") or ""))
+        elif action == "remove":
+            optwatch.remove(sym)
+        else:
+            optwatch.set_enabled(sym, action == "enable")
+    except HTTPException:
+        raise
+    except optwatch.WatchlistError as e:
+        # optwatch refuses for exactly three reasons -- no sentence, a share
+        # -fleet collision, or the row is already there -- and all three are
+        # the caller's to fix, so 409 rather than 500.
+        raise HTTPException(409, str(e))
+
+    board = _watch_board()
+    now_on = {r["symbol"]: r for r in board["rows"]}
+    with _OPT_LOCK:
+        cached = _BOARD.get(f.account_id)
+        if cached:
+            # The cached board still describes the old list, and the page is
+            # about to render it. Drop the rows that are gone and re-stamp
+            # the ones that changed, so a symbol just switched off does not
+            # keep showing the facts it had a second ago -- a row that says
+            # "disabled" beside live data is the kind of half-truth this page
+            # exists to refuse. The refresh below then replaces it properly.
+            rows = []
+            for r in cached["rows"]:
+                w = now_on.get(r.get("symbol"))
+                if w is None:
+                    continue
+                rows.append(dict(r, **w) if w.get("enabled")
+                            else dict(w, measured=False, facts={},
+                                      missing=[], stale=[], errors=[],
+                                      as_of=None, trading_calls=0,
+                                      data_calls=0, regime="off",
+                                      regime_reason="disabled on the "
+                                                    "watchlist -- no data is "
+                                                    "being gathered on it"))
+            cached["rows"] = rows
+            cached["watchlist"] = {k: v for k, v in board.items()
+                                   if k != "rows"}
+    if f.broker:
+        # Every verb changes what the board should say, disable included.
+        _board_start(f)
+    return {"ok": True, "symbol": sym, "action": action, "watchlist": board}
 
 
 # ============================================================ compat (old UI)

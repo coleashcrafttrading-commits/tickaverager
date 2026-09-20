@@ -38,7 +38,7 @@ how two pages come to disagree about what is held.
 -------------------------------------------------------------- the scenarios
 Each one is a reviewer's failing input, reproducible in a browser:
 
-  default      a healthy chain and a healthy shelf
+  default      a healthy board, a healthy chain and a healthy shelf
   wide         a chain whose spreads are 54.5%, 46.2% and 19.4% of mid
   expfail      GET /expirations answers 502 until /mock/heal is called
   expired      first_tradable null and every listed expiry already passed
@@ -46,6 +46,13 @@ Each one is a reviewer's failing input, reproducible in a browser:
   bankfail     GET /bank/{slug} answers 404, for the stranded-detail case
   deep         61 strikes, so the chain is taller than its scroll box and the
                ATM centring is observable at all
+  boardempty   the first GET after a restart: the watchlist is known and
+               nothing is measured yet. It must not read as "nothing watched"
+  boardlimit   POST /board/refresh answers 429, which is the rate limiter
+               protecting the 200/min host the live share ladders spend from
+  boardclash   a watched ticker the share ladder also trades, so the board
+               has to carry the disjointness banner
+  boardfail    GET /board answers 502, for the stranded-board case
 """
 from __future__ import annotations
 
@@ -69,7 +76,15 @@ STATE = {"scenario": "default", "log": []}
 LOCK = threading.Lock()
 
 SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
-             "bankfail", "deep"]
+             "bankfail", "deep", "boardempty", "boardlimit", "boardclash",
+             "boardfail"]
+
+# The watchlist the POST verbs mutate. A list rather than a set so the order
+# a human added names in survives, which is the order the real file keeps.
+WATCH = ["SPY", "QQQ", "AAPL", "IWM", "TSLA"]
+# The one refusal that matters, copied from optwatch: a symbol the share
+# ladder trades can never be watched for options.
+SHARE_FLEET = ["MSTX", "NVDA", "RAM"]
 
 
 # ============================================================ the wire units
@@ -208,6 +223,52 @@ def expirations(scen):
             "first_tradable": rows[0]["expiry"], "budget": {"trading_calls": 1}}
 
 
+# The shelf. A NameError lived here: commit 300b7a2 ("drop the fixtures for
+# the routes that no longer exist") took BANK_ROWS with it and left bank()
+# and bank_doc() referring to a name that was gone, so /api/optlab/bank
+# answered a 500 and the browser suite died at section 2 -- before it reached
+# anything. Restored, with the two slugs the checks below name by hand.
+#
+# Six rows, not 231: the grid, the filter and the blocked state are what the
+# view has to get right, and each of those needs one example, not a corpus.
+def _bank_row(slug, name, family, bias, net, legs, permitted, zero_dte,
+              summary):
+    return {"slug": slug, "name": name, "family": family, "bias": bias,
+            "net": net, "legs": legs, "permitted": permitted,
+            "zero_dte": zero_dte, "summary": summary,
+            "requires_share_leg": False,
+            "blocked_because": None if permitted
+            else "needs options level 4 -- an uncovered short"}
+
+
+BANK_ROWS = [
+    _bank_row("put-credit-spread", "Put credit spread", "vertical",
+              "bullish", "credit", 2, True, False,
+              "Sell a put, buy a further one for protection. Defined risk, "
+              "and the workhorse of every premium-selling week."),
+    _bank_row("zero-dte-broken-wing-butterfly",
+              "0DTE broken wing butterfly", "butterfly", "neutral", "credit",
+              3, True, True,
+              "An unbalanced fly opened on the session it expires. The "
+              "flatten deadline is the binding rule, not the profit target."),
+    _bank_row("iron-condor", "Iron condor", "condor", "neutral", "credit",
+              4, True, False,
+              "Two credit spreads, one either side. Wins on a market that "
+              "does nothing."),
+    _bank_row("long-call-vertical", "Long call vertical", "vertical",
+              "bullish", "debit", 2, True, False,
+              "Buy a call, sell a further one to pay for part of it."),
+    _bank_row("short-strangle", "Short strangle", "strangle", "neutral",
+              "credit", 2, False, False,
+              "Sell a call and a put, both out of the money, neither "
+              "covered. Level 4 -- Alpaca rejects it outright here."),
+    _bank_row("naked-put", "Naked put", "single", "bullish", "credit", 1,
+              False, False,
+              "Sell a put with nothing behind it. Level 4, and the "
+              "assignment is 100 shares nobody sized for."),
+]
+
+
 def bank():
     return {"level": 3, "max_legs": 4, "count": len(BANK_ROWS),
             "stats": {"total": 231, "permitted": 174, "forbidden": 57,
@@ -324,6 +385,12 @@ HOST_PAGE = """<!doctype html>
   <div id="view"></div>
 </div>
 </div>
+<!-- The real page (static/index.html:36) carries this and core.js's toast()
+     appends straight into it, so a harness without it turns every toast into
+     an uncaught TypeError -- measured: adding a ticker with no reason threw
+     instead of showing the refusal. A harness that differs from the page is
+     a harness that hides bugs. -->
+<div class="toasts" id="toasts"></div>
 <script type="module">
 import { VIEWS } from "/static/ui/core.js";
 import "/static/ui/views/options.js";
@@ -341,7 +408,10 @@ function show(tab) {
 }
 function el(id) { return document.getElementById(id); }
 
-const TABS = ["chain", "strategies", "backtest"];
+/* "chain" is still here even though it left the real tab bar: it is
+   reachable at #/options/chain for debugging and its checks below still
+   mount it. */
+const TABS = ["board", "strategies", "backtest", "chain"];
 el("mkTabs").innerHTML = TABS.map((t) =>
   `<button data-tab="${t}" class="btn sm">${t}</button>`).join("");
 el("mkTabs").onclick = (e) => {
@@ -363,10 +433,339 @@ el("mkScen").onclick = async (e) => {
   }
 };
 
-show((location.hash || "#chain").slice(1));
+show((location.hash || "#board").slice(1));
 window.__show = show;
 </script></body></html>
 """
+
+
+# ==================================================================== board
+# The Options tab's landing room, faked. Same discipline as the chain above:
+# every field is in the SAME UNIT app.py's /api/optlab/board sends, and each
+# one that could be read two ways says which. The units here come from
+# optfacts.py directly, and two of them are traps:
+#
+#   iv_rank / iv_percentile   ALREADY 0-100. 48.0 means IV rank 48.
+#   atm_spread_pct            a FRACTION of mid, 0.013 for 1.3%.
+#
+# optfacts labels both of those "pct". A harness that agreed with the view on
+# the wrong one would verify the page clean with every spread on it a hundred
+# times too tight, which is the bug this file's header exists because of.
+BOARD_REGISTRY = [
+    {"name": "spot", "unit": "usd", "scope": "symbol",
+     "provider": "optdata.OptionData.spot", "max_age_s": 60.0,
+     "computed": False, "note": "Alpaca's last trade. We never model a "
+                                "share price."},
+    {"name": "iv", "unit": "ratio", "scope": "symbol",
+     "provider": "greeks.chain_greeks_merged", "max_age_s": 120.0,
+     "computed": False, "note": "At-the-money implied volatility on the "
+                                "front expiry. ALPACA'S where they publish "
+                                "it -- every expiry except 0DTE."},
+    {"name": "iv_rank", "unit": "pct", "scope": "symbol",
+     "provider": "optvol.iv_rank", "max_age_s": 108000.0, "computed": True,
+     "note": "Needs a year of history no endpoint serves, so it is ours, "
+             "and it REFUSES below MIN_IV_RANK_DAYS."},
+    {"name": "iv_rank_days", "unit": "days", "scope": "symbol",
+     "provider": "optfacts.iv_history_daily", "max_age_s": 108000.0,
+     "computed": True, "note": "How many distinct sessions of recorded IV "
+                               "back the rank."},
+    {"name": "realized_vol_20", "unit": "ratio", "scope": "symbol",
+     "provider": "optvol.realized_vol", "max_age_s": 108000.0,
+     "computed": True, "note": "Annualised close-to-close volatility over 20 "
+                               "sessions. Nobody serves this."},
+    {"name": "vrp", "unit": "ratio", "scope": "symbol", "provider": "optvol.vrp",
+     "max_age_s": 120.0, "computed": True,
+     "note": "Implied minus realized, in volatility points."},
+    {"name": "term_slope", "unit": "ratio_per_30d", "scope": "symbol",
+     "provider": "optvol.term_structure", "max_age_s": 120.0, "computed": True,
+     "note": "Positive is contango, the ordinary state."},
+    {"name": "skew_25d", "unit": "ratio", "scope": "symbol",
+     "provider": "optvol.skew", "max_age_s": 120.0, "computed": True,
+     "note": "The 25-delta put risk reversal on the front expiry."},
+    {"name": "liquidity_grade", "unit": "enum:A|B|C|D|F", "scope": "symbol",
+     "provider": "optdata.QualityGate", "max_age_s": 120.0, "computed": True,
+     "note": "D and F make the whole symbol unusable."},
+    {"name": "atm_spread_pct", "unit": "pct", "scope": "symbol",
+     "provider": "optdata.OptionData.chain", "max_age_s": 120.0,
+     "computed": False, "note": "The median at-the-money spread as a "
+                                "FRACTION of mid."},
+    {"name": "earnings_in_days", "unit": "days", "scope": "symbol",
+     "provider": "optcal.EventCalendar.next_earnings", "max_age_s": 108000.0,
+     "computed": False, "note": "UNKNOWN and NONE-SCHEDULED are different "
+                                "states."},
+    {"name": "ex_div_in_days", "unit": "days", "scope": "symbol",
+     "provider": "optcal.EventCalendar.next_dividend", "max_age_s": 108000.0,
+     "computed": False, "note": "The day before it is when a short call gets "
+                                "assigned for the dividend."},
+    {"name": "next_expiry", "unit": "date", "scope": "symbol",
+     "provider": "optdata.OptionData.expirations", "max_age_s": 3600.0,
+     "computed": False, "note": "From the contract registry on the SCARCE "
+                                "trading host, cached 15 minutes."},
+    {"name": "greeks_source", "unit": "enum:alpaca|computed|mixed|none",
+     "scope": "symbol", "provider": "greeks.chain_sources", "max_age_s": 120.0,
+     "computed": True, "note": "The owner's question rendered as a fact: "
+                               "`alpaca` means we recomputed nothing."},
+]
+
+
+def _f(value, source, unit, *, quality="ok", reason=None, age=7.0):
+    return {"value": value, "unit": unit, "source": source,
+            "as_of": None if value is None else time.time() - age,
+            "age_s": None if value is None else age,
+            "quality": quality, "reason": reason}
+
+
+def _known(v, src, unit, **kw):
+    return _f(v, src, unit, **kw)
+
+
+def _absent(unit, reason, **kw):
+    return _f(None, None, unit, quality="missing", reason=reason, **kw)
+
+
+def _watch_row(sym, tier, why, **kw):
+    row = {"symbol": sym, "tier": tier, "cadence_s": 60.0, "enabled": True,
+           "mode_weight": 1.0, "slot_budget": 1, "why": why,
+           "added_at": "2026-09-19T08:00:00-04:00", "notes": "",
+           "shares_conflict": False, "conflict_reason": None}
+    row.update(kw)
+    return row
+
+
+# One row per interesting shape, because each of these is a reviewer's own
+# failing input: a healthy row with Alpaca's own IV; a row whose IV we had to
+# solve; a row with an earnings print inside the window; one that cannot be
+# graded at all; one deliberately paused; and one that collides with the live
+# share ladder.
+def _board_rows():
+    exp = (datetime.now(timezone.utc) + timedelta(days=9)).date().isoformat()
+    spy = _watch_row("SPY", "A", "deepest listed option market; penny-wide "
+                                 "near the money and daily expiries")
+    spy.update({
+        "measured": True, "as_of": time.time() - 7,
+        "regime": "rich_vol",
+        "regime_reason": "implied 18.4% against realized 14.1% over 20 "
+                         "sessions, a ratio of 1.30, at or above the 1.20 "
+                         "rich band; iv_rank 62 agrees",
+        "missing": [], "stale": [], "errors": [],
+        "trading_calls": 1, "data_calls": 4,
+        "facts": {
+            "spot": _known(612.34, "alpaca", "usd"),
+            "iv": _known(0.1842, "alpaca", "ratio"),
+            "iv_rank": _known(62.0, "computed", "pct", quality="thin",
+                              reason="94 of 252 sessions of recorded IV "
+                                     "history back this"),
+            "iv_rank_days": _known(94, "computed", "days"),
+            "realized_vol_20": _known(0.1411, "computed", "ratio",
+                                      reason="49 daily bars"),
+            "vrp": _known(0.0431, "computed", "ratio",
+                          reason="implied 18.4% minus realized 14.1%"),
+            "term_slope": _known(0.0121, "computed", "ratio_per_30d"),
+            "skew_25d": _known(0.0268, "computed", "ratio"),
+            "liquidity_grade": _known("A", "computed", "enum:A|B|C|D|F",
+                                      reason="median at-the-money spread "
+                                             "0.90% of mid across 10 "
+                                             "contracts"),
+            "atm_spread_pct": _known(0.009, "alpaca", "pct"),
+            "earnings_in_days": _absent("days", "SPY is an ETF and has no "
+                                                "earnings schedule"),
+            "ex_div_in_days": _known(9, "alpaca", "days"),
+            "next_expiry": _known(exp, "alpaca", "date"),
+            "greeks_source": _known("alpaca", "computed",
+                                    "enum:alpaca|computed|mixed|none",
+                                    reason="30 of 30 rows came from Alpaca"),
+        }})
+
+    qqq = _watch_row("QQQ", "A", "second deepest; daily expiries, and the "
+                                 "other underlying with recorded IV history")
+    qqq.update({
+        "measured": True, "as_of": time.time() - 7,
+        "regime": "cheap_vol",
+        "regime_reason": "implied 14.9% against realized 17.8% over 20 "
+                         "sessions, a ratio of 0.84, at or below the 0.90 "
+                         "cheap band",
+        "missing": ["iv_rank"], "stale": [], "errors": [],
+        "trading_calls": 1, "data_calls": 4,
+        "facts": {
+            "spot": _known(521.08, "alpaca", "usd"),
+            # A near-dated chain genuinely is both. The badge must say so.
+            "iv": _known(0.1489, "mixed", "ratio",
+                         reason="14 of 30 rows came from Alpaca, 16 solved "
+                                "here"),
+            # THE HONEST REFUSAL. Six days is not a year and the page must
+            # not print a rank off it.
+            "iv_rank": _absent("pct", "6 session(s) of recorded IV history; "
+                                      "iv_rank needs 60"),
+            "iv_rank_days": _known(6, "computed", "days"),
+            "realized_vol_20": _known(0.1782, "computed", "ratio"),
+            "vrp": _known(-0.0293, "computed", "ratio"),
+            "term_slope": _known(-0.004, "computed", "ratio_per_30d"),
+            "skew_25d": _absent("ratio", "no put within 0.10 of 0.25 delta "
+                                         "on the front expiry"),
+            "liquidity_grade": _known("B", "computed", "enum:A|B|C|D|F"),
+            "atm_spread_pct": _known(0.0131, "alpaca", "pct"),
+            "earnings_in_days": _absent("days", "no earnings schedule on "
+                                                "this machine"),
+            "ex_div_in_days": _known(22, "alpaca", "days"),
+            "next_expiry": _known(exp, "alpaca", "date"),
+            "greeks_source": _known("mixed", "computed",
+                                    "enum:alpaca|computed|mixed|none"),
+        }})
+
+    aapl = _watch_row("AAPL", "B", "mega-cap with a penny-increment option "
+                                   "programme; earnings are knowable")
+    aapl.update({
+        "measured": True, "as_of": time.time() - 8,
+        "regime": "event_risk",
+        "regime_reason": "earnings in 4 day(s), inside the 10-day event "
+                         "window; whatever the premium is doing, it is doing "
+                         "it because of the print",
+        "missing": [], "stale": [], "errors": [],
+        "trading_calls": 1, "data_calls": 4,
+        "facts": {
+            "spot": _known(241.77, "alpaca", "usd"),
+            "iv": _known(0.3612, "alpaca", "ratio"),
+            "iv_rank": _known(88.0, "computed", "pct", quality="thin",
+                              reason="94 of 252 sessions back this"),
+            "iv_rank_days": _known(94, "computed", "days"),
+            "realized_vol_20": _known(0.2204, "computed", "ratio"),
+            "vrp": _known(0.1408, "computed", "ratio"),
+            "term_slope": _known(-0.0312, "computed", "ratio_per_30d"),
+            "skew_25d": _known(0.0511, "computed", "ratio"),
+            "liquidity_grade": _known("A", "computed", "enum:A|B|C|D|F"),
+            "atm_spread_pct": _known(0.0102, "alpaca", "pct"),
+            "earnings_in_days": _known(4, "calendar", "days"),
+            "ex_div_in_days": _known(31, "alpaca", "days"),
+            "next_expiry": _known(exp, "alpaca", "date"),
+            "greeks_source": _known("alpaca", "computed",
+                                    "enum:alpaca|computed|mixed|none"),
+        }})
+
+    # The uncloseable one. 46.2% of mid on the money is not a market, it is a
+    # quote, and the page must say so rather than grading it.
+    iwm = _watch_row("IWM", "A", "small-cap breadth; a different volatility "
+                                 "regime from SPY and QQQ")
+    iwm.update({
+        "measured": True, "as_of": time.time() - 9,
+        "regime": "unusable",
+        "regime_reason": "liquidity_grade D: the at-the-money spread is "
+                         "46.2% of mid, and the spread is paid going in and "
+                         "coming out",
+        "missing": ["iv_rank", "earnings_in_days"], "stale": [],
+        "errors": ["IWM: open interest (OptDataError: HTTP 429 rate "
+                   "limited on /v2/options/contracts)"],
+        "trading_calls": 2, "data_calls": 4,
+        "facts": {
+            "spot": _known(228.4, "alpaca", "usd"),
+            "iv": _known(0.2233, "computed", "ratio",
+                         reason="Alpaca sent no greeks for these rows; "
+                                "solved here off the implied forward"),
+            "iv_rank": _absent("pct", "6 session(s) of recorded IV history; "
+                                      "iv_rank needs 60"),
+            "iv_rank_days": _known(6, "computed", "days"),
+            "realized_vol_20": _known(0.1988, "computed", "ratio"),
+            "vrp": _known(0.0245, "computed", "ratio"),
+            "term_slope": _known(0.0031, "computed", "ratio_per_30d"),
+            "skew_25d": _known(0.0192, "computed", "ratio"),
+            "liquidity_grade": _known("D", "computed", "enum:A|B|C|D|F",
+                                      reason="median at-the-money spread "
+                                             "46.2% of mid"),
+            # 0.462 on the wire, 46.2% on the screen. The unit trap.
+            "atm_spread_pct": _known(0.462, "alpaca", "pct"),
+            "earnings_in_days": _absent("days", "no earnings schedule on "
+                                                "this machine"),
+            "ex_div_in_days": _known(41, "alpaca", "days"),
+            "next_expiry": _known(exp, "alpaca", "date"),
+            "greeks_source": _known("computed", "computed",
+                                    "enum:alpaca|computed|mixed|none"),
+        }})
+
+    tsla = _watch_row("TSLA", "C", "richest single-name implied volatility "
+                                   "in the penny programme", enabled=False)
+    tsla.update({
+        "measured": False, "as_of": None, "regime": "off",
+        "regime_reason": "disabled on the watchlist -- no data is being "
+                         "gathered on it",
+        "missing": [], "stale": [], "errors": [], "facts": {},
+        "trading_calls": 0, "data_calls": 0})
+    return [spy, qqq, aapl, iwm, tsla]
+
+
+def board(scen):
+    rows = _board_rows()
+    if scen == "boardclash":
+        # A watched name the share ladder also trades. The board must carry
+        # the banner: an assignment there would sell shares state/lots_RAM
+        # believes it owns.
+        clash = _watch_row("RAM", "C", "added by hand before the ladder "
+                                       "picked it up",
+                           shares_conflict=True,
+                           conflict_reason="RAM is in config['tickers'] and "
+                                           "has a lot ledger at "
+                                           "state/lots_RAM.json.")
+        clash.update({"measured": False, "as_of": None, "regime": "unusable",
+                      "regime_reason": "the fact vector failed entirely",
+                      "missing": [], "stale": [], "errors": [], "facts": {},
+                      "trading_calls": 0, "data_calls": 0})
+        rows.append(clash)
+    if scen == "boardempty":
+        # The first GET after a restart: the watchlist is known, nothing is
+        # measured yet. This must NOT render as "nothing is watched".
+        rows = [dict(r, measured=False, as_of=None, facts={},
+                     regime="unmeasured",
+                     regime_reason="no refresh has completed yet",
+                     missing=[], stale=[], errors=[],
+                     trading_calls=0, data_calls=0)
+                for r in rows if r.get("enabled")]
+
+    counts = {}
+    for r in rows:
+        counts[r["regime"]] = counts.get(r["regime"], 0) + 1
+    fresh = scen == "boardempty"
+    bad = {r["symbol"]: r["conflict_reason"]
+           for r in rows if r.get("shares_conflict")}
+    return {
+        "ok": True,
+        "now": _now_iso(),
+        "armed": False,
+        "status": {
+            "level": "info",
+            "headline": "Nothing is armed. No option is being traded.",
+            "detail": "This is the data layer: the tickers we watch and the "
+                      "facts we can measure about them. There is no options "
+                      "position, no order path behind this page and no arm "
+                      "switch on it. Every route it calls is a read.",
+        },
+        "watchlist": {"version": 1, "path": "state/options_watchlist.json",
+                      "count": len(rows),
+                      "enabled": sum(1 for r in rows if r.get("enabled")),
+                      "share_fleet": ["MSTX", "NVDA", "RAM"],
+                      "conflicts": bad, "disjoint": not bad},
+        "rows": rows,
+        "regimes": counts,
+        "registry": BOARD_REGISTRY,
+        "regime_labels": ["cheap_vol", "rich_vol", "neutral", "event_risk",
+                          "unusable"],
+        "refreshed_at": None if fresh else _now_iso(),
+        "age_s": None if fresh else 7.0,
+        "stale": fresh,
+        "refreshing": fresh,
+        "seconds": None if fresh else 2.71,
+        "cost": {} if fresh else {
+            "trading_calls": 4, "data_calls": 16, "elapsed_s": 2.71,
+            "budget_stopped": ["IWM"] if scen == "default" else [],
+            "errors": ["IWM: open interest (OptDataError: HTTP 429 rate "
+                       "limited on /v2/options/contracts)"],
+            "cost_note": "4 call(s) against the 200/min trading host shared "
+                         "with the live share fleet; 16 against the separate "
+                         "10,000/min market data host"},
+        "min_refresh_s": 20.0,
+        "ttl_s": 90.0,
+        "budget": {"trading_calls": 12, "data_calls": 96, "cache_entries": 9},
+        "note": "IV rank needs a year of daily implied volatility that no "
+                "endpoint serves, so it is the one number here that "
+                "genuinely must be computed.",
+    }
 
 
 def _static_path(path):
@@ -399,6 +798,21 @@ class Handler(BaseHTTPRequestHandler):
     def _fail(self, code, detail):
         self._json({"detail": detail}, code)
 
+    def _body(self) -> dict:
+        """The request's JSON body, or {}. Length-delimited: this server is
+        HTTP/1.1 with keep-alive, so reading to EOF would hang the socket."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return {}
+        if n <= 0:
+            return {}
+        try:
+            got = json.loads(self.rfile.read(n).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        return got if isinstance(got, dict) else {}
+
     def _note(self, path):
         with LOCK:
             STATE["log"].append({"t": time.time(), "path": path})
@@ -406,6 +820,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = urlparse(self.path).path
+        self._note("POST " + self.path)
+        # DRAIN THE BODY BEFORE DISPATCHING, ALWAYS, even for the routes that
+        # do not want it. This is HTTP/1.1 with keep-alive: bytes left unread
+        # on the socket become the front of the NEXT request on the same
+        # connection, and the server answered the one after a POST with
+        # 501 Unsupported method ('{}POST'). core.js sends `{}` on every
+        # POST, so every unread body was one such corruption.
+        body = self._body()
+        with LOCK:
+            scen = STATE["scenario"]
         if p.startswith("/mock/scenario/"):
             name = p.rsplit("/", 1)[-1]
             if name not in SCENARIOS:
@@ -425,6 +849,45 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 STATE["log"] = []
             return self._json({"cleared": True})
+
+        if p.endswith("/optlab/board/refresh"):
+            if scen == "boardlimit":
+                # The real route refuses here, and the refusal is the point:
+                # the expiry registry is on the 200/min trading host the live
+                # share ladders spend from.
+                return self._fail(429, "The board was refreshed 3s ago. It "
+                                       "may be forced once every 20s -- the "
+                                       "expiry registry spends the same "
+                                       "200/min the live share ladders do.")
+            return self._json(board(scen))
+        if p.endswith("/optlab/watch"):
+            sym = str(body.get("symbol") or "").strip().upper()
+            act = str(body.get("action") or "add").strip().lower()
+            if not sym:
+                return self._fail(400, "A symbol is required.")
+            if act not in ("add", "remove", "enable", "disable"):
+                return self._fail(400, f"action {act!r} is not add, remove, "
+                                       f"enable or disable.")
+            if act == "add":
+                if not str(body.get("why") or "").strip():
+                    return self._fail(400, "Adding a ticker needs a reason "
+                                           "-- one sentence saying why it is "
+                                           "worth the data budget.")
+                if sym in SHARE_FLEET:
+                    return self._fail(409, f"{sym} is traded by the share "
+                                           f"ladder on this machine. The "
+                                           f"options watchlist is kept "
+                                           f"disjoint from it.")
+                if sym not in WATCH:
+                    WATCH.append(sym)
+            elif sym not in WATCH:
+                return self._fail(404, f"{sym} is not on the watchlist.")
+            elif act == "remove":
+                WATCH.remove(sym)
+            return self._json({"ok": True, "symbol": sym, "action": act,
+                               "watchlist": {"count": len(WATCH),
+                                             "rows": [{"symbol": x}
+                                                      for x in WATCH]}})
         return self._fail(404, "not a mock route")
 
     def do_GET(self):
@@ -461,7 +924,11 @@ class Handler(BaseHTTPRequestHandler):
             with open(full, "rb") as fh:
                 return self._send(200, fh.read(), ctype + "; charset=utf-8")
 
-        # ------------------------------------------------------ the six reads
+        # ------------------------------------------------------ the reads
+        if p.endswith("/optlab/board"):
+            if scen == "boardfail":
+                return self._fail(502, "mock: the board blew up")
+            return self._json(board(scen))
         if "/optlab/expirations/" in p:
             if scen == "expfail":
                 return self._fail(502, "mock: expirations blew up")
@@ -507,6 +974,7 @@ CHECK_PAGE = """<!doctype html>
  .ok{color:#3ddc97}.bad{color:#ff6b8a}h2{font-size:14px;margin:18px 0 6px}</style>
 </head><body>
 <div id="out">running…</div><div id="view" style="display:none"></div>
+<div class="toasts" id="toasts"></div>
 <script type="module">
 import { VIEWS } from "/static/ui/core.js";
 import "/static/ui/views/options.js";
@@ -595,6 +1063,98 @@ check("Refresh brings it back", atmInView(), true);
 check("and does not leave the fresh box at scrollTop 0",
       box().scrollTop > 0, true);
 el("view").style.display = "none";
+await scen("default");
+
+section(5, "the board shows the watchlist before it has measured anything");
+await scen("boardempty");
+await mount("board");
+check("the honest line is the first thing on the page",
+      /Nothing is armed\\. No option is being traded\\./.test(text()), true);
+// "we are watching four names and have not measured them yet" and "we are
+// watching nothing" are different answers, and this is the one that used to
+// render as an empty page.
+check("the watched count is on screen before any fact is",
+      /WATCHED\\s*4 \\/ 4/i.test(el("view").textContent.replace(/\\s+/g, " ")),
+      true);
+check("every ticker still has a row",
+      el("view").querySelectorAll(".b-row").length, 4);
+check("and each row says it is being measured",
+      /no refresh has completed yet/.test(text()), true);
+check("no row claims a number",
+      [...el("view").querySelectorAll(".b-val")]
+        .every((v) => v.textContent.trim() === "\\u2014"), true);
+check("the empty cells are marked absent, not merely blank",
+      el("view").querySelectorAll(".b-cell.none").length > 0, true);
+
+section(6, "a fact that never formed is a dash with a reason, never a zero");
+await scen("default");
+await mount("board");
+const row = (sym) => [...el("view").querySelectorAll(".b-row")]
+  .find((r) => r.querySelector(".b-sym").textContent.trim().indexOf(sym) === 0);
+const cell = (sym, label) => [...row(sym).querySelectorAll(".b-cell")]
+  .find((c) => c.querySelector(".b-lab").textContent.trim() === label);
+const qqqRank = cell("QQQ", "IV rank");
+// The value is a dash AND the day count sits beside it. "No rank" and "no
+// history" are different answers, and only the second tells a human that
+// leaving the recorder running is the thing that fixes it.
+check("QQQ has six days of history, so there is no IV rank",
+      qqqRank.querySelector(".b-val").textContent.trim(), "\\u20146d");
+check("...but the six days are on the number, not only in the tooltip",
+      /6d/.test(qqqRank.querySelector(".b-val").textContent), true);
+// The whole point of the increment. A rank here would be a 52-week statistic
+// invented out of one afternoon.
+check("...and no rank of zero is printed",
+      /^0/.test(qqqRank.querySelector(".b-val").textContent.trim()), false);
+check("...the cell says it was not measured",
+      qqqRank.classList.contains("none"), true);
+check("...and carries the reason, with the day count in it",
+      /6 session\\(s\\) of recorded IV history/.test(qqqRank.title), true);
+check("SPY's rank exists but is flagged thin",
+      cell("SPY", "IV rank").classList.contains("thin"), true);
+check("...and says how much history backs it",
+      /94 of 252 sessions/.test(cell("SPY", "IV rank").title), true);
+check("...with the day count printed on the number itself",
+      /94d/.test(cell("SPY", "IV rank").querySelector(".b-val").textContent),
+      true);
+
+section(7, "the unit trap: a spread is a FRACTION of mid on the wire");
+row("IWM").querySelector(".b-sym").click();
+await sleep(300);
+const drawer = row("IWM").querySelector(".b-drawer");
+const spread = [...drawer.querySelectorAll("tbody tr")]
+  .find((tr) => /atm_spread_pct/.test(tr.textContent));
+check("0.462 renders as 46.2%", /46\\.2%/.test(spread.textContent), true);
+check("and never as 0.5%", /0\\.5%/.test(spread.textContent), false);
+check("the drawer lists every fact the row has",
+      drawer.querySelectorAll("tbody tr").length > 10, true);
+check("and says who is SUPPOSED to serve each one",
+      /nobody \\u2014 we compute it/.test(drawer.textContent), true);
+
+section(8, "provenance is visible on the number, not in a footnote");
+const badge = (sym, label) => {
+  const b = cell(sym, label).querySelector(".b-src");
+  return b ? b.className.replace("b-src ", "") : "none";
+};
+check("SPY's at-the-money IV is Alpaca's", badge("SPY", "IV"), "s-alpaca");
+check("its realised vol is ours", badge("SPY", "Realised"), "s-computed");
+// A near-dated chain genuinely is both, and the board must not pick a side.
+check("QQQ's IV is a mix and says so", badge("QQQ", "IV"), "s-mixed");
+check("a fact that never formed carries no badge at all",
+      badge("QQQ", "IV rank"), "none");
+
+section(9, "the rate limiter's refusal reaches the page");
+await scen("boardlimit");
+await mount("board");
+el("obGo").click();
+await sleep(600);
+check("the 429 is shown, not swallowed",
+      /may be forced once every 20s/.test(text()), true);
+check("and it names the budget it is protecting",
+      /200\\/min the live share ladders/.test(text()), true);
+check("the board is still on screen behind it",
+      el("view").querySelectorAll(".b-row").length > 0, true);
+check("and Refresh is a button again, not stuck on Measuring",
+      el("obGo").textContent.trim(), "Refresh");
 await scen("default");
 
 el("out").innerHTML = lines.join("")
