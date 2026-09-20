@@ -21,6 +21,22 @@ afterwards is not evidence, the same argument the journal and the risk bank
 already make. Each row carries the full chain row: quotes, sizes, computed
 greeks, implied volatility, the spread and what a seller gives up crossing it.
 
+IT ROTATES, AND IT HAD TO. Measured 19 Sep 2026: the file was 247,643,331 bytes
+and growing ~134 MB a day on a 9.7 G disk with 2.3 G free. Nothing capped it, so
+in about 17 days the disk would have filled and taken the LIVE SHARE FLEET down
+with it -- the recorder killing the trading it was supposed to inform. Every run
+now rolls the log first if it is over the cap; the cap, the keep count and the
+arithmetic behind both are in optquotes.py, next to the reader that has to
+understand the roll.
+
+THE ROLL IS CRASH-SAFE, AND IT HAD TO BE TOO. This process is killed the way
+processes on a small VM are killed -- SIGKILL, the OOM killer, a reboot -- and
+the roll is the one moment it is rewriting the file every gate reads. So the
+compress goes through a temp name and is fsynced before it is renamed into
+place (a truncated `.1.gz` used to make every reader raise EOFError), and the
+next run finishes any compress a kill interrupted. Neither is optional on this
+box; see optquotes._compress and optquotes._settle.
+
 IT TRADES NOTHING. It holds no OptionTrader and imports none. It is a read loop
 and a file append.
 """
@@ -39,6 +55,7 @@ sys.path.insert(0, str(ROOT))
 
 import broker                      # noqa: E402
 import options                     # noqa: E402
+import optquotes                   # noqa: E402
 
 LOG = logging.getLogger("record_options")
 
@@ -112,6 +129,19 @@ def main(argv=None) -> int:
     syms = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]
 
     while True:
+        # BEFORE the sample, never during it. A sample is two appends per
+        # symbol -- puts then calls under one timestamp -- and rolling between
+        # them would split one observation of one market across two files.
+        # Unrolled, this file grew 134 MB a day against 2.3 GB of free disk
+        # and would have stopped the share fleet in about 17 days.
+        try:
+            rolled = optquotes.rotate(out)
+            if rolled is not None:
+                LOG.info("quote log rolled to %s", rolled.name)
+        except OSError as exc:
+            # A failed roll must not cost the sample. The disk check is the
+            # next run's problem; the quotes are gone for good if skipped.
+            LOG.warning("could not roll the quote log: %s", exc)
         for sym in syms:
             try:
                 rows, quoted = sample(od, alpaca, sym, band=a.band,

@@ -27,6 +27,12 @@ fifteen minutes, which is roughly two million rows a week. Nothing here loads
 the file into memory; every reader is a generator over lines, and the history
 builders keep only a bounded deque per symbol.
 
+IT IS ALSO WHERE THE ROTATION LIVES. The recorder appends ~134 MB a day and
+nothing capped it; see QUOTE_LOG_MAX_BYTES for the disk arithmetic. The roll
+naming is defined here rather than in the recorder on purpose -- the reader is
+the half that can be silently wrong about it, so `read` and `rotate` have to
+agree about what a rolled file is called and in what order the files go back.
+
 A TRUNCATED OR CORRUPT LINE IS SKIPPED, NOT GUESSED. The file is append-only
 and a sample can be interrupted mid-write, so the last line is sometimes half a
 JSON object. A parse failure drops that row and counts it; it never terminates
@@ -36,8 +42,13 @@ fetch already caused once.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
+import os
+import re
+import shutil
+import zlib
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
@@ -54,24 +65,272 @@ QUOTE_LOG = ROOT / "state" / "option_quotes.jsonl"
 DEFAULT_KEEP = 40
 
 
+# ==================================================================== rotation
+# WHY THIS EXISTS. Nothing capped this file and it was going to end the live
+# fleet on a date. Measured on the VM, 19 Sep 2026:
+#
+#   state/option_quotes.jsonl   247,643,331 bytes
+#   root disk                   9.7 G, 2.3 G free, 76% used
+#   growth                      ~134 MB/day -- 32 samples a weekday
+#                               (every 15 min, 13-20 UTC) x 3 chains,
+#                               ~498 bytes a row
+#
+# At that rate the disk filled in about 17 days and the share ladder, which
+# lives on the same disk, stopped with it. The recorder must not be the thing
+# that kills the trading.
+#
+# THE CAP, and why this number. 256 MB is a roll every ~1.9 days, which is
+# frequent enough that the largest single loss a corrupt roll could cause is
+# two days of quotes, and rare enough that the compress runs once every other
+# day rather than every sample.
+QUOTE_LOG_MAX_BYTES = 256 * 1024 * 1024
+
+# HOW MANY ROLLS TO KEEP, and why this number. Rolled files are gzipped, and
+# the measured ratio on real rows is 8.5:1 (20,000,000 bytes of this file ->
+# 2,354,679). So 12 rolls is ~360 MB on disk holding ~23 days of raw history,
+# and the whole recorder is bounded at roughly
+#
+#   256 MB live + 360 MB archive + 256 MB in flight during a compress = ~870 MB
+#
+# against 2.3 GB free. It never grows past that, which is the entire point.
+#
+# 23 days is also more history than anything reading this file asks for:
+# spread_history keeps 40 observations per contract (~1.25 days) and
+# iv_history keeps 400 samples (~12.5 days).
+QUOTE_LOG_KEEP = 12
+
+#: `option_quotes.jsonl.3.gz` -> 3. The number is the AGE: .1 is the roll that
+#: just happened, QUOTE_LOG_KEEP is the oldest still kept.
+#:
+#: Anchored at the end, so the temp name a compress writes through
+#: (`...jsonl.1.gz.tmp`) is NOT a roll and cannot be read or shifted while it
+#: is still being written.
+_ROLL_RE = re.compile(r"\.(\d+)(\.gz)?$")
+
+#: The compress writes here and renames into place. One writer per log is
+#: assumed -- the recorder is a single process, and two of them appending to
+#: one quote log is already broken for reasons that have nothing to do with
+#: rotation.
+_TMP_SUFFIX = ".tmp"
+
+
+def rolled_paths(path: Path = QUOTE_LOG) -> list[Path]:
+    """The rolled siblings of `path` that exist, OLDEST FIRST, ONE PER INDEX.
+
+    Found by scanning rather than by counting to QUOTE_LOG_KEEP, so lowering
+    the keep count does not orphan files that are still on disk and still
+    hold history somebody is about to read.
+
+    EXACTLY ONE FILE PER ROLL INDEX, and the uncompressed one wins. Between
+    the gzip landing and the uncompressed roll being unlinked BOTH
+    `option_quotes.jsonl.1` and `option_quotes.jsonl.1.gz` exist, and a crash
+    in that window leaves them both there for good. Returning both made
+    read() count every rolled row twice -- 120 rows where 70 existed.
+
+    WHY THE PLAIN ONE IS THE RIGHT HALF OF THE PAIR: it is the live log,
+    renamed. The rename is atomic and it completes BEFORE the compress starts,
+    so a `.N` that exists is always the whole roll, under every crash ordering
+    and under the older non-atomic rotate as well. A `.N.gz` is only provably
+    whole under the rotate below (temp file, fsync, rename); one written by
+    the previous version of this file can be truncated, and nothing cheap can
+    tell a truncated member from a complete one without decompressing it.
+    """
+    p = Path(path)
+    best: dict[int, Path] = {}
+    for cand in p.parent.glob(p.name + ".*"):
+        m = _ROLL_RE.search(cand.name)
+        if not m:
+            continue                      # a .tmp mid-compress, or not ours
+        i = int(m.group(1))
+        cur = best.get(i)
+        if cur is None or (cur.suffix == ".gz" and not m.group(2)):
+            best[i] = cand
+    # Descending: the HIGHEST number is the oldest, and read() promises oldest
+    # first. Getting this backwards would hand every history builder its
+    # observations in reverse and quietly invert every "recent" window.
+    return [best[i] for i in sorted(best, reverse=True)]
+
+
+def _sources(path: Path) -> list[Path]:
+    """Every file holding history for this log, oldest first."""
+    p = Path(path)
+    return rolled_paths(p) + ([p] if p.exists() else [])
+
+
+def _open_text(p: Path):
+    return (gzip.open(p, "rt", encoding="utf-8") if p.suffix == ".gz"
+            else p.open("r", encoding="utf-8"))
+
+
+def _compress(src: Path, dst: Path) -> None:
+    """Gzip `src` to `dst`, ATOMICALLY: a reader sees `dst` whole or not yet.
+
+    THE TRAP THIS CLOSES. Compressing straight into the final name meant a
+    SIGKILL, an OOM or a VM reboot mid-gzip left a truncated `.1.gz` under the
+    name every reader trusts, and read() then raised EOFError ("Compressed
+    file ended before the end-of-stream marker was reached") -- taking
+    coverage(), spread_history(), iv_history() and every gate behind them down
+    with it. "A failed compress leaves the roll uncompressed" only ever held
+    for an OSError, which is the one failure that unwinds politely.
+
+    The fsync is not decoration: without it the rename can reach the disk
+    before the bytes do, and a power loss then leaves exactly the truncated
+    member this is here to prevent.
+    """
+    tmp = dst.with_name(dst.name + _TMP_SUFFIX)
+    tmp.unlink(missing_ok=True)
+    try:
+        with src.open("rb") as fh, tmp.open("wb") as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as out:
+                shutil.copyfileobj(fh, out, length=1024 * 1024)
+            raw.flush()
+            os.fsync(raw.fileno())
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _settle(path: Path) -> None:
+    """Finish a compress a crash interrupted, so the pair cannot travel.
+
+    Both `.N` and `.N.gz` on disk is the crash window of the roll below. The
+    reader already prefers the plain one and so reads it correctly, but left
+    alone the pair gets shifted to `.N+1` on every later roll and doubles the
+    archive forever. The plain file is the source of truth (see rolled_paths),
+    so the gz is REBUILT from it rather than trusted -- a gz left by the older
+    non-atomic rotate may be truncated, and verifying one costs a full
+    decompress anyway.
+
+    Never fatal. A settle that cannot run costs disk, and losing rows is the
+    one outcome that cannot be undone.
+    """
+    p = Path(path)
+    for cand in sorted(p.parent.glob(p.name + ".*")):
+        m = _ROLL_RE.search(cand.name)
+        if not m or m.group(2):
+            continue                      # only the uncompressed halves
+        gz = cand.with_name(cand.name + ".gz")
+        if not gz.exists():
+            continue
+        try:
+            _compress(cand, gz)
+            cand.unlink(missing_ok=True)
+            LOG.warning("%s: finished a compress an earlier run left half "
+                        "done; rebuilt %s from it", cand.name, gz.name)
+        except OSError as exc:
+            LOG.warning("%s: could not finish the interrupted compress: %s",
+                        cand.name, exc)
+
+
+def rotate(path: Path = QUOTE_LOG, *, max_bytes: Optional[int] = None,
+           keep: Optional[int] = None) -> Optional[Path]:
+    """Roll the live log if it has passed the cap. Returns the new .1.gz, or
+    None when nothing needed rolling.
+
+    Call this BETWEEN samples, never inside one. A sample is two appends --
+    puts then calls, under one timestamp -- and rolling between them would
+    split one observation of one market across two files.
+    """
+    p = Path(path)
+    cap = QUOTE_LOG_MAX_BYTES if max_bytes is None else int(max_bytes)
+    n = QUOTE_LOG_KEEP if keep is None else int(keep)
+    # BEFORE the size check, because the crash that left a half-finished
+    # compress behind is exactly the run that then sits under the cap for two
+    # days. A settled archive costs a handful of stat calls.
+    _settle(p)
+    try:
+        if p.stat().st_size <= cap:
+            return None
+    except OSError:
+        return None
+
+    # Drop what is already past the window BEFORE shifting, or the shift
+    # would just push it one further out and keep it forever.
+    for old in rolled_paths(p):
+        m = _ROLL_RE.search(old.name)
+        if m and int(m.group(1)) >= n:
+            old.unlink(missing_ok=True)
+    # Shift downwards from the oldest, so no rename lands on a live name.
+    for i in range(n - 1, 0, -1):
+        for suf in (".gz", ""):
+            src = p.with_name(f"{p.name}.{i}{suf}")
+            if src.exists():
+                src.replace(p.with_name(f"{p.name}.{i + 1}{suf}"))
+
+    rolled = p.with_name(f"{p.name}.1")
+    p.replace(rolled)
+    # The recorder opens the path fresh for every append, so from here on it
+    # writes a new empty log and the roll is already out of its way.
+    #
+    # From here until the unlink both `.1` and `.1.gz` can exist. That window
+    # is safe in both directions now: the gz only appears under its real name
+    # once it is complete (_compress), and rolled_paths picks exactly one of
+    # the pair, so nothing counts the roll twice.
+    gz = p.with_name(f"{p.name}.1.gz")
+    try:
+        _compress(rolled, gz)
+    except OSError as exc:
+        # An uncompressed .1 still reads back -- _open_text handles both -- so
+        # a failed compress costs disk, not history. Losing the rows would be
+        # the unrecoverable outcome, so it is the one we refuse.
+        LOG.warning("%s: could not compress the rolled log: %s", rolled, exc)
+        gz.unlink(missing_ok=True)
+        return rolled
+    rolled.unlink(missing_ok=True)
+    LOG.info("rolled %s to %s (%d bytes)", p.name, gz.name, gz.stat().st_size)
+    return gz
+
+
+def _lines(src: Path) -> Iterator[str]:
+    """Every line of one source. A DAMAGED ARCHIVE COSTS THE ROWS IT HOLDS,
+    never the whole read.
+
+    A truncated gzip member raises EOFError on the read that runs past the
+    end of the stream, and a corrupted one raises zlib.error. Letting either
+    out of read() meant one bad file took coverage(), spread_history(),
+    iv_history() and every gate behind them down together -- twelve archives
+    could be perfect and the thirteenth still returned nothing at all. The
+    rows before the damage are real observations and they are yielded; what
+    is past it is gone either way.
+    """
+    n = 0
+    try:
+        with _open_text(src) as fh:
+            for line in fh:
+                n += 1
+                yield line
+    except (OSError, EOFError, zlib.error) as exc:
+        # gzip.BadGzipFile is an OSError; so is a file that vanished under us.
+        LOG.warning("%s: ends mid-stream after %d line(s) (%s) -- that "
+                    "archive's remaining rows are lost, the rest of the "
+                    "history is intact", src.name, n, exc)
+
+
 def read(path: Path = QUOTE_LOG, *, symbols: Optional[Sequence[str]] = None,
          underlyings: Optional[Sequence[str]] = None,
          since_ts: Optional[float] = None) -> Iterator[dict]:
     """Stream recorded rows, oldest first, filtering as we go.
 
-    Returns nothing at all for a missing file -- an absent recorder is a
+    Reads the ROLLED files too, oldest first, then the live one. A reader that
+    only looked at the live log would appear to work and would silently lose
+    every observation older than the last roll -- which is the failure the
+    rotation would otherwise have introduced.
+
+    Returns nothing at all when no file exists -- an absent recorder is a
     legitimate state, and the gates already treat "no observations" as a
     refusal rather than as a pass.
     """
     p = Path(path)
-    if not p.exists():
+    sources = _sources(p)
+    if not sources:
         LOG.info("no quote log at %s -- no history to read", p)
         return
     want_sym = {s.upper() for s in symbols} if symbols else None
     want_und = {s.upper() for s in underlyings} if underlyings else None
     bad = 0
-    with p.open("r", encoding="utf-8") as fh:
-        for line in fh:
+    for src in sources:
+        for line in _lines(src):
             line = line.strip()
             if not line:
                 continue

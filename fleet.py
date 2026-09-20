@@ -174,6 +174,9 @@ class Fleet:
         """
         self._autostart = bool(autostart)
         self.lock = threading.RLock()
+        # Guards the realized_total() cache so a miss cannot become N
+        # simultaneous journal parses. See realized_total for what that cost.
+        self._rt_lock = threading.Lock()
         # ---- identity: which account this fleet IS ----
         self.acct = account
         self.account_id = str(getattr(account, "id", "") or "default")
@@ -1183,14 +1186,33 @@ class Fleet:
         cache = getattr(self, "_rt_cache", None)
         if cache and now - cache[0] < max_age:
             return cache[1]
-        try:
-            import journal as _journal
-            rows = _journal.load(path=getattr(self, "journal_path", None))
-            val = round(float(_journal.stats(rows).get("realized") or 0), 2)
-        except Exception:
-            val = cache[1] if cache else 0.0
-        self._rt_cache = (now, val)
-        return val
+        # THE STAMPEDE. This cache had no lock, so every dashboard client that
+        # arrived in the same expired window started its own journal read and
+        # its own stats() pass. json.loads holds the GIL for its whole run, so
+        # four of them at once did not just cost four times as much -- they
+        # starved the event loop and a 70 KB static file took 8.2 s to serve.
+        # One waits, the rest wait on it, and they all get the same number.
+        lock = getattr(self, "_rt_lock", None)
+        if lock is None:                    # older Fleet pickles / subclasses
+            lock = self._rt_lock = threading.Lock()
+        with lock:
+            # Look again: whoever held the lock has almost certainly just
+            # refreshed it, and re-reading here is the whole point.
+            now = _time.time()
+            cache = getattr(self, "_rt_cache", None)
+            if cache and now - cache[0] < max_age:
+                return cache[1]
+            try:
+                import journal as _journal
+                rows = _journal.load(path=getattr(self, "journal_path", None))
+                # realized_sum, not stats(): this wants one number, and
+                # stats() builds the by-rung, by-session and inventory views
+                # as well -- 0.426 s against 0.012 s on 39,946 rows.
+                val = round(_journal.realized_sum(rows), 2)
+            except Exception:
+                val = cache[1] if cache else 0.0
+            self._rt_cache = (_time.time(), val)
+            return val
 
     def portfolio(self) -> dict:
         """Account-wide view -- INCLUDING anything held that no ladder owns."""

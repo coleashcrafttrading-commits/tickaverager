@@ -638,8 +638,15 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
     Separate from /api/ticker because this is HISTORY -- it survives lots
     closing, config changes and restarts, none of which the live ledger does.
     """
-    rows = journal.load(symbol=symbol.upper(), days=days or None, path=f.journal_path)
-    inv = journal.open_inventory(journal.load(symbol=symbol.upper(), path=f.journal_path))
+    # ONE read of the journal, two views of it. This used to call load()
+    # twice -- once day-filtered for the stats, once unfiltered for the open
+    # inventory -- which parsed 21 MB of JSON twice for one request, holding
+    # the GIL through both and blocking every other client on the box.
+    # `days` is relative to now, so the filter has to be applied here rather
+    # than cached; that is cheap, the parse is not.
+    base = journal.load(symbol=symbol.upper(), path=f.journal_path)
+    inv = journal.open_inventory(base)
+    rows = journal.filter_rows(base, days=days or None)
 
     # The open book is what the booked figure hides, so it is valued here at
     # the same marks the engines trade on. A symbol the fleet no longer holds

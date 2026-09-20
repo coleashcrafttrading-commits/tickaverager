@@ -24,10 +24,12 @@ analysis tools and the backtester load it without starting a fleet.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import re
 import threading
+from array import array
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +47,411 @@ JOURNAL_PATH = Path(os.environ.get("TICKAVERAGER_JOURNAL",
                                    str(STATE_DIR / "journal.jsonl")))
 
 _LOCK = threading.Lock()
+
+# ======================================================== the read cache
+# WHY THIS EXISTS. load() used to re-read and re-parse the WHOLE journal on
+# every call. On the live box that is 21,343,251 bytes and 39,946 rows, and
+# one load+stats measured 1.0 s idle and up to 4.3 s under load.
+#
+# The trap is not the cost, it is WHO PAYS IT. json.loads is a C extension
+# that holds the GIL for its entire run, so four dashboard clients that miss
+# the caller-side cache together do four simultaneous full parses and starve
+# the event-loop thread -- the one that would hand back a static file. That is
+# how a 70 KB CSS file came to take 8.2 s to serve while load average sat at
+# 1.96 on two cores. It was never CPU and more cores would not have helped.
+#
+# The fix is available only because the journal is APPEND-ONLY (see the module
+# docstring, and CLAUDE.md under "Ground truth, in order"): the bytes we
+# already parsed cannot change, so parse only the ones that are new.
+#
+# What is cached is the RAW rows. The filters are applied per call, because
+# `days` is measured from NOW and can never be baked into a stored list, and
+# because a cache keyed on (symbol, days, events) would be a cache that misses
+# almost every time.
+
+#: Enough of the first line to tell one file from a different file that has
+#: been moved into its place. Cheap: one open and one 512-byte read.
+_HEAD_BYTES = 512
+
+#: The bytes ENDING at the cached offset -- the seam the fast path is about to
+#: seek past. The head alone is not an identity: a replacement file that
+#: shares its first 512 bytes and is larger passes both the size and the head
+#: check, and the fast path then seeks into a file it has never read (measured:
+#: 1904.00 realized served against 2704.00 on disk). See _identity.
+_SEAM_BYTES = 64
+
+#: THE MEMORY CEILING, and why this number.
+#:
+#: The incremental parse traded a disk problem for a memory one: nothing ever
+#: pruned the cache, so a journal that grows forever was retained forever.
+#: MEASURED here 19 Sep 2026 on a 22.8 MB / 32,375-row journal of real shape:
+#:
+#:     rows as json.loads hands them back   108.8 MB  3,525 B/row  4.77x file
+#:     with names and the repeated cfg
+#:     snapshot shared (see _parse)          20.8 MB    675 B/row  0.91x file
+#:
+#: The VM has 1,971 MB total, 1,225 MB available, NO SWAP, and uvicorn already
+#: holds 214 MB RSS. With no swap an overshoot is not a slow box, it is the
+#: OOM killer taking the dashboard out. 200,000 rows is ~129 MB retained at the
+#: measured 675 B/row -- about a tenth of what is available -- and a cold parse
+#: peaks at ~2.2x retained (also measured), so the worst instant is ~280 MB
+#: against 1,225 MB.
+#:
+#: The journal grows ~3,300 rows/day (2.34 MB at 738 B/row), so from today's
+#: 32,375 rows the cap is ~50 days out. PAST IT THE READ IS STILL WHOLE: the
+#: oldest rows are dropped from the cache and re-parsed from disk on every
+#: call, which is slower and never wrong. What is bounded is what is RETAINED
+#: between calls; a caller that asks for every row still materialises every
+#: row, because that is what load() promises.
+JOURNAL_CACHE_MAX_ROWS = 200_000
+
+#: Set TICKAVERAGER_JOURNAL_CACHE=0 to read straight from disk every time.
+_CACHE_ON = os.environ.get("TICKAVERAGER_JOURNAL_CACHE", "1") not in ("0", "")
+
+#: ONE lock for every journal, not one per file. Two accounts parsing at once
+#: contend for the GIL anyway, so serialising them is strictly better than
+#: letting them run together -- and it is this lock that turns N concurrent
+#: callers into ONE parse with N-1 waiters, which is the actual bug.
+_CACHE_LOCK = threading.RLock()
+
+#: Least-recently-used ordering across journals, so a second account's history
+#: that nothing has read for an hour is evicted before the one being polled.
+_TICK = itertools.count()
+
+
+class _Cached:
+    """One journal file as we last saw it."""
+    __slots__ = ("start", "offset", "size", "mtime_ns", "fid", "head", "seam",
+                 "rows", "ends", "used")
+
+    def __init__(self, offset: int, size: int, mtime_ns: int, fid: Any,
+                 head: bytes, seam: bytes, rows: list[dict], ends) -> None:
+        self.start = 0              # bytes of the file NOT cached, from byte 0
+        self.offset = offset        # bytes consumed, always at a line boundary
+        self.size = size            # st_size when we last looked
+        self.mtime_ns = mtime_ns    # st_mtime_ns when we last looked
+        self.fid = fid              # (st_dev, st_ino), or None where absent
+        self.head = head            # first _HEAD_BYTES bytes of the file
+        self.seam = seam            # the _SEAM_BYTES ending at self.offset
+        self.rows = rows
+        # ends[i] is the byte just past row i's newline. Eight bytes a row in
+        # an array, not a list of ints: this is what makes an eviction able to
+        # say WHERE the surviving rows start, and it has to stay small enough
+        # not to be the memory problem it is here to solve.
+        self.ends = ends
+        self.used = next(_TICK)
+
+
+_CACHE: dict[str, _Cached] = {}
+
+
+def cache_clear(path: Optional[Path] = None) -> None:
+    """Forget one journal, or all of them. Tests that write a file and read it
+    back in the same process call this; so does purge_symbol, which is the one
+    thing in this module that rewrites history in place."""
+    with _CACHE_LOCK:
+        if path is None:
+            _CACHE.clear()
+            # The shared-name pools are only worth anything while rows are
+            # held. Dropping them here keeps "cache_clear releases everything"
+            # literally true, which is the property the memory test pins.
+            _POOL.clear()
+            _CFG_POOL.clear()
+            return
+        _CACHE.pop(_key(Path(path)), None)
+
+
+def cache_enabled(on: Optional[bool] = None) -> bool:
+    """Read or set the cache switch. Returns the state after any change."""
+    global _CACHE_ON
+    if on is not None:
+        _CACHE_ON = bool(on)
+        if not _CACHE_ON:
+            cache_clear()
+    return _CACHE_ON
+
+
+def _key(jp: Path) -> str:
+    try:
+        return str(jp.resolve())
+    except OSError:
+        return str(jp)
+
+
+def _head(jp: Path) -> bytes:
+    try:
+        with jp.open("rb") as fh:
+            return fh.read(_HEAD_BYTES)
+    except OSError:
+        return b""
+
+
+def _seam(jp: Path, off: int) -> bytes:
+    """The bytes immediately BEFORE `off` -- the join the fast path trusts.
+
+    The stored copy always ends in a newline, because the offset is always a
+    line boundary, so this also answers "is byte off-1 still a record
+    boundary" without a separate read.
+    """
+    if off <= 0:
+        return b""
+    want = min(_SEAM_BYTES, off)
+    try:
+        with jp.open("rb") as fh:
+            fh.seek(off - want)
+            return fh.read(want)
+    except OSError:
+        return b""
+
+
+def _file_id(st: os.stat_result) -> Optional[tuple]:
+    """The filesystem's own answer to "is this the same file".
+
+    PLATFORM-DEPENDENT ON PURPOSE, with a portable fallback. Production is
+    Linux, where (st_dev, st_ino) is authoritative: a file renamed out of the
+    way and replaced has a different inode however similar its bytes are.
+    Development is Windows, where CPython fills st_ino with the NTFS file
+    index, which is as good -- but some filesystems (and some network shares)
+    report 0, so a zero is read as "no answer" and the head and seam checks
+    carry the guard on their own.
+    """
+    ino = getattr(st, "st_ino", 0)
+    dev = getattr(st, "st_dev", 0)
+    return (dev, ino) if ino else None
+
+
+# ---------------------------------------------------------------- row sharing
+# WHY: json.loads does not share anything BETWEEN calls -- its key memo is
+# cleared at the end of every call -- so 32,375 rows held 32,375 private copies
+# of the same 36 field names and of the same 21-key cfg snapshot. That, not the
+# data, was 88 of the 108.8 MB measured. Sharing them costs 8% on the cold
+# parse (1.17 s -> 1.26 s) and takes the retained heap to 20.8 MB.
+#
+# THE TRAP: the shared cfg dict is now one object behind many rows. That is
+# already the contract -- _raw_rows says TREAT ROWS AS READ-ONLY, because the
+# rows themselves are shared with every other caller -- but a caller that
+# mutated r["cfg"] would now corrupt other rows too. Nothing does; grep before
+# you make one.
+#
+# Both pools are BOUNDED. An unbounded intern pool is the same leak in a
+# smaller font, and sys.intern is worse still: it never releases.
+_POOL_MAX = 512
+_POOL: dict[str, str] = {}
+
+#: Values worth sharing are the ones with a FIXED vocabulary. `ts`, `lot_id`
+#: and `why` are deliberately absent -- they are per-row, and pooling them
+#: would grow the pool with the file.
+_SHARED_VALUE_KEYS = frozenset(("event", "symbol", "cfg_hash", "side",
+                                "session", "account"))
+
+_CFG_MAX = 256
+_CFG_POOL: dict[str, dict] = {}
+
+
+def _parse(blob: bytes) -> tuple[list[dict], Any]:
+    """Parse whole lines out of a byte range, with the end offset of each row.
+
+    A bad line is skipped, never fatal -- including one that is not valid
+    UTF-8, which the old text-mode read would have raised on and taken the
+    whole dashboard down with.
+
+    A TRAILING FRAGMENT WITH NO NEWLINE IS NOT A ROW. The writer appends
+    `json.dumps(row) + "\\n"` and a write can tear, so a last line with no
+    terminator is a row still landing, not a row. Both the cached and the
+    uncached path stop here, which is the only way they can agree: they
+    disagreed before, 5 rows against 6 on the same file.
+    """
+    out: list[dict] = []
+    ends = array("q")
+    pool = _POOL
+    cfgs = _CFG_POOL
+    shared_vals = _SHARED_VALUE_KEYS
+    pos = 0
+    end = len(blob)
+    for raw in blob.split(b"\n"):
+        pos += len(raw) + 1
+        if pos > end:
+            break                       # no newline: still being written
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            r = json.loads(s.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        # A line that parses to something that is not an object is not a row.
+        # Letting it through means the next r.get() raises in a caller.
+        if not isinstance(r, dict):
+            continue
+        row = {}
+        for k, v in r.items():
+            kk = pool.get(k)
+            if kk is None:
+                kk = k
+                if len(pool) < _POOL_MAX:
+                    pool[k] = k
+            if type(v) is str and kk in shared_vals:
+                vv = pool.get(v)
+                if vv is None:
+                    vv = v
+                    if len(pool) < _POOL_MAX:
+                        pool[v] = v
+                v = vv
+            row[kk] = v
+        cfg = row.get("cfg")
+        if type(cfg) is dict:
+            h = row.get("cfg_hash")
+            if type(h) is str:
+                got = cfgs.get(h)
+                if got is None:
+                    if len(cfgs) < _CFG_MAX:
+                        cfgs[h] = cfg
+                elif got == cfg:
+                    # Equality checked, not assumed: the hash is of the
+                    # snapshot, but a row carrying somebody else's hash must
+                    # not silently acquire somebody else's settings.
+                    row["cfg"] = got
+        out.append(row)
+        ends.append(pos)
+    return out, ends
+
+
+def _view(jp: Path, c: _Cached) -> list[dict]:
+    """Every row this file holds, given what the cache still has of it.
+
+    Normally that is the cached list itself. After an eviction it is the
+    evicted prefix, re-read and re-parsed from disk, in front of what was
+    kept -- slower, never shorter. The alternative was to answer with the
+    rows we happen to have left, which is the one outcome a P/L read may
+    never have.
+    """
+    if not c.start:
+        return c.rows
+    try:
+        with jp.open("rb") as fh:
+            blob = fh.read(c.start)
+    except OSError:
+        return c.rows
+    older, _ends = _parse(blob)
+    return older + c.rows
+
+
+def _evict(key: str) -> None:
+    """Hold the whole cache under JOURNAL_CACHE_MAX_ROWS. Caller holds the
+    lock. Cold journals go first and go whole; only when one journal is on its
+    own over the cap are its OLDEST rows dropped, because dropping the newest
+    would make every subsequent append re-read the file from byte zero."""
+    total = 0
+    for c in _CACHE.values():
+        total += len(c.rows)
+    if total <= JOURNAL_CACHE_MAX_ROWS:
+        return
+    for k in sorted((k for k in _CACHE if k != key),
+                    key=lambda k: _CACHE[k].used):
+        if total <= JOURNAL_CACHE_MAX_ROWS:
+            return
+        total -= len(_CACHE.pop(k).rows)
+    if total <= JOURNAL_CACHE_MAX_ROWS:
+        return
+    c = _CACHE.get(key)
+    if c is None:
+        return
+    drop = len(c.rows) - JOURNAL_CACHE_MAX_ROWS
+    if drop <= 0:
+        return
+    # ends[drop-1] is the byte just past the last evicted row. Anything
+    # between it and the first surviving row is a blank or unparseable line,
+    # which re-parses to nothing, so it is the correct place to resume from.
+    c.start = int(c.ends[drop - 1])
+    # NEW objects, not a del in place: a caller handed the old list may still
+    # be iterating it outside this lock.
+    c.rows = c.rows[drop:]
+    c.ends = c.ends[drop:]
+
+
+def _raw_rows(jp: Path) -> list[dict]:
+    """Every row of one journal file, newest last, parsing only what is new.
+
+    The returned list is never mutated in place, so a caller iterating it
+    cannot be tripped by a concurrent append. The row dicts are shared with
+    every other caller, and so is the `cfg` snapshot inside them: TREAT ROWS
+    AS READ-ONLY.
+    """
+    if not jp.exists():
+        return []
+    if not _CACHE_ON:
+        # Cut at the last newline for the same reason the cached path does:
+        # a last line with no terminator is a row still being written. These
+        # two paths returning different counts on the same file is defect 5.
+        blob = jp.read_bytes()
+        return _parse(blob[:blob.rfind(b"\n") + 1])[0]
+
+    key = _key(jp)
+    with _CACHE_LOCK:
+        try:
+            st = jp.stat()
+        except OSError:
+            return []
+        head = _head(jp)
+        fid = _file_id(st)
+        c = _CACHE.get(key)
+        # The seam is read against the offset we would seek to, so it only
+        # means anything once there is something cached.
+        seam = _seam(jp, c.offset) if c is not None else b""
+
+        if (c is not None and st.st_size == c.size
+                and st.st_mtime_ns == c.mtime_ns and head == c.head
+                and fid == c.fid and seam == c.seam):
+            c.used = next(_TICK)
+            return _view(jp, c)           # nothing has touched the file
+
+        # A FULL REPARSE, when the file is not simply the old one with more on
+        # the end. Getting this wrong means serving stale P/L forever after a
+        # rotation, so every case that is not plainly "grew" is treated as new:
+        #   size shrank      -> truncated
+        #   size unchanged   -> rewritten in place (purge_symbol does this)
+        #   mtime went back  -> an older copy restored over it
+        #   head differs     -> a different file now answers to this name
+        #   file id differs  -> the filesystem says it is a different file
+        #   seam differs     -> the bytes we are about to seek past are not
+        #                       the bytes we parsed, so whatever this is, it
+        #                       is not our file with more on the end
+        full = (c is None or st.st_size <= c.size
+                or st.st_mtime_ns < c.mtime_ns or head != c.head
+                or fid != c.fid or seam != c.seam)
+
+        if full:
+            blob = jp.read_bytes()
+            # Never parse half a row. The writer may be mid-append, so stop at
+            # the last complete newline and leave the offset there; the rest of
+            # that line is picked up once it lands.
+            cut = blob.rfind(b"\n") + 1
+            rows, ends = _parse(blob[:cut])
+            _CACHE[key] = _Cached(cut, st.st_size, st.st_mtime_ns, fid, head,
+                                  blob[max(0, cut - _SEAM_BYTES):cut],
+                                  rows, ends)
+            _evict(key)
+            return _view(jp, _CACHE[key])
+
+        with jp.open("rb") as fh:
+            fh.seek(c.offset)
+            blob = fh.read()
+        cut = blob.rfind(b"\n") + 1
+        if cut:
+            base = c.offset
+            rows, ends = _parse(blob[:cut])
+            # A NEW list, not an extend: a caller handed the old one may still
+            # be iterating it outside this lock.
+            c.rows = c.rows + rows
+            c.ends = c.ends + array("q", (base + e for e in ends))
+            c.offset += cut
+            c.seam = (c.seam + blob[:cut])[-_SEAM_BYTES:]
+        c.size = st.st_size
+        c.mtime_ns = st.st_mtime_ns
+        c.used = next(_TICK)
+        _evict(key)
+        return _view(jp, c)
+
 
 # Multi-account: every write goes to the journal of the account it belongs
 # to. The engine functions find it on engine.fleet (journal_path, account_id);
@@ -226,41 +633,53 @@ def _hold_seconds(entry_time: str) -> int:
 
 
 # ======================================================================= read
-def load(symbol: str = "", days: Optional[int] = None,
-         events: Iterable[str] = (), path: Optional[Path] = None) -> list[dict]:
-    """Every row, newest last. Bad lines are skipped, never fatal."""
-    jp, _ = _resolve(path, "")
-    if not jp.exists():
-        return []
+def filter_rows(rows: list[dict], symbol: str = "", days: Optional[int] = None,
+                events: Iterable[str] = ()) -> list[dict]:
+    """The load() filters, applied to rows already in hand.
+
+    Split out of load() so a caller that needs two views of the same history
+    -- /api/performance wants the day-filtered rows AND the whole-file open
+    inventory -- reads the file once and slices it twice, instead of parsing
+    21 MB twice for one request.
+
+    Always returns a NEW list. The cache's own list must never escape where
+    something could append to it.
+    """
     cutoff = None
     if days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     want = set(events)
+    if not (symbol or want or cutoff):
+        return list(rows)
     out: list[dict] = []
-    with jp.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
+    for r in rows:
+        if symbol and r.get("symbol") != symbol:
+            continue
+        if want and r.get("event") not in want:
+            continue
+        if cutoff:
             try:
-                r = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if symbol and r.get("symbol") != symbol:
-                continue
-            if want and r.get("event") not in want:
-                continue
-            if cutoff:
-                try:
-                    t = datetime.fromisoformat(str(r.get("ts")))
-                    if t.tzinfo is None:
-                        t = t.replace(tzinfo=timezone.utc)
-                    if t < cutoff:
-                        continue
-                except (ValueError, TypeError):
-                    pass
-            out.append(r)
+                t = datetime.fromisoformat(str(r.get("ts")))
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+                if t < cutoff:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        out.append(r)
     return out
+
+
+def load(symbol: str = "", days: Optional[int] = None,
+         events: Iterable[str] = (), path: Optional[Path] = None) -> list[dict]:
+    """Every row, newest last. Bad lines are skipped, never fatal.
+
+    Only the bytes appended since the last call are parsed -- see _raw_rows
+    for why that matters more than it sounds. The ROWS are shared with every
+    other caller and with the cache, so nothing may mutate one.
+    """
+    jp, _ = _resolve(path, "")
+    return filter_rows(_raw_rows(jp), symbol=symbol, days=days, events=events)
 
 
 # ================================================================== analysis
@@ -283,6 +702,25 @@ def is_bookkeeping(r: dict) -> bool:
 def real_trades(rows: list[dict]) -> list[dict]:
     """Only the rows that represent an actual fill."""
     return [r for r in rows if not is_bookkeeping(r)]
+
+
+def realized_sum(rows: list[dict]) -> float:
+    """Booked P/L and nothing else. Identical to stats()["realized"].
+
+    The dashboard polls this on every refresh and wants ONE number. Getting
+    it from stats() meant also walking the by-rung, by-session, by-config,
+    hold-time, drawdown and open-inventory passes and throwing them away:
+    measured on 39,946 rows, stats() costs 0.426 s against 0.012 s here. Once
+    the parse was made incremental that wasted work was the largest single
+    cost left in the dashboard's hot path.
+
+    The definition is duplicated from stats() rather than shared, because
+    stats() builds `closes` for six other purposes. test_journal_cache pins
+    the two together so the duplicate cannot drift.
+    """
+    return sum(float(r.get("realized") or 0) for r in rows
+               if r.get("event") in ("close", "partial")
+               and not r.get("dry_run") and not is_bookkeeping(r))
 
 
 def stats(rows: list[dict], marks: dict | None = None,
@@ -554,7 +992,11 @@ def _by_config(rows: list[dict]) -> dict:
         h = r.get("cfg_hash")
         if not h:
             continue
-        d = by.setdefault(h, {"cfg": r.get("cfg", {}), "opens": 0, "closes": 0,
+        # A COPY. The parsed rows now share ONE cfg dict per cfg_hash (see
+        # _parse), so handing this one out by reference would let a caller
+        # that edited a report's settings block edit the cache's rows too.
+        d = by.setdefault(h, {"cfg": dict(r.get("cfg") or {}),
+                              "opens": 0, "closes": 0,
                               "realized": 0.0, "first_seen": r.get("ts"),
                               "last_seen": r.get("ts")})
         if r.get("event") == "open":
@@ -821,6 +1263,10 @@ def purge_symbol(symbol: str, path: Optional[Path] = None) -> dict:
         tmp = jp.with_suffix(".tmp")
         tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
         os.replace(tmp, jp)
+    # The one place in this module that rewrites the file instead of appending
+    # to it. The read cache detects that on its own, but saying so here is
+    # cheaper than relying on a stat comparison to notice.
+    cache_clear(jp)
     return {"ok": True, "removed": removed, "symbol": symbol}
 
 
