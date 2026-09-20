@@ -98,6 +98,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from zoneinfo import ZoneInfo
 
+import optguard
+
 import optbank
 import optbook
 import optengine
@@ -978,7 +980,16 @@ class OptionsLoop:
                  max_screens: int = 4,
                  record_evidence: bool = True,
                  exit_dry_run: bool = False):
-        self.a = alpaca
+        # Block the exercise endpoint HERE, not only in optlife.Manager.
+        # install_exercise_block was called in exactly one place --
+        # Manager.__init__ -- and the production path is this loop, which
+        # never constructs a Manager. So on the only path that actually runs,
+        # POST /v2/positions/{id}/exercise was reachable. The call has no
+        # quantity parameter and exercises the WHOLE position irreversibly,
+        # which is why docs/options_rules.md makes blocking it a request-layer
+        # assertion rather than a convention. It is idempotent, so wrapping an
+        # already-wrapped client is safe.
+        self.a = optguard.install_exercise_block(alpaca)
         self.config = config
         self.watchlist = [str(s).upper() for s in watchlist]
         self.caps = caps

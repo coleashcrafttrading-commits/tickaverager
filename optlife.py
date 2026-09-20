@@ -205,8 +205,12 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     # CLOSING can go back to MANAGING: a rejected or expired closing order
     # leaves a live position, and a state machine with no road back from
     # CLOSING is a machine that quietly forgets about it.
-    CLOSING: frozenset({CLOSED, MANAGING, PARTIAL, LEGGED_RISK, ASSIGNED,
-                        ORPHAN, HALTED, PENDING_EXPIRY_CONFIRM}),
+    # CLOSING -> CLOSING is legal and deliberate: cancelling a stale exit and
+    # repricing it is an ordinary part of getting out, and refusing the
+    # self-transition made the loop raise on the one path whose whole job is
+    # to keep trying to close.
+    CLOSING: frozenset({CLOSING, CLOSED, MANAGING, PARTIAL, LEGGED_RISK,
+                        ASSIGNED, ORPHAN, HALTED, PENDING_EXPIRY_CONFIRM}),
     PENDING_EXPIRY_CONFIRM: frozenset({CLOSED, ASSIGNED, HALTED, ORPHAN}),
     ASSIGNED: frozenset({REMEDIATING, HALTED, CLOSED}),
     REMEDIATING: frozenset({CLOSED, HALTED, ASSIGNED}),
@@ -307,7 +311,16 @@ class LifePosition:
     def live(self) -> bool:
         """Is the account exposed right now? Filled contracts decide, not the
         state name: a SUBMITTED order that partially filled and has not been
-        moved to PARTIAL yet is still 100 shares a leg of real exposure."""
+        moved to PARTIAL yet is still 100 shares a leg of real exposure.
+
+        A TERMINAL state is the one thing that overrules them. CLOSED means
+        the broker confirmed the legs are gone, and a closed position that
+        still reported itself live would be marked, managed and have exits
+        routed against it for the rest of the session -- every one of them
+        refused with "nothing to close", which blocks opening forever.
+        """
+        if self.state in TERMINAL_STATES:
+            return False
         return (self.state in LIVE_STATES or self.filled_contracts > 0
                 or (self.broker_contracts or 0) > 0)
 

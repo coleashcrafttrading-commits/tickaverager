@@ -266,7 +266,14 @@ def live_assignment_notional(positions: Sequence[dict]) -> float:
 def unparseable_positions(positions: Sequence[dict]) -> list[str]:
     bad = []
     for p in positions:
-        if (_num(p.get("qty")) or 0.0) < 0 and _occ_strike(str(p.get("symbol", ""))) is None:
+        # Signed through the shared helper for the same reason
+        # live_assignment_notional is: option qty arrives UNSIGNED with the
+        # direction in `side`, so testing `qty < 0` never saw a short. An
+        # unparseable SHORT symbol was therefore never flagged, and plan()'s
+        # "refuse to open while any position is unreadable" backstop -- the
+        # one that exists precisely because an unreadable short is unbounded
+        # unknown risk -- never fired.
+        if _signed_contracts(p) < 0 and _occ_strike(str(p.get("symbol", ""))) is None:
             bad.append(str(p.get("symbol")))
     return bad
 

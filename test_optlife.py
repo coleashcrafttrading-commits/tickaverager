@@ -891,6 +891,8 @@ done.to(optlife.CLOSING, "test")
 r = optlife.reconcile(FakeAlpaca([]), [done])
 check("a CLOSING position with no legs at the broker becomes CLOSED",
       done.state, optlife.CLOSED)
+check("and stops being live, so nothing keeps managing a flat position",
+      done.live, False)
 check("it is not reported as missing", r.missing_at_broker, [])
 check("and the book agrees again", r.agrees, True)
 
@@ -993,6 +995,8 @@ gen_before = p.exit_generation
 r6 = optlife.close(p, "target", router=router_for(stuck), alpaca=stuck,
                    m=m16, session=SESSION)
 check("a refused cancel sends NO replacement", len(stuck.orders), 0)
+check("and reports nothing as uncovered, because the exit is still working",
+      r6.unsent, {})
 check("and does not burn a reprice generation", p.exit_generation,
       gen_before)
 check("the reason says the order is still live",
