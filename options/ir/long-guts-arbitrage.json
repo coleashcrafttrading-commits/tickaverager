@@ -1,0 +1,204 @@
+{
+  "slug": "long-guts-arbitrage",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 2,
+  "construction": {
+    "template": "long_guts",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "LEVEL 2 LEGAL: two long options, no short legs, no uncovered exposure. Fully executable on Alpaca Level 3. This is one of the few entries in this family with no approval obstacle at all."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 25.0,
+        "src": "As a non-arbitrage volatility trade (guts held for a large move), require IV rank < 25 and an expected catalyst, and note that it is capital-inefficient versus a standard strangle for identical exposure — the extra capital is the embedded (K2 - K1) that is returned at expiry."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 100.0,
+        "src": "Both legs quoted within 2 seconds, displayed size >= 10, OI >= 100, same expiry."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "If entered as a volatility trade, close at 100% of the debit above the floor, or at 21 DTE, whichever comes first.",
+      "basis": "debit",
+      "fraction": 1.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "BOTH legs are ITM by construction, so BOTH will be auto-exercised at expiry if held: the call buys 100 shares and the put sells 100 shares, netting flat but moving $20,000+ of stock through the account with settlement-timing exposure. Close both legs by 15:00 ET on expiration day, unconditionally.",
+      "time_et": "15:00",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "LEVEL 2 LEGAL: two long options, no short legs, no uncovered exposure. Fully executable on Alpaca Level 3. This is one of the few entries in this family with no approval obstacle at all.",
+      "reason": "level 4 on this account; the strategy cannot be sent at all",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Arbitrage gate: (call_ask + put_ask) x 100 < (K2 - K1) x 100 - fees - $10. Use executable asks, never midpoints.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "100",
+        "10"
+      ]
+    },
+    {
+      "text": "Both legs quoted within 2 seconds, displayed size >= 10, OI >= 100, same expiry.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Never on an adjusted contract.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If entered as an arbitrage, hold or close whenever the pair can be sold for more than (K2 - K1) x 100 plus fees.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100"
+      ]
+    },
+    {
+      "text": "If entered as a volatility trade, close at 100% of the debit above the floor, or at 21 DTE, whichever comes first.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "loor, or at 21 DTE, whichever comes first.",
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "No short legs, so the only decay risk is the extrinsic above the floor; measure P/L as (current pair value - (K2 - K1) x 100) so the floor is not mistaken for profit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100"
+      ]
+    },
+    {
+      "text": "No short option legs, therefore no assignment risk.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "BOTH legs are ITM by construction, so BOTH will be auto-exercised at expiry if held: the call buys 100 shares and the put sells 100 shares, netting flat but moving $20,000+ of stock through the account with settlement-timing exposure. Close both legs by 15:00 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "hares, netting flat but moving $20,000+ of stock through the account with settlement-timing exposure",
+      "missing_numbers": [
+        "20000"
+      ]
+    },
+    {
+      "text": "Never allow an ITM long option to reach auto-exercise.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "c644d89360cb0b6e",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

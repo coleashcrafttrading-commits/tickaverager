@@ -1,0 +1,226 @@
+{
+  "slug": "options-pairs-relative-value",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_guts",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Total debit <= 1.5% of equity per pair; at most 3 pairs open at once."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 250.0,
+        "src": "OI >= 250 on every leg; no leg whose bid/ask exceeds 10% of its mid."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "time_stop",
+      "src": "Time stop: close at 21 DTE regardless of P/L; the theta on two long legs compounds.",
+      "dte": 21.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "If debit spreads are used, close each short leg at extrinsic < $0.10 or |delta| >= 0.85, and short calls before any ex-dividend date while ITM.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "If debit spreads are used, close each short leg at extrinsic < $0.10 or |delta| >= 0.85, and short calls before any ex-dividend date while ITM.",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "close_not_exercise",
+      "src": "Close, do not exercise, any ITM long leg."
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Both underlyings must be genuinely related: same sector or an established correlation >= 0.6 over 120 days. A pair without a linkage is two unrelated bets.",
+      "reason": "portfolio-level constraint: belongs to optalloc, not a per-strategy IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.6",
+        "120"
+      ]
+    },
+    {
+      "text": "Dollar-delta match at entry within 10%: contracts_A x delta_A x spot_A approximately equals contracts_B x |delta_B| x spot_B.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10"
+      ]
+    },
+    {
+      "text": "Total debit <= 1.5% of equity per pair; at most 3 pairs open at once.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Use debit spreads rather than outrights whenever the outright package costs more than 1.5% of equity - the short leg of each spread is covered by the long, keeping the structure at level 3.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "3"
+      ]
+    },
+    {
+      "text": "Both legs same expiry; expiry must be at least 14 days beyond the catalyst date.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "14"
+      ]
+    },
+    {
+      "text": "Never build the B leg as a short call - the bearish leg is always a long put or a put debit spread on this account.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Take profit at 60% of the maximum modeled pair value, or when the spread between A and B reaches the target ratio, whichever comes first.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60"
+      ]
+    },
+    {
+      "text": "Close both legs together. A pair that has become a single outright position is no longer the trade that was entered - if one leg is closed, close the other within the session.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Re-match dollar delta if the ratio drifts more than 25% from entry, by adjusting contracts on the cheaper side only.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "Cut the pair immediately if the correlation that justified it breaks (120-day correlation falls below 0.4).",
+      "reason": "portfolio-level constraint: belongs to optalloc, not a per-strategy IR",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close all legs at least 2 trading days before expiration; never allow auto-exercise on either side.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Log the pair as one position throughout; partial closes must be recorded as a structure change, not a new trade.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "7d77b08ac52cb0e8",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

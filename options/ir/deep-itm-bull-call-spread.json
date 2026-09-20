@@ -1,0 +1,257 @@
+{
+  "slug": "deep-itm-bull-call-spread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_debit_spread",
+    "params": {
+      "short_delta": 0.8
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "gte",
+        "value": 0.8,
+        "src": "Long strike delta >= 0.80, short strike delta between 0.60 and 0.72, both strikes below spot."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.6,
+          0.72
+        ],
+        "src": "Long strike delta >= 0.80, short strike delta between 0.60 and 0.72, both strikes below spot."
+      },
+      {
+        "fact": "dte",
+        "op": "gte",
+        "value": 45.0,
+        "src": "DTE >= 45. Do not use this structure under 30 DTE."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 250.0,
+        "src": "Open interest >= 250 on both legs (deep ITM strikes are thinner; widen the liquidity tolerance but never skip it)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 85% of max profit, or at 21 DTE if the position is profitable at all -- whichever comes first.",
+      "basis": "max_profit",
+      "fraction": 0.85
+    }
+  ],
+  "exits": [
+    {
+      "kind": "dte_close",
+      "src": "Close the entire spread by 21 DTE at the latest. The last three weeks add almost no profit and all of the assignment risk.",
+      "dte": 21.0
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: the short call is ITM by design, so check extrinsic value daily. If short-leg extrinsic < $0.15, close the spread the same session.",
+      "threshold_usd": 0.15
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD (critical for this structure): close the entire spread the session before any ex-dividend date whenever short-leg extrinsic < 1.5 * dividend. Deep ITM short calls on dividend payers are the single most commonly assigned option in the whole family."
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "DIVIDEND GUARD (critical for this structure): close the entire spread the session before any ex-dividend date whenever short-leg extrinsic < 1.5 * dividend. Deep ITM short calls on dividend payers are the single most commonly assigned option in the whole family.",
+      "threshold_usd": 1.5
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Underlying in a confirmed uptrend: 20-EMA > 50-SMA > 200-SMA and price above all three.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "50",
+        "200"
+      ]
+    },
+    {
+      "text": "Net debit between 70% and 85% of width -- reward:reward ratio is intentionally low; the win rate is the edge.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "70",
+        "85"
+      ]
+    },
+    {
+      "text": "Probability of profit (approximated as 1 - short strike delta... i.e. delta of short call) implies >= 65% chance of finishing above the short strike.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "65"
+      ]
+    },
+    {
+      "text": "Extrinsic value of the long leg <= 2% of the strike (deep ITM options with fat extrinsic are a bad deal and carry the most early-assignment exposure on the short side).",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "DTE >= 45. Do not use this structure under 30 DTE.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Open interest >= 250 on both legs (deep ITM strikes are thinner; widen the liquidity tolerance but never skip it).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "liquidity tolerance but never skip it).",
+      "missing_numbers": null
+    },
+    {
+      "text": "Never open across an earnings date without accepting a full-debit loss scenario.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Take profit at 85% of max profit, or at 21 DTE if the position is profitable at all -- whichever comes first.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "rofitable at all -- whichever comes first.",
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "Stop: close if the underlying closes below the long strike, or if the spread mid drops to 50% of the debit.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Do not roll. If the trend breaks, this structure is simply wrong; exit and re-evaluate.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Re-enter a new, further-dated spread only after price reclaims the 20-EMA for two consecutive closes.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20"
+      ]
+    },
+    {
+      "text": "Absolute backstop: no open position past 15:30 ET on expiration day, ever.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "30"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 1 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    },
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "c2cec6338103ce3c",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

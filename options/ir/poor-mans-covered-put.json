@@ -1,0 +1,314 @@
+{
+  "slug": "poor-mans-covered-put",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_diagonal",
+    "params": {
+      "dte": 33
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "lt",
+        "value": 0,
+        "src": "Trend filter: spot < 50-day SMA AND 50-day SMA < 200-day SMA."
+      },
+      {
+        "fact": "sma50_vs_sma200",
+        "op": "lt",
+        "value": 0,
+        "src": "Trend filter: spot < 50-day SMA AND 50-day SMA < 200-day SMA."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30 at the time of the long put purchase (do not buy vega after a spike)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "gte",
+        "value": 180.0,
+        "src": "Long put delta |0.80-0.90|, DTE >= 180; extrinsic <= 10% of premium."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          45.0
+        ],
+        "src": "Short put delta |0.20-0.30|, DTE 21-45."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 5.0,
+        "src": "Net debit <= 5% of equity per unit; maximum 3 concurrent PMCPs."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close the short put at 50-75% of the credit received and sell the next 21-45 DTE cycle at delta |0.20-0.30|.",
+      "basis": "credit",
+      "fraction": 0.75
+    },
+    {
+      "kind": "delta_stop",
+      "src": "If the short put's |delta| exceeds 0.50, roll down and out for a NET CREDIT only, keeping long strike - short strike >= remaining net debit.",
+      "abs_delta": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "Long put delta |0.80-0.90|, DTE >= 180; extrinsic <= 10% of premium.",
+      "threshold_usd": 10.0
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the long put no later than 90 DTE, and only after the short has been bought back.",
+      "dte": 90.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 2,
+      "partial": 3,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "Long put delta |0.80-0.90|, DTE >= 180; extrinsic <= 10% of premium.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.80",
+        "0.90"
+      ]
+    },
+    {
+      "text": "Short put delta |0.20-0.30|, DTE 21-45.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.20",
+        "0.30"
+      ]
+    },
+    {
+      "text": "MANDATORY: long strike - short strike >= net debit per share.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Financing check: the front-month credit must be >= 3% of the net debit; if put skew makes that impossible, reject the trade.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Net debit <= 5% of equity per unit; maximum 3 concurrent PMCPs.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: a short put at a LOWER strike with an EARLIER expiry is covered by the long put. Submit as a 2-leg mleg; BUY THE LONG PUT FIRST if legging.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Close the short put at 50-75% of the credit received and sell the next 21-45 DTE cycle at delta |0.20-0.30|.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "21",
+        "45",
+        "0.20",
+        "0.30"
+      ]
+    },
+    {
+      "text": "If the short put's |delta| exceeds 0.50, roll down and out for a NET CREDIT only, keeping long strike - short strike >= remaining net debit.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "the short put's  , roll down and out for a NET CREDIT only, keeping long strike - short strike >= r",
+      "missing_numbers": null
+    },
+    {
+      "text": "Roll the long put forward when its |delta| drops below 0.70 or DTE < 120.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.70",
+        "120"
+      ]
+    },
+    {
+      "text": "Hard stop: close everything if the long put's mark falls to 50% of purchase price, or if spot closes above the 200-day SMA for 3 consecutive sessions.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "200",
+        "3"
+      ]
+    },
+    {
+      "text": "Track the running net debit (original debit minus cumulative credits) and reference it in every strike constraint.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Never sell more short puts than long puts owned.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close any short put whose extrinsic falls below $0.10 - deep-ITM short puts are exercised early to capture interest, and this risk grows with rates.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "Do NOT exercise the long put to cover an assignment; sell the assigned shares in the market and keep the long put's time value.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Full exit: buy back the short put first, then sell the long put.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "5c357ea28870a651",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

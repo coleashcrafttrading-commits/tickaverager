@@ -1,0 +1,255 @@
+{
+  "slug": "rolled-short-put-repair",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_diagonal",
+    "params": {
+      "dte": 37
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "The roll MUST be executed for a net credit. If no credit is available at a lower strike and later expiry, do not roll - close the position and take the loss",
+        "note": "SAFETY: without this the short leg is uncovered"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          45.0
+        ],
+        "src": "New expiry at least 21 days beyond the current one, and 30-45 DTE total"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "time_stop",
+      "src": "After the roll, manage the new position with standard CSP rules: close at 50% of the NEW credit, or at 21 DTE",
+      "dte": 21.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "dte_close",
+      "src": "Close at 50% of the new credit, at 21 DTE, at the 2-roll limit, or on the 20%-decline / 200-day-SMA abort",
+      "dte": 21.0
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "NEVER-ASSIGN RULE persists across rolls: extrinsic < $0.10, delta > -0.85, within 1.0% of the strike at 14:30 ET on expiry day, hard backstop 15:45 ET",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Trigger: existing short put delta exceeds -0.50, OR the underlying has fallen more than 1.5 ATR since entry",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.50",
+        "1.5"
+      ]
+    },
+    {
+      "text": "The roll MUST be executed for a net credit. If no credit is available at a lower strike and later expiry, do not roll - close the position and take the loss",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "The roll MUST be executed for a net credit. If no credit is available at a lower str",
+      "missing_numbers": null
+    },
+    {
+      "text": "New strike at least 3% below the old strike",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "New expiry at least 21 days beyond the current one, and 30-45 DTE total",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "Roll counter: maximum 2 rolls per original position. On the third trigger, close",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Hard abort: if the underlying has fallen more than 20% from the original entry, or has broken its 200-day SMA on a weekly closing basis, close rather than roll",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "200"
+      ]
+    },
+    {
+      "text": "Submit as a single multi-leg roll order to avoid legging risk, never as two separate orders",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "After the roll, manage the new position with standard CSP rules: close at 50% of the NEW credit, or at 21 DTE",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "After the roll, manage the new position with standard CSP rules:",
+      "missing_numbers": null
+    },
+    {
+      "text": "Track cumulative credit and cumulative days-in-trade per original position; if days-in-trade exceeds 120, close regardless",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "120"
+      ]
+    },
+    {
+      "text": "Never increase contract count on a roll. Rolling into more contracts to make it back converts a manageable loss into an account event",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Capital check: the rolled position still ties up new_strike x 100 in cash. Confirm it does not breach the 20%-of-equity per-position limit",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "20"
+      ]
+    },
+    {
+      "text": "Close at 50% of the new credit, at 21 DTE, at the 2-roll limit, or on the 20%-decline / 200-day-SMA abort",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": ", at the 2-roll limit, or on the 20%-decline / 200-day-SMA abort",
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "NEVER-ASSIGN RULE persists across rolls: extrinsic < $0.10, delta > -0.85, within 1.0% of the strike at 14:30 ET on expiry day, hard backstop 15:45 ET",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "NEVER-ASSIGN RULE persists across rolls:  , delta > -0.85, within 1.0% of the st",
+      "missing_numbers": [
+        "0.85",
+        "1.0",
+        "30",
+        "15",
+        "45"
+      ]
+    },
+    {
+      "text": "The roll itself must be completed before the never-assign timer on the OLD position fires. Schedule rolls no later than 3 DTE on the original contract",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 1 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "08fa96d2c047318d",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

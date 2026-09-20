@@ -1,0 +1,202 @@
+{
+  "slug": "broken-wing-iron-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "broken_wing_iron_condor",
+    "params": {
+      "dte": 45
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "All standard iron condor entry filters apply (IVR >= 30, 30-60 DTE, no events, liquidity)"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 (defined risk)"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "All standard iron condor entry filters apply (IVR >= 30, 30-60 DTE, no events, liquidity)"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Max loss (wide side) <= 2% of equity"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of credit",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop at 21 DTE",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Loss stop at 2x credit",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Extra rule: if the WIDE-wing side is tested (that short's delta >= 0.30), close the whole structure immediately rather than rolling - the asymmetric tail is the reason this trade exists and it is the one that hurts",
+      "abs_delta": 0.3
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close the entire structure by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close immediately if any short goes ITM by > 0.25 x its own wing width, or a short delta >= 0.85, or short extrinsic < $0.10",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately if any short goes ITM by > 0.25 x its own wing width, or a short delta >= 0.85, or short extrinsic < $0.10",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard on the short call as per standard iron condor"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 4,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Wide wing width <= 3x the narrow wing width; beyond that the tail risk is not worth the extra credit",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Net credit >= 30% of the WIDER wing width",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Directional lean must be justified by a rule, not intuition: widen the call wing only when the 20-day SMA slope is negative, widen the put wing only when it is positive",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20"
+      ]
+    },
+    {
+      "text": "If the NARROW-wing side is tested, roll that vertical out/away for a credit once, or close",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close immediately if any short goes ITM by > 0.25 x its own wing width, or a short delta >= 0.85, or short extrinsic < $0.10",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "d482874c0b2e266d",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

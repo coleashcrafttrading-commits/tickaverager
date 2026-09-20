@@ -1,0 +1,204 @@
+{
+  "slug": "short-put-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_condor",
+    "params": {
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 25.0,
+        "src": "IV rank <= 25"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 (each short is covered by a long at a strike that bounds the risk)"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "DTE 20-45"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500, spread <= 10% of mid on all legs"
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "OI >= 500, spread <= 10% of mid on all legs"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss <= 1.5% of equity"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 60% of max profit",
+      "basis": "max_profit",
+      "fraction": 0.6
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop at 10 DTE",
+      "dte": 10.0
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Loss stop at 50% of max loss",
+      "basis": "max_loss",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Short put D is ITM from entry: close the structure if D's extrinsic < $0.10 or its delta <= -0.90",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 5,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Net credit >= 55% of W1",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "55",
+        "1"
+      ]
+    },
+    {
+      "text": "Breakout distance to A or D <= 1.0 x expected move",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Close within 30 minutes of the open after a scheduled catalyst",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Short put D is ITM from entry: close the structure if D's extrinsic < $0.10 or its delta <= -0.90",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close when spot moves beyond A or above D by 0.5 x W1 (near max profit)",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.5",
+        "1"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "0cadd434bcdd54a9",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

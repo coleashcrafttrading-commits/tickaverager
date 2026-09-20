@@ -1,0 +1,240 @@
+{
+  "slug": "pre-earnings-long-strangle",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 2,
+  "construction": {
+    "template": "long_straddle",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "spot",
+        "op": "gte",
+        "value": 30.0,
+        "src": "Underlying price >= $30 and average daily option volume >= 1,000 contracts - cheap stocks have chains too coarse to exit."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 0.75,
+        "src": "Debit <= 0.75% of equity per name; at most 3 pre-earnings positions at once and never more than 1 in the same sector."
+      },
+      {
+        "fact": "min_leg_volume",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "Underlying price >= $30 and average daily option volume >= 1,000 contracts - cheap stocks have chains too coarse to exit."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY: flat before the announcement. For a post-close reporter, flat by 15:45 ET that day; for a pre-open reporter, flat by 15:45 ET the prior session.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 5
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "Confirmed earnings date from two sources; if the date is 'estimated', skip the name.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Enter 5-10 trading days before the announcement. Earlier and theta dominates; later and the IV ramp is already paid for.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5",
+        "10"
+      ]
+    },
+    {
+      "text": "IV GATE: current ATM IV for the post-earnings expiry must be below the median level it reached in the 2 days before the last 4 announcements. If IV is already at or above that level, there is nothing left to buy.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "4"
+      ]
+    },
+    {
+      "text": "Debit <= 0.75% of equity per name; at most 3 pre-earnings positions at once and never more than 1 in the same sector.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "sitions at once and never more than 1 in the same sector.",
+      "missing_numbers": [
+        "3",
+        "1"
+      ]
+    },
+    {
+      "text": "Prefer the strangle when the straddle debit exceeds the budget, but only when both strikes have OI >= 250.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "250"
+      ]
+    },
+    {
+      "text": "Both legs same expiry, one MLeg order, no chasing beyond $0.05.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    },
+    {
+      "text": "Take profit at 30% gain on the package; the vol ramp rarely pays more than that without the event.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Hard time stop: close by the market close on the day BEFORE the announcement, without exception, profitable or not.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Re-center by rolling to the new ATM strike only if the underlying moves more than 1.5 x ATR(14) and more than 3 days remain before the print; otherwise close.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "3"
+      ]
+    },
+    {
+      "text": "Never hold through the print. Holding converts a vega trade into an event bet with a guaranteed IV crush working against both legs.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not average down.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "No leg may be held into the event 'because it is cheap' - a residual long leg is a lottery ticket funded by a failed thesis.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close, never exercise, any ITM long leg.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the earnings date moves, re-evaluate from scratch: either exit or reset the window.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "ae0367c3a34edace",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

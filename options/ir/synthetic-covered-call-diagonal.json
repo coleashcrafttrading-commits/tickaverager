@@ -1,0 +1,260 @@
+{
+  "slug": "synthetic-covered-call-diagonal",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_diagonal",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": null,
+  "management": [
+    {
+      "kind": "delta_stop",
+      "src": "If the underlying rallies through the short strike and the short call delta exceeds 0.80, roll the short call up-and-out for a net credit. Never roll for a debit, and never roll to a strike below the long strike plus the total debit paid.",
+      "abs_delta": 0.8
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "Long-leg extrinsic <= 3% of spot; front-month IV must exceed back-month IV by at least 2 vol points at entry.",
+      "threshold_usd": 3.0
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on its expiration day if spot is within 1.0% of the short strike or above it.",
+      "time_et": "15:40",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on its expiration day if spot is within 1.0% of the short strike or above it.",
+      "time_et": "15:40",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "If the short call is ITM at any point on its expiration day, close it by 14:00 ET.",
+      "time_et": "14:00",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic < 1.25 x declared_dividend. This is more dangerous here than in a real covered call: assignment delivers a 100-SHARE SHORT position, because there are no shares to deliver — only a long call.",
+      "time_et": "15:00",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic < 1.25 x declared_dividend. This is more dangerous here than in a real covered call: assignment delivers a 100-SHARE SHORT position, because there are no shares to deliver — only a long call.",
+      "time_et": "15:00"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call by 15:00 ET the session BEFORE any ex-dividend date if call_extrinsic < 1.25 x declared_dividend. This is more dangerous here than in a real covered call: assignment delivers a 100-SHARE SHORT position, because there are no shares to deliver — only a long call.",
+      "threshold_usd": 1.25
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close the long call by 15:00 ET on ITS expiration day if ITM, to prevent auto-exercise into a 100-share purchase.",
+      "time_et": "15:00",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "LEVEL 3 LEGAL: the short call is covered by the long call within the same multi-leg order (the long strike is lower and the long expiry is later), which satisfies Alpaca's same-order coverage rule. Submit as one 2-leg diagonal order.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "CRITICAL WIDTH RULE: (short_strike - long_strike) x 100 must be GREATER than the net debit paid. If it is not, an upside move produces a loss on a structure that was supposed to be neutral-to-bullish. Reject any diagonal failing this test.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100"
+      ]
+    },
+    {
+      "text": "Long leg by delta: 0.80-0.90. Short leg by delta: 0.25-0.35. Both selected from the listed chain, not interpolated.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.80",
+        "0.90",
+        "0.25",
+        "0.35"
+      ]
+    },
+    {
+      "text": "Long-leg extrinsic <= 3% of spot; front-month IV must exceed back-month IV by at least 2 vol points at entry.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Dividend yield of the underlying < 2.0%; the long call forgoes dividends and a high yield makes this structurally worse than a real covered call.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2.0"
+      ]
+    },
+    {
+      "text": "Size: net debit per unit <= 5% of equity ($2,500).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Close the short call at 50% of its credit, or at 21 DTE, whichever comes first, then sell the next cycle's short call.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "21"
+      ]
+    },
+    {
+      "text": "If the underlying rallies through the short strike and the short call delta exceeds 0.80, roll the short call up-and-out for a net credit. Never roll for a debit, and never roll to a strike below the long strike plus the total debit paid.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "t strike and the  , roll the short call up-and-out for a net credit. Never roll for a debit, and nev",
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the entire diagonal if the long call's delta falls below 0.60 — the structure has become a directional loss, not a premium engine.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.60"
+      ]
+    },
+    {
+      "text": "Roll the long leg out when its DTE falls below 90.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "90"
+      ]
+    },
+    {
+      "text": "Track cumulative credits: the structure is profitable only when accumulated short-call credits plus the long call's remaining value exceed the original debit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "MANDATORY ASSIGNMENT GUARD: close the short call no later than 15:40 ET on its expiration day if spot is within 1.0% of the short strike or above it.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "If the short call is ever assigned, the account is short 100 shares against a long call. Flatten within the same session by exercising the long call or by buying the shares back; do not carry it overnight.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "eb8ac2440230d58b",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

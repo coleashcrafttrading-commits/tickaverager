@@ -1,0 +1,261 @@
+{
+  "slug": "long-straddle",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_straddle",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 25.0,
+        "src": "IV rank <= 25 over the trailing 252 days. Buying straddles in high IV is how accounts die."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Total debit <= 1.5% of equity per position ($750 on $50k). Straddles are expensive; size small."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs OI >= 500, bid/ask <= 8% of mid."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 8.0,
+        "src": "Both legs OI >= 500, bid/ask <= 8% of mid."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit: close the whole straddle at +50% of debit, or when either leg alone can be sold for more than the total debit paid.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "profit_target",
+      "src": "Stop: close at -40% of debit, or at any point where remaining DTE < 10 and the underlying is within 0.5% of the strike.",
+      "basis": "debit",
+      "fraction": 0.4
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Hard rule: flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Time stop: close at 7 DTE if the position is not at a profit target and no catalyst remains.",
+      "dte": 7.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 6
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "IV30 < HV20 - 3 vol points (implied cheaper than realized), or a dated catalyst inside the expiry.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "20",
+        "3"
+      ]
+    },
+    {
+      "text": "Strike = the listed strike closest to spot; |call delta - 0.50| <= 0.05.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.50",
+        "0.05"
+      ]
+    },
+    {
+      "text": "Required move check: (total debit / spot) must be <= 0.75 * the average absolute move over the last 4 comparable catalysts. If the option market already prices a bigger move than history delivers, skip.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.75",
+        "4"
+      ]
+    },
+    {
+      "text": "DTE must extend at least 5 calendar days past the catalyst date so you can exit into post-event IV, not expiry.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Do NOT enter the day before earnings on a name whose IV rank is above 50 -- you will pay the full vol crush.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Submit both legs as one MLeg order at the combined mid.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Vol-crush exit: if the position is held through a scheduled event, close within 30 minutes of the event print regardless of P/L -- IV collapse destroys the straddle even when direction was right.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Stop: close at -40% of debit, or at any point where remaining DTE < 10 and the underlying is within 0.5% of the strike.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.5"
+      ]
+    },
+    {
+      "text": "Delta drift: if net position delta exceeds +/-0.60 per 1-lot, either take the profit on the winning leg or close the whole thing; a straddle that has become a directional trade is no longer the trade you sized for.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.60",
+        "1"
+      ]
+    },
+    {
+      "text": "Never hold an ATM straddle inside 7 DTE without a catalyst -- theta becomes brutal.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7"
+      ]
+    },
+    {
+      "text": "No short legs, so there is no assignment risk on this structure. However: ITM long options are AUTO-EXERCISED by the OCC at $0.01 ITM, which would deliver 100 shares per contract. Close both legs before 15:45 ET on expiration day, always. Never rely on a do-not-exercise instruction.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "100",
+        "15",
+        "45"
+      ]
+    },
+    {
+      "text": "If either leg's bid goes to $0.00 and the other leg is deep ITM, close the ITM leg by limit order and let the worthless leg be abandoned only after confirming it is more than $0.01 OTM at 15:30 ET; otherwise close both.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.00",
+        "0.01",
+        "15",
+        "30"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "f10c81a8827bd29d",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

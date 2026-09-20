@@ -1,0 +1,241 @@
+{
+  "slug": "bear-put-spread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_debit_spread",
+    "params": {
+      "short_delta": 0.475,
+      "dte": 37
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 40.0,
+        "src": "IV rank <= 40 (you are buying premium, and skew already taxes you)."
+      },
+      {
+        "fact": "close_vs_ema20",
+        "op": "lt",
+        "value": 0,
+        "src": "Directional gate: last close < 20-EMA AND 20-EMA < 50-SMA, or a break below the prior 20-day low on >1.5x average volume."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.35,
+          0.6
+        ],
+        "src": "Long put delta 0.35-0.60; short put delta 0.15-0.30."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.15,
+          0.3
+        ],
+        "src": "Long put delta 0.35-0.60; short put delta 0.15-0.30."
+      },
+      {
+        "fact": "debit_over_width",
+        "op": "lte",
+        "value": 0.5,
+        "src": "Net debit <= 50% of width."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          25.0,
+          50.0
+        ],
+        "src": "DTE 25-50 for swings."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs OI >= 500, bid/ask <= 10% of mid."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Both legs OI >= 500, bid/ask <= 10% of mid."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 65% of max profit.",
+      "basis": "max_profit",
+      "fraction": 0.65
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop: close at 10 DTE if the spread mid is below the entry debit.",
+      "dte": 10.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Hard rule: flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: if the short put is ITM by any amount at 15:30 ET on expiration day, close the whole spread at once.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: any day the short put is ITM with extrinsic < $0.10, close that session -- deep ITM short puts get exercised early for the carry.",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 5,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Directional gate: last close < 20-EMA AND 20-EMA < 50-SMA, or a break below the prior 20-day low on >1.5x average volume.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Debit * 100 * contracts <= 2% of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "2"
+      ]
+    },
+    {
+      "text": "Submit as one MLeg limit order at the mid; reprice in $0.01 steps up to mid + 25% of the quoted spread, then cancel.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "25"
+      ]
+    },
+    {
+      "text": "Stop: close at 50% loss of the debit, or if the underlying closes back above the 20-EMA.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "20"
+      ]
+    },
+    {
+      "text": "Roll down only after a > 1.5 ATR favorable move and only by closing the existing spread at >= 50% profit first.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "50"
+      ]
+    },
+    {
+      "text": "Never average down on a losing long vertical.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If both strikes are deep ITM at 5 DTE (underlying < short strike - 2%), close for near-max profit; the last few cents are not worth assignment exposure.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "2b999a0589ced110",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

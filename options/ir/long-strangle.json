@@ -1,0 +1,218 @@
+{
+  "slug": "long-strangle",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_strangle",
+    "params": {
+      "short_delta": 0.25,
+      "dte": 45
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 20.0,
+        "src": "IV rank <= 20 over 252 days. This is a long-vega trade; buy vol when it is objectively cheap."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.3
+        ],
+        "src": "Both legs 0.20-0.30 delta, chosen by delta not by equal dollar distance."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Total debit <= 1.0% of equity per position ($500 on $50k)."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "DTE 30-60. Never open a strangle under 21 DTE without a dated catalyst."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs OI >= 500, bid/ask <= 10% of mid."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Both legs OI >= 500, bid/ask <= 10% of mid."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at +50% of debit, or when one leg alone can be sold for more than the total debit paid.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "profit_target",
+      "src": "Stop: close at -40% of debit.",
+      "basis": "debit",
+      "fraction": 0.4
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop: close at 21 DTE if not at target. Theta on OTM options accelerates hard in the last three weeks.",
+      "dte": 21.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the whole structure at 21 DTE absent a catalyst.",
+      "dte": 21.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Move check: (call strike - put strike + debit)/spot must be <= the largest 30-day range over the last 12 months; if the required move has never happened, do not buy it.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "12"
+      ]
+    },
+    {
+      "text": "DTE 30-60. Never open a strangle under 21 DTE without a dated catalyst.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": ". Never open a strangle under 21 DTE without a dated catalyst.",
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "IV30 < HV20 - 3 vol points, or a catalyst inside the expiry with >= 5 days of cushion after it.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "20",
+        "3",
+        "5"
+      ]
+    },
+    {
+      "text": "Vol stop: close if IV rank rises above 50 and price has not moved -- you got the vol expansion without the move; take the vega profit.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "If one side goes deep ITM (delta > 0.80), consider selling that leg and holding the cheap wing as a free lottery ticket, but only if the remaining leg's value is < 10% of realized profit.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10"
+      ]
+    },
+    {
+      "text": "No short legs, so no assignment risk. But OCC auto-exercises long options $0.01 ITM at expiry, which would create unwanted stock. Close both legs before 15:45 ET every expiration.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "15",
+        "45"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "f59d9739fa12a3bc",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

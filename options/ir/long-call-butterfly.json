@@ -1,0 +1,279 @@
+{
+  "slug": "long-call-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_call_butterfly",
+    "params": {
+      "short_delta": 0.5
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.45,
+          0.55
+        ],
+        "src": "Body strike delta between 0.45 and 0.55 for the neutral version; for a directional fly, body delta between 0.25 and 0.40."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.25,
+          0.4
+        ],
+        "src": "Body strike delta between 0.45 and 0.55 for the neutral version; for a directional fly, body delta between 0.25 and 0.40."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Each of the 3 strikes: open interest >= 500, prior-day volume >= 100, and bid/ask spread <= max($0.05, 10% of leg mid)."
+      },
+      {
+        "fact": "min_leg_volume",
+        "op": "gte",
+        "value": 100.0,
+        "src": "Each of the 3 strikes: open interest >= 500, prior-day volume >= 100, and bid/ask spread <= max($0.05, 10% of leg mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at profit >= 25% of max profit, i.e. when mark >= debit + 0.25*(width - debit), for DTE > 5.",
+      "basis": "max_profit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "profit_target",
+      "src": "For 0-2 DTE flies, close at profit >= 50% of max profit or when mark >= 2.0x the debit paid, whichever triggers first.",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "profit_target",
+      "src": "Hard stop: close if mark <= 50% of net debit (loss >= 50% of capital at risk) and spot is outside both wings.",
+      "basis": "debit",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: the 2 short body calls must be bought back or the whole structure closed no later than 15:45 ET on expiration day, unconditionally, at market if necessary, even at max loss.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: if the underlying goes ex-dividend before expiry and the short body calls are ITM with extrinsic < the declared dividend, close the position before the close of the day prior to the ex-date."
+    },
+    {
+      "kind": "pin_guard",
+      "src": "PIN GUARD: if at 15:30 ET on expiry day |spot - body strike| < 0.25% of spot, close the entire fly immediately; do not attempt to capture the last of the tent.",
+      "time_et": "15:30",
+      "pct_of_spot": 0.25
+    },
+    {
+      "kind": "dte_close",
+      "src": "Time exit: close any fly with > 0 DTE remaining at 2 DTE if neither the profit target nor the stop has been hit.",
+      "dte": 2.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Net debit must be <= 20% of wing width (e.g. pay <= $1.00 on a $5-wide fly), giving a minimum 4:1 theoretical reward/risk.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "4",
+        "1"
+      ]
+    },
+    {
+      "text": "Both wings must be exactly equal width; reject the order if strike spacing differs by even one increment.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Each of the 3 strikes: open interest >= 500, prior-day volume >= 100, and bid/ask spread <= max($0.05, 10% of leg mid).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Submit as a single 3-strike multi-leg (4-contract) order, limit at the natural mid, willing to pay mid + $0.02 per unit; never leg in.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.02"
+      ]
+    },
+    {
+      "text": "Max 1.5% of account equity at risk per butterfly; max 5% of equity across all open butterflies on one underlying.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "5"
+      ]
+    },
+    {
+      "text": "No entry if an earnings report, FOMC statement, or CPI print falls between now and expiry unless the fly is deliberately an event pin trade.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "For 0-2 DTE flies, close at profit >= 50% of max profit or when mark >= 2.0x the debit paid, whichever triggers first.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": ".0x the debit paid, whichever triggers first.",
+      "missing_numbers": [
+        "0",
+        "2",
+        "2.0"
+      ]
+    },
+    {
+      "text": "If spot moves more than 1.0 wing-width away from the body with > 5 DTE left, close rather than adjust; do not roll the body chasing price.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0",
+        "5"
+      ]
+    },
+    {
+      "text": "Never add to a losing butterfly; one unit per thesis per expiry.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: the 2 short body calls must be bought back or the whole structure closed no later than 15:45 ET on expiration day, unconditionally, at market if necessary, even at max loss.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "ASSIGNMENT GUARD: close immediately at any time if the short body calls are ITM and their extrinsic value (mid - intrinsic) < $0.10 per contract.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "Time exit: close any fly with > 0 DTE remaining at 2 DTE if neither the profit target nor the stop has been hit.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "062a532673e84668",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

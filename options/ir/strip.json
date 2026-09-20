@@ -1,0 +1,197 @@
+{
+  "slug": "strip",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 2,
+  "construction": {
+    "template": "strip",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 25.0,
+        "src": "IV rank < 25; reject if IV rank >= 35."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 35.0,
+        "src": "IV rank < 25; reject if IV rank >= 35."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Total debit <= 1% of equity per unit."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "ATM OI >= 1000, per-leg spread <= max($0.05, 8% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "stop_fraction",
+      "src": "Hard stop at 50% loss of the debit.",
+      "basis": "debit",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close every leg by 15:00 ET on expiration day: OCC exercise-by-exception auto-exercises longs that finish $0.01 ITM, which would deliver 100 or 200 shares into the account.",
+      "time_et": "15:00",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "All three contracts on the identical ATM strike and expiry.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "A dated catalyst inside the expiry.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Single 3-contract multi-leg order at mid, pay up to mid + $0.03.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.03"
+      ]
+    },
+    {
+      "text": "Close at 50% gain on the debit, or the session after the catalyst, whichever first.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Time stop: close if 40% of the time to expiry has elapsed with no move beyond 0.75 expected moves.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "40",
+        "0.75"
+      ]
+    },
+    {
+      "text": "Consider closing the lone call if the underlying breaks down hard, leaving a pure long put position.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "No short legs, so no assignment risk.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close every leg by 15:00 ET on expiration day: OCC exercise-by-exception auto-exercises longs that finish $0.01 ITM, which would deliver 100 or 200 shares into the account.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01"
+      ]
+    },
+    {
+      "text": "Close any leg worth less than $0.05 rather than letting it expire.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "bf553828a7d0e372",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

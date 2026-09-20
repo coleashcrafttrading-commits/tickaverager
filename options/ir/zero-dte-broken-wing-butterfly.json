@@ -1,0 +1,292 @@
+{
+  "slug": "zero-dte-broken-wing-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "broken_wing_put_fly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Max loss ((W2 - W1) x 100 - credit) <= 1% of equity; at most 2 concurrent; counts against the 3%-per-day 0DTE budget."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "All four contracts OI >= 1000; one MLeg limit order."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "delta_stop",
+      "src": "Delta stop: close if the body's locally computed |delta| reaches 0.30.",
+      "abs_delta": 0.3
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close any short with extrinsic < $0.10 or |delta| >= 0.85 at any hour.",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 7
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "SPY or QQQ only (SPX would be the institutional venue but index options are not available on Alpaca; SPY is share-settled, which is exactly why the exit rules below are non-negotiable).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Locally computed greeks mandatory at 0DTE; refresh every 30 seconds.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0",
+        "30"
+      ]
+    },
+    {
+      "text": "MUST be opened for a net credit. If the combination prices at a debit, the no-upside-risk property is gone and the trade is rejected.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Entry window 09:45-13:00 ET. The structure needs time for the body to decay.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "09",
+        "45",
+        "13",
+        "00"
+      ]
+    },
+    {
+      "text": "Body strike at least 1.0 x the remaining-day expected move below spot, and below the session low.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "W2 <= 2.5 x W1 - beyond that the tail is not worth the credit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "2.5",
+        "1"
+      ]
+    },
+    {
+      "text": "Max loss ((W2 - W1) x 100 - credit) <= 1% of equity; at most 2 concurrent; counts against the 3%-per-day 0DTE budget.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "3",
+        "0"
+      ]
+    },
+    {
+      "text": "No entry within 15 minutes of a scheduled release or before 14:30 ET on FOMC days.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "14",
+        "30"
+      ]
+    },
+    {
+      "text": "Take profit at 50% of the structure's maximum value, or close any time the whole thing can be bought back for a debit smaller than the opening credit.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Stop: close if spot trades below the body strike, regardless of mark - below the body the payoff turns and the short 2x dominates.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Do not 'ride it through' the body on the theory that the far wing catches it; the far wing is 1 contract against 2 shorts.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "Never roll; never add a second BWB below a losing one.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "UNCONDITIONAL FLATTEN AT 15:30 ET.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "30"
+      ]
+    },
+    {
+      "text": "Two short puts per unit: if either is ITM after 15:00 ET, close the structure immediately. Assignment delivers 200 shares (about $120k of SPY) into a $50k account.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00",
+        "200",
+        "50"
+      ]
+    },
+    {
+      "text": "Close any short with extrinsic < $0.10 or |delta| >= 0.85 at any hour.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.85"
+      ]
+    },
+    {
+      "text": "If unfilled by 15:40 ET, reprice to the natural every 10 seconds, accept the slippage, and log a critical incident.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "40",
+        "10"
+      ]
+    },
+    {
+      "text": "Never exercise the long wings to cover an assignment as a plan - that is an incident response, not a strategy.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 1 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "59c1d2e9ce01b3ce",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

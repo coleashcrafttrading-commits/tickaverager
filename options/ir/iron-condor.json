@@ -1,0 +1,334 @@
+{
+  "slug": "iron-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_condor",
+    "params": {
+      "short_delta": 0.17,
+      "dte": 45
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca options level >= 3 (defined risk; no naked leg) - allowed on the paper account"
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank(252-day) >= 30"
+      },
+      {
+        "fact": "spot",
+        "op": "gte",
+        "value": 20.0,
+        "src": "Underlying price >= $20 and 20-day ADV >= 2,000,000 shares"
+      },
+      {
+        "fact": "adv_20d",
+        "op": "gte",
+        "value": 2000000.0,
+        "src": "Underlying price >= $20 and 20-day ADV >= 2,000,000 shares"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.33,
+        "src": "Net credit >= 33% of the wing width W (e.g. >= $1.65 on a $5 wing); reject the trade otherwise"
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.14,
+          0.2
+        ],
+        "src": "Short strikes at 0.14-0.20 delta on both sides; if the chain has no strike in that band, take the nearest strike with delta <= 0.20"
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "lte",
+        "value": 0.2,
+        "src": "Short strikes at 0.14-0.20 delta on both sides; if the chain has no strike in that band, take the nearest strike with delta <= 0.20"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "DTE between 30 and 60"
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings report, ex-dividend date, or scheduled FOMC/CPI inside the expiry window"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Per-leg liquidity: open interest >= 500, day volume >= 100, bid-ask spread <= 10% of leg mid or <= $0.10, whichever is larger"
+      },
+      {
+        "fact": "min_leg_volume",
+        "op": "gte",
+        "value": 100.0,
+        "src": "Per-leg liquidity: open interest >= 500, day volume >= 100, bid-ask spread <= 10% of leg mid or <= $0.10, whichever is larger"
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Per-leg liquidity: open interest >= 500, day volume >= 100, bid-ask spread <= 10% of leg mid or <= $0.10, whichever is larger"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Position size: max loss of the structure <= 2% of account equity ($1,000 on $50k); total short-premium buying power across all open structures <= 35% of equity"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit: close the entire structure at 50% of the credit received (buy back for <= 0.50 x credit)",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop: close at 21 DTE regardless of P/L (tastytrade SPY study: managing at 50%/21 DTE raised win rate and cut time in trade)",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Loss stop: close if the structure can only be bought back for >= 2.0x the credit received (i.e. -100% of credit as loss, roughly 2x credit debit)",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Tested-side roll: if either short strike's |delta| >= 0.30, roll the untested side's spread toward the money to a 0.25-0.30 delta short, same expiry, for additional credit - only once per trade, and only if DTE > 21",
+      "abs_delta": 0.3
+    },
+    {
+      "kind": "iv_exit",
+      "src": "If IV rank falls below 15 while the trade is profitable, take profit early (the vega edge is gone)",
+      "iv_rank_below": 15.0,
+      "requires_profit": true
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "HARD ASSIGNMENT GUARD: submit a closing order for the entire structure no later than 15:45 ET on expiration day, regardless of P/L, even if both shorts are OTM. Nothing with a short leg is ever held to settlement.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "itm_depth_guard",
+      "src": "Close immediately (market-adjacent marketable limit) if any short strike goes ITM by more than 0.25 x W, or a short leg's delta >= 0.85, or a short leg's extrinsic value < $0.10",
+      "pct_of_width": 0.25
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close immediately (market-adjacent marketable limit) if any short strike goes ITM by more than 0.25 x W, or a short leg's delta >= 0.85, or a short leg's extrinsic value < $0.10",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately (market-adjacent marketable limit) if any short strike goes ITM by more than 0.25 x W, or a short leg's delta >= 0.85, or a short leg's extrinsic value < $0.10",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Dividend guard: if the short call's extrinsic value < the projected dividend amount, close or roll that call spread before the close of the session preceding the ex-dividend date"
+    },
+    {
+      "kind": "pin_guard",
+      "src": "Pin guard on expiration day: if the underlying is within 0.30% of either short strike at 15:30 ET, close immediately rather than waiting for 15:45",
+      "time_et": "15:30",
+      "pct_of_spot": 0.3
+    },
+    {
+      "kind": "unwind_order",
+      "src": "If any leg becomes untradeable (no bid, halted underlying), close the remaining tradeable legs that carry short risk first, then flatten the longs",
+      "shorts_first": true
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 11,
+      "compiled": 6,
+      "partial": 3,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Net credit >= 33% of the wing width W (e.g. >= $1.65 on a $5 wing); reject the trade otherwise",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "); reject the trade otherwise",
+      "missing_numbers": null
+    },
+    {
+      "text": "Both wings the same width W (unbalanced = use the broken-wing entry instead)",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Per-leg liquidity: open interest >= 500, day volume >= 100, bid-ask spread <= 10% of leg mid or <= $0.10, whichever is larger",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "or <= $0.10, whichever is larger",
+      "missing_numbers": null
+    },
+    {
+      "text": "Position size: max loss of the structure <= 2% of account equity ($1,000 on $50k); total short-premium buying power across all open structures <= 35% of equity",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "35"
+      ]
+    },
+    {
+      "text": "Submit as a single Alpaca 4-leg mleg limit order, net credit, limit = mid of the structure; if unfilled after 60s, improve by $0.05 up to 3 times, then cancel (never market order a 4-leg)",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "60",
+        "0.05",
+        "3"
+      ]
+    },
+    {
+      "text": "Tested-side roll: if either short strike's |delta| >= 0.30, roll the untested side's spread toward the money to a 0.25-0.30 delta short, same expiry, for additional credit - only once per trade, and only if DTE > 21",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "Tested-side roll: if either short strike's  , roll the untested side's spread toward the mon",
+      "missing_numbers": [
+        "0.25",
+        "21"
+      ]
+    },
+    {
+      "text": "Never roll a losing side out in time for a debit; roll only for a net credit or close",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Delta guard: if net position delta exceeds +/-0.20 per 1-lot, either roll the untested side or close",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.20",
+        "1"
+      ]
+    },
+    {
+      "text": "Dividend guard: if the short call's extrinsic value < the projected dividend amount, close or roll that call spread before the close of the session preceding the ex-dividend date",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "nd amount, close or roll that call spread before the close of the session preceding the ex-dividend",
+      "missing_numbers": null
+    },
+    {
+      "text": "Pin guard on expiration day: if the underlying is within 0.30% of either short strike at 15:30 ET, close immediately rather than waiting for 15:45",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "45"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "7ea4e6e24048e8f2",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

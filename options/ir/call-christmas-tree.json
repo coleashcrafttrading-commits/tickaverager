@@ -1,0 +1,258 @@
+{
+  "slug": "call-christmas-tree",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_christmas_tree",
+    "params": {
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 3
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 2
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank >= 30"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 ONLY if every short is fully covered by a long at an equal-or-better strike in the same ratio; if the 3x short is not fully covered, the structure requires level 4 - check leg-by-leg coverage before submitting"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "All strikes OI >= 500"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "DTE 20-45"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of max profit",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close at 21 DTE regardless of P/L",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Loss stop: close if the loss reaches 1.0x the net debit (or, for a credit entry, 2x the credit)",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately if the 3x short strike B is ITM by more than 0.25 x (C - B), or its extrinsic < $0.10, or its delta >= 0.85",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close immediately if the 3x short strike B is ITM by more than 0.25 x (C - B), or its extrinsic < $0.10, or its delta >= 0.85",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard: 3 short calls per unit means 300 shares of assignment exposure per unit; close before the ex-date if extrinsic < dividend"
+    },
+    {
+      "kind": "unwind_order",
+      "src": "If any long leg goes illiquid, close the shorts first",
+      "shorts_first": true
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 2,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Strike B set at a concrete target: the 20-day high, a measured move, or spot x (1 + 0.75 x expected move)",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20"
+      ]
+    },
+    {
+      "text": "Compute the full payoff numerically before routing; REJECT if upside risk above C is unbounded or exceeds 1.5% of equity",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Net debit <= 25% of (B - A), or a net credit",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "Alpaca level 3 ONLY if every short is fully covered by a long at an equal-or-better strike in the same ratio; if the 3x short is not fully covered, the structure requires level 4 - check leg-by-leg coverage before submitting",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "ONLY if every short is fully covered by a long at an equal-or-better strike in t",
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "Alpaca mleg orders support at most 4 legs; a 1-3-2 is 3 leg lines (ratios 1/3/2) and is acceptable",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "1",
+        "3",
+        "2",
+        "3"
+      ]
+    },
+    {
+      "text": "Loss stop: close if the loss reaches 1.0x the net debit (or, for a credit entry, 2x the credit)",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "If spot exceeds strike B by more than 0.5 x (C - B), close - the position is past its tent and the ratio risk is the live exposure",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.5"
+      ]
+    },
+    {
+      "text": "Never let the trade approach expiry with spot between B and C",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close immediately if the 3x short strike B is ITM by more than 0.25 x (C - B), or its extrinsic < $0.10, or its delta >= 0.85",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.25"
+      ]
+    },
+    {
+      "text": "Ex-dividend guard: 3 short calls per unit means 300 shares of assignment exposure per unit; close before the ex-date if extrinsic < dividend",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "300"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "e51141c4fb99b161",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

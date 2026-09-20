@@ -1,0 +1,248 @@
+{
+  "slug": "bull-put-diagonal",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_credit_spread",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "gt",
+        "value": 0,
+        "src": "Trend/level filter: spot > 50-day SMA, or a confirmed bounce off support within 2 sessions."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 35.0,
+        "src": "IV rank >= 35."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.25,
+        "src": "Credit >= 25% of the strike width."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss (width x 100 - credit) <= 1.5% of equity per unit."
+      },
+      {
+        "fact": "spread_pct_of_credit",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Combined bid-ask <= 10% of the credit."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK: the short put is covered by a lower-strike long put with a LATER expiry. Submit as a 2-leg mleg; buy the long put FIRST if legging.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of the credit received.",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop at 2x the credit received, or when the short put's |delta| reaches 0.50.",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Stop at 2x the credit received, or when the short put's |delta| reaches 0.50.",
+      "abs_delta": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close or roll at 21 DTE on the short leg if its |delta| > 0.35.",
+      "dte": 21.0
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 3 units per underlying.",
+      "units": 3.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "unwind_order",
+      "src": "NEVER sell the long put while the short put is open; the long is the cover.",
+      "shorts_first": true
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 3.0,
+    "src": "Max 3 units per underlying."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Trend/level filter: spot > 50-day SMA, or a confirmed bounce off support within 2 sessions.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Short put by delta |0.20-0.35|; long put strike below it; long expiry at least 21 days beyond the short.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.20",
+        "0.35",
+        "21"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: the short put is covered by a lower-strike long put with a LATER expiry. Submit as a 2-leg mleg; buy the long put FIRST if legging.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Close or roll at 21 DTE on the short leg if its |delta| > 0.35.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.35"
+      ]
+    },
+    {
+      "text": "Roll the short down and out for a credit only; never roll past the long leg's expiry.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the thesis flips bearish, buy back the short and keep the long put as a cheap hedge.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close any short put whose extrinsic drops below $0.10 - deep-ITM short puts are exercised early for interest carry.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "If spot is below the long strike, close both legs as a package.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "2087af34ce2209b8",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

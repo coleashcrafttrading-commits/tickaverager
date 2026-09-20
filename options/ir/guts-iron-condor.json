@@ -1,0 +1,129 @@
+{
+  "slug": "guts-iron-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_condor",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 would technically permit it (defined risk), which is exactly the trap"
+      }
+    ]
+  },
+  "accept": null,
+  "management": [],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately and unconditionally; ITM shorts with extrinsic under $0.10 will be assigned, and both sides are ITM by construction",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 3,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 1,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 2,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "DO NOT TRADE on this system. Included for completeness only.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If ever used: both shorts are deep ITM from the moment of entry, so the assignment guard fires immediately - which is why the OTM-equivalent iron condor is always the correct expression",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Not applicable - the position should not be opened. If inherited from a roll gone wrong, close it the same session.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Never hold overnight; never hold over an ex-dividend date",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 2 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    },
+    {
+      "gap": "no_dividend_guard",
+      "why": "a short call plus a dividend rule in the document, and no compiled guard. A short call with less extrinsic than the dividend is exercised the night before the ex-date."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "1716e10bc37077f1",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

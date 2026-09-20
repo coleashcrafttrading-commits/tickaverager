@@ -1,0 +1,191 @@
+{
+  "slug": "put-ratio-backspread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_backspread",
+    "params": {
+      "short_delta": 0.6
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 2
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "is_credit",
+        "op": "eq",
+        "value": true,
+        "src": "Open for a net CREDIT or zero cost only; reject debits."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.55,
+          0.65
+        ],
+        "src": "Short leg delta -0.55 to -0.65; long legs -0.30 to -0.35."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss <= 1.5% of equity per unit."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at 100% of the max-loss amount in profit.",
+      "basis": "max_loss",
+      "fraction": 1.0
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close at 14 DTE regardless of P/L.",
+      "dte": 14.0
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at 60% of the theoretical max loss.",
+      "basis": "max_loss",
+      "fraction": 0.6
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: 1 short put, covered by 2 longs but assignable. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the short put is ITM with extrinsic < $0.10 - the winning scenario.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close no later than 14 DTE.",
+      "dte": 14.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Skew filter: (IV of the long strike) - (IV of the short strike) <= 3.0 vol points; otherwise the structure is not economically available.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3.0"
+      ]
+    },
+    {
+      "text": "Short leg delta -0.55 to -0.65; long legs -0.30 to -0.35.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.30",
+        "0.35"
+      ]
+    },
+    {
+      "text": "Single 3-contract multi-leg order at mid; must remain a credit after slippage.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Close the session after the catalyst resolves.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: 1 short put, covered by 2 longs but assignable. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "covered by 2 longs but assignable.   on expiration day, unconditionally.",
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "2c0c246d25170829",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

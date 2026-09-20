@@ -1,0 +1,238 @@
+{
+  "slug": "roll-short-vertical-for-duration",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_condor",
+    "params": {
+      "short_delta": 0.2
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "lte",
+        "value": 0.2,
+        "src": "New short strike |delta| <= 0.20 and at least as far OTM, in percentage terms, as the original entry."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "New width W_new <= 1.5 x the original width, and the NEW max loss ((W_new x 100) - cumulative credits) must still be <= 2% of equity. If widening breaches that cap, do not widen."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close the rolled spread by 15:45 ET on its expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x the width.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x the width.",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard on a short call leg before every ex-date while ITM."
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "ROLL ELIGIBILITY GATE - all four must hold, or the position is simply closed: (1) the tested short's |delta| is between 0.30 and 0.50 (below 0.30 there is nothing to fix, above 0.50 the roll is a rescue, not a roll); (2) the original directional thesis is still valid by its own rule (e.g. the moving-average condition that triggered entry still holds); (3) the roll can be executed for a NET CREDIT; (4) this position has not been rolled before.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.30",
+        "0.50"
+      ]
+    },
+    {
+      "text": "ONE ROLL PER POSITION, EVER. A second roll is forbidden - it is the single most reliable way a small defined loss becomes a large one.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "New width W_new <= 1.5 x the original width, and the NEW max loss ((W_new x 100) - cumulative credits) must still be <= 2% of equity. If widening breaches that cap, do not widen.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "New expiry <= 45 days beyond the current one. Rolling to a distant expiry to manufacture a credit is deferral, not management.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45"
+      ]
+    },
+    {
+      "text": "Execute as a single 4-leg MLeg order where the broker supports it; otherwise close the old spread completely and confirm the fill BEFORE opening the new one. Never open the new spread first.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "Do not roll across an earnings date or a scheduled macro event into the new expiry.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "The rolled position is a NEW position with its own rules: 50% profit target on the cumulative credit, 21-DTE time stop, 2x cumulative credit loss stop.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "21",
+        "2"
+      ]
+    },
+    {
+      "text": "Log the roll as a single linked trade with cumulative credit and cumulative max loss; never report the roll credit as a profit.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the new short is tested again, CLOSE - the one-roll limit is absolute.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not roll the untested side of a condor 'to help pay for' this roll; that is a separate decision with its own gate (see the recentering roll).",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x the width.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25"
+      ]
+    },
+    {
+      "text": "Abort the roll entirely if the old spread closes but the new one cannot be filled at a credit within 5 minutes - being flat is an acceptable outcome; being half-rolled is not.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "9387b01026f982f1",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

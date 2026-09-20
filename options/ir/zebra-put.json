@@ -1,0 +1,198 @@
+{
+  "slug": "zebra-put",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_backspread",
+    "params": {
+      "short_delta": 0.725,
+      "dte": 45
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 2
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.7,
+          0.75
+        ],
+        "src": "Long strike delta -0.70 to -0.75; short strike delta -0.48 to -0.52."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.48,
+          0.52
+        ],
+        "src": "Long strike delta -0.70 to -0.75; short strike delta -0.48 to -0.52."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 3.0,
+        "src": "Debit <= 3% of equity per unit."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "30-60 DTE; both strikes OI >= 500, per-leg spread <= max($0.10, 10% of mid)."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "30-60 DTE; both strikes OI >= 500, per-leg spread <= max($0.10, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "stop_fraction",
+      "src": "Manage as a directional position: profit target at 50% gain on the debit, stop at 35% loss of the debit.",
+      "basis": "debit",
+      "fraction": 0.35
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: 1 short ATM put, covered by 2 long ITM puts. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the short put is ITM with extrinsic < $0.10.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close no later than 14 DTE.",
+      "dte": 14.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 3,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Net extrinsic check: (2 x long extrinsic) - (1 x short extrinsic) <= $0.15 per share, otherwise reject.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.15"
+      ]
+    },
+    {
+      "text": "Net delta between -0.90 and -1.05 per unit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90",
+        "1.05"
+      ]
+    },
+    {
+      "text": "Single 3-contract multi-leg order at mid, pay up to mid + $0.05.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.05"
+      ]
+    },
+    {
+      "text": "Roll out at 14 DTE to preserve the zero-theta property.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "14"
+      ]
+    },
+    {
+      "text": "Re-strike if the long delta exceeds -0.90.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "ASSIGNMENT GUARD: 1 short ATM put, covered by 2 long ITM puts. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "b3c559f49974091c",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

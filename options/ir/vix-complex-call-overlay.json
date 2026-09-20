@@ -1,0 +1,251 @@
+{
+  "slug": "vix-complex-call-overlay",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_debit_spread",
+    "params": {
+      "short_delta": 0.35
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "term_shape",
+        "op": "eq",
+        "value": "contango",
+        "src": "Entry only when VIX spot is below 16 and the VIX futures term structure is in contango - buying vol-of-vol after the spike is how this hedge loses money."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.3,
+          0.4
+        ],
+        "src": "Long strike delta 0.30-0.40, short strike delta 0.10-0.15, both legs same expiry, OI >= 250."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.1,
+          0.15
+        ],
+        "src": "Long strike delta 0.30-0.40, short strike delta 0.10-0.15, both legs same expiry, OI >= 250."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 250.0,
+        "src": "Long strike delta 0.30-0.40, short strike delta 0.10-0.15, both legs same expiry, OI >= 250."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call at extrinsic < $0.10 or delta >= 0.85 - assignment creates a naked short position in a product that can gap 40% overnight.",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "VIX index options are European, cash-settled and NOT tradeable on Alpaca. Only VXX, UVXY, VIXY and similar share-settled ETP options may be used, and their decay characteristics are materially worse than VIX futures options - document the proxy in every log line.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "CALL SPREAD VERSION ONLY at level 3. The 1x2 call ratio (buy 1, sell 2) leaves one uncovered short call on a product that can double overnight - BLOCKED, level 4, and it should be rejected at the router even if approval is later raised.",
+      "reason": "level 4 on this account; the strategy cannot be sent at all",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "1",
+        "2",
+        "4"
+      ]
+    },
+    {
+      "text": "Entry only when VIX spot is below 16 and the VIX futures term structure is in contango - buying vol-of-vol after the spike is how this hedge loses money.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "16"
+      ]
+    },
+    {
+      "text": "Annual budget cap: total premium spent on volatility-complex hedges <= 1.5% of equity per year, tracked cumulatively across rolls.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Position sized so a VIX move from 15 to 35 produces a hedge gain of 3-6% of equity - model it before entry, do not guess.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "35",
+        "3",
+        "6"
+      ]
+    },
+    {
+      "text": "Monetize on a spike: sell the spread when it reaches 4x the debit paid, or when VIX spot exceeds 30, whichever comes first. A tail hedge that is never monetized is just a fee.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "30"
+      ]
+    },
+    {
+      "text": "Roll quarterly at 30 DTE, resetting strikes to the current delta targets; count each roll against the annual budget.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Do not roll strikes up during a spike to 'keep the hedge on' - take the money, then re-establish after the term structure returns to contango.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Halve the position if the ETP has undergone a reverse split within the last 30 days; strike continuity after a split is a frequent source of sizing errors.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Close both legs at least 2 trading days before expiry; never allow auto-exercise on a leveraged volatility ETP.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Close the short call at extrinsic < $0.10 or delta >= 0.85 - assignment creates a naked short position in a product that can gap 40% overnight.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.85",
+        "40"
+      ]
+    },
+    {
+      "text": "Close the entire hedge immediately if the ETP announces a reverse split, a change in index methodology, or a suspension of creations.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Never hold a short ETP call leg through a spike on the theory that the long leg covers it - it does, for money, but assignment still delivers a short share position.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 1 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "28373b23711e8415",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

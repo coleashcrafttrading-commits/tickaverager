@@ -1,0 +1,263 @@
+{
+  "slug": "iron-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 50.0,
+        "src": "IV rank >= 50 computed over a 252-day IV history."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings, no FOMC, no CPI inside the expiry unless the trade is explicitly an IV-crush trade opened the session before the event."
+      },
+      {
+        "fact": "event_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings, no FOMC, no CPI inside the expiry unless the trade is explicitly an IV-crush trade opened the session before the event."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "All four contracts: OI >= 500, prior-day volume >= 100, per-leg spread <= max($0.05, 10% of mid)."
+      },
+      {
+        "fact": "min_leg_volume",
+        "op": "gte",
+        "value": 100.0,
+        "src": "All four contracts: OI >= 500, prior-day volume >= 100, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target: close at 25% of max profit for the 30-45 DTE version (iron flies rarely reach 50% because the profit zone is a point, not a range).",
+      "basis": "max_profit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time management: close or roll at 21 DTE regardless of P/L - gamma risk past 21 DTE is not compensated.",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop: close if the mark-to-market loss reaches 2.0x the credit received.",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if either short leg is ITM with extrinsic value < $0.10.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: if the short call is ITM and its extrinsic is less than the declared dividend, close before the prior day's close."
+    },
+    {
+      "kind": "pin_guard",
+      "src": "PIN GUARD: at 15:30 ET on expiry day, if |spot - body| < 0.30% of spot, close everything; a pin is the single worst operational outcome because assignment on the short straddle is a coin flip.",
+      "time_et": "15:30",
+      "pct_of_spot": 0.3
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Credit received >= 25% of wing width; target 30-40% (e.g. >= $1.50 on a $5-wide fly).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25",
+        "30",
+        "40"
+      ]
+    },
+    {
+      "text": "Short strike = the listed strike nearest spot; both short legs MUST share that identical strike.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Wings exactly equidistant from the body.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "No earnings, no FOMC, no CPI inside the expiry unless the trade is explicitly an IV-crush trade opened the session before the event.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "unless the trade is explicitly an IV-crush trade opened the session before the e",
+      "missing_numbers": null
+    },
+    {
+      "text": "Single 4-leg order, limit at mid, accept mid - $0.03.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "0.03"
+      ]
+    },
+    {
+      "text": "Max risk <= 2% of equity per position; max 3 concurrent iron flies across the whole account.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "3"
+      ]
+    },
+    {
+      "text": "Profit target: close at 25% of max profit for the 30-45 DTE version (iron flies rarely reach 50% because the profit zone is a point, not a range).",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "45"
+      ]
+    },
+    {
+      "text": "Delta drift: if net position delta exceeds +/-20 per unit, close; do not defend a directional iron fly.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20"
+      ]
+    },
+    {
+      "text": "Optional single roll: if spot breaches a breakeven with > 21 DTE left, roll the untested short leg to the body of the new range once only, never twice.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "ASSIGNMENT GUARD: both an ATM short call and an ATM short put exist, and at expiry one of them is ITM by definition unless spot lands exactly on the strike. Flatten the entire structure no later than 15:45 ET on expiration day, unconditionally, at market if the spread will not fill.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "45"
+      ]
+    },
+    {
+      "text": "Never allow the long wings to expire while a short leg lives; close the whole structure as one order.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 2 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "23837a97cbaa3534",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

@@ -1,0 +1,299 @@
+{
+  "slug": "bear-put-diagonal",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_debit_spread",
+    "params": {
+      "dte": 90
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "lt",
+        "value": 0,
+        "src": "Trend filter: spot < 50-day SMA AND 50-day SMA < 200-day SMA."
+      },
+      {
+        "fact": "sma50_vs_sma200",
+        "op": "lt",
+        "value": 0,
+        "src": "Trend filter: spot < 50-day SMA AND 50-day SMA < 200-day SMA."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "between",
+        "value": [
+          20.0,
+          50.0
+        ],
+        "src": "IV rank between 20 and 50 (avoid buying the long put after a vol spike)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          60.0,
+          120.0
+        ],
+        "src": "Long put by delta |0.60-0.75|, 60-120 DTE; short put by delta |0.25-0.35|, 21-45 DTE."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          45.0
+        ],
+        "src": "Long put by delta |0.60-0.75|, 60-120 DTE; short put by delta |0.25-0.35|, 21-45 DTE."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "Short expiry strictly before the long expiry.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 2.5,
+        "src": "Net debit <= 2.5% of equity per unit; combined bid-ask <= 8% of debit."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close the short put at 50-75% of the credit received and re-sell the next cycle.",
+      "basis": "credit",
+      "fraction": 0.75
+    },
+    {
+      "kind": "profit_target",
+      "src": "Close the entire structure at +50% of net debit.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -50% of net debit, or if spot closes above the long strike plus 1 ATR(14).",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 3 units per underlying.",
+      "units": 3.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Deep-ITM short puts are exercised early for interest carry - close any short put with extrinsic < $0.10 regardless of DTE.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the long put no later than 30 DTE or when |delta| < 0.40.",
+      "dte": 30.0
+    },
+    {
+      "kind": "unwind_order",
+      "src": "Buy back the short before selling the long.",
+      "shorts_first": true
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 3.0,
+    "src": "Max 3 units per underlying."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 7,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Long put by delta |0.60-0.75|, 60-120 DTE; short put by delta |0.25-0.35|, 21-45 DTE.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.75",
+        "0.25",
+        "0.35"
+      ]
+    },
+    {
+      "text": "MANDATORY: short strike < long strike, and (long strike - short strike) >= net debit per share.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Net debit <= 2.5% of equity per unit; combined bid-ask <= 8% of debit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "8"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: a short put at a LOWER strike expiring EARLIER is fully covered by the long put. Submit as a 2-leg mleg; buy the long put FIRST if legging.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Stop at -50% of net debit, or if spot closes above the long strike plus 1 ATR(14).",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Trend stop: close if spot closes above the 50-day SMA for 2 consecutive sessions.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "2"
+      ]
+    },
+    {
+      "text": "Roll the short down and out when spot falls below the short strike and the short's |delta| > 0.60, for a net credit only and only to a strike still below long strike - debit. If no credit roll exists, close the whole diagonal.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.60"
+      ]
+    },
+    {
+      "text": "Roll the long put forward at DTE < 45 or when its |delta| drops below 0.50.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45",
+        "0.50"
+      ]
+    },
+    {
+      "text": "Close the short put immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close the long put no later than 30 DTE or when |delta| < 0.40.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.40"
+      ]
+    },
+    {
+      "text": "If the long put marks below 30% of the entry debit, close both legs.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "9633ea305ebac1a5",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

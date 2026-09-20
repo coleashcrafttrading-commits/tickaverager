@@ -1,0 +1,301 @@
+{
+  "slug": "leaps-calendar",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_calendar",
+    "params": {
+      "short_delta": 0.625,
+      "dte": 33
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30 when buying the LEAPS; back-month IV below its own 40th percentile."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.55,
+          0.7
+        ],
+        "src": "LEAPS delta 0.55-0.70, DTE >= 270; extrinsic <= 20% of premium."
+      },
+      {
+        "fact": "dte",
+        "op": "gte",
+        "value": 270.0,
+        "src": "LEAPS delta 0.55-0.70, DTE >= 270; extrinsic <= 20% of premium."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          45.0
+        ],
+        "src": "Short call at the IDENTICAL strike, DTE 21-45, |delta| 0.45-0.55 at entry."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.45,
+          0.55
+        ],
+        "src": "Short call at the IDENTICAL strike, DTE 21-45, |delta| 0.45-0.55 at entry."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 4.0,
+        "src": "Net debit <= 4% of equity per unit; maximum 3 concurrent units."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK: a long call at the same strike and a later expiry fully covers the short. Submit as a 2-leg mleg; BUY THE LEAPS FIRST if legging.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close the short at 50-75% of the credit and re-sell the next 21-45 DTE cycle at the same strike.",
+      "basis": "credit",
+      "fraction": 0.75
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "LEAPS delta 0.55-0.70, DTE >= 270; extrinsic <= 20% of premium.",
+      "threshold_usd": 20.0
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short call by 14:30 ET on its expiration day, unconditionally. Because the short is ATM, roughly half of all expirations will be ITM - this rule fires constantly and must be automated.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share. On an ATM short this happens often; treat every ex-date as a scheduled close."
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the LEAPS no later than 90 DTE and only after the short is bought back.",
+      "dte": 90.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 3,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "IV rank < 30 when buying the LEAPS; back-month IV below its own 40th percentile.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "40"
+      ]
+    },
+    {
+      "text": "Accept explicitly that there is no upside beyond the strike; if upside participation is wanted, use the PMCC instead.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Net debit <= 4% of equity per unit; maximum 3 concurrent units.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Underlying's 20-day realized volatility below its 1-year median (range-bound).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "1"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: a long call at the same strike and a later expiry fully covers the short. Submit as a 2-leg mleg; BUY THE LEAPS FIRST if legging.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Close the short at 50-75% of the credit and re-sell the next 21-45 DTE cycle at the same strike.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "21",
+        "45"
+      ]
+    },
+    {
+      "text": "If the underlying rallies more than 5% above the strike, roll the short UP and out for a net credit - this converts the position into a PMCC and restores some upside.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "If the underlying falls more than 10% below the strike, the short's premium collapses; consider rolling the short DOWN (which caps the trade lower) or closing the position if the LEAPS is down 50%.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10",
+        "50"
+      ]
+    },
+    {
+      "text": "Roll the LEAPS forward when its DTE < 120 or its delta falls below 0.45.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "120",
+        "0.45"
+      ]
+    },
+    {
+      "text": "Hard stop: close the position if the LEAPS' mark falls to 50% of purchase price.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Never sell more than one short per LEAPS.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Do not exercise the LEAPS to cover an assignment; buy the shares back in the market.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "3b275f04d1b2207f",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

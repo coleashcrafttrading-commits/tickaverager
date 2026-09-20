@@ -1,0 +1,252 @@
+{
+  "slug": "bear-call-diagonal",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_credit_spread",
+    "params": {
+      "short_delta": 0.275
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "lt",
+        "value": 0,
+        "src": "Trend/level filter: spot < 50-day SMA, or spot has just been rejected at a resistance level within 2 sessions."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 35.0,
+        "src": "IV rank >= 35."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.35
+        ],
+        "src": "Short call by delta 0.20-0.35; long call strike above it; long expiry at least 21 days beyond the short expiry."
+      },
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.25,
+        "src": "Credit >= 25% of the strike width (e.g. >= $0.25 on a $1 wide, >= $1.25 on a $5 wide)."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss (width x 100 - credit) <= 1.5% of equity per unit."
+      },
+      {
+        "fact": "spread_pct_of_credit",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Combined bid-ask <= 10% of the credit."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK: the short call is covered by a higher-strike long call with a LATER expiry. The requirement is width-based, not debit-based. Submit as a 2-leg mleg; if legging, buy the long call FIRST.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of the credit received (close the short, and decide separately on the long).",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop at 2x the credit received as a loss, or when the short call's |delta| reaches 0.50.",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Stop at 2x the credit received as a loss, or when the short call's |delta| reaches 0.50.",
+      "abs_delta": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close or roll at 21 DTE on the short leg regardless of P&L if the short's delta is above 0.35.",
+      "dte": 21.0
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 3 units per underlying; aggregate credit-diagonal max loss <= 10% of equity.",
+      "units": 3.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short call by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share."
+    },
+    {
+      "kind": "unwind_order",
+      "src": "NEVER close the long leg while the short is open - that converts the trade into a naked short call. The long may only be sold after the short is bought back.",
+      "shorts_first": true
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 3.0,
+    "src": "Max 3 units per underlying; aggregate credit-diagonal max loss <= 10% of equity."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 3,
+      "unexpressed": 0
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Trend/level filter: spot < 50-day SMA, or spot has just been rejected at a resistance level within 2 sessions.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Short call by delta 0.20-0.35; long call strike above it; long expiry at least 21 days beyond the short expiry.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: the short call is covered by a higher-strike long call with a LATER expiry. The requirement is width-based, not debit-based. Submit as a 2-leg mleg; if legging, buy the long call FIRST.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Close or roll at 21 DTE on the short leg regardless of P&L if the short's delta is above 0.35.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.35"
+      ]
+    },
+    {
+      "text": "Roll the short up and out for a credit only; never roll into an expiry beyond the long leg's expiry.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the long back-month call is worth more than 40% of the max loss and the thesis has flipped bullish, keep the long after buying back the short - it is a free directional option.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "40"
+      ]
+    },
+    {
+      "text": "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "If the short is deep ITM and spot is above the long strike, close both legs as a package; do not attempt to salvage.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "9b5084bec23d1ff3",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

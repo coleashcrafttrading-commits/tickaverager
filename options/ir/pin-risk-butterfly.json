@@ -1,0 +1,253 @@
+{
+  "slug": "pin-risk-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_call_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Body strike selected by OPEN INTEREST, not by delta: choose the strike within 1.5% of spot with the highest combined call+put OI, requiring that OI >= 3x the median OI of the five nearest strikes."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 5000.0,
+        "src": "Underlying must be SPY, QQQ or IWM class liquidity: penny-wide strikes, OI >= 5,000 on all three legs."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD, tightened for this structure: all legs closed by 15:15 ET on expiration day, unconditionally, at market if necessary.",
+      "time_et": "15:15",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 6
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 5
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "LEVEL 3 LEGAL: the two short body contracts are covered by the two long wings within the same multi-leg order. Alpaca accepts it as a single order.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "MANDATORY single multi-leg order; never leg into a butterfly.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Body strike selected by OPEN INTEREST, not by delta: choose the strike within 1.5% of spot with the highest combined call+put OI, requiring that OI >= 3x the median OI of the five nearest strikes.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Entry window: no earlier than 11:00 ET and no later than 14:00 ET on expiration day. Before 11:00 the morning range is unresolved; after 14:00 the risk/reward inverts as gamma explodes.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "11",
+        "00",
+        "14",
+        "00",
+        "11",
+        "00",
+        "14",
+        "00"
+      ]
+    },
+    {
+      "text": "Net debit must be <= 15% of the wing width (e.g. <= $0.15 on a $1-wide fly, <= $0.75 on a $5-wide fly). Above that the payoff ratio is not worth the pin risk.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15"
+      ]
+    },
+    {
+      "text": "No entry if a macro release (CPI, FOMC, NFP) or the underlying's earnings falls after the entry time.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Size: maximum total debit per expiration day <= 1% of equity ($500 on a $50k account). The modal outcome is a total loss of the debit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Close at 4x the debit paid (e.g. $0.15 in, $0.60 out) or at 15:15 ET, whichever comes first. Do not hold for the full width.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "15",
+        "15"
+      ]
+    },
+    {
+      "text": "Hard time stop: close the entire structure no later than 15:15 ET regardless of P/L. This is earlier than the general 15:40 rule because the body is deliberately placed at the money, which is the maximum-assignment-uncertainty location.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "15",
+        "15",
+        "40"
+      ]
+    },
+    {
+      "text": "Close immediately if the underlying moves beyond either wing by more than 0.25% — the thesis is dead and the remaining value is negligible.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25"
+      ]
+    },
+    {
+      "text": "Never roll a pin fly. Never add to it intraday.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the debit was under $0.10 and the position is worthless by 14:30 ET, close it anyway to remove the short body from the book — do not leave a 'worthless' short option outstanding into the close.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10",
+        "14",
+        "30"
+      ]
+    },
+    {
+      "text": "THE PIN IS THE HAZARD: if the underlying finishes at or within $0.05 of the body strike, the two short body calls may be partially assigned (holders exercise unpredictably when an option finishes at the money). Partial assignment leaves 100 short shares plus an unbalanced option position over the weekend, with Monday gap risk against it. This is the single scenario the never-be-assigned mandate exists to prevent.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05",
+        "100"
+      ]
+    },
+    {
+      "text": "If both wings finish ITM and the body is ITM, the structure nets to the width — but only after four separate exercise/assignment events. Close instead.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "4e23a7e5473c89b3",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

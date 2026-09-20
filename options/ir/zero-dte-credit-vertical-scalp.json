@@ -1,0 +1,381 @@
+{
+  "slug": "zero-dte-credit-vertical-scalp",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_credit_spread",
+    "params": {
+      "short_delta": 0.15
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.1,
+          0.2
+        ],
+        "src": "Short strike delta 0.10-0.20 at entry."
+      },
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.2,
+        "src": "Net credit >= 20% of width for 0DTE (lower than the 33% swing rule -- 0DTE credit is thinner, which is why the stop must be tighter)."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Max loss per position <= 1% of equity = $500 on $50k. Maximum 3 concurrent 0DTE positions; total 0DTE defined risk <= 3% of equity per day."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "Both legs OI >= 1000, bid/ask <= $0.03 on a $1-wide. Submit as one MLeg limit order at the mid; do not chase more than $0.02."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of credit received, or at any point after 15:00 ET where the spread can be closed for <= $0.05.",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop loss: close at 2.0x the credit received. This is not optional -- 0DTE spreads go from 50% winner to max loss in minutes.",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Delta stop: close if the short strike's locally computed delta reaches 0.35.",
+      "abs_delta": 0.35
+    },
+    {
+      "kind": "touch_stop",
+      "src": "Touch stop: close immediately if the underlying trades through the short strike, regardless of the spread mark.",
+      "reference": "the short strike"
+    },
+    {
+      "kind": "profit_target",
+      "src": "Time-decay ratchet: after 15:00 ET, tighten the profit target to 35% of credit -- the remaining theta is not worth the remaining gamma.",
+      "basis": "credit",
+      "fraction": 0.35
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "UNCONDITIONAL FLATTEN AT 15:30 ET. Every 0DTE position, winner or loser, in the money or out, is closed by 15:30 ET. This is the single most important rule in the entire options module.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: if the short leg is ITM at any time after 15:00 ET, close immediately rather than waiting for the 15:30 sweep.",
+      "time_et": "15:00",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "If a closing limit order is unfilled by 15:40 ET, escalate: reprice to the natural (bid for a sale, ask for a purchase) every 10 seconds until filled. Accept the slippage; it is always cheaper than assignment.",
+      "time_et": "15:40",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 11,
+      "compiled": 1,
+      "partial": 3,
+      "unexpressed": 7
+    },
+    "management_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 3,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Underlying restricted to SPY, QQQ, IWM. No single names, no illiquid ETFs.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "LOCAL GREEKS REQUIRED: Alpaca serves no greeks or IV for 0DTE contracts at any subscription tier. Compute IV by inverting Black-Scholes on the option mid, using T = (seconds remaining to 16:00 ET) / (252 * 23400), then compute delta from that IV. Refresh at least every 30 seconds while a position is open. Do not trade this structure if the greeks pipeline is stale by more than 60 seconds.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0",
+        "30",
+        "60"
+      ]
+    },
+    {
+      "text": "Entry window 09:45-14:00 ET only. No entries in the first 15 minutes (opening auction noise) and none after 14:00 (insufficient decay left to pay for the gamma).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "09",
+        "45",
+        "14",
+        "00",
+        "15",
+        "14",
+        "00"
+      ]
+    },
+    {
+      "text": "Short strike must also be at least 1.0 x the current session's realized 30-minute range away from spot.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0",
+        "30"
+      ]
+    },
+    {
+      "text": "Directional gate: bullish version requires spot > VWAP and VWAP rising; bearish version requires spot < VWAP and VWAP falling.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Net credit >= 20% of width for 0DTE (lower than the 33% swing rule -- 0DTE credit is thinner, which is why the stop must be tighter).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Max loss per position <= 1% of equity = $500 on $50k. Maximum 3 concurrent 0DTE positions; total 0DTE defined risk <= 3% of equity per day.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "500",
+        "3",
+        "0",
+        "0",
+        "3"
+      ]
+    },
+    {
+      "text": "Daily loss limit: after 2 stopped-out 0DTE trades OR a cumulative 0DTE loss of 2% of equity in one session, the system stops opening 0DTE positions for the rest of the day.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "0",
+        "0",
+        "2",
+        "0"
+      ]
+    },
+    {
+      "text": "No 0DTE entries on FOMC statement days before 14:30 ET, or within 15 minutes either side of a scheduled 08:30/10:00/14:00 ET macro release.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0",
+        "14",
+        "30",
+        "15",
+        "08",
+        "30",
+        "10",
+        "00",
+        "14",
+        "00"
+      ]
+    },
+    {
+      "text": "Both legs OI >= 1000, bid/ask <= $0.03 on a $1-wide. Submit as one MLeg limit order at the mid; do not chase more than $0.02.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.03",
+        "1",
+        "0.02"
+      ]
+    },
+    {
+      "text": "Take profit at 50% of credit received, or at any point after 15:00 ET where the spread can be closed for <= $0.05.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00",
+        "0.05"
+      ]
+    },
+    {
+      "text": "Stop loss: close at 2.0x the credit received. This is not optional -- 0DTE spreads go from 50% winner to max loss in minutes.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Time-decay ratchet: after 15:00 ET, tighten the profit target to 35% of credit -- the remaining theta is not worth the remaining gamma.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00"
+      ]
+    },
+    {
+      "text": "Never roll a 0DTE position. There is nothing to roll to. Close it.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Never open a second position on the same side to 'average' a losing one.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "UNCONDITIONAL FLATTEN AT 15:30 ET. Every 0DTE position, winner or loser, in the money or out, is closed by 15:30 ET. This is the single most important rule in the entire options module.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "ASSIGNMENT GUARD: if the short leg is ITM at any time after 15:00 ET, close immediately rather than waiting for the 15:30 sweep.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "ASSIGNMENT GUARD: an option that finishes $0.01 in the money is auto-exercised by the OCC. A short 0DTE SPY put finishing ITM delivers ~$60,000 of stock on a $50k account. There is no scenario in which holding to the bell is acceptable.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "0",
+        "60000",
+        "50"
+      ]
+    },
+    {
+      "text": "Log any position that reaches 15:45 ET unfilled as a critical incident and halt new 0DTE entries until reviewed.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "45",
+        "0"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "a0433cfa6ab6cf7e",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

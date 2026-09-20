@@ -1,0 +1,305 @@
+{
+  "slug": "calendarized-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_call_butterfly",
+    "params": {
+      "short_delta": 0.5,
+      "dte": 28
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30; front_IV - back_IV >= -2.0 vol points."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.45,
+          0.55
+        ],
+        "src": "Body ATM by delta 0.45-0.55; wings symmetric in strike distance, sized at 1.0 x the front-month expected move."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front body 21-35 DTE; wings 45-70 DTE; gap 21-35 days."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          45.0,
+          70.0
+        ],
+        "src": "Front body 21-35 DTE; wings 45-70 DTE; gap 21-35 days."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front body 21-35 DTE; wings 45-70 DTE; gap 21-35 days."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Net debit <= 2% of equity per unit; 4-leg bid-ask <= 10% of debit."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings or ex-dividend in the front cycle."
+      },
+      {
+        "fact": "ex_div_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings or ex-dividend in the front cycle."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK but with a caveat the automation must encode: the lower-strike back-month long fully covers one short body contract (long strike < short strike, later expiry). The SECOND short body contract is covered by the UPPER wing only by strike, so Alpaca will hold (upper wing strike - body strike) x 100 minus the credit on that pair as maintenance. Verify the reserved buying power before sizing.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target +20% of debit.",
+      "basis": "debit",
+      "fraction": 0.2
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -40% of debit.",
+      "basis": "debit",
+      "fraction": 0.4
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 2 units per underlying.",
+      "units": 2.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll BOTH short body contracts by 14:30 ET on front expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the whole structure no later than 2 trading days before the body's expiry if not rolling.",
+      "dte": 2.0,
+      "trading_days": 2.0
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close a short body contract immediately if extrinsic <= $0.05 or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close short calls before ex-dividend if extrinsic < dividend per share."
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 2.0,
+    "src": "Max 2 units per underlying."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 4,
+      "unexpressed": 1
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "IV rank < 30; front_IV - back_IV >= -2.0 vol points.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2.0"
+      ]
+    },
+    {
+      "text": "Body ATM by delta 0.45-0.55; wings symmetric in strike distance, sized at 1.0 x the front-month expected move.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Net debit <= 2% of equity per unit; 4-leg bid-ask <= 10% of debit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK but with a caveat the automation must encode: the lower-strike back-month long fully covers one short body contract (long strike < short strike, later expiry). The SECOND short body contract is covered by the UPPER wing only by strike, so Alpaca will hold (upper wing strike - body strike) x 100 minus the credit on that pair as maintenance. Verify the reserved buying power before sizing.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "LEVEL 3 OK but with a caveat the automation must encode: the lower-strike back-month long f",
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Submit as a single 4-leg mleg; if legging, buy BOTH wings first, then sell the body.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "If |spot - body strike| > 0.8 x the wing width, close the structure - the fly has lost its geometry.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.8"
+      ]
+    },
+    {
+      "text": "If |net delta| > 0.30 per unit, close rather than adjust.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.30"
+      ]
+    },
+    {
+      "text": "Roll the body out one expiry at front DTE <= 7 only if both shorts' |delta| <= 0.60, for a credit.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "0.60"
+      ]
+    },
+    {
+      "text": "Close a short body contract immediately if extrinsic <= $0.05 or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Unwind the body (shorts) before the wings (longs), always - the wings are the cover.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If either wing marks below $0.10, close everything.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "c17086c093a29b20",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

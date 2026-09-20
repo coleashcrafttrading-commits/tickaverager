@@ -1,0 +1,344 @@
+{
+  "slug": "long-call-calendar",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_calendar",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "Underlying IV rank < 30 AND IV percentile < 40."
+      },
+      {
+        "fact": "iv_percentile",
+        "op": "lt",
+        "value": 40.0,
+        "src": "Underlying IV rank < 30 AND IV percentile < 40."
+      },
+      {
+        "fact": "term_shape",
+        "op": "eq",
+        "value": "contango",
+        "src": "front_IV - back_IV >= -3.0 vol points (reject steep contango)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Net debit per unit <= $2.50 on an underlying under $150, and total debit <= 2% of account equity ($1,000 on a $50k account)."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings, no ex-dividend date, and no scheduled binary event between now and front expiry (unless running the earnings-calendar playbook explicitly)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at +25% of net debit (spread mark >= 1.25 x debit). 30-50% is acceptable on a wider-strike or longer-gap calendar; use 25% as the default machine target.",
+      "basis": "debit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop out at -50% of net debit (spread mark <= 0.50 x debit).",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop out at -50% of net debit (spread mark <= 0.50 x debit).",
+      "basis": "debit",
+      "multiple": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "dte_close",
+      "src": "Close the entire spread no later than 2 trading days before front expiry unless the short leg is being rolled.",
+      "dte": 2.0,
+      "trading_days": 2.0
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "HARD RULE: close or roll the short call by 14:30 ET on its expiration day, unconditionally, regardless of P&L. American, share-settled options are never carried into expiration.",
+      "time_et": "14:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "HARD RULE: close or roll the short call by 14:30 ET on its expiration day, unconditionally, regardless of P&L. American, share-settled options are never carried into expiration.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call immediately if its extrinsic value <= $0.05 per share OR short |delta| >= 0.90 (early-assignment window is open).",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before the close of the session preceding ex-dividend if the short call's extrinsic value < the declared dividend per share."
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 1,
+      "partial": 3,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 1,
+      "partial": 3,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "front_IV - back_IV >= -3.0 vol points (reject steep contango).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3.0"
+      ]
+    },
+    {
+      "text": "Front leg DTE in [21,35]; back leg DTE in [45,70]; expiry gap in [21,35] days.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2135",
+        "4570",
+        "2135"
+      ]
+    },
+    {
+      "text": "Strike selected by delta: neutral = front |delta| in [0.45,0.55]; directional = front |delta| in [0.25,0.35]. Strike must be within 1.0 x ATR(14) of spot.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.45",
+        "0.55",
+        "0.25",
+        "0.35",
+        "1.0"
+      ]
+    },
+    {
+      "text": "Net debit per unit <= $2.50 on an underlying under $150, and total debit <= 2% of account equity ($1,000 on a $50k account).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2.50",
+        "150"
+      ]
+    },
+    {
+      "text": "Combined bid-ask of the two legs <= 10% of the net debit; reject if worse.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10"
+      ]
+    },
+    {
+      "text": "No earnings, no ex-dividend date, and no scheduled binary event between now and front expiry (unless running the earnings-calendar playbook explicitly).",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "w and front expiry (unless running the earnings-calendar playbook explicitly).",
+      "missing_numbers": null
+    },
+    {
+      "text": "LEVEL 3 OK: the long back-month call at the same strike, expiring later, fully covers the short front call. Submit as a single 2-leg mleg order. If Alpaca rejects the mixed-expiry mleg, leg in with the LONG back-month call filled FIRST, then sell the front - never the reverse.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Do not open if the front leg expires the same day (see zero-dte-day-calendar for that variant).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Take profit at +25% of net debit (spread mark >= 1.25 x debit). 30-50% is acceptable on a wider-strike or longer-gap calendar; use 25% as the default machine target.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Directional stop: close if |spot - strike| > 1.0 x the front-month ATM straddle price (the expected move) measured at entry.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Position delta cap: if |net delta| > 0.30 per unit, close or recenter to a new strike within 1 ATR of spot.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.30",
+        "1"
+      ]
+    },
+    {
+      "text": "Roll the short leg out one expiry when front DTE <= 7 AND short |delta| <= 0.60 AND the short's remaining extrinsic <= 30% of its extrinsic at entry. Roll for a credit only; if the roll is a debit, close the whole structure.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "0.60",
+        "30"
+      ]
+    },
+    {
+      "text": "Portfolio cap: max 4 concurrent calendar units per underlying; total capital in all calendars <= 10% of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "10"
+      ]
+    },
+    {
+      "text": "Close the entire spread no later than 2 trading days before front expiry unless the short leg is being rolled.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "before front expiry unless the short leg is being rolled.",
+      "missing_numbers": null
+    },
+    {
+      "text": "HARD RULE: close or roll the short call by 14:30 ET on its expiration day, unconditionally, regardless of P&L. American, share-settled options are never carried into expiration.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "settled options are never carried into expiration.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the short call immediately if its extrinsic value <= $0.05 per share OR short |delta| >= 0.90 (early-assignment window is open).",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "When unwinding leg-by-leg rather than as an mleg, BUY BACK THE SHORT LEG FIRST, then sell the long - never leave a naked short.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the long back-month call marks below $0.10, close both legs; the structure is dead.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "1f429f818aa52079",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

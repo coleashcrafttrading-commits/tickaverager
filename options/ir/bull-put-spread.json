@@ -1,0 +1,292 @@
+{
+  "slug": "bull-put-spread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_credit_spread",
+    "params": {
+      "short_delta": 0.23,
+      "dte": 37
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank >= 30 over 252 days; prefer IV rank > 50 for full size."
+      },
+      {
+        "fact": "close_vs_ema20",
+        "op": "gt",
+        "value": 0,
+        "src": "Directional gate: last close > 20-EMA, OR the short strike is at least 1.0 ATR(14) below the lowest low of the last 10 sessions."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.16,
+          0.3
+        ],
+        "src": "Short put delta between 0.16 and 0.30."
+      },
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.33,
+        "src": "Net credit >= 33% of width. A $5-wide must pay >= $1.65."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          25.0,
+          50.0
+        ],
+        "src": "DTE 25-50 for swing entries."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Max loss (width*100 - credit) <= 2% of equity = $1,000 on $50k; position count limited so that total defined risk across all open spreads <= 25% of equity."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs OI >= 500 and bid/ask <= 10% of mid."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Both legs OI >= 500 and bid/ask <= 10% of mid."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "Earnings: no entry with earnings inside the expiry unless IV rank > 60 and the short strike is beyond 1.25 * the implied move."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit: close at 50% of max profit (spread mid <= 0.50 * credit).",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time exit: close at 21 DTE regardless of P/L if the profit target has not hit.",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop: close when the spread mark = 2.0x credit received, or when the underlying closes below the short strike, whichever first.",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Hard rule: flat by 15:45 ET on expiration day, every time.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: at 15:30 ET on expiration day, if the underlying is below (short strike + $0.05), close the whole spread immediately.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: any day the short put is ITM with extrinsic value < $0.10, close that session. Deep ITM American puts are exercised early once extrinsic dies, especially in high-rate environments where the holder earns interest on the proceeds.",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 10,
+      "compiled": 3,
+      "partial": 5,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 4,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "IV rank >= 30 over 252 days; prefer IV rank > 50 for full size.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "over 252 days; prefer IV rank > 50 for full size.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Directional gate: last close > 20-EMA, OR the short strike is at least 1.0 ATR(14) below the lowest low of the last 10 sessions.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Net credit >= 33% of width. A $5-wide must pay >= $1.65.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.65"
+      ]
+    },
+    {
+      "text": "Max loss (width*100 - credit) <= 2% of equity = $1,000 on $50k; position count limited so that total defined risk across all open spreads <= 25% of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1000",
+        "25"
+      ]
+    },
+    {
+      "text": "No more than 2 concurrent bull put spreads on correlated underlyings (SPY/QQQ/IWM count as one).",
+      "reason": "portfolio-level constraint: belongs to optalloc, not a per-strategy IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Earnings: no entry with earnings inside the expiry unless IV rank > 60 and the short strike is beyond 1.25 * the implied move.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "Earnings:   unless IV rank > 60 and the short strike is beyond 1.25 * the implied move.",
+      "missing_numbers": [
+        "60",
+        "1.25"
+      ]
+    },
+    {
+      "text": "Alpaca: fully covered two-leg structure, accepted as MLeg at Level 3. Always submit as one MLeg order.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Stop: close when the spread mark = 2.0x credit received, or when the underlying closes below the short strike, whichever first.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "w the short strike, whichever first.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Breach rule: if the underlying trades below the short strike with > 7 DTE, roll out to the next monthly for a net credit (same or lower strikes only), or close. Never roll for a debit.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7"
+      ]
+    },
+    {
+      "text": "Maximum of two rolls per underlying per trade; on the third test, take the loss.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "In a fast selloff (underlying down > 2 ATR in 3 sessions), close rather than roll -- rolling into a crash compounds the same trade.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close for $0.05 rather than holding the last nickel to expiry.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "c5ea6cb1aaa24684",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

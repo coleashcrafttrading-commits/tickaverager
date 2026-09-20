@@ -1,0 +1,326 @@
+{
+  "slug": "zero-dte-day-calendar",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_calendar",
+    "params": {
+      "short_delta": 0.4
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.3,
+          0.5
+        ],
+        "src": "Short strike by delta 0.30-0.50 and at least 0.5 x the 5-minute ATR(14) away from spot."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 0.5,
+        "src": "Net debit <= $0.60 per unit, and total 0DTE calendar debit <= 0.5% of equity per session ($250 on $50k)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target +20% of debit, or $0.10 per unit, whichever comes first.",
+      "basis": "debit",
+      "fraction": 0.2
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -40% of debit, or if spot trades through the short strike by more than 0.3 x ATR(5min).",
+      "basis": "debit",
+      "fraction": 0.4
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "HARD RULE: the 0DTE short leg must be closed by 14:30 ET, every session, regardless of P&L or moneyness. No exceptions, no discretion, no 'it will come back'.",
+      "time_et": "14:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "HARD RULE: the 0DTE short leg must be closed by 14:30 ET, every session, regardless of P&L or moneyness. No exceptions, no discretion, no 'it will come back'.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "unwind_order",
+      "src": "Close the short leg first, then decide whether to keep the 1-4 DTE long as a lottery ticket (default: close it too, same order).",
+      "shorts_first": true
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 7
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "Underlying limited to SPY, QQQ, IWM (daily expiries, penny-wide markets, share-settled - so assignment discipline is mandatory).",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Entry window 10:00-12:30 ET only. Never in the first 30 minutes (opening gamma) and never after 12:30 (no time left to be right).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10",
+        "00",
+        "12",
+        "30",
+        "30",
+        "12",
+        "30"
+      ]
+    },
+    {
+      "text": "No macro release (FOMC statement, CPI, PPI, NFP, PCE) scheduled for that session.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "VIX < 20 AND the first-30-minute range < 0.6% of spot.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "30",
+        "0.6"
+      ]
+    },
+    {
+      "text": "Net debit <= $0.60 per unit, and total 0DTE calendar debit <= 0.5% of equity per session ($250 on $50k).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.60",
+        "0"
+      ]
+    },
+    {
+      "text": "Bid-ask on the 2-leg package <= $0.05; reject anything wider.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "0.05"
+      ]
+    },
+    {
+      "text": "Max 3 units per session; no re-entry after two stop-outs in the same session.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK (same strike, long expires later). Single mleg order. Alpaca note: verify the mleg fills as a package - if it does not, do NOT leg into a 0DTE short first; fill the long leg first or skip the trade.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0"
+      ]
+    },
+    {
+      "text": "Profit target +20% of debit, or $0.10 per unit, whichever comes first.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "or $0.10 per unit, whichever comes first.",
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "Stop at -40% of debit, or if spot trades through the short strike by more than 0.3 x ATR(5min).",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.3"
+      ]
+    },
+    {
+      "text": "Absolute time stop: 14:00 ET - if not at target, begin working the close.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "14",
+        "00"
+      ]
+    },
+    {
+      "text": "No rolling. A 0DTE short is never rolled into the same session; it is closed.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Hard daily loss cap: stop trading day calendars for the session after -1% of equity in this bucket.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "HARD RULE: the 0DTE short leg must be closed by 14:30 ET, every session, regardless of P&L or moneyness. No exceptions, no discretion, no 'it will come back'.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "If the short is ITM at any point after 13:30 ET, close it immediately - do not wait for 14:30.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "13",
+        "30",
+        "14",
+        "30"
+      ]
+    },
+    {
+      "text": "Close the short leg first, then decide whether to keep the 1-4 DTE long as a lottery ticket (default: close it too, same order).",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "4"
+      ]
+    },
+    {
+      "text": "If the spread mark goes to zero bid on the short, buy it back for $0.01-$0.02 and book the gain.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "0.02"
+      ]
+    },
+    {
+      "text": "Never allow a 0DTE short to reach 15:55 ET. SPY/QQQ/IWM settle in shares; an ITM short at the bell means 100 shares delivered against you over the weekend or overnight.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0",
+        "15",
+        "55",
+        "100"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "6f67aa60ec53599e",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

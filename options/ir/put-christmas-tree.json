@@ -1,0 +1,221 @@
+{
+  "slug": "put-christmas-tree",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_christmas_tree",
+    "params": {
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 3
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 2
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank >= 30"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 when fully covered"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500 at all strikes, DTE 20-45"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "OI >= 500 at all strikes, DTE 20-45"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of max profit",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close at 21 DTE regardless of P/L",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Loss stop at 1.0x the net debit (or 2x the credit)",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately if the 3x short put strike is ITM by more than 0.25 x (B - A), or its extrinsic < $0.10, or its delta <= -0.85",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Strike B at a concrete downside target (20-day low, measured move, or spot x (1 - 0.75 x expected move))",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Compute the payoff numerically; REJECT if downside risk below A exceeds 1.5% of equity",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Net debit <= 25% of (C - B), or a net credit",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "Verify leg-by-leg that every short put is covered; otherwise it is a level 4 structure and Alpaca will reject it",
+      "reason": "level 4 on this account; the strategy cannot be sent at all",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "Loss stop at 1.0x the net debit (or 2x the credit)",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Close if spot falls more than 0.5 x (B - A) below strike B",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.5"
+      ]
+    },
+    {
+      "text": "Close immediately if the 3x short put strike is ITM by more than 0.25 x (B - A), or its extrinsic < $0.10, or its delta <= -0.85",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.25",
+        "0.85"
+      ]
+    },
+    {
+      "text": "300 shares of purchase obligation per unit if assigned - on a $50k account a single assignment on a $200 underlying is a $60,000 debit; this is the hard cap on sizing",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "300",
+        "50",
+        "200",
+        "60000"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "d7c62263cb7b6687",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

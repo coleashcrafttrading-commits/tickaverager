@@ -1,0 +1,266 @@
+{
+  "slug": "earnings-front-month-calendar",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_calendar",
+    "params": {
+      "short_delta": 0.5
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.45,
+          0.55
+        ],
+        "src": "Strike = the strike nearest spot at entry, |delta| 0.45-0.55."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Net debit <= 1% of equity per unit; maximum 2 earnings calendars open at once."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "If the front leg is 0DTE the morning after, the 14:30 ET forced-close rule applies as a hard backstop, but the trade should already be flat by 10:30.",
+      "time_et": "10:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short leg immediately if it goes ITM with extrinsic <= $0.05 - a post-earnings ITM short is an assignment candidate the same day.",
+      "threshold_usd": 0.05
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 7
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Confirmed earnings date and confirmed that the front expiry contains it and the back expiry contains no second event.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "front_IV - back_IV >= 8.0 vol points at the ATM strike.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "8.0"
+      ]
+    },
+    {
+      "text": "Front-month implied move (ATM straddle / spot) <= 8%; skip anything above.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "8"
+      ]
+    },
+    {
+      "text": "Historical check: over the last 8 prints, the median |actual move| must be < 0.8 x the current implied move.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "8",
+        "0.8"
+      ]
+    },
+    {
+      "text": "Enter in the last 60 minutes of the session BEFORE the print (between 15:00 and 15:50 ET), never days early - the front IV ramp is the payment.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60"
+      ]
+    },
+    {
+      "text": "Net debit <= 1% of equity per unit; maximum 2 earnings calendars open at once.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Combined bid-ask <= 8% of debit; reject wide event-week markets.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "8"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK (same-strike, long back covers short front). Single mleg order; long leg first if legging.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "This is a one-session trade. There is no 'management' - there is an exit the next morning.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not adjust, roll, or 'give it time' after the print. The edge is the single IV-crush event.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not add size after the print regardless of direction.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the print is delayed or moved past the front expiry, close the position the same day for whatever it fetches.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the FULL spread between 09:45 and 10:30 ET on the session after the print, unconditionally, win or lose. Waiting past 10:30 gives the gamma back.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "09",
+        "45",
+        "10",
+        "30",
+        "10",
+        "30"
+      ]
+    },
+    {
+      "text": "If the front leg is 0DTE the morning after, the 14:30 ET forced-close rule applies as a hard backstop, but the trade should already be flat by 10:30.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "as a hard backstop, but the trade should already be  .",
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Emergency: if the stock gaps more than 1.5x the implied move, close on the open; do not wait for the 09:45 window.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "09",
+        "45"
+      ]
+    },
+    {
+      "text": "Leg out short-first if the mleg close does not fill within 3 minutes; then work the long.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "38ce59d62fb27b69",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "slug": "call-ratio-backspread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_backspread",
+    "params": {
+      "short_delta": 0.6
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 2
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30 at entry."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "is_credit",
+        "op": "eq",
+        "value": true,
+        "src": "Open for a net CREDIT or zero cost; reject any debit fill - a debit backspread loses on a decline too."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.55,
+          0.65
+        ],
+        "src": "Short leg delta 0.55-0.65; long legs delta 0.30-0.35; strike distance = 1.5-3.0% of spot."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.3,
+          0.35
+        ],
+        "src": "Short leg delta 0.55-0.65; long legs delta 0.30-0.35; strike distance = 1.5-3.0% of spot."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss ((long strike - short strike) x 100 - credit) <= 1.5% of equity per unit."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target: close at 100% of the max-loss amount in profit, i.e. when mark-to-market gain >= (long strike - short strike) x 100.",
+      "basis": "max_loss",
+      "fraction": 1.0
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time rule: close at 14 DTE - the loss valley at the long strike deepens fast into expiry.",
+      "dte": 14.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: 1 short call, covered by 2 longs but still assignable. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the short call is ITM with extrinsic < $0.10 - which is exactly what happens in the winning rally scenario.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: close before the ex-dividend date whenever the short call is ITM with extrinsic below the dividend."
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close no later than 14 DTE, or 1 DTE for event versions.",
+      "dte": 14.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 2,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Short leg delta 0.55-0.65; long legs delta 0.30-0.35; strike distance = 1.5-3.0% of spot.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "3.0"
+      ]
+    },
+    {
+      "text": "A catalyst inside the expiry, or a chart at the top of a multi-month base.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Single 3-contract multi-leg order at mid, accept mid - $0.03 as long as it stays a credit.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.03"
+      ]
+    },
+    {
+      "text": "Close the session after the catalyst resolves, win or lose.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Stop: close if mark-to-market loss reaches 60% of the theoretical max loss.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60"
+      ]
+    },
+    {
+      "text": "Never roll the short leg up; that re-creates a front ratio.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: 1 short call, covered by 2 longs but still assignable. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "covered by 2 longs but still assignable.   on expiration day, unconditionally.",
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "Close no later than 14 DTE, or 1 DTE for event versions.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "faaa2e4b0a4b3c30",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

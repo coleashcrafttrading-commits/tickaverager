@@ -1,0 +1,306 @@
+{
+  "slug": "bull-call-diagonal",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_debit_spread",
+    "params": {
+      "short_delta": 0.675,
+      "dte": 90
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "gt",
+        "value": 0,
+        "src": "Trend filter: spot > 50-day SMA AND 50-day SMA > 200-day SMA."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "between",
+        "value": [
+          20.0,
+          50.0
+        ],
+        "src": "IV rank between 20 and 50."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.6,
+          0.75
+        ],
+        "src": "Long leg by delta 0.60-0.75, 60-120 DTE. Short leg by delta 0.25-0.35, 21-45 DTE."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          60.0,
+          120.0
+        ],
+        "src": "Long leg by delta 0.60-0.75, 60-120 DTE. Short leg by delta 0.25-0.35, 21-45 DTE."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.25,
+          0.35
+        ],
+        "src": "Long leg by delta 0.60-0.75, 60-120 DTE. Short leg by delta 0.25-0.35, 21-45 DTE."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          45.0
+        ],
+        "src": "Long leg by delta 0.60-0.75, 60-120 DTE. Short leg by delta 0.25-0.35, 21-45 DTE."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 2.5,
+        "src": "Net debit <= 2.5% of equity per unit."
+      },
+      {
+        "fact": "spread_pct_of_debit",
+        "op": "lte",
+        "value": 8.0,
+        "src": "Combined bid-ask <= 8% of the debit."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close the short leg at 50-75% of the credit received and re-sell the next cycle (this is the income engine).",
+      "basis": "credit",
+      "fraction": 0.75
+    },
+    {
+      "kind": "profit_target",
+      "src": "Close the whole structure at +50% of the net debit as total profit.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -50% of the net debit, or if spot closes below the long strike minus 1 ATR(14).",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 3 units per underlying; total diagonal debit <= 15% of equity.",
+      "units": 3.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short call by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share - this is the most common early-assignment trigger for diagonals."
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the long leg no later than 30 DTE (the theta cliff) or when its delta falls below 0.40.",
+      "dte": 30.0
+    },
+    {
+      "kind": "unwind_order",
+      "src": "Always buy back the short before selling the long.",
+      "shorts_first": true
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 3.0,
+    "src": "Max 3 units per underlying; total diagonal debit <= 15% of equity."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 5,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 2,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "MANDATORY: short strike > long strike, and short strike >= long strike + net debit per share. This guarantees that if both legs finish ITM the trade is still profitable.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Short expiry must be strictly BEFORE the long expiry - never the reverse.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "LEVEL 3 OK: a short call at a HIGHER strike with an EARLIER expiry is fully covered by the long call. Submit as a 2-leg mleg; if legging, buy the long call FIRST.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Stop at -50% of the net debit, or if spot closes below the long strike minus 1 ATR(14).",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Trend stop: close if spot closes below the 50-day SMA for 2 consecutive sessions.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "2"
+      ]
+    },
+    {
+      "text": "Roll the short up and out when spot exceeds the short strike and the short's |delta| > 0.60, but ONLY for a net credit and only to a strike still above the long strike + debit. If the roll cannot be done for a credit, close the entire diagonal.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.60"
+      ]
+    },
+    {
+      "text": "Roll the long leg forward when its DTE < 45 or its delta drops below 0.50.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45",
+        "0.50"
+      ]
+    },
+    {
+      "text": "Max 3 units per underlying; total diagonal debit <= 15% of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "15"
+      ]
+    },
+    {
+      "text": "Close the short call immediately if extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close the long leg no later than 30 DTE (the theta cliff) or when its delta falls below 0.40.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.40"
+      ]
+    },
+    {
+      "text": "Abandon rule: if the long call's mark is below 30% of the entry debit, close both legs.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "161bb507cad2d117",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

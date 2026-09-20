@@ -1,0 +1,238 @@
+{
+  "slug": "systematic-vol-premium-program",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "Strangle version only when IV rank >= 30; otherwise run the put side alone."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "SPY only. OI >= 1000 per leg. One MLeg order per side."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Per cycle: take profit at 50% of credit, time stop at 21 DTE, loss stop at 2x credit.",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Per cycle: take profit at 50% of credit, time stop at 21 DTE, loss stop at 2x credit.",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Per cycle: take profit at 50% of credit, time stop at 21 DTE, loss stop at 2x credit.",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close every cycle by 15:45 ET on its expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x its wing width.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x its wing width.",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard on any short call side before every SPY ex-dividend date while ITM."
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Fixed schedule: open one cycle on the first trading day after monthly opex, every month, without a market-view gate. The absence of discretion is the strategy.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Defined risk always: every short leg must carry a long wing. The naked benchmark versions are level 4 and are not permitted here.",
+      "reason": "level 4 on this account; the strategy cannot be sent at all",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "Size per cycle: total defined risk <= 2% of equity. Twelve cycles a year at 2% is the program's risk budget; it must not be scaled up after winning months.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "2"
+      ]
+    },
+    {
+      "text": "Skip rule (the only discretion allowed): skip the cycle entirely if VIX spot > 35 at the scheduled open, and resume the next month. Log every skip.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "35"
+      ]
+    },
+    {
+      "text": "Strangle version only when IV rank >= 30; otherwise run the put side alone.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "ersion only when  ; otherwise run the put side alone.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Program-level circuit breaker: if trailing 6-cycle cumulative P/L is worse than -6% of equity, halt the program and require a review before restarting.",
+      "reason": "degraded-market handling: owned by optguard",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "6",
+        "6"
+      ]
+    },
+    {
+      "text": "Never roll a losing cycle into the next one - each cycle is independent by design, and rolling destroys the benchmark property.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Never add a second cycle in the same month to make back a loss.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Record per-cycle credit, realized P/L, and the SPY move, so the program's realized premium capture can be compared to the variance risk premium it is supposed to harvest.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close any short leg at extrinsic < $0.10, |delta| >= 0.85, or when ITM by more than 0.25 x its wing width.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25"
+      ]
+    },
+    {
+      "text": "A cycle that hits the loss stop is closed in full, both sides, not just the tested side.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "ee060a3069d0fed0",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

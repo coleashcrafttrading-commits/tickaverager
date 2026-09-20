@@ -1,0 +1,229 @@
+{
+  "slug": "long-put-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_condor",
+    "params": {
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank >= 30"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "DTE 20-45"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500, spread <= 10% of mid on all four legs"
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "OI >= 500, spread <= 10% of mid on all four legs"
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Debit <= 1.5% of equity"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of max profit",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop at 14 DTE",
+      "dte": 14.0
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Loss stop at 50% of the debit",
+      "basis": "debit",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "The upper short put (strike C) is ITM by construction - close the structure if its extrinsic < $0.10 or its delta <= -0.85",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 5,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Net debit <= 45% of W1",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45",
+        "1"
+      ]
+    },
+    {
+      "text": "Body centered within 0.25 x body width of spot",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25"
+      ]
+    },
+    {
+      "text": "Outer widths equal",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Route only if cheaper than the equivalent iron condor and call condor",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close if spot leaves the A-D range",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "The upper short put (strike C) is ITM by construction - close the structure if its extrinsic < $0.10 or its delta <= -0.85",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.85"
+      ]
+    },
+    {
+      "text": "Short puts have no dividend-driven assignment, but deep ITM short puts are assigned when extrinsic vanishes, especially near expiry and around hard-to-borrow situations",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close immediately if either short strike is breached by more than 0.25 x W1",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25",
+        "1"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "d6b6d49249db8e7b",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

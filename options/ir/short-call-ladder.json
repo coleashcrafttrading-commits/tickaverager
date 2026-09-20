@@ -1,0 +1,256 @@
+{
+  "slug": "short-call-ladder",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "short_call_ladder",
+    "params": {
+      "short_delta": 0.625
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30 and a catalyst or breakout setup inside the expiry."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "is_credit",
+        "op": "eq",
+        "value": true,
+        "src": "Open for a net CREDIT; reject debit fills."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.55,
+          0.7
+        ],
+        "src": "K1 delta 0.55-0.70, K2 delta 0.35-0.45, K3 delta 0.20-0.30."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.35,
+          0.45
+        ],
+        "src": "K1 delta 0.55-0.70, K2 delta 0.35-0.45, K3 delta 0.20-0.30."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.3
+        ],
+        "src": "K1 delta 0.55-0.70, K2 delta 0.35-0.45, K3 delta 0.20-0.30."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss ((K2 - K1) x 100 - credit) <= 1.5% of equity per unit."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "All three strikes: OI >= 500, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at 100% of max-loss amount in profit on the upside.",
+      "basis": "max_loss",
+      "fraction": 1.0
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close at 14 DTE regardless of P/L - the valley between K1 and K3 deepens sharply into expiry.",
+      "dte": 14.0
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at 60% of theoretical max loss.",
+      "basis": "max_loss",
+      "fraction": 0.6
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: 1 short call at K1, the deepest ITM strike in the structure. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the K1 short call is ITM with extrinsic < $0.10 - which is the normal state of an ITM short call in this structure.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: close before every ex-dividend date whenever K1 is ITM; an ITM short call with low extrinsic is assigned on the day before ex-div with high probability."
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close no later than 14 DTE.",
+      "dte": 14.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 3,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Equal strike spacing K1->K2 and K2->K3.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2",
+        "2",
+        "3"
+      ]
+    },
+    {
+      "text": "K1 delta 0.55-0.70, K2 delta 0.35-0.45, K3 delta 0.20-0.30.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2",
+        "3"
+      ]
+    },
+    {
+      "text": "Single 3-leg limit order at mid; must remain a credit.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Close at 14 DTE regardless of P/L - the valley between K1 and K3 deepens sharply into expiry.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "3"
+      ]
+    },
+    {
+      "text": "Do not roll; close and re-establish if the thesis survives.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: 1 short call at K1, the deepest ITM strike in the structure. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "1"
+      ]
+    },
+    {
+      "text": "ASSIGNMENT GUARD: close immediately if the K1 short call is ITM with extrinsic < $0.10 - which is the normal state of an ITM short call in this structure.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "DIVIDEND GUARD: close before every ex-dividend date whenever K1 is ITM; an ITM short call with low extrinsic is assigned on the day before ex-div with high probability.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "159a3aa525229979",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

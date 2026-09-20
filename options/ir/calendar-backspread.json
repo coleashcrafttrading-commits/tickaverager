@@ -1,0 +1,313 @@
+{
+  "slug": "calendar-backspread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_backspread",
+    "params": {
+      "short_delta": 0.425,
+      "front_dte": 28,
+      "back_dte": 90,
+      "dte": 28
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 2
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 20.0,
+        "src": "IV rank < 20 AND back-month IV below its own 12-month 30th percentile."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.35,
+          0.5
+        ],
+        "src": "Same strike on all legs; short front |delta| 0.35-0.50."
+      },
+      {
+        "fact": "front_dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front."
+      },
+      {
+        "fact": "back_dte",
+        "op": "between",
+        "value": [
+          60.0,
+          120.0
+        ],
+        "src": "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front.",
+        "note": "implied by front < back"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          60.0,
+          120.0
+        ],
+        "src": "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Net debit <= 2% of equity per unit."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK - the short front is fully covered by one of the back-month longs at the same strike and a later expiry. Submit as a 3-contract mleg; if it is rejected, buy the two back-month longs FIRST, then sell the front.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target +50% of debit (this structure is asymmetric - let winners run further than a plain calendar).",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -50% of debit, or at -35% if the back-month IV has fallen 5 vol points below entry.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "profit_target",
+      "src": "If the structure becomes a pure long 2-lot after the front expires, apply plain long-call rules: stop at -50% of the remaining value, take profit at +100%.",
+      "basis": "credit",
+      "fraction": 1.0,
+      "note": "basis not stated in the sentence; assumed the structure's own net. Reviewer: confirm."
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 2 units per underlying.",
+      "units": 2.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short front leg by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short immediately if extrinsic <= $0.05 or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before ex-dividend if extrinsic < dividend per share."
+    },
+    {
+      "kind": "dte_close",
+      "src": "After the short is gone, close the remaining long pair no later than 21 DTE on the back month, or when the long premium decays below 40% of the original debit.",
+      "dte": 21.0
+    },
+    {
+      "kind": "unwind_order",
+      "src": "Buy back the short before selling any long.",
+      "shorts_first": true
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 2.0,
+    "src": "Max 2 units per underlying."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 3,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "IV rank < 20 AND back-month IV below its own 12-month 30th percentile.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "12",
+        "30"
+      ]
+    },
+    {
+      "text": "Ratio exactly 1 short : 2 long. Never sell more fronts than there are back-month longs.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "Front 21-35 DTE, back 60-120 DTE; the back leg must be at least 45 days beyond the front.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "45"
+      ]
+    },
+    {
+      "text": "Realized-vol filter: 20-day realized volatility below the 25th percentile of its own 1-year range (a coiled underlying).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "25",
+        "1"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK - the short front is fully covered by one of the back-month longs at the same strike and a later expiry. Submit as a 3-contract mleg; if it is rejected, buy the two back-month longs FIRST, then sell the front.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "3"
+      ]
+    },
+    {
+      "text": "Stop at -50% of debit, or at -35% if the back-month IV has fallen 5 vol points below entry.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "35"
+      ]
+    },
+    {
+      "text": "Roll the short front out one expiry at front DTE <= 7 for a credit, to keep financing the longs; roll at most 3 times.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "3"
+      ]
+    },
+    {
+      "text": "If the structure becomes a pure long 2-lot after the front expires, apply plain long-call rules: stop at -50% of the remaining value, take profit at +100%.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Close the short immediately if extrinsic <= $0.05 or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "After the short is gone, close the remaining long pair no later than 21 DTE on the back month, or when the long premium decays below 40% of the original debit.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "40"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "5e5197ffbaee503b",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

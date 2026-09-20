@@ -1,0 +1,321 @@
+{
+  "slug": "double-diagonal",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_condor",
+    "params": {
+      "short_delta": 0.25
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "IV rank between 30 and 60."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.3
+        ],
+        "src": "Short strikes by delta 0.20-0.30 on each side, symmetric within 0.07 delta."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss per side (width x 100 - credit) <= 1.5% of equity."
+      },
+      {
+        "fact": "spread_pct_of_credit",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Combined 4-leg bid-ask <= 10% of the credit."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK: each short is covered by a same-side long at a protective strike in a LATER expiry. Submit as a single 4-leg mleg; if it must be legged, fill BOTH WINGS FIRST, then sell both shorts.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of the total credit.",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop at 2x the credit received, or when either short's |delta| reaches 0.50.",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Stop at 2x the credit received, or when either short's |delta| reaches 0.50.",
+      "abs_delta": 0.5
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 2 units per underlying.",
+      "units": 2.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll BOTH short legs by 14:30 ET on their expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close either short immediately if its extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before the session preceding ex-dividend if extrinsic < dividend per share."
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 2.0,
+    "src": "Max 2 units per underlying."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 2,
+      "partial": 3,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 7,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Short strikes by delta 0.20-0.30 on each side, symmetric within 0.07 delta.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.07"
+      ]
+    },
+    {
+      "text": "Long wings 1-5 points beyond each short, symmetric width on both sides.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "5"
+      ]
+    },
+    {
+      "text": "Long expiry at least 21 days beyond the short expiry, never the reverse.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "Total credit >= 20% of the one-sided strike width.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20"
+      ]
+    },
+    {
+      "text": "Short strikes must sit outside 1.0 x the front-month expected move.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Combined 4-leg bid-ask <= 10% of the credit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: each short is covered by a same-side long at a protective strike in a LATER expiry. Submit as a single 4-leg mleg; if it must be legged, fill BOTH WINGS FIRST, then sell both shorts.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "4"
+      ]
+    },
+    {
+      "text": "At 21 DTE on the short legs, close or roll any short whose |delta| > 0.35 regardless of P&L.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "21",
+        "0.35"
+      ]
+    },
+    {
+      "text": "Roll the tested short away from spot and out in time for a NET CREDIT only, and never into an expiry at or beyond the wings' expiry.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Roll the untested short toward spot to recenter only if doing so keeps |net delta| < 0.20 per unit and the short's delta stays <= 0.30.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.20",
+        "0.30"
+      ]
+    },
+    {
+      "text": "After the front shorts are closed, the two wings remain as a long back-month strangle: either sell a new round of shorts against them (the reason to use a diagonal) or close the wings if their combined mark is below 25% of the original wing cost.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "Close either short immediately if its extrinsic <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close any short put whose extrinsic drops below $0.10 (interest-carry exercise risk).",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "NEVER close a wing while its same-side short is open - that creates a naked short. Wings are sold only after the corresponding short is bought back.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If spot trades beyond a wing strike, close that side's pair as a package.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "fecdf7e22876ec90",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

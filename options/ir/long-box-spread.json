@@ -1,0 +1,248 @@
+{
+  "slug": "long-box-spread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "reverse_iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 5000.0,
+        "src": "Underlying must be a top-tier liquid ETF (SPY, QQQ, IWM) with penny-wide option markets and OI >= 5,000 on every strike used."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY: close all four legs no later than 15:30 ET on expiration day, as a single 4-leg order. Do not allow any leg to settle by exercise or assignment.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 6
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "LEVEL 3 LEGAL: every short leg is covered by a long leg of the same right at a better strike within the same multi-leg order, so Alpaca's same-order coverage rule is satisfied. Submit as a single 4-leg order — never leg it.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "4"
+      ]
+    },
+    {
+      "text": "CRITICAL VIABILITY WARNING: on American-style equity and ETF options this is NOT a riskless instrument. The short put at K1 (if spot falls) or the short call at K2 (if spot rises) can be assigned at any time, delivering or taking 100 shares. The position is only self-liquidating at expiry.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2",
+        "100"
+      ]
+    },
+    {
+      "text": "Required rate test: implied_rate >= (current_effective_fed_funds + 0.50%) AND net_debit < (width x 100) - total_fees - $10. Reject otherwise.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10"
+      ]
+    },
+    {
+      "text": "Fees: 4 legs to open and 4 to close = 8 contract fees. At $0.65 each that is $5.20 per box round trip, against a 5-point box whose maximum earn on a 90-day tenor at 5% is about $6. The fee load alone usually kills it. Reject any box where total_fees > 30% of max_profit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "4",
+        "8",
+        "0.65",
+        "5.20",
+        "5",
+        "90",
+        "5",
+        "6",
+        "30"
+      ]
+    },
+    {
+      "text": "Prefer the widest strikes available far from spot in BOTH directions only if liquidity permits; otherwise brackets straddling spot are fine for a long box since the risk is assignment, not direction.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "NEVER on an underlying with an ex-dividend date inside the box's life — the short call becomes an early-exercise target.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Monitor both short legs daily for extrinsic value. If either short leg's extrinsic drops below $0.10, close the entire box that session.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "Because the box's value converges to the width deterministically, there is no profit target other than 'hold to just before expiry or exit early if the implied rate available elsewhere improves'.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If assigned on either short leg: immediately exercise or sell the corresponding long option to flatten the resulting 100-share position in the SAME session. Do not carry assigned shares overnight — a 5-point box does not have the capital to support $10,000 of unexpected stock.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "5",
+        "10000"
+      ]
+    },
+    {
+      "text": "Re-evaluate weekly: if the box can be sold back for more than the present value of holding it to expiry, close early.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "MANDATORY: close all four legs no later than 15:30 ET on expiration day, as a single 4-leg order. Do not allow any leg to settle by exercise or assignment.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "At expiry, two of the four legs are ITM by construction; letting them settle means an exercise on one long and an assignment on one short, with 100 shares moving in each direction and settlement-timing exposure in between. Close the box instead.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100"
+      ]
+    },
+    {
+      "text": "If either short leg's extrinsic value falls below $0.05 at any time, close the entire box that session regardless of the rate give-up.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    },
+    {
+      "text": "If the underlying moves far enough that K1 and K2 are both ITM or both OTM by more than 10%, the box's short legs are at elevated assignment risk — close it.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2",
+        "10"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "54d90e4bf4bccf65",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

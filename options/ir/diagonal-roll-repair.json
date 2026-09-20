@@ -1,0 +1,233 @@
+{
+  "slug": "diagonal-roll-repair",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_diagonal",
+    "params": {
+      "short_delta": 0.25
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.3
+        ],
+        "src": "New short delta 0.20-0.30; never roll into a strike that is still ITM."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "If no credit roll exists that satisfies both validations, close the entire structure by 14:30 ET on the short's expiration day.",
+      "time_et": "14:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short immediately if extrinsic <= $0.05 or |delta| >= 0.90 rather than attempting a roll into the last hour.",
+      "threshold_usd": 0.05
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 6
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Only roll for a NET CREDIT. If the roll costs a debit, close the position instead - paying to stay in a losing trade is the most expensive habit in options.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "VALIDATION (must be enforced on every roll): the new short's expiry must be STRICTLY EARLIER than the covering long's expiry. Rolling past the long's expiry silently creates a reverse diagonal and an uncovered short.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "VALIDATION: for calls, new short strike >= long strike + cumulative net debit; for puts, new short strike <= long strike - cumulative net debit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "New short delta 0.20-0.30; never roll into a strike that is still ITM.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "New short  ; never roll into a strike that is still ITM.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Maximum 3 rolls per position. After the third, close regardless.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "The roll must not increase the position's maximum loss - if it does, reject and close.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "LEVEL 3 OK provided both validations pass. Execute as a single 2-leg mleg (buy-to-close + sell-to-open) so the account is never momentarily naked.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Track cumulative credits; every subsequent strike constraint uses the running net debit or credit, not the original.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the position requires a fourth roll, the thesis is wrong - close it.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "After any roll, re-verify the covering relationship (strike and expiry) programmatically before the next session.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the underlying has moved more than 2 ATR against the position since entry, do not roll - close.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "The closing side of the roll must fill before or simultaneously with the opening side; if the mleg does not fill as a package, BUY TO CLOSE first and only then sell the new short.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If no credit roll exists that satisfies both validations, close the entire structure by 14:30 ET on the short's expiration day.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "If no credit roll exists that satisfies both validations,   on the short's expiration day.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the short immediately if extrinsic <= $0.05 or |delta| >= 0.90 rather than attempting a roll into the last hour.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "r than attempting a roll into the last hour.",
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Never roll on expiration day after 14:00 ET - liquidity is poor and assignment risk is immediate. Close instead.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "14",
+        "00"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "2f0c44c0686da637",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

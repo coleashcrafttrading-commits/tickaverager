@@ -1,0 +1,219 @@
+{
+  "slug": "butterfly-convexity-arbitrage",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_call_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 100.0,
+        "src": "Pre-trade checks: all three strikes quoted within 2 seconds, displayed size >= 10 on each, OI >= 100 on each, same expiry, no OCC adjustment, underlying not halted."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD: close the two short body contracts no later than 15:40 ET on expiration day, unconditionally.",
+      "time_et": "15:40",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD: close the two short body contracts no later than 15:40 ET on expiration day, unconditionally.",
+      "time_et": "15:40",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "If spot is within 1.0% of the body strike K2 at any point on expiration day, close the entire butterfly by 14:00 ET — a pinned body is the worst assignment scenario in this structure because partial assignment on one of the two short contracts leaves a lopsided, directional residual.",
+      "time_et": "14:00",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close the short body calls by 15:00 ET the session before any ex-dividend date if extrinsic < 1.25 x declared dividend.",
+      "time_et": "15:00",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short body calls by 15:00 ET the session before any ex-dividend date if extrinsic < 1.25 x declared dividend.",
+      "time_et": "15:00"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short body calls by 15:00 ET the session before any ex-dividend date if extrinsic < 1.25 x declared dividend.",
+      "threshold_usd": 1.25
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "LEVEL 3 LEGAL: the two short body contracts are covered by the two long wings within the same multi-leg order, so Alpaca accepts a butterfly as a single order.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "MANDATORY: submit as a single 3-leg (4-contract) order. Never leg it — a partially filled butterfly is a naked short call or a ratio spread.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Scan gate at executable prices: (K1_ask + K3_ask - 2 x K2_bid) x 100 + fees + $10 < 0. Wings must be exactly equidistant (K2 - K1 = K3 - K2) or the convexity test is invalid.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "10",
+        "0"
+      ]
+    },
+    {
+      "text": "Pre-trade checks: all three strikes quoted within 2 seconds, displayed size >= 10 on each, OI >= 100 on each, same expiry, no OCC adjustment, underlying not halted.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "One limit order at the arbitrage price; cancel after 3 seconds if unfilled. Do not improve the price.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Nothing to manage if the violation was real.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the body's short calls go deep ITM (spot > K3), the butterfly is worth approximately zero and the short legs carry maximum assignment risk with minimum value — close it.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not adjust the wings; any adjustment converts a locked position into a directional one.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If spot is within 1.0% of the body strike K2 at any point on expiration day, close the entire butterfly by 14:00 ET — a pinned body is the worst assignment scenario in this structure because partial assignment on one of the two short contracts leaves a lopsided, directional residual.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0",
+        "2"
+      ]
+    },
+    {
+      "text": "If the short body's extrinsic value falls below $0.05, close the whole structure that session.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "0c019d2cdc3898a5",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

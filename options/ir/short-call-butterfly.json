@@ -1,0 +1,189 @@
+{
+  "slug": "short-call-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "short_call_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Equal wings; OI >= 500 and per-leg spread <= max($0.05, 10% of mid) on all three strikes."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at 50% of max profit, i.e. when the structure can be bought back for <= 50% of the credit received.",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Hard stop: close if the mark-to-market loss reaches 2.0x the credit received.",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if either short call is ITM with extrinsic < $0.10.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: close before the ex-dividend date whenever the lower short call is ITM and its extrinsic value is below the declared dividend. This is the highest-probability early assignment path for this structure."
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close no later than 2 DTE in all cases; the tent's max loss zone sharpens exactly when gamma is largest.",
+      "dte": 2.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Credit received must be >= 25% of wing width; otherwise the risk/reward is not worth the assignment exposure.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "IV rank of the underlying < 25 at entry (read from a 252-day IV percentile computed locally).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "A dated catalyst must exist inside the expiry; no catalyst, no trade.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Single multi-leg order at the natural mid, accept mid - $0.02.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.02"
+      ]
+    },
+    {
+      "text": "Max risk (width - credit) <= 1% of equity per position.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Close the day after the catalyst resolves regardless of P/L; the vol crush destroys the position from that point on.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "No adjustments; this is a one-shot event structure.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: two short calls exist (lower and upper). Flatten the entire structure by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "45"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 2 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "3e47793bfb7d2dea",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

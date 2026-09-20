@@ -1,0 +1,207 @@
+{
+  "slug": "csp-roll-down-and-out",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_diagonal",
+    "params": {
+      "short_delta": 0.55
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "lte",
+        "value": 0.55,
+        "src": "Trigger: short put delta <= -0.55 OR spot < strike x 1.01, with DTE <= 21."
+      },
+      {
+        "fact": "dte",
+        "op": "lte",
+        "value": 21.0,
+        "src": "Trigger: short put delta <= -0.55 OR spot < strike x 1.01, with DTE <= 21."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "Trigger: short put delta <= -0.55 OR spot < strike x 1.01, with DTE <= 21.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.01"
+      ]
+    },
+    {
+      "text": "Execute as ONE multi-leg roll order (buy-to-close + sell-to-open).",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Require NET CREDIT. If no lower strike pays a credit, roll out at the SAME strike for a credit; if that also fails, close the position and take the loss.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Require cash reserve for the new strike before submitting.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not roll into an expiry containing earnings.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Hard cap of 2 rolls per position.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Track cumulative credits; the position must remain profitable at the new breakeven or the roll is just loss-deferral.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If total time in the position exceeds 90 days, close regardless.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "90"
+      ]
+    },
+    {
+      "text": "If the underlying breaks its 200-day SMA by more than 5%, stop rolling and close.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "200",
+        "5"
+      ]
+    },
+    {
+      "text": "If the roll cannot be filled by 15:30 ET on expiration day, buy back the short put outright - never carry it into expiration.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "30"
+      ]
+    },
+    {
+      "text": "Standard extrinsic guard on the old leg until it is closed.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Kill the whole position if the unrealized loss exceeds 1.5% of account equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 1 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    },
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "5e9276440e43dc24",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

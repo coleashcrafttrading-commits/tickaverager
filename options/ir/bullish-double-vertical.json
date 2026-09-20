@@ -1,0 +1,237 @@
+{
+  "slug": "bullish-double-vertical",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_butterfly",
+    "params": {
+      "short_delta": 0.225,
+      "dte": 45
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "gt",
+        "value": 0,
+        "src": "Bullish trigger required: price above the 50-day SMA AND 20-day SMA slope positive, or a defined breakout above the 20-day high"
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 25.0,
+        "src": "IV rank >= 25"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 (two defined-risk verticals)"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.25
+        ],
+        "src": "Short put at 0.20-0.25 delta; short call at the target price (measured move or 20-day ATR x 2 above spot)"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Max loss (put side) <= 2% of equity"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "DTE 30-60, no earnings inside the expiry"
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "DTE 30-60, no earnings inside the expiry"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500, spread <= 10% of mid on all four legs"
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "OI >= 500, spread <= 10% of mid on all four legs"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 60% of max profit",
+      "basis": "max_profit",
+      "fraction": 0.6
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop at 14 DTE",
+      "dte": 14.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the put vertical immediately if the short put goes ITM by more than 0.25 x Wp, or its delta <= -0.85, or its extrinsic < $0.10",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard on the short call"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 7,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Net cost <= 25% of Wc (the call spread width), i.e. the put spread must finance at least 75% of the call spread",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    },
+    {
+      "text": "Roll or close the put spread at 50% of ITS credit if the call spread is still open and working",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Loss stop: close everything if the loss reaches 1.0x the maximum profit of the call spread (asymmetric structures need a tighter loss rule than symmetric ones)",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Trend invalidation: close if price closes below the 50-day SMA",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Never add to the losing put side",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the put vertical immediately if the short put goes ITM by more than 0.25 x Wp, or its delta <= -0.85, or its extrinsic < $0.10",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25",
+        "0.85"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "7898dc936be78e65",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

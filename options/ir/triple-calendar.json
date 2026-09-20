@@ -1,0 +1,243 @@
+{
+  "slug": "triple-calendar",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "reverse_iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 25.0,
+        "src": "IV rank < 25."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 4.0,
+        "src": "Total debit <= 4% of equity; total bid-ask across all six legs <= 10% of debit (this is the binding constraint - most candidates fail here)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target +15% of total debit.",
+      "basis": "debit",
+      "fraction": 0.15
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -35% of total debit.",
+      "basis": "debit",
+      "fraction": 0.35
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Manage per-calendar, not as a blob: close any individual calendar whose short |delta| exceeds 0.70.",
+      "abs_delta": 0.7
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll ALL THREE short legs by 14:30 ET on front expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the whole ladder no later than 2 trading days before front expiry if not rolling.",
+      "dte": 2.0,
+      "trading_days": 2.0
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close any short leg whose extrinsic <= $0.05 or |delta| >= 0.90 immediately.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Short calls: close before ex-dividend if extrinsic < dividend per share."
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "front_IV - back_IV >= -2.0 vol points at all three strikes.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2.0"
+      ]
+    },
+    {
+      "text": "Strikes by delta: lower put 0.20-0.30, middle ATM 0.45-0.55, upper call 0.20-0.30; outer strikes delta-symmetric within 0.05.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.20",
+        "0.30",
+        "0.45",
+        "0.55",
+        "0.20",
+        "0.30",
+        "0.05"
+      ]
+    },
+    {
+      "text": "Total width of the ladder >= 1.5 x the front-month expected move.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK (every short is covered by a same-strike later long). Must be submitted as three separate 2-leg mlegs (Alpaca caps mleg at 4 legs); submit LONG-first on each pair if legging is ever required, and submit the ATM pair first so the largest short is covered soonest.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Liquid ETF underlyings only.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If |net delta| > 0.40 per unit, close the tested outer calendar rather than rolling it.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.40"
+      ]
+    },
+    {
+      "text": "Roll shorts out at front DTE <= 7 only for the calendars whose short |delta| <= 0.55; close the rest.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "0.55"
+      ]
+    },
+    {
+      "text": "Maximum 1 triple-calendar unit per underlying, maximum 2 in the portfolio.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "Close any short leg whose extrinsic <= $0.05 or |delta| >= 0.90 immediately.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Unwind shorts first, in order of moneyness (most ITM first).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "f512fab9977d6acf",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

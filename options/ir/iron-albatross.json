@@ -1,0 +1,222 @@
+{
+  "slug": "iron-albatross",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_condor",
+    "params": {
+      "short_delta": 0.065,
+      "dte": 45
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 40.0,
+        "src": "IV rank >= 40"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.12,
+        "src": "Net credit >= 12% of the wing width W (far-OTM credit is thin; below this the risk/reward is indefensible)"
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.05,
+          0.08
+        ],
+        "src": "Short strikes at 0.05-0.08 delta both sides"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          30.0,
+          60.0
+        ],
+        "src": "DTE 30-60"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Max loss <= 1% of equity per position AND total albatross max loss <= 5% of equity across all positions"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 5.0,
+        "src": "Max loss <= 1% of equity per position AND total albatross max loss <= 5% of equity across all positions"
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings or macro binary inside the expiry"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 250.0,
+        "src": "Far-OTM strikes still need OI >= 250 and a quotable bid (a wing you cannot sell is not a wing)"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of credit, or at 21 DTE, whichever first",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Loss stop: close if the buy-back cost >= 3x the credit received (the loss multiple must be larger than an iron condor's because the credit is small relative to the width)",
+      "basis": "credit",
+      "multiple": 3.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "If either short's delta reaches 0.20, close the whole structure - do not roll a tail trade toward the money",
+      "abs_delta": 0.2
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close if a short leg's extrinsic < $0.10 or delta >= 0.85",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard on the short call"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 8,
+      "partial": 0,
+      "unexpressed": 0
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Take profit at 50% of credit, or at 21 DTE, whichever first",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": ", or at 21 DTE, whichever first",
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "If either short's delta reaches 0.20, close the whole structure - do not roll a tail trade toward the money",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "structure - do not roll a tail trade toward the money",
+      "missing_numbers": null
+    },
+    {
+      "text": "Never add size after a win streak; the payoff distribution is negatively skewed by design",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close immediately if any short strike is breached intraday (spot beyond the short strike) regardless of the model price",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close if a short leg's extrinsic < $0.10 or delta >= 0.85",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.85"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "8242543106374598",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

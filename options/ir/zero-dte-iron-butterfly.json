@@ -1,0 +1,292 @@
+{
+  "slug": "zero-dte-iron-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.25,
+        "src": "Net credit >= 25% of width - a fly collects more than a condor and should be held to a higher bar."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Max loss per position <= 1% of equity; at most 1 concurrent 0DTE butterfly; counts against the 3%-per-day 0DTE defined-risk budget."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "All four legs OI >= 1000; one MLeg limit order at the mid; no chasing beyond $0.02."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 25% of credit - a 0DTE fly does not need to be held for the pin to pay; holding for the full credit is how the structure turns into its max loss.",
+      "basis": "credit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop loss at 1.5x the credit received (tighter than the condor because the body is ATM from the start).",
+      "basis": "credit",
+      "multiple": 1.5
+    }
+  ],
+  "exits": [],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "SPY, QQQ, IWM only. Locally computed greeks mandatory (Alpaca serves none at 0DTE); refresh every 30 seconds.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Entry window 12:30-14:30 ET. Earlier than that the underlying has too much time to leave the body; later and the credit does not cover the gamma.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "12",
+        "30",
+        "14",
+        "30"
+      ]
+    },
+    {
+      "text": "Body strike must be within $0.75 of spot on SPY at entry and must be the strike with the highest 0DTE open interest within $2 of spot.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.75",
+        "0",
+        "2"
+      ]
+    },
+    {
+      "text": "Compression gate: the last 30 minutes' realized range must be <= 60% of the session's average 30-minute range, and spot within 0.2% of VWAP.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "60",
+        "30",
+        "0.2"
+      ]
+    },
+    {
+      "text": "Max loss per position <= 1% of equity; at most 1 concurrent 0DTE butterfly; counts against the 3%-per-day 0DTE defined-risk budget.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0",
+        "3",
+        "0"
+      ]
+    },
+    {
+      "text": "No entry on FOMC days before 14:30 ET or within 15 minutes of any scheduled release.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "14",
+        "30",
+        "15"
+      ]
+    },
+    {
+      "text": "All four legs OI >= 1000; one MLeg limit order at the mid; no chasing beyond $0.02.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.02"
+      ]
+    },
+    {
+      "text": "Take profit at 25% of credit - a 0DTE fly does not need to be held for the pin to pay; holding for the full credit is how the structure turns into its max loss.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Touch stop: close immediately if the underlying trades more than 0.5 x W away from the body.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.5"
+      ]
+    },
+    {
+      "text": "Never roll or re-center a 0DTE fly; close it and, if the thesis survives, open a new one at the new body.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Counts toward the daily circuit breaker: 2 stops or -2% of equity in 0DTE ends the session.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "2",
+        "0"
+      ]
+    },
+    {
+      "text": "UNCONDITIONAL FLATTEN AT 15:30 ET, no exceptions.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "30"
+      ]
+    },
+    {
+      "text": "With an ATM body, one of the two shorts is always at or near the money - if either is ITM after 15:00 ET, close the whole structure immediately.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00"
+      ]
+    },
+    {
+      "text": "Auto-exercise of a $0.01-ITM leg delivers or removes 100 shares; with a straddle body both shorts can be pinned, producing a same-strike assignment on one side and an exercise on the other.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "100"
+      ]
+    },
+    {
+      "text": "If unfilled by 15:40 ET, reprice to the natural every 10 seconds and log a critical incident.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "40",
+        "10"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 2 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "6e46d91513b648de",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

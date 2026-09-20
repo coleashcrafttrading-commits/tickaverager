@@ -1,0 +1,242 @@
+{
+  "slug": "long-call-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_condor",
+    "params": {
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank >= 30"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "DTE 20-45"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "All four strikes with OI >= 500 and spread <= 10% of mid"
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "All four strikes with OI >= 500 and spread <= 10% of mid"
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Debit <= 1.5% of equity"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of max profit ((W1 - debit) x 0.50)",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop at 14 DTE - condors need time to converge but gamma near expiry is dangerous with two short legs",
+      "dte": 14.0
+    },
+    {
+      "kind": "profit_target",
+      "src": "Loss stop: close at 50% of the debit lost",
+      "basis": "debit",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close the whole structure by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close immediately if either short strike (B or C) goes ITM by more than 0.25 x W1, or a short delta >= 0.85, or short extrinsic < $0.10 - note strike B is ITM at entry by construction, so this structure requires active monitoring from day one",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately if either short strike (B or C) goes ITM by more than 0.25 x W1, or a short delta >= 0.85, or short extrinsic < $0.10 - note strike B is ITM at entry by construction, so this structure requires active monitoring from day one",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard: both shorts are calls; if either short call's extrinsic < projected dividend, close before the ex-date close"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 5,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Net debit <= 45% of W1 (outer wing width)",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45",
+        "1"
+      ]
+    },
+    {
+      "text": "Body (B to C) centered within 0.25 x body width of spot; body width >= 0.75 x expected move",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25",
+        "0.75"
+      ]
+    },
+    {
+      "text": "Outer widths equal: B - A == D - C",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Price check against the equivalent iron condor and the put condor at the same strikes; route the cheapest of the three",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Time stop at 14 DTE - condors need time to converge but gamma near expiry is dangerous with two short legs",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "ed time to converge but gamma near expiry is dangerous with two short legs",
+      "missing_numbers": null
+    },
+    {
+      "text": "If spot leaves the A-D range, close; the structure is at max loss and further waiting only adds assignment risk",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close immediately if either short strike (B or C) goes ITM by more than 0.25 x W1, or a short delta >= 0.85, or short extrinsic < $0.10 - note strike B is ITM at entry by construction, so this structure requires active monitoring from day one",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25",
+        "1"
+      ]
+    },
+    {
+      "text": "Never carry the ITM short call (strike B) over an ex-dividend date",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "c5f8908d9e5c2705",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

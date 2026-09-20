@@ -1,0 +1,205 @@
+{
+  "slug": "broken-wing-iron-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "broken_wing_iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 45.0,
+        "src": "IV rank >= 45; no earnings inside the expiry."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Max loss computed off the WIDE wing must be <= 2% of equity per unit."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "IV rank >= 45; no earnings inside the expiry."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "All four legs: OI >= 500, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at 25% of max profit (the credit) for swing versions.",
+      "basis": "max_profit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close or roll at 21 DTE regardless of P/L.",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop at 2.0x the credit in mark-to-market loss, computed off the wide side.",
+      "basis": "credit",
+      "multiple": 2.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: an ATM short call AND an ATM short put both exist; one is ITM at expiry by construction. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if either short leg is ITM with extrinsic < $0.10.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: close before the ex-date if the short call is ITM with extrinsic below the dividend."
+    },
+    {
+      "kind": "pin_guard",
+      "src": "PIN GUARD: close at 15:30 ET if |spot - body| < 0.30% of spot.",
+      "time_et": "15:30",
+      "pct_of_spot": 0.3
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 4,
+      "partial": 0,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Wide wing = 2.0 x narrow wing; reject ratios above 3.0x.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2.0",
+        "3.0"
+      ]
+    },
+    {
+      "text": "Credit >= 30% of the NARROW wing width and >= 15% of the wide wing width.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "15"
+      ]
+    },
+    {
+      "text": "Both short legs on the identical ATM strike.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Single 4-leg limit order at mid, accept mid - $0.03.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "0.03"
+      ]
+    },
+    {
+      "text": "If spot breaches the narrow wing, close - do not defend; the narrow side caps quickly and there is nothing to salvage.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Delta limit: close if net delta exceeds +/-25 per unit.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "25"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "15f7435ea43cf4c2",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

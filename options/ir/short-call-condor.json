@@ -1,0 +1,235 @@
+{
+  "slug": "short-call-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_condor",
+    "params": {
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 25.0,
+        "src": "IV rank <= 25"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 (defined risk: short A is covered by long B, short D is naked-looking but covered by long C at a lower strike)"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "DTE 20-45"
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500 and spread <= 10% of mid on all four strikes"
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "OI >= 500 and spread <= 10% of mid on all four strikes"
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss <= 1.5% of equity"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 60% of max profit",
+      "basis": "max_profit",
+      "fraction": 0.6
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop at 10 DTE",
+      "dte": 10.0
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Loss stop at 50% of max loss",
+      "basis": "max_loss",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close by 15:45 ET on expiration day, always",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "The lowest strike A is a SHORT ITM call from entry - close or roll it before any ex-dividend date whenever its extrinsic < the projected dividend"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close immediately if short A's extrinsic < $0.10 or its delta >= 0.90",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 4,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Net credit >= 55% of W1 (equivalently, max loss <= 45% of width)",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "55",
+        "1"
+      ]
+    },
+    {
+      "text": "Body wide enough that the breakout distance is <= 1.0 x expected move",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Alpaca level 3 (defined risk: short A is covered by long B, short D is naked-looking but covered by long C at a lower strike)",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "D is naked-looking but covered by long C at a lower strike)",
+      "missing_numbers": null
+    },
+    {
+      "text": "Compare against the reverse iron condor at the same strikes and route the better fill",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close within 30 minutes of the open after a scheduled catalyst",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "The lowest strike A is a SHORT ITM call from entry - close or roll it before any ex-dividend date whenever its extrinsic < the projected dividend",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "om entry - close or roll it before any   its extrinsic < the projected dividend",
+      "missing_numbers": null
+    },
+    {
+      "text": "Close immediately if short A's extrinsic < $0.10 or its delta >= 0.90",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close when spot exceeds D or falls below A by more than 0.5 x W1 (at/near max profit)",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.5",
+        "1"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "a5494b08f170aa83",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

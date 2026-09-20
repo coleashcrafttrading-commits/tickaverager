@@ -1,0 +1,341 @@
+{
+  "slug": "long-put-calendar",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_calendar",
+    "params": {
+      "front_dte": 28,
+      "back_dte": 57,
+      "dte": 28,
+      "short_delta": 0.5
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 30.0,
+        "src": "IV rank < 30 AND IV percentile < 40."
+      },
+      {
+        "fact": "iv_percentile",
+        "op": "lt",
+        "value": 40.0,
+        "src": "IV rank < 30 AND IV percentile < 40."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "front_dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days."
+      },
+      {
+        "fact": "back_dte",
+        "op": "between",
+        "value": [
+          45.0,
+          70.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days.",
+        "note": "implied by front < back"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          45.0,
+          70.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE, gap 21-35 days."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.45,
+          0.55
+        ],
+        "src": "Strike by delta: neutral front |delta| 0.45-0.55; directional 0.25-0.35. Within 1.0 ATR(14) of spot."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Net debit <= $2.50/unit on sub-$150 underlyings; total debit <= 2% of equity."
+      },
+      {
+        "fact": "spread_pct_of_debit",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Combined bid-ask <= 10% of the debit."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings between now and front expiry unless running the earnings playbook."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "LEVEL 3 OK: long back-month put at the same strike and later expiry covers the short front put. Single mleg order; if rejected, fill the LONG leg first.",
+        "note": "SAFETY: without this the short leg is uncovered"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target +25% of debit; acceptable range 25-50%.",
+      "basis": "debit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -50% of debit.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 4 units per underlying; calendars in aggregate <= 10% of equity.",
+      "units": 4.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short put by 14:30 ET on its expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the whole spread no later than 2 trading days before front expiry if not rolling.",
+      "dte": 2.0,
+      "trading_days": 2.0
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short put immediately if extrinsic <= $0.05/share OR short |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 4.0,
+    "src": "Max 4 units per underlying; calendars in aggregate <= 10% of equity."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 3,
+      "partial": 4,
+      "unexpressed": 1
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "front_IV - back_IV >= -3.0 vol points.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3.0"
+      ]
+    },
+    {
+      "text": "Strike by delta: neutral front |delta| 0.45-0.55; directional 0.25-0.35. Within 1.0 ATR(14) of spot.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.25",
+        "0.35",
+        "1.0"
+      ]
+    },
+    {
+      "text": "Net debit <= $2.50/unit on sub-$150 underlyings; total debit <= 2% of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2.50",
+        "150"
+      ]
+    },
+    {
+      "text": "No earnings between now and front expiry unless running the earnings playbook.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "ow and front expiry unless running the earnings playbook.",
+      "missing_numbers": null
+    },
+    {
+      "text": "LEVEL 3 OK: long back-month put at the same strike and later expiry covers the short front put. Single mleg order; if rejected, fill the LONG leg first.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Directional stop: |spot - strike| > 1.0 x front-month ATM straddle price at entry.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "If |net delta| > 0.30 per unit, close or recenter.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.30"
+      ]
+    },
+    {
+      "text": "Roll the short put out one expiry when front DTE <= 7 and short |delta| <= 0.60, for a credit only.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "0.60"
+      ]
+    },
+    {
+      "text": "Close the short put immediately if extrinsic <= $0.05/share OR short |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Deep-ITM short puts on hard-to-borrow or high-interest-rate names get exercised early for the interest - close any short put whose extrinsic is below $0.10 regardless of DTE.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "Leg out short-first, always.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the long put marks below $0.10, close both legs.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "615bc746a6c1ee96",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

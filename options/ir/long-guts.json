@@ -1,0 +1,183 @@
+{
+  "slug": "long-guts",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_guts",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 20.0,
+        "src": "IV rank <= 20."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs OI >= 500 and bid/ask <= 8% of mid -- ITM strikes rarely clear this."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 8.0,
+        "src": "Both legs OI >= 500 and bid/ask <= 8% of mid -- ITM strikes rarely clear this."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "time_stop",
+      "src": "Time stop: 21 DTE.",
+      "dte": 21.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close at 21 DTE absent a catalyst.",
+      "dte": 21.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "MARKED AS A BAD IDEA -- included for completeness. Prefer the equivalent long strangle in every realistic case.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If used at all: total extrinsic paid (debit - intrinsic overlap) must be lower than the total premium of the equivalent OTM strangle after slippage. Compute both and only take guts if it wins by >= 5%.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Capital check: the debit is large (it contains full intrinsic value). Cap debit at 5% of equity even though the at-risk portion is much smaller.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Take profit at +50% of the EXTRINSIC paid, not of total debit -- measuring against total debit makes the target unreachable.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Stop: close when extrinsic paid has decayed by 50%.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Do not leg out; close as a package.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "No short legs, so no assignment risk. BUT both legs are ITM by construction and both would be auto-exercised by the OCC at expiry, delivering 100 long shares from the call and 100 short shares from the put per contract. Closing before 15:45 ET is mandatory, not optional.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "100",
+        "15",
+        "45"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "8358db17c6b4272d",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

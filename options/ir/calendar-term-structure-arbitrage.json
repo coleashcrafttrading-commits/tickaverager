@@ -1,0 +1,206 @@
+{
+  "slug": "calendar-term-structure-arbitrage",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_diagonal",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": null,
+  "management": [
+    {
+      "kind": "delta_stop",
+      "src": "If the near leg's short delta exceeds 0.80 before expiry, close the pair - the assignment risk now exceeds the arbitrage edge.",
+      "abs_delta": 0.8
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: the near leg is short and American; close it by 15:30 ET on its expiration day, always.",
+      "time_et": "15:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the near leg at extrinsic < $0.10 or |delta| >= 0.85, and before any ex-dividend date while a short call is ITM.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close the near leg at extrinsic < $0.10 or |delta| >= 0.85, and before any ex-dividend date while a short call is ITM.",
+      "abs_delta": 0.85
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 7
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "VIOLATION TEST, ON EXECUTABLE PRICES ONLY: near-expiry BID at strike K must exceed far-expiry ASK at the same strike and same right, by more than total round-trip costs. Mid prices do not count; a violation that disappears at the touch never existed.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Minimum edge: (near bid - far ask) x 100 >= $15 per contract after commissions, or skip it.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "15"
+      ]
+    },
+    {
+      "text": "Quote freshness: both legs must have traded or updated within 60 seconds and both must show size >= 10 contracts.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60",
+        "10"
+      ]
+    },
+    {
+      "text": "Both legs same strike, same right, same underlying. Any strike or right mismatch makes this an ordinary calendar spread, not an arbitrage.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Dividend check: if an ex-dividend date falls between the two expiries, recompute - a large expected dividend legitimately makes the near call cheaper and the near put richer, and most apparent violations are exactly this.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Hard-to-borrow check: an elevated borrow rate can also explain the inversion legitimately; if the borrow rate exceeds 5% annualized, reject.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Submit as one MLeg order only. Never leg it - legging turns a riskless trade into a directional one.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Hold to the near expiry, then decide on the far leg as a standalone position.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close both legs immediately if the spread reverts to normal and the credit can be banked early with more than 50% of the edge captured.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Never add size to a violation that persists; a persisting violation is almost always a data error.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the near leg is assigned, exercise or sell the far leg in the same session to flatten the resulting share position, and log it as an incident.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Never hold the far leg unhedged overnight after an unexpected assignment.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_dividend_guard",
+      "why": "a short call plus a dividend rule in the document, and no compiled guard. A short call with less extrinsic than the dividend is exercised the night before the ex-date."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "3dd709503a6c36e9",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "slug": "index-rebalance-options-positioning",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "reverse_iron_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 0.75,
+        "src": "Net debit <= 0.75% of equity per name; at most 2 index-event positions at once."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 250.0,
+        "src": "OI >= 250 per leg; reject any name where the post-announcement bid/ask exceeds 10% of the option's mid."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short leg at extrinsic < $0.10 or |delta| >= 0.85, and before any ex-dividend date while a short call is ITM.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close the short leg at extrinsic < $0.10 or |delta| >= 0.85, and before any ex-dividend date while a short call is ITM.",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "close_not_exercise",
+      "src": "Close, do not exercise, any ITM long leg."
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Only announced, dated changes. No speculation on rumored candidates, and no positions entered before an official announcement.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Enter between announcement and 3 trading days before the effective date; never enter on the effective date itself, when the flow is already in the price.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Estimated forced flow (index AUM tracking the benchmark x target weight) must exceed 5 days of the name's average dollar volume; below that the effect is noise.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Debit spreads only - never outright long calls on a name that has already gapped on the announcement, and never short legs that are not covered by a long of the same right.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Net debit <= 0.75% of equity per name; at most 2 index-event positions at once.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Both legs same expiry, one MLeg order.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Take profit at 50-70% of the spread's maximum value, or on the effective-date close, whichever comes first.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "70"
+      ]
+    },
+    {
+      "text": "Hard rule: close on or before the first trading day AFTER the effective date. The documented pattern is a partial reversal once the forced flow is done, and holding through it gives back the gain.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not add on an adverse move; index events are one-shot, and a spread that has not worked by the effective date has failed.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the index provider amends or delays the change, close immediately - the entire thesis was the dated flow.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close both legs at least 2 trading days before expiration; never hold to expiry on a single name.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Halt and review if a position is still open 2 sessions after the effective date.",
+      "reason": "degraded-market handling: owned by optguard",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "no_assignment_guard",
+      "why": "the structure has 2 short leg(s) and no compiled assignment guard. These are AMERICAN options on shares: a short that finishes in the money delivers 100 shares per contract the account never sized for."
+    },
+    {
+      "gap": "no_dividend_guard",
+      "why": "a short call plus a dividend rule in the document, and no compiled guard. A short call with less extrinsic than the dividend is exercised the night before the ex-date."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "81b0a3902fcb1a05",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

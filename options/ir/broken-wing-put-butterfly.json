@@ -1,0 +1,287 @@
+{
+  "slug": "broken-wing-put-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "broken_wing_put_fly",
+    "params": {
+      "short_delta": 0.35
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 35.0,
+        "src": "IV rank >= 35; no earnings inside the expiry."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "is_credit",
+        "op": "eq",
+        "value": true,
+        "src": "Open for a net CREDIT; reject any fill that would be a debit larger than 3% of W1."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.3,
+          0.4
+        ],
+        "src": "Inner long delta -0.30 to -0.40; body -0.20 to -0.25; outer long -0.08 to -0.12."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss ((W2 - W1) x 100 - credit) <= 1.5% of equity per unit."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "IV rank >= 35; no earnings inside the expiry."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "All three strikes: OI >= 500, prior-day volume >= 100, per-leg spread <= max($0.05, 10% of mid)."
+      },
+      {
+        "fact": "min_leg_volume",
+        "op": "gte",
+        "value": 100.0,
+        "src": "All three strikes: OI >= 500, prior-day volume >= 100, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Discretionary variant: close at 25-50% of max profit - trigger when mark >= 0.30 x (W1 x 100 + credit).",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time rule: close at 7 DTE unconditionally, and never carry into the final week's gamma.",
+      "dte": 7.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Breach rule: close if the short body put delta exceeds 0.40 in absolute value, or if spot closes below the inner long strike.",
+      "abs_delta": 0.4
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: the 2 short body puts are the exposure. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the short body puts are ITM with extrinsic < $0.10.",
+      "threshold_usd": 0.1
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Open for a net CREDIT; reject any fill that would be a debit larger than 3% of W1.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "1"
+      ]
+    },
+    {
+      "text": "W2 = 2 x W1 exactly (skip one strike interval below the body).",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "2",
+        "1"
+      ]
+    },
+    {
+      "text": "Inner long delta -0.30 to -0.40; body -0.20 to -0.25; outer long -0.08 to -0.12.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.20",
+        "0.25",
+        "0.08",
+        "0.12"
+      ]
+    },
+    {
+      "text": "Target credit of 12-18% of W1 when using the mechanical 21 DTE variant.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "12",
+        "18",
+        "1",
+        "21"
+      ]
+    },
+    {
+      "text": "Single multi-leg order at the natural mid, accept mid - $0.03.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.03"
+      ]
+    },
+    {
+      "text": "Mechanical variant: on fill, immediately rest a GTC order to close at 2% of W1; it typically fills with 7-8 DTE left.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "1",
+        "7",
+        "8"
+      ]
+    },
+    {
+      "text": "Discretionary variant: close at 25-50% of max profit - trigger when mark >= 0.30 x (W1 x 100 + credit).",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "25",
+        "0.30"
+      ]
+    },
+    {
+      "text": "Time rule: close at 7 DTE unconditionally, and never carry into the final week's gamma.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "nconditionally, and never carry into the final week's gamma.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Never roll the outer long up to harvest credit; that widens the tail.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: the 2 short body puts are the exposure. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "TAIL GUARD: close the entire structure if spot trades below the outer long strike; the position is at max loss there and only assignment risk remains.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Hard time exit at 7 DTE; the 21 DTE variant exists specifically so the position never sees expiration-week gamma.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "21"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "1fd2edf7a863d868",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

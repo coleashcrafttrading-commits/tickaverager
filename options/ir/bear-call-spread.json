@@ -1,0 +1,283 @@
+{
+  "slug": "bear-call-spread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_credit_spread",
+    "params": {
+      "short_delta": 0.23,
+      "dte": 37
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 30.0,
+        "src": "IV rank >= 30 measured over the trailing 252 days. Below 20, skip -- the credit does not pay for the tail."
+      },
+      {
+        "fact": "close_vs_ema20",
+        "op": "lt",
+        "value": 0,
+        "src": "Directional gate: last close < 20-EMA, OR short strike is at least 1.0 ATR(14) above the highest high of the last 10 sessions."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.16,
+          0.3
+        ],
+        "src": "Short call delta between 0.16 and 0.30."
+      },
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.33,
+        "src": "Net credit >= 33% of spread width (a $5-wide must pay >= $1.65). If the market will not pay it, widen the strike or skip the trade."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          25.0,
+          50.0
+        ],
+        "src": "DTE between 25 and 50."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 2.0,
+        "src": "Max loss per position (width*100 - credit) <= 2% of account equity = $1,000 on $50k."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs OI >= 500, bid/ask <= 10% of mid."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 10.0,
+        "src": "Both legs OI >= 500, bid/ask <= 10% of mid."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit: buy back the spread at 50% of max profit (spread mid <= 0.50 * credit received).",
+      "basis": "max_profit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time-based exit: close at 21 DTE regardless of P/L if not already closed at the profit target. Gamma risk past 21 DTE is not compensated.",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop loss: close if the spread's mark reaches 2.0x the credit received (i.e., unrealized loss = 1x credit), or if the underlying trades through the short strike -- whichever comes first.",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop loss: close if the spread's mark reaches 2.0x the credit received (i.e., unrealized loss = 1x credit), or if the underlying trades through the short strike -- whichever comes first.",
+      "basis": "credit",
+      "multiple": 1.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Hard rule: the position must be flat by 15:45 ET on expiration day, without exception.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: if at 15:30 ET on expiration day the underlying is above (short strike - $0.05), close the whole spread immediately. Pin risk at the short strike is the single largest source of accidental assignment.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: on any day, if the short call is ITM and its extrinsic value < $0.10, close the spread that session.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: if the short call is ITM and its extrinsic < 1.5 * the pending dividend, close the spread by the close of the session before ex-dividend."
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "DIVIDEND GUARD: if the short call is ITM and its extrinsic < 1.5 * the pending dividend, close the spread by the close of the session before ex-dividend.",
+      "threshold_usd": 1.5
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 10,
+      "compiled": 5,
+      "partial": 2,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 4,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Directional gate: last close < 20-EMA, OR short strike is at least 1.0 ATR(14) above the highest high of the last 10 sessions.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.0"
+      ]
+    },
+    {
+      "text": "Max loss per position (width*100 - credit) <= 2% of account equity = $1,000 on $50k.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1000"
+      ]
+    },
+    {
+      "text": "Total portfolio short-delta from all credit spreads kept within +/-0.30 delta per $1,000 of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.30",
+        "1000"
+      ]
+    },
+    {
+      "text": "No entry with an earnings report inside the expiry window unless IV rank > 60 AND the short strike sits beyond the options-implied earnings move * 1.25.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60",
+        "1.25"
+      ]
+    },
+    {
+      "text": "Alpaca note: this is a fully covered two-leg structure and is accepted as an MLeg order at Level 3. Submit both legs in one MLeg order -- legging in creates a momentarily naked short call, which Alpaca will reject and which would be uncovered risk.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Stop loss: close if the spread's mark reaches 2.0x the credit received (i.e., unrealized loss = 1x credit), or if the underlying trades through the short strike -- whichever comes first.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "the short strike -- whichever comes first.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Breach rule: if the underlying touches the short strike at any point with > 7 DTE remaining, either close or roll out to the next monthly expiry for a net credit; never roll for a debit and never roll down into more risk.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7"
+      ]
+    },
+    {
+      "text": "Never roll a tested call spread up and out more than twice on the same underlying; take the loss on the third test.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Do not add contracts to a tested position.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the spread ever quotes at <= $0.05 mid with > 3 DTE, close it for the nickel rather than carrying assignment risk for the last 5 cents.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05",
+        "3",
+        "5"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "4312eb47e283cfa1",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

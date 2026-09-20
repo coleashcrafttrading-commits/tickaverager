@@ -1,0 +1,304 @@
+{
+  "slug": "bull-call-spread",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_debit_spread",
+    "params": {
+      "dte": 37,
+      "short_delta": 0.55
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_ema20",
+        "op": "gt",
+        "value": 0,
+        "src": "Directional gate: last close > 20-EMA AND 20-EMA > 50-SMA, or a breakout above the prior 20-day high on >1.5x average volume."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 40.0,
+        "src": "IV rank <= 40 (this is a long-vol/long-premium structure)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          25.0,
+          50.0
+        ],
+        "src": "DTE between 25 and 50 for swing entries."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.4,
+          0.7
+        ],
+        "src": "Long strike delta between 0.40 and 0.70; short strike delta between 0.15 and 0.35."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.15,
+          0.35
+        ],
+        "src": "Long strike delta between 0.40 and 0.70; short strike delta between 0.15 and 0.35."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Both legs: open interest >= 500 and bid/ask spread <= 10% of the leg mid, or <= $0.05 absolute."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit: close the whole spread at 65% of max profit (i.e., spread mid >= net debit + 0.65 * (width - debit)).",
+      "basis": "max_profit",
+      "fraction": 0.65
+    },
+    {
+      "kind": "profit_target",
+      "src": "Stop loss: close if spread mid <= 50% of net debit paid, or if the underlying closes below the 20-EMA that triggered entry -- whichever comes first.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop: if at 10 DTE the spread mid is below the entry debit, close it. Long verticals bleed fastest in the last two weeks.",
+      "dte": 10.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Hard rule: close the entire spread no later than 15:45 ET on expiration day regardless of P/L. Never let a leg expire.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: if the short call is in the money by any amount at 15:30 ET on expiration day, close the full spread immediately at market-plus-limit (limit = bid - $0.05, repriced every 15s).",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: if the short call is ITM and its extrinsic value < 1.5 * the upcoming dividend, close the spread no later than the close of the session before the ex-dividend date."
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "DIVIDEND GUARD: if the short call is ITM and its extrinsic value < 1.5 * the upcoming dividend, close the spread no later than the close of the session before the ex-dividend date.",
+      "threshold_usd": 1.5
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 10,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Underlying must be optionable, average daily volume >= 2,000,000 shares, price >= $20.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2000000",
+        "20"
+      ]
+    },
+    {
+      "text": "Directional gate: last close > 20-EMA AND 20-EMA > 50-SMA, or a breakout above the prior 20-day high on >1.5x average volume.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Net debit must be <= 50% of spread width (a $5-wide costs no more than $2.50), giving reward:risk >= 1:1.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "1",
+        "1"
+      ]
+    },
+    {
+      "text": "Both legs: open interest >= 500 and bid/ask spread <= 10% of the leg mid, or <= $0.05 absolute.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    },
+    {
+      "text": "Submit as a single Alpaca MLeg order, limit at the spread mid rounded to the nearest $0.01, never a market order. If unfilled after 60s, reprice in $0.01 steps up to mid + 25% of the bid/ask spread, then cancel.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "60",
+        "0.01",
+        "25"
+      ]
+    },
+    {
+      "text": "Position size: contracts = floor(0.02 * equity / (net debit * 100)); hard cap 10 contracts per underlying.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "10"
+      ]
+    },
+    {
+      "text": "No entry within 2 calendar days of an earnings report unless the trade is explicitly an earnings trade.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    },
+    {
+      "text": "Stop loss: close if spread mid <= 50% of net debit paid, or if the underlying closes below the 20-EMA that triggered entry -- whichever comes first.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "triggered entry -- whichever comes first.",
+      "missing_numbers": null
+    },
+    {
+      "text": "Roll up only if the underlying has moved > 1.5 ATR in your favor and you can close the current spread at >= 50% profit; open the new spread as a separate order, never as an adjustment leg.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5",
+        "50"
+      ]
+    },
+    {
+      "text": "Never add to a losing long vertical.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Hard rule: close the entire spread no later than 15:45 ET on expiration day regardless of P/L. Never let a leg expire.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "regardless of P/L. Never let a leg expire.",
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: at any time, if the short call is ITM and its extrinsic value (mid - intrinsic) < $0.10, close the spread within the same session.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "If both legs are deep ITM (underlying > short strike + 2% ) at 5 DTE, close for near-max profit rather than waiting -- the remaining edge is pennies and the assignment risk is real.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "4fd4c3c569f36b35",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

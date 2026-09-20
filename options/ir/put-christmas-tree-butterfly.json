@@ -1,0 +1,182 @@
+{
+  "slug": "put-christmas-tree-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_christmas_tree",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 3
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 2
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_over_width",
+        "op": "lte",
+        "value": 0.25,
+        "src": "Net debit <= 25% of W x 100."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500 per strike, per-leg spread <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at 30% of max profit.",
+      "basis": "max_profit",
+      "fraction": 0.3
+    },
+    {
+      "kind": "time_stop",
+      "src": "Close at 21 DTE regardless of P/L.",
+      "dte": 21.0
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at 60% of the debit if spot rallies above C.",
+      "basis": "debit",
+      "fraction": 0.6
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: 3 short puts at B. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the B puts are ITM with extrinsic < $0.10.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close no later than 5 DTE.",
+      "dte": 5.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "Strike spacing C->B and B->A exactly equal.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Strict 1:3:2 contract ratio so net contracts = 0 and no naked short exists.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "3",
+        "2",
+        "0"
+      ]
+    },
+    {
+      "text": "Full expiry payoff computed at A, B, C and 2W below A before submission; reject if the trough exceeds 1.5% of equity.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "1.5"
+      ]
+    },
+    {
+      "text": "Single 6-contract multi-leg order at mid, pay up to mid + $0.04.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "6",
+        "0.04"
+      ]
+    },
+    {
+      "text": "Close if spot trades below A.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "ASSIGNMENT GUARD: 3 short puts at B. Flatten by 15:45 ET on expiration day, unconditionally.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "b03074850b23c26d",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

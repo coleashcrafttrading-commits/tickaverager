@@ -1,0 +1,346 @@
+{
+  "slug": "zero-dte-iron-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "iron_condor",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "credit_over_width",
+        "op": "gte",
+        "value": 0.18,
+        "src": "Net credit >= 18% of width (a condor collects from two sides, so the per-side hurdle is lower than the single vertical's 20%)."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Max loss per position <= 1% of equity ($500 on $50k); at most 2 concurrent 0DTE condors; total 0DTE defined risk <= 3% of equity per day."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "All four legs OI >= 1000, one MLeg limit order at the mid, chase no more than $0.02."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 50% of credit, or any time after 15:00 ET the whole structure closes for <= $0.05.",
+      "basis": "credit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_multiple",
+      "src": "Stop loss at 2.0x the credit received on the structure.",
+      "basis": "credit",
+      "multiple": 2.0
+    },
+    {
+      "kind": "delta_stop",
+      "src": "Delta stop: close the tested side when its short strike's locally computed delta reaches 0.30; the untested side may be left to decay only if its own delta is below 0.05.",
+      "abs_delta": 0.3
+    },
+    {
+      "kind": "touch_stop",
+      "src": "Touch stop: close immediately if the underlying trades through either short strike.",
+      "reference": "either short strike"
+    },
+    {
+      "kind": "profit_target",
+      "src": "After 15:00 ET tighten the profit target to 35% of credit.",
+      "basis": "credit",
+      "fraction": 0.35
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "If a closing order is unfilled by 15:40 ET, reprice to the natural every 10 seconds until filled and log a critical incident; halt new 0DTE entries until reviewed.",
+      "time_et": "15:40",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 1,
+      "partial": 2,
+      "unexpressed": 6
+    },
+    "management_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 3,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "safety_critical_uncompiled": 3
+  },
+  "unexpressed": [
+    {
+      "text": "Underlyings restricted to SPY, QQQ, IWM. No single names.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "LOCAL GREEKS MANDATORY: invert Black-Scholes on the option mid with T = seconds to 16:00 ET / (252 x 23400) to get IV, then delta. Refresh every 30 seconds. Do not open or hold if the greeks pipeline is stale by more than 60 seconds.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "16",
+        "00",
+        "30",
+        "60"
+      ]
+    },
+    {
+      "text": "Entry window 09:45-13:30 ET. Nothing in the opening 15 minutes; nothing after 13:30 because a condor needs decay on both sides.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "09",
+        "45",
+        "13",
+        "30",
+        "15",
+        "13",
+        "30"
+      ]
+    },
+    {
+      "text": "Both short strikes >= 1.25 x the session's realized 30-minute range from spot, and >= the option-implied expected move for the remainder of the day.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.25",
+        "30"
+      ]
+    },
+    {
+      "text": "Range gate: open only when the 30-minute realized range is below its 10-day median for the same time of day, and spot is within 0.3% of VWAP.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30",
+        "10",
+        "0.3"
+      ]
+    },
+    {
+      "text": "Max loss per position <= 1% of equity ($500 on $50k); at most 2 concurrent 0DTE condors; total 0DTE defined risk <= 3% of equity per day.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "0",
+        "0",
+        "3"
+      ]
+    },
+    {
+      "text": "No entry on FOMC statement days before 14:30 ET, or within 15 minutes either side of an 08:30/10:00/14:00 ET release.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "14",
+        "30",
+        "15",
+        "08",
+        "30",
+        "10",
+        "00",
+        "14",
+        "00"
+      ]
+    },
+    {
+      "text": "All four legs OI >= 1000, one MLeg limit order at the mid, chase no more than $0.02.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.02"
+      ]
+    },
+    {
+      "text": "Take profit at 50% of credit, or any time after 15:00 ET the whole structure closes for <= $0.05.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00",
+        "0.05"
+      ]
+    },
+    {
+      "text": "Delta stop: close the tested side when its short strike's locally computed delta reaches 0.30; the untested side may be left to decay only if its own delta is below 0.05.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "ay be left to decay only if its own delta is below 0.05.",
+      "missing_numbers": [
+        "0.05"
+      ]
+    },
+    {
+      "text": "After 15:00 ET tighten the profit target to 35% of credit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00"
+      ]
+    },
+    {
+      "text": "Never roll a 0DTE structure and never add a second condor to average a loser.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    },
+    {
+      "text": "Daily circuit breaker: after 2 stopped 0DTE trades or a cumulative 0DTE loss of 2% of equity, stop opening for the session.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "0",
+        "0",
+        "2"
+      ]
+    },
+    {
+      "text": "UNCONDITIONAL FLATTEN AT 15:30 ET - every leg, winner or loser, ITM or OTM.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "30"
+      ]
+    },
+    {
+      "text": "If a short leg is ITM at any time after 15:00 ET, close that side immediately rather than waiting for the sweep.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "15",
+        "00"
+      ]
+    },
+    {
+      "text": "An option that finishes $0.01 ITM is auto-exercised by the OCC; a short 0DTE SPY put delivers roughly $60,000 of stock into a $50k account.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.01",
+        "0",
+        "60000",
+        "50"
+      ]
+    },
+    {
+      "text": "If a closing order is unfilled by 15:40 ET, reprice to the natural every 10 seconds until filled and log a critical incident; halt new 0DTE entries until reviewed.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "b63e3e791e4091ac",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

@@ -1,0 +1,319 @@
+{
+  "slug": "poor-mans-covered-call",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_diagonal",
+    "params": {
+      "short_delta": 0.85,
+      "dte": 33
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "close_vs_sma50",
+        "op": "gt",
+        "value": 0,
+        "src": "Trend filter: spot > 50-day SMA AND 50-day SMA > 200-day SMA; underlying must not have declined more than 15% in the last 20 sessions."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 35.0,
+        "src": "IV rank < 35 at the time of the LEAPS purchase (the long leg is your biggest vega exposure)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.8,
+          0.9
+        ],
+        "src": "LEAPS: delta 0.80-0.90, DTE >= 180 (270-730 preferred), extrinsic <= 10% of premium."
+      },
+      {
+        "fact": "dte",
+        "op": "gte",
+        "value": 180.0,
+        "src": "LEAPS: delta 0.80-0.90, DTE >= 180 (270-730 preferred), extrinsic <= 10% of premium."
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.2,
+          0.3
+        ],
+        "src": "Short call: delta 0.20-0.30, DTE 21-45."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          45.0
+        ],
+        "src": "Short call: delta 0.20-0.30, DTE 21-45."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close the short call at 50-75% of the credit received, then immediately sell the next cycle's 0.20-0.30 delta call at 21-45 DTE. This roll cadence is the income engine.",
+      "basis": "credit",
+      "fraction": 0.75
+    },
+    {
+      "kind": "delta_stop",
+      "src": "If the short call's |delta| exceeds 0.50, roll it up and out for a NET CREDIT only, and only to a strike still >= long strike + remaining net debit. If no credit roll satisfies that, close the short and let the LEAPS run naked-long (which is allowed and has no assignment risk) until a valid strike appears.",
+      "abs_delta": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "extrinsic_guard",
+      "src": "LEAPS: delta 0.80-0.90, DTE >= 180 (270-730 preferred), extrinsic <= 10% of premium.",
+      "threshold_usd": 10.0
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll the short call by 14:30 ET on its expiration day, unconditionally. A PMCC short call that expires ITM means -100 shares delivered on Monday.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Close the short call immediately if its extrinsic value <= $0.05/share or |delta| >= 0.90.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before the close of the session preceding ex-dividend whenever its extrinsic value < the declared dividend per share. This is the #1 cause of PMCC assignment, and it typically happens when the stock has rallied through the short strike."
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the LEAPS no later than 90 DTE, and always after the short call has been bought back.",
+      "dte": 90.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 3,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 0,
+      "partial": 2,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Trend filter: spot > 50-day SMA AND 50-day SMA > 200-day SMA; underlying must not have declined more than 15% in the last 20 sessions.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "15"
+      ]
+    },
+    {
+      "text": "MANDATORY: short strike >= long strike + net debit per share. If violated, the trade is rejected.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Net debit per unit <= 5% of equity ($2,500 on a $50k account); no more than 5 concurrent PMCCs.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5",
+        "5"
+      ]
+    },
+    {
+      "text": "LEAPS bid-ask <= 5% of its mid; short-call bid-ask <= $0.05.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5",
+        "0.05"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: the short call is at a higher strike and an earlier expiry than a long call the account owns - a textbook covered diagonal. Submit as a 2-leg mleg for the open; thereafter manage the short leg as single-leg orders. If legging the open, BUY THE LEAPS FIRST and only then sell the call.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "2"
+      ]
+    },
+    {
+      "text": "Close the short call at 50-75% of the credit received, then immediately sell the next cycle's 0.20-0.30 delta call at 21-45 DTE. This roll cadence is the income engine.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "at 21-45 DTE. This roll cadence is the income engine.",
+      "missing_numbers": [
+        "0.20",
+        "0.30",
+        "21",
+        "45"
+      ]
+    },
+    {
+      "text": "If the short call's |delta| exceeds 0.50, roll it up and out for a NET CREDIT only, and only to a strike still >= long strike + remaining net debit. If no credit roll satisfies that, close the short and let the LEAPS run naked-long (which is allowed and has no assignment risk) until a valid strike appears.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "the short call's  , roll it up and out for a NET CREDIT only, and only to a strike still >= long str",
+      "missing_numbers": null
+    },
+    {
+      "text": "Roll the LEAPS forward when its delta falls below 0.70 OR its DTE falls below 120 - inside 90 DTE the theta cliff accelerates sharply.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.70",
+        "120",
+        "90"
+      ]
+    },
+    {
+      "text": "Hard stop on the LEAPS: close the whole position if the LEAPS' mark falls to 50% of the purchase price, or if spot closes below the 200-day SMA for 3 consecutive sessions.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50",
+        "200",
+        "3"
+      ]
+    },
+    {
+      "text": "Track cost basis: the running net debit = original debit - cumulative credits. Every management decision references the CURRENT net debit, not the original.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Never sell more short calls than LEAPS owned - a second short call is naked and would require level 4.",
+      "reason": "level 4 on this account; the strategy cannot be sent at all",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "4"
+      ]
+    },
+    {
+      "text": "Close the short call immediately if its extrinsic value <= $0.05/share or |delta| >= 0.90.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.90"
+      ]
+    },
+    {
+      "text": "Close the short call before the close of the session preceding ex-dividend whenever its extrinsic value < the declared dividend per share. This is the #1 cause of PMCC assignment, and it typically happens when the stock has rallied through the short strike.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Full exit: buy back the short call FIRST, then sell the LEAPS. Never the reverse.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If assigned: buy back the 100 short shares at market on the next open, keep the LEAPS, and re-sell a new short call once the strike constraint is satisfiable again.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "9b36a2cf30009514",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

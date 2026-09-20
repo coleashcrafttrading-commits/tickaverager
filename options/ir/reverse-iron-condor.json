@@ -1,0 +1,242 @@
+{
+  "slug": "reverse-iron-condor",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "reverse_iron_condor",
+    "params": {
+      "short_delta": 0.325,
+      "dte": 32
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 25.0,
+        "src": "IV rank <= 25 and IV percentile <= 30"
+      },
+      {
+        "fact": "iv_percentile",
+        "op": "lte",
+        "value": 30.0,
+        "src": "IV rank <= 25 and IV percentile <= 30"
+      },
+      {
+        "fact": "account_option_level",
+        "op": "gte",
+        "value": 3.0,
+        "src": "Alpaca level 3 (defined risk, net debit)"
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_over_width",
+        "op": "lte",
+        "value": 0.45,
+        "src": "Net debit <= 45% of the wing width W (otherwise the risk/reward is not worth it)"
+      },
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.3,
+          0.35
+        ],
+        "src": "Inner strikes at 0.30-0.35 delta, wings equal width"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          20.0,
+          45.0
+        ],
+        "src": "DTE 20-45; for an earnings play, the expiry immediately after the event"
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at 100% of the debit paid (sell for 2x) or at 60% of max profit, whichever comes first",
+      "basis": "debit",
+      "fraction": 1.0
+    },
+    {
+      "kind": "time_stop",
+      "src": "Hard time stop: close at 10 DTE regardless of P/L; theta and the widening between the inner strikes destroy this structure late",
+      "dte": 10.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Force-close the entire structure by 15:45 ET on expiration day, always (the two short outer legs are assignable)",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "itm_depth_guard",
+      "src": "Close immediately if either SHORT outer strike goes ITM by more than 0.25 x W or its delta >= 0.85 - at that point the structure is at max profit anyway and holding only adds assignment risk",
+      "pct_of_width": 0.25
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Close immediately if either SHORT outer strike goes ITM by more than 0.25 x W or its delta >= 0.85 - at that point the structure is at max profit anyway and holding only adds assignment risk",
+      "abs_delta": 0.85
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Ex-dividend guard on the short call"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 4,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "Net debit <= 45% of the wing width W (otherwise the risk/reward is not worth it)",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "W (otherwise the risk/reward is not worth it)",
+      "missing_numbers": null
+    },
+    {
+      "text": "Expected move (ATM straddle price / spot) must be LARGER than the distance from spot to the nearest inner strike, otherwise the structure can never pay",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Debit paid <= 1% of equity per position",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Take profit at 100% of the debit paid (sell for 2x) or at 60% of max profit, whichever comes first",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": "60% of max profit, whichever comes first",
+      "missing_numbers": [
+        "60"
+      ]
+    },
+    {
+      "text": "Volatility exit: if IV rank rises above 50 while the position is profitable, close immediately - the vega gain is the edge and it decays fast",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Event exit: close within 30 minutes of the market open following a scheduled catalyst - IV crush after the event kills the position even if the move was right",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "No adjustments; this structure is either working or it is not",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Abandon rule: if the position is down 70% of the debit with < 15 DTE, close and stop paying for time",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "70",
+        "15"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "1243dce4dd6f2081",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

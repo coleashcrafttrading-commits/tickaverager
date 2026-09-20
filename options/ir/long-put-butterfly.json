@@ -1,0 +1,203 @@
+{
+  "slug": "long-put-butterfly",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "long_put_butterfly",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 2
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_over_width",
+        "op": "lte",
+        "value": 0.2,
+        "src": "Net debit <= 20% of wing width."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "Strike liquidity: OI >= 500, prior-day volume >= 100, per-leg bid/ask <= max($0.05, 10% of mid)."
+      },
+      {
+        "fact": "min_leg_volume",
+        "op": "gte",
+        "value": 100.0,
+        "src": "Strike liquidity: OI >= 500, prior-day volume >= 100, per-leg bid/ask <= max($0.05, 10% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Close at profit >= 25% of max profit for DTE > 5; >= 50% of max profit for 0-2 DTE.",
+      "basis": "max_profit",
+      "fraction": 0.25
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Hard stop at 50% loss of the debit when spot is outside both wings.",
+      "basis": "debit",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: flatten the entire structure by 15:45 ET on expiration day, unconditionally.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: close immediately if the short body puts are ITM with extrinsic value < $0.10.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "pin_guard",
+      "src": "PIN GUARD: close at 15:30 ET if |spot - body| < 0.25% of spot on expiry day.",
+      "time_et": "15:30",
+      "pct_of_spot": 0.25
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 3,
+      "compiled": 1,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 2
+  },
+  "unexpressed": [
+    {
+      "text": "Price the equivalent call butterfly at the same three strikes and take whichever costs less; skew usually favors the put fly below spot and the call fly above spot.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Both wings exactly equal width.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Single 3-strike multi-leg order, limit at mid, pay up to mid + $0.02.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.02"
+      ]
+    },
+    {
+      "text": "Risk <= 1.5% of equity per position.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "Close at profit >= 25% of max profit for DTE > 5; >= 50% of max profit for 0-2 DTE.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0",
+        "2"
+      ]
+    },
+    {
+      "text": "Abandon (close) rather than adjust if spot travels more than one wing width from the body with > 5 DTE remaining.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Short puts carry no dividend-driven early assignment, but deep-ITM short puts near zero extrinsic are assigned for interest reasons; the $0.10 extrinsic rule covers this.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.10"
+      ]
+    },
+    {
+      "text": "Time exit at 2 DTE if neither target nor stop has fired.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "a5d63e811deb3457",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

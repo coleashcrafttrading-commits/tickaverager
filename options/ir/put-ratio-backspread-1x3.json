@@ -1,0 +1,272 @@
+{
+  "slug": "put-ratio-backspread-1x3",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "put_backspread_1x3",
+    "params": {
+      "short_delta": 0.15
+    },
+    "legs": [
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 3
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 20.0,
+        "src": "IV rank <= 20 AND 10-delta put IV minus ATM IV <= 10 vol points (otherwise the three long wings are prohibitively expensive)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.1,
+          0.2
+        ],
+        "src": "Short put delta ~0.50; long puts delta 0.10-0.20."
+      },
+      {
+        "fact": "is_credit",
+        "op": "eq",
+        "value": true,
+        "src": "Package must open for a net credit or a debit <= 5% of (short strike - long strike)."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss <= 1.5% of equity."
+      },
+      {
+        "fact": "dte",
+        "op": "gte",
+        "value": 60.0,
+        "src": "DTE >= 60."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "OI >= 1000 on the long strike, quoted size >= 30."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "time_stop",
+      "src": "Time stop: close at 30 DTE.",
+      "dte": 30.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: short put ITM at 15:30 ET on expiry day -> close the whole package immediately; assignment would deliver 100 shares per unit.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: short put ITM with extrinsic < $0.10 on any day -> close that session.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dte_close",
+      "src": "Mandatory close/roll at 30 DTE.",
+      "dte": 30.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 9,
+      "compiled": 3,
+      "partial": 3,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 5
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 4,
+      "partial": 0,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "MARKED AS SPECIALIST -- default to the 1x2 put backspread unless this is explicitly a tail hedge.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "IV rank <= 20 AND 10-delta put IV minus ATM IV <= 10 vol points (otherwise the three long wings are prohibitively expensive).",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": "V <= 10 vol points (otherwise the three long wings are prohibitively expensive).",
+      "missing_numbers": null
+    },
+    {
+      "text": "Short put delta ~0.50; long puts delta 0.10-0.20.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.50"
+      ]
+    },
+    {
+      "text": "Ratio exactly 1:3 (GCD 1). The short put is covered by one of the three long puts inside the same MLeg order -- Level 3 submittable.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "3",
+        "3"
+      ]
+    },
+    {
+      "text": "OI >= 1000 on the long strike, quoted size >= 30.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "If used as a portfolio hedge, size the number of units so that a 20% index decline produces a gain of roughly 10-15% of equity, and accept the valley cost as an insurance premium.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "20",
+        "10",
+        "15"
+      ]
+    },
+    {
+      "text": "Take profit at 2.5x the max-loss amount, or on a 2.0 ATR move below the long strike.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2.5",
+        "2.0"
+      ]
+    },
+    {
+      "text": "Vol harvest: if IV rank rises above 60 with price roughly unchanged, close and re-establish further out -- vega gains are the most reliable payoff this structure produces.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60"
+      ]
+    },
+    {
+      "text": "Valley stop: at 45 DTE, if the underlying sits within 2% of the long strike, close.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45",
+        "2"
+      ]
+    },
+    {
+      "text": "If net delta is beyond -1.50 per unit, sell one long put, converting to a 1x2.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.50",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "As a standing hedge, roll to a new 60-90 DTE expiry every 30 days rather than letting the current one decay.",
+      "reason": "rolling is not implemented in v1 (design 5.4)",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "60",
+        "90",
+        "30"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "c6887deed0cc727a",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

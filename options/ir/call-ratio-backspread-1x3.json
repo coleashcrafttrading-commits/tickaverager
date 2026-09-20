@@ -1,0 +1,261 @@
+{
+  "slug": "call-ratio-backspread-1x3",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_backspread_1x3",
+    "params": {
+      "short_delta": 0.2
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 3
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 20.0,
+        "src": "IV rank <= 20."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.15,
+          0.25
+        ],
+        "src": "Short call delta ~0.50; long calls delta 0.15-0.25."
+      },
+      {
+        "fact": "is_credit",
+        "op": "eq",
+        "value": true,
+        "src": "Package must open for a net credit or a debit <= 5% of (long strike - short strike)."
+      },
+      {
+        "fact": "max_loss_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Max loss (width*100 - credit) <= 1.5% of equity (tighter than the 1x2 because the valley is wider and more likely to be reached)."
+      },
+      {
+        "fact": "dte",
+        "op": "gte",
+        "value": 60.0,
+        "src": "DTE >= 60."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "OI >= 1000 on the long strike (you need triple quantity), quoted size >= 30."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "time_stop",
+      "src": "Time stop: close at 30 DTE, not 21 -- the extra long option makes late-cycle theta twice as damaging.",
+      "dte": 30.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "ASSIGNMENT GUARD: short call ITM at 15:30 ET on expiry day -> close the whole package immediately.",
+      "time_et": "15:30",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "ASSIGNMENT GUARD: short call ITM with extrinsic < $0.10 on any day -> close that session.",
+      "threshold_usd": 0.1
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "DIVIDEND GUARD: close before ex-dividend whenever the short call is ITM and extrinsic < 1.5 * dividend."
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "DIVIDEND GUARD: close before ex-dividend whenever the short call is ITM and extrinsic < 1.5 * dividend.",
+      "threshold_usd": 1.5
+    },
+    {
+      "kind": "dte_close",
+      "src": "Mandatory close at 30 DTE absent a live catalyst.",
+      "dte": 30.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 8,
+      "compiled": 4,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 5,
+      "partial": 0,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "MARKED AS AGGRESSIVE -- default to the 1x2 unless the 1x3 prices for a credit AND IV rank < 20.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "2",
+        "1",
+        "3",
+        "20"
+      ]
+    },
+    {
+      "text": "Short call delta ~0.50; long calls delta 0.15-0.25.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "0.50"
+      ]
+    },
+    {
+      "text": "Ratio exactly 1:3. GCD(1,3) = 1, so Alpaca accepts the ratio, and the single short call is covered by one of the three longs -- Level 3 submittable as a single MLeg order.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1",
+        "3",
+        "1",
+        "3"
+      ]
+    },
+    {
+      "text": "OI >= 1000 on the long strike (you need triple quantity), quoted size >= 30.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "Take profit at 2.5x the max-loss amount, or on a 2.0 ATR move above the long strike.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2.5",
+        "2.0"
+      ]
+    },
+    {
+      "text": "Time stop: close at 30 DTE, not 21 -- the extra long option makes late-cycle theta twice as damaging.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "21"
+      ]
+    },
+    {
+      "text": "Valley stop: at 45 DTE, if the underlying is within 2% of the long strike, close.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "45",
+        "2"
+      ]
+    },
+    {
+      "text": "If net delta exceeds +1.50 per unit, sell one long call, converting to a 1x2 backspread.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.50",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "text": "Take the vega profit: if IV rank rises above 50 with price unchanged, close.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    }
+  ],
+  "safety_gaps": [
+    {
+      "gap": "stop_named_but_not_compiled",
+      "why": "the document names a stop and none compiled. A strategy that looks armed and is missing its stop is the failure this whole pipeline exists to prevent."
+    }
+  ],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "53097b63466aa685",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "slug": "long-strip",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "strip",
+    "params": {},
+    "legs": [
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 2
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lte",
+        "value": 25.0,
+        "src": "IV rank <= 25 -- and check skew: if 25-delta put IV exceeds 25-delta call IV by more than 6 vol points, the puts are already crowded and the edge is gone."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.5,
+        "src": "Total debit <= 1.5% of equity."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 500.0,
+        "src": "OI >= 500 per contract, bid/ask <= 8% of mid."
+      },
+      {
+        "fact": "max_leg_spread_pct",
+        "op": "lte",
+        "value": 8.0,
+        "src": "OI >= 500 per contract, bid/ask <= 8% of mid."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Take profit at +50% of debit.",
+      "basis": "debit",
+      "fraction": 0.5
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -40% of debit.",
+      "basis": "debit",
+      "fraction": 0.4
+    },
+    {
+      "kind": "time_stop",
+      "src": "Time stop: 10 DTE.",
+      "dte": 10.0
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Flat by 15:45 ET on expiration day.",
+      "time_et": "15:45",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close at 10 DTE if flat.",
+      "dte": 10.0
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 4
+    },
+    "management_rules": {
+      "total": 5,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 2
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 2,
+      "partial": 0,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "IV rank <= 25 -- and check skew: if 25-delta put IV exceeds 25-delta call IV by more than 6 vol points, the puts are already crowded and the edge is gone.",
+      "reason": "no fact for this volatility-surface condition yet",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "6"
+      ]
+    },
+    {
+      "text": "ATM strike; |put delta| within 0.05 of 0.50.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05",
+        "0.50"
+      ]
+    },
+    {
+      "text": "Ratio exactly 2 puts : 1 call (GCD = 1; all legs long, so Alpaca accepts the MLeg).",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "1"
+      ]
+    },
+    {
+      "text": "Downside breakeven distance <= 0.75 * the average absolute adverse move on comparable catalysts.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.75"
+      ]
+    },
+    {
+      "text": "DTE extends >= 5 days past the catalyst.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "5"
+      ]
+    },
+    {
+      "text": "Close within 30 minutes of a scheduled event print.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "30"
+      ]
+    },
+    {
+      "text": "If the underlying breaks down and net delta exceeds -1.20 per unit, sell one put to bank the directional move and leave a straddle running.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.20"
+      ]
+    },
+    {
+      "text": "No short legs, so no assignment risk. All legs are long, so ITM legs auto-exercise at expiry into up to 200 short shares (puts) or 100 long shares (call) per unit. Close everything before 15:45 ET.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "200",
+        "100",
+        "15",
+        "45"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "b08f61624a0223f7",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

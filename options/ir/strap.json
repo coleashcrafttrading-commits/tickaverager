@@ -1,0 +1,199 @@
+{
+  "slug": "strap",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 2,
+  "construction": {
+    "template": "strap",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 2
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 25.0,
+        "src": "IV rank < 25; reject if IV rank >= 35 (you would be buying three overpriced options)."
+      },
+      {
+        "fact": "iv_rank_252",
+        "op": "gte",
+        "value": 35.0,
+        "src": "IV rank < 25; reject if IV rank >= 35 (you would be buying three overpriced options)."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 1.0,
+        "src": "Total debit <= 1% of equity per unit."
+      },
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 1000.0,
+        "src": "Strike liquidity: OI >= 1000 at the ATM strike, per-leg spread <= max($0.05, 8% of mid)."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "stop_fraction",
+      "src": "Hard stop at 50% loss of the debit.",
+      "basis": "debit",
+      "fraction": 0.5
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Still close all legs by 15:00 ET on expiration day - long ITM options are auto-exercised by the OCC at $0.01 ITM, which would deliver SHARES into the account. Never allow a long option to be auto-exercised; close it for value.",
+      "time_et": "15:00",
+      "scope": "structure",
+      "day": "expiration"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "management_rules": {
+      "total": 4,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 1,
+      "unexpressed": 2
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "All three contracts on the identical ATM strike and expiry.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "A dated catalyst must fall inside the expiry.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Single 3-contract multi-leg order at mid, pay up to mid + $0.03.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "0.03"
+      ]
+    },
+    {
+      "text": "Close at 50% gain on the debit, or on the session after the catalyst resolves, whichever comes first.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "50"
+      ]
+    },
+    {
+      "text": "Time stop: close if 40% of the calendar time to expiry has elapsed with no move exceeding 0.75 x the implied expected move.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "40",
+        "0.75"
+      ]
+    },
+    {
+      "text": "Consider closing the put leg alone if the underlying gaps up more than 1.5 expected moves, converting the remainder into a pure long call position.",
+      "reason": "no fact: implied_move_multiple",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "1.5"
+      ]
+    },
+    {
+      "text": "No short legs, so there is no assignment risk to the account.",
+      "reason": "the document states there is nothing to enforce here",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Still close all legs by 15:00 ET on expiration day - long ITM options are auto-exercised by the OCC at $0.01 ITM, which would deliver SHARES into the account. Never allow a long option to be auto-exercised; close it for value.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "S into the account. Never allow a long option to be auto-exercised; close it for value.",
+      "missing_numbers": [
+        "0.01"
+      ]
+    },
+    {
+      "text": "Close any long leg trading below $0.05 rather than riding it to zero, to avoid auto-exercise surprises on the other side.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.05"
+      ]
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "ec000edef0f0192c",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

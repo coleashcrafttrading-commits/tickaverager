@@ -1,0 +1,205 @@
+{
+  "slug": "strike-arbitrage-vertical",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "call_credit_spread",
+    "params": {},
+    "legs": [
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": null,
+  "accept": {
+    "all": [
+      {
+        "fact": "min_leg_oi",
+        "op": "gte",
+        "value": 100.0,
+        "src": "Both strikes must have OI >= 100. A violation involving a zero-OI strike is a phantom."
+      }
+    ]
+  },
+  "management": [],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD: close the short leg no later than 15:40 ET on expiration day, unconditionally, even though it is covered by the long leg. Assignment would deliver 100 shares and force an exercise of the long leg to unwind, with settlement-timing exposure in between.",
+      "time_et": "15:40",
+      "scope": "structure",
+      "day": "expiration"
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "MANDATORY ASSIGNMENT GUARD: close the short leg no later than 15:40 ET on expiration day, unconditionally, even though it is covered by the long leg. Assignment would deliver 100 shares and force an exercise of the long leg to unwind, with settlement-timing exposure in between.",
+      "time_et": "15:40",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "If the short leg goes ITM with extrinsic below $0.05 at any time, close the whole spread that session.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "assignment_guard",
+      "src": "Close the short call by 15:00 ET the session before any ex-dividend date if its extrinsic value is below 1.25 x the declared dividend.",
+      "time_et": "15:00",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call by 15:00 ET the session before any ex-dividend date if its extrinsic value is below 1.25 x the declared dividend.",
+      "time_et": "15:00"
+    }
+  ],
+  "limits": {},
+  "coverage": {
+    "entry_rules": {
+      "total": 6,
+      "compiled": 1,
+      "partial": 0,
+      "unexpressed": 5
+    },
+    "management_rules": {
+      "total": 3,
+      "compiled": 0,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 4,
+      "compiled": 2,
+      "partial": 1,
+      "unexpressed": 1
+    },
+    "safety_critical_uncompiled": 1
+  },
+  "unexpressed": [
+    {
+      "text": "LEVEL 3 LEGAL: a vertical spread is fully covered within the same multi-leg order, so Alpaca accepts it. This is one of the few genuinely executable arbitrage patterns in the family.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "MANDATORY: submit as a SINGLE multi-leg order with a limit price. Never leg it — the violation exists for milliseconds and a half-filled spread is a naked short option, which Level 3 will reject on the second leg and which leaves an unintended exposure.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Scan gate: for a call vertical, flag when (K1_call_bid - K2_call_ask) x 100 > (K2 - K1) x 100 + fees + $10. For a put vertical, the symmetric test.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "100",
+        "100",
+        "10"
+      ]
+    },
+    {
+      "text": "Pre-trade checks: both legs' quotes timestamped within 2 seconds, displayed size >= 10 on both, underlying not halted, no OCC contract adjustment on either strike, same expiry and same deliverable.",
+      "reason": "structural: the template enforces this shape, so there is nothing for a predicate to check",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2",
+        "10"
+      ]
+    },
+    {
+      "text": "Do not chase: one limit order at the arbitrage price, cancel after 3 seconds if unfilled.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3"
+      ]
+    },
+    {
+      "text": "Nothing to manage if the violation was real — the position is worth at least zero at every price.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If only part of the intended size fills, accept the partial and do not increase the limit price.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "If the spread was established at a genuine arbitrage price, it can simply be held to expiry — but the assignment guard below still applies, because the short leg is American and share-settled.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    },
+    {
+      "text": "Close the short call by 15:00 ET the session before any ex-dividend date if its extrinsic value is below 1.25 x the declared dividend.",
+      "reason": "an exit or stop this compiler could not express",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1.25"
+      ]
+    },
+    {
+      "text": "If both legs finish ITM, close the spread rather than allowing the offsetting exercise and assignment to settle.",
+      "reason": "assignment prose: the machine-readable part is the guard, which is compiled separately where the sentence gives a time or a threshold",
+      "safety_critical": true,
+      "section": "exit_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "723160c09bf4ce26",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}

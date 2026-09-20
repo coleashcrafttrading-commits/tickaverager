@@ -1,0 +1,301 @@
+{
+  "slug": "calendar-straddle",
+  "ir_version": 1,
+  "status": "draft",
+  "alpaca_level": 3,
+  "construction": {
+    "template": "reverse_iron_butterfly",
+    "params": {
+      "short_delta": 0.5,
+      "front_dte": 28,
+      "back_dte": 57,
+      "dte": 28
+    },
+    "legs": [
+      {
+        "right": "call",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "sell",
+        "ratio": 1
+      },
+      {
+        "right": "call",
+        "action": "buy",
+        "ratio": 1
+      },
+      {
+        "right": "put",
+        "action": "buy",
+        "ratio": 1
+      }
+    ]
+  },
+  "preconditions": {
+    "all": [
+      {
+        "fact": "iv_rank_252",
+        "op": "lt",
+        "value": 25.0,
+        "src": "IV rank < 25."
+      }
+    ]
+  },
+  "accept": {
+    "all": [
+      {
+        "fact": "short_delta_abs",
+        "op": "between",
+        "value": [
+          0.45,
+          0.55
+        ],
+        "src": "Single ATM strike, |delta| 0.45-0.55, chosen at the highest-open-interest strike within 1 ATR of spot when a pin thesis exists."
+      },
+      {
+        "fact": "front_dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE."
+      },
+      {
+        "fact": "back_dte",
+        "op": "between",
+        "value": [
+          45.0,
+          70.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE."
+      },
+      {
+        "fact": "dte_gap_days",
+        "op": "gt",
+        "value": 0,
+        "src": "Front 21-35 DTE, back 45-70 DTE.",
+        "note": "implied by front < back"
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          21.0,
+          35.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE."
+      },
+      {
+        "fact": "dte",
+        "op": "between",
+        "value": [
+          45.0,
+          70.0
+        ],
+        "src": "Front 21-35 DTE, back 45-70 DTE."
+      },
+      {
+        "fact": "debit_pct_equity",
+        "op": "lte",
+        "value": 3.0,
+        "src": "Total debit <= 3% of equity; combined 4-leg bid-ask <= 8% of debit."
+      },
+      {
+        "fact": "earnings_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings or ex-dividend inside the front cycle."
+      },
+      {
+        "fact": "ex_div_in_expiry",
+        "op": "eq",
+        "value": false,
+        "src": "No earnings or ex-dividend inside the front cycle."
+      }
+    ]
+  },
+  "management": [
+    {
+      "kind": "profit_target",
+      "src": "Profit target +20% of total debit.",
+      "basis": "debit",
+      "fraction": 0.2
+    },
+    {
+      "kind": "stop_fraction",
+      "src": "Stop at -40% of total debit.",
+      "basis": "debit",
+      "fraction": 0.4
+    },
+    {
+      "kind": "max_units",
+      "src": "Max 2 units per underlying.",
+      "units": 2.0,
+      "scope": "underlying"
+    }
+  ],
+  "exits": [
+    {
+      "kind": "assignment_guard",
+      "src": "Close or roll BOTH short legs by 14:30 ET on front expiration day, unconditionally.",
+      "time_et": "14:30",
+      "scope": "short_legs",
+      "day": "expiration"
+    },
+    {
+      "kind": "dte_close",
+      "src": "Close the whole structure no later than 2 trading days before front expiry if not rolling.",
+      "dte": 2.0,
+      "trading_days": 2.0
+    },
+    {
+      "kind": "extrinsic_guard",
+      "src": "Whichever short goes ITM: close it immediately if extrinsic <= $0.05 or |delta| >= 0.90. Note that at expiry one of the two shorts is ALWAYS ITM by definition unless spot lands exactly on the strike - this structure guarantees an assignment candidate.",
+      "threshold_usd": 0.05
+    },
+    {
+      "kind": "itm_delta_guard",
+      "src": "Whichever short goes ITM: close it immediately if extrinsic <= $0.05 or |delta| >= 0.90. Note that at expiry one of the two shorts is ALWAYS ITM by definition unless spot lands exactly on the strike - this structure guarantees an assignment candidate.",
+      "abs_delta": 0.9
+    },
+    {
+      "kind": "dividend_guard",
+      "src": "Close the short call before ex-dividend if extrinsic < dividend per share."
+    },
+    {
+      "kind": "unwind_order",
+      "src": "Unwind shorts before longs.",
+      "shorts_first": true
+    }
+  ],
+  "limits": {
+    "max_units_per_underlying": 2.0,
+    "src": "Max 2 units per underlying."
+  },
+  "coverage": {
+    "entry_rules": {
+      "total": 7,
+      "compiled": 3,
+      "partial": 2,
+      "unexpressed": 2
+    },
+    "management_rules": {
+      "total": 6,
+      "compiled": 3,
+      "partial": 0,
+      "unexpressed": 3
+    },
+    "exit_rules": {
+      "total": 5,
+      "compiled": 4,
+      "partial": 1,
+      "unexpressed": 0
+    },
+    "safety_critical_uncompiled": 0
+  },
+  "unexpressed": [
+    {
+      "text": "front_IV - back_IV >= -2.0 vol points on BOTH the call and the put.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "2.0"
+      ]
+    },
+    {
+      "text": "Single ATM strike, |delta| 0.45-0.55, chosen at the highest-open-interest strike within 1 ATR of spot when a pin thesis exists.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "1"
+      ]
+    },
+    {
+      "text": "Total debit <= 3% of equity; combined 4-leg bid-ask <= 8% of debit.",
+      "reason": "unclassified: no matcher recognised this phrasing",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": true,
+      "left_over": null,
+      "missing_numbers": [
+        "4",
+        "8"
+      ]
+    },
+    {
+      "text": "LEVEL 3 OK: the short front call is covered by the long back call at the same strike, and the short front put by the long back put. Submit as a single 4-leg mleg; if rejected, submit two 2-leg calendars (call calendar and put calendar), LONG leg first on each.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "entry_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "3",
+        "4",
+        "2"
+      ]
+    },
+    {
+      "text": "If |spot - strike| > 0.8 x front-month ATM straddle price, close - the pin thesis has failed.",
+      "reason": "discretionary: no machine-readable condition in the sentence",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.8"
+      ]
+    },
+    {
+      "text": "If |net delta| > 0.35 per unit, close rather than adjust; recentering a calendar straddle costs four legs of slippage.",
+      "reason": "order mechanics: owned by optexec, not by the IR",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "0.35"
+      ]
+    },
+    {
+      "text": "Roll both shorts out one expiry at front DTE <= 7 only if both shorts' |delta| <= 0.60, for a net credit.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "management_rules",
+      "partial": false,
+      "left_over": null,
+      "missing_numbers": [
+        "7",
+        "0.60"
+      ]
+    },
+    {
+      "text": "Whichever short goes ITM: close it immediately if extrinsic <= $0.05 or |delta| >= 0.90. Note that at expiry one of the two shorts is ALWAYS ITM by definition unless spot lands exactly on the strike - this structure guarantees an assignment candidate.",
+      "reason": "conditional exception clause: the IR has no way to attach an 'unless' to a compiled predicate without an expression language",
+      "safety_critical": false,
+      "section": "exit_rules",
+      "partial": true,
+      "left_over": "Whichever short goes ITM: close it immediately if   or  . Note that at expiry on",
+      "missing_numbers": null
+    }
+  ],
+  "safety_gaps": [],
+  "blocked_on": [],
+  "provenance": {
+    "source_doc_sha": "b701ba096589771b",
+    "compiled_at": "2026-09-20T02:52:36+00:00",
+    "compiler": "optcompile",
+    "reviewed_by": null,
+    "reviewed_at": null
+  }
+}
