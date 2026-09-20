@@ -1598,16 +1598,27 @@ class ExitRouter:
         return {"cancelled": True, "order_id": oid, "response": resp}
 
 
+#: Statuses in which an order is NOT working: it cannot fill, so it neither
+#: blocks a new exit nor needs cancelling. `pending_cancel` is in here on
+#: purpose -- a cancel we have already sent must not be re-sent every cycle,
+#: and the replacement it was cancelled for has already gone out.
+NOT_WORKING_STATUSES = frozenset({
+    "filled", "canceled", "cancelled", "expired", "rejected", "done_for_day",
+    "replaced", "stopped", "suspended", "pending_cancel", "pending_replace",
+})
+
+
 def our_working_exits(rows: Sequence[dict], stems: Sequence[str]
                       ) -> list[dict]:
-    """The orders in `rows` that THIS position's exit path issued.
+    """The orders in `rows` that THIS position's exit path issued and that
+    can still fill.
 
     Matched on the client_order_id stem rather than on the leg symbols, and
     that is the whole point. The C1 parachute is a deliberate bad-price
     buy-to-close resting on every short leg for the life of the position;
     matching on symbols would see it, call it "an exit is already working"
-    and block the real exit forever. Somebody else's order on our legs is
-    reported to the human (`foreign` below) and never treated as ours.
+    and block the real exit forever. Somebody else's resting order on our
+    legs is theirs, and it never stops us getting out.
     """
     keys = tuple(s for s in stems if s)
     if not keys:
@@ -1615,8 +1626,12 @@ def our_working_exits(rows: Sequence[dict], stems: Sequence[str]
     out = []
     for row in rows or []:
         coid = str((row or {}).get("client_order_id") or "")
-        if coid.startswith(keys):
-            out.append(dict(row))
+        if not coid.startswith(keys):
+            continue
+        if str((row or {}).get("status") or "").lower() in \
+                NOT_WORKING_STATUSES:
+            continue
+        out.append(dict(row))
     return out
 
 
@@ -1700,6 +1715,18 @@ def resolve_working_exits(position: LifePosition, *, router: ExitRouter,
     cancelled = [router.cancel(str(r.get("id") or ""),
                                label="reprice:%s" % position.underlying)
                  for r in ours]
+    took = [c for c in cancelled if c.get("cancelled") or c.get("dry_run")]
+    if len(took) != len(cancelled):
+        # A CANCEL THAT DID NOT TAKE IS A LIVE ORDER. Sending the
+        # replacement anyway would be exactly the duplicate this function
+        # exists to prevent, arrived at through the repair path, so the
+        # stale order keeps blocking until it can be cancelled.
+        return ours, cancelled, (
+            "%d of %d cancels were refused (%s) -- not repricing over an "
+            "order that is still live at the broker"
+            % (len(cancelled) - len(took), len(cancelled),
+               "; ".join(str(c.get("reason") or "") for c in cancelled
+                         if not (c.get("cancelled") or c.get("dry_run")))))
     position.exit_generation += 1
     return [], cancelled, ("%d exit(s) of ours had rested past %.0fs and "
                            "were cancelled to be repriced as generation %d"
@@ -1770,8 +1797,13 @@ def close(position: LifePosition, reason: str, *, router: ExitRouter,
     resting, cancelled, why_working = resolve_working_exits(
         position, router=router, alpaca=alpaca, session=session)
     if resting:
+        # `unsent` stays EMPTY here: an exit of ours is working on these
+        # contracts, so they are covered. `unsent` means "nobody is closing
+        # this", and reporting a resting order as uncovered would cry wolf
+        # every cycle until it filled.
         return CloseResult(accepted=False, qty=0, at_risk=at_risk,
-                           unsent=dict(at_risk), resting=resting,
+                           unsent={}, resting=resting,
+                           cancelled=cancelled,
                            reason=("%s -- not re-sent: %s"
                                    % (reason, why_working)))
 
@@ -2061,6 +2093,7 @@ def reconcile(alpaca: Any, positions: Iterable[LifePosition], *,
 
     for lp in live:
         gone = 0
+        observed: list[int] = []
         for leg in lp.book.legs:
             sym = optbook.leg_symbol(leg)
             seen.add(sym)
@@ -2096,8 +2129,6 @@ def reconcile(alpaca: Any, positions: Iterable[LifePosition], *,
                     # that are actually on the account.
                     leg["qty"] = int(bl.contracts)
                     lp.book.qty = max(int(lp.book.qty or 0), int(bl.contracts))
-                    lp.broker_contracts = max(int(lp.broker_contracts or 0),
-                                              int(bl.contracts))
                     row["escalated"] = True
                     row["why"] += (" -- the local leg is raised to %d so the "
                                    "remainder keeps being managed and closed;"
@@ -2109,10 +2140,15 @@ def reconcile(alpaca: Any, positions: Iterable[LifePosition], *,
                                    "attributed to any of them"
                                    % claimants.get(sym, 0))
                 r.qty_mismatch.append(row)
+                observed.append(int(bl.contracts or 0))
                 continue
-            lp.broker_contracts = max(int(lp.broker_contracts or 0),
-                                      int(bl.contracts or 0))
+            observed.append(int(bl.contracts or 0))
             r.matched.append(sym)
+
+        # A fresh reading every cycle, never a high-water mark: a position
+        # that has half closed is half the risk it was, and a number that
+        # only ever goes up would keep it "live" after it was flat.
+        lp.broker_contracts = max(observed) if observed else None
 
         if gone and gone == len(lp.book.legs) and lp.state == CLOSING:
             # The exit filled. This is the ONE place CLOSED is reached, and

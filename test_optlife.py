@@ -963,6 +963,42 @@ check("the same id would come back for the same generation",
       optlife.close_coid(p, intent="close", generation=1, session=SESSION))
 check("and the result records the cancel", len(r4.cancelled), 1)
 
+# An order of ours that can no longer fill is not a working exit: a filled
+# or cancelled row must not block the next close forever.
+dup.orders, dup.cancelled = [], []
+dup.working = [{"id": "o-2", "client_order_id": coid, "status": "canceled",
+                "submitted_at": submitted_at(at(10, 30))}]
+dup.now = at(10, 31, DAY)
+optlife.close(p, "target", router=router_for(dup), alpaca=dup, m=m16,
+              session=SESSION)
+check("a cancelled order of ours does not block the exit", len(dup.orders), 1)
+check("and nothing was cancelled a second time", dup.cancelled, [])
+
+
+# A CANCEL THAT DID NOT TAKE IS A LIVE ORDER: the replacement must not go out
+# over the top of it, which would be the duplicate arriving by the repair
+# path.
+class NoCancel(FakeAlpaca):
+    def _req(self, method, url, path, **kw):
+        if method == "DELETE" and "/v2/orders/" in url:
+            raise RuntimeError("422 the order is already being filled")
+        return super()._req(method, url, path, **kw)
+
+
+stuck = NoCancel([pos_row(SHORT_SYM, 1, "short"),
+                  pos_row(LONG_SYM, 1, "long")], now=at(10, 32))
+stuck.working = [{"id": "o-3", "client_order_id": coid, "status": "new",
+                  "submitted_at": submitted_at(at(10, 30))}]
+gen_before = p.exit_generation
+r6 = optlife.close(p, "target", router=router_for(stuck), alpaca=stuck,
+                   m=m16, session=SESSION)
+check("a refused cancel sends NO replacement", len(stuck.orders), 0)
+check("and does not burn a reprice generation", p.exit_generation,
+      gen_before)
+check("the reason says the order is still live",
+      "still live at the broker" in r6.reason, True)
+
+
 # When the working orders cannot be read we send anyway: a stranded short
 # leg is worse than a duplicate the broker will refuse on the id.
 
