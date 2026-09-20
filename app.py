@@ -2409,8 +2409,15 @@ def options_watch(body: dict = Body(...), f: Fleet = Depends(cur)):
                          "saying why it is worth the data budget. A "
                          "watchlist whose rows have no provenance becomes a "
                          "pile nobody dares prune.")
+            # allow_share_conflict has to be reachable from here: optwatch
+            # refuses a share-fleet collision with a message that tells the
+            # caller to pass exactly this, and a refusal advertising a lever
+            # the API does not expose is a dead end. The overlap stays a
+            # loud warning on the row and nothing may be armed on it.
             optwatch.add(sym, why, tier=str(body.get("tier") or "B"),
-                         notes=str(body.get("notes") or ""))
+                         notes=str(body.get("notes") or ""),
+                         allow_share_conflict=bool(
+                             body.get("allow_share_conflict")))
         elif action == "remove":
             optwatch.remove(sym)
         else:
