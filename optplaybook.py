@@ -2383,19 +2383,16 @@ class Playbook:
         for a in proposal_order(self.assignments.all()):
             open_pos = self.ledger.open_for(a.symbol, a.play)
             permitted, why = arm.permits(a.symbol, a.play)
-            hold = holds.get(a.key())
             rows.append({
                 **a.as_dict(),
                 "armed": permitted, "arm_why": why,
                 "open": [p.as_dict() for p in open_pos],
                 "open_count": len(open_pos),
-                # The order these are proposed and sized in, on the row itself,
-                # because "why did the swing get the money and not the spread"
-                # is unanswerable from a screen that does not show it.
+                # The order these are PROPOSED in, on the row itself. It is
+                # ordering only now -- there is no allocation behind it since
+                # the capital cap was removed -- but "which play is asked
+                # first" is still worth being able to see.
                 "priority": priority_of(a.play),
-                "reserves": (round(hold["max_loss"], 2)
-                             if hold and hold["measured"] else None),
-                "reserve_why": (hold or {}).get("label") or "",
             })
         last = self.last.as_dict() if self.last else None
         return {
