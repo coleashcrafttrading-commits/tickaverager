@@ -2661,11 +2661,16 @@ def optlab_plays_arm(body: dict = Body(...), f: Fleet = Depends(cur)):
         # Arming a key nothing is assigned to would look armed and never trade.
         raise HTTPException(400, "nothing is assigned for: %s. Assign the play "
                                  "to the ticker first." % ", ".join(unknown))
+    # ADDITIVE by default. There is one arm file, so a single-key write used to
+    # REPLACE the set, which meant arming a second ticker silently disarmed the
+    # first. `replace: true` is the deliberate "arm exactly this and nothing
+    # else", which is what the Arm-everything button sends.
     try:
         arm = _pbook.write_arm(
             keys, reason=reason, by=str(body.get("by") or "dashboard"),
             days=int(body.get("days") or _pbook.ARM_DEFAULT_DAYS),
-            path=Path(f.state_dir) / "options" / "PLAYS_ARMED")
+            path=Path(f.state_dir) / "options" / "PLAYS_ARMED",
+            merge=not bool(body.get("replace")))
     except (_pbook.PlaybookError, ValueError) as e:
         raise HTTPException(400, str(e))
     fz = frozen(f.state_dir)
@@ -2676,8 +2681,12 @@ def optlab_plays_arm(body: dict = Body(...), f: Fleet = Depends(cur)):
 
 @app.post("/api/a/{acct}/optlab/plays/disarm")
 @app.post("/api/optlab/plays/disarm")
-def optlab_plays_disarm(f: Fleet = Depends(cur)):
+def optlab_plays_disarm(body: dict = Body(default=None), f: Fleet = Depends(cur)):
     """Stop opening. Never stops an exit.
+
+    With no body, disarms EVERYTHING. With `keys`, disarms only those and
+    leaves the rest of the set armed -- the counterpart to the additive arm, so
+    one row's Disarm does not switch off the other eight.
 
     No reason required, no rate limit, and no broker needed: the stop button has
     to work when everything else does not. Open positions stay under
@@ -2685,9 +2694,24 @@ def optlab_plays_disarm(f: Fleet = Depends(cur)):
     make the stop button the thing that strands a short leg into expiry.
     """
     path = Path(f.state_dir) / "options" / "PLAYS_ARMED"
-    was = _pbook.disarm(path)
     open_n = len(_pbook.Ledger(Path(f.state_dir) / "options"
                                / "play_ledger.jsonl").open_positions())
+    keys = (body or {}).get("keys")
+    if isinstance(keys, str):
+        keys = [keys]
+    keys = [str(k).strip() for k in (keys or []) if str(k).strip()]
+    if keys:
+        try:
+            arm = _pbook.disarm_keys(keys, path=path, by="dashboard")
+        except _pbook.PlaybookError as e:
+            raise HTTPException(409, str(e))
+        return {"ok": True, "disarmed": keys, "arm": arm.as_dict(),
+                "open_positions": open_n,
+                "note": ("%s will not open anything new. Still armed: %s. "
+                         "%d open position(s) stay managed."
+                         % (", ".join(keys),
+                            ", ".join(arm.keys) or "nothing", open_n))}
+    was = _pbook.disarm(path)
     return {"ok": True, "was_armed": was,
             "open_positions": open_n,
             "note": ("Opening is off. %d open position(s) are still managed to "

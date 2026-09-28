@@ -247,13 +247,38 @@ def load_arm(path: Path = ARM_PATH) -> Arm:
 
 
 def write_arm(keys, *, reason: str, by: str = "", days: int = ARM_DEFAULT_DAYS,
-              path: Path = ARM_PATH) -> Arm:
-    """Arm. Refuses to write a file that would not then load as valid."""
+              path: Path = ARM_PATH, merge: bool = True) -> Arm:
+    """Arm. Refuses to write a file that would not then load as valid.
+
+    `merge` is the default and it matters: arming is ADDITIVE. There is one arm
+    file, so writing it with a single key used to REPLACE whatever was there,
+    which meant arming a second ticker silently disarmed the first -- exactly
+    the opposite of what a button labelled "Arm" on one row of nine should do.
+    Merging means each row's Arm adds that key to the set and leaves the rest
+    alone, so as many plays can run at once as the owner turns on.
+
+    `merge=False` is for the deliberate "arm exactly this set and nothing else"
+    call, which is what "Arm everything" does when it writes ["*"].
+
+    A merge onto an EXPIRED or otherwise invalid arm starts fresh rather than
+    inheriting its keys: an expired arm is not a set of permissions to extend,
+    and silently re-arming keys somebody last approved a month ago is not what
+    pressing Arm on one row asked for.
+    """
     if not reason.strip():
         raise PlaybookError("arming needs a reason -- it goes in the audit log")
     ks = [str(k) for k in (keys or []) if str(k).strip()]
     if not ks:
         raise PlaybookError("arming needs at least one SYMBOL:play key, or '*'")
+    if merge:
+        cur = load_arm(path)
+        if cur.valid:
+            ks = list(cur.keys) + [k for k in ks if k not in cur.keys]
+    # "*" subsumes everything, so keeping named keys beside it is noise that
+    # would make the strip read "armed for *, SPY:x, QQQ:y" and invite the
+    # reading that removing SPY:x narrows anything. It does not.
+    if "*" in ks:
+        ks = ["*"]
     d = max(1, min(int(days), ARM_MAX_DAYS))
     payload = {
         "phrase": ARM_PHRASE, "keys": ks, "reason": reason.strip(), "by": by,
@@ -276,11 +301,49 @@ def write_arm(keys, *, reason: str, by: str = "", days: int = ARM_DEFAULT_DAYS,
 
 
 def disarm(path: Path = ARM_PATH) -> bool:
+    """Disarm everything. The stop button: no arguments, no conditions."""
     p = Path(path)
     existed = p.exists()
     if existed:
         p.unlink()
     return existed
+
+
+def disarm_keys(keys, *, path: Path = ARM_PATH, by: str = "") -> Arm:
+    """Disarm just these keys, leaving the rest of the set armed.
+
+    The counterpart to write_arm's merge. Removing the last key removes the
+    file, because an arm file with an empty key list is a file that arms
+    nothing, and leaving one lying around invites the reading that something
+    is still armed.
+
+    Disarming a NAMED key while "*" is armed cannot be done by subtraction --
+    "*" is not a list the key is in. Rather than silently expanding "*" into
+    every assignment (which would freeze the set at this moment and quietly
+    stop arming anything added later), this refuses and says to disarm and
+    re-arm the ones wanted. Being told that is better than a button that
+    appears to work and changes the meaning of the arm.
+    """
+    p = Path(path)
+    cur = load_arm(p)
+    if not cur.present:
+        return cur
+    drop = {str(k) for k in (keys or [])}
+    if "*" in cur.keys and drop and "*" not in drop:
+        raise PlaybookError(
+            "everything is armed with '*', so %s cannot be removed from it. "
+            "Disarm, then arm the keys you want."
+            % ", ".join(sorted(drop)))
+    left = [k for k in cur.keys if k not in drop]
+    if not left:
+        disarm(p)
+        return load_arm(p)
+    return write_arm(left, reason=cur.reason or "narrowed", by=by or cur.by,
+                     days=max(1, int((cur.expires
+                                      - _dt.datetime.now(_dt.timezone.utc))
+                                     .total_seconds() // 86400) + 1)
+                     if cur.expires else ARM_DEFAULT_DAYS,
+                     path=p, merge=False)
 
 
 # ================================================================== the book

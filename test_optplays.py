@@ -654,6 +654,82 @@ def main() -> int:
           len(res3.errors), 1)
     check("...and is not silently adopted", res3.adopted, 0)
 
+
+    print("\n20. ARMING IS ADDITIVE -- as many plays on as the owner turns on")
+    # The bug this pins: there is ONE arm file, so a single-key write used to
+    # replace the whole set. Arming a second ticker silently disarmed the
+    # first, which is the opposite of what an Arm button on one row of nine
+    # should do. Reported by the owner: "its only letting me arm one at a time.
+    # I want to have as many working as I want."
+    mp = os.path.join(tempfile.mkdtemp(), "ARMED")
+    a1 = PB.write_arm(["SPY:index-put-credit-spread"], reason="first", by="t",
+                      days=5, path=mp)
+    check("one key armed", list(a1.keys), ["SPY:index-put-credit-spread"])
+    a2 = PB.write_arm(["QQQ:index-put-credit-spread"], reason="second", by="t",
+                      days=5, path=mp)
+    check("arming a second key KEEPS the first",
+          sorted(a2.keys),
+          ["QQQ:index-put-credit-spread", "SPY:index-put-credit-spread"])
+    a3 = PB.write_arm(["AAPL:swing-atm-hourly"], reason="third", by="t",
+                      days=5, path=mp)
+    check("and a third", len(a3.keys), 3)
+    check("all three are permitted",
+          [a3.permits("SPY", "index-put-credit-spread")[0],
+           a3.permits("QQQ", "index-put-credit-spread")[0],
+           a3.permits("AAPL", "swing-atm-hourly")[0]], [True, True, True])
+    check("something never armed is still refused",
+          a3.permits("TSLA", "swing-atm-hourly")[0], False)
+    again = PB.write_arm(["SPY:index-put-credit-spread"], reason="dup", by="t",
+                         days=5, path=mp)
+    check("arming the same key twice does not duplicate it", len(again.keys), 3)
+
+    print("\n21. Disarming one key leaves the rest armed")
+    left = PB.disarm_keys(["QQQ:index-put-credit-spread"], path=mp)
+    check("the disarmed key is gone",
+          "QQQ:index-put-credit-spread" in left.keys, False)
+    check("the others are still armed", sorted(left.keys),
+          ["AAPL:swing-atm-hourly", "SPY:index-put-credit-spread"])
+    check("...and still permitted",
+          left.permits("SPY", "index-put-credit-spread")[0], True)
+    check("the disarmed one is not",
+          left.permits("QQQ", "index-put-credit-spread")[0], False)
+    gone = PB.disarm_keys(["AAPL:swing-atm-hourly",
+                           "SPY:index-put-credit-spread"], path=mp)
+    check("removing the last key removes the file", gone.present, False)
+    check("...so nothing is armed", gone.valid, False)
+
+    print("\n22. A star is not a list, and says so instead of pretending")
+    PB.write_arm(["*"], reason="everything", by="t", days=5, path=mp,
+                 merge=False)
+    raises("a named key cannot be subtracted from a star",
+           lambda: PB.disarm_keys(["SPY:index-put-credit-spread"], path=mp),
+           PB.PlaybookError)
+    check("...and the star is still armed after the refusal",
+          PB.load_arm(mp).permits("ANY", "swing-atm-hourly")[0], True)
+    merged = PB.write_arm(["SPY:index-put-credit-spread"], reason="x", by="t",
+                          days=5, path=mp)
+    check("arming a named key while the star is on collapses back to the star",
+          list(merged.keys), ["*"])
+    PB.write_arm(["SPY:index-put-credit-spread"], reason="narrow", by="t",
+                 days=5, path=mp, merge=False)
+    check("merge=False is how a set is deliberately narrowed",
+          list(PB.load_arm(mp).keys), ["SPY:index-put-credit-spread"])
+
+    print("\n23. A merge never revives an EXPIRED arm's keys")
+    # An expired arm is not a set of permissions to extend. Silently re-arming
+    # keys somebody last approved a month ago is not what pressing Arm on one
+    # row asked for.
+    with open(mp, "w", encoding="utf-8") as fh:
+        json.dump({"phrase": PB.ARM_PHRASE,
+                   "keys": ["OLD:index-put-credit-spread"], "reason": "stale",
+                   "expires": (dt.datetime.now(dt.timezone.utc)
+                               - dt.timedelta(days=1)).isoformat()}, fh)
+    fresh = PB.write_arm(["NEW:swing-atm-hourly"], reason="today", by="t",
+                         days=5, path=mp)
+    check("only the new key is armed", list(fresh.keys),
+          ["NEW:swing-atm-hourly"])
+    check("the expired arm's key is NOT revived",
+          fresh.permits("OLD", "index-put-credit-spread")[0], False)
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
     return 1 if FAIL else 0
 

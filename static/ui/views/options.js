@@ -2434,7 +2434,12 @@ function plPreview(cy) {
 }
 
 /* ---------------------------------------------------------------- actions */
-async function plArm(keys, label) {
+/* Arming is ADDITIVE unless `replace` is set. One row's Arm adds that key to
+   the set; it does not become the set. The first version replaced it, so
+   arming a second ticker silently disarmed the first -- the opposite of what
+   an Arm button on one row of nine should do. */
+async function plArm(keys, label, opts) {
+  const replace = !!(opts && opts.replace);
   const reason = await ask(
     `Arming ${label}. Why? (it goes in the audit log)`, "");
   if (reason == null || !String(reason).trim()) {
@@ -2446,9 +2451,11 @@ async function plArm(keys, label) {
   try {
     const r = await POST("/api/optlab/plays/arm", {
       keys, reason: String(reason).trim(), days: Number(days) || 7,
-      by: "dashboard",
+      by: "dashboard", replace,
     });
-    toast(r.warning ? r.warning : `Armed ${label}.`);
+    const now = ((r.arm || {}).keys || []).join(", ");
+    toast(r.warning ? r.warning
+          : `Armed ${label}. Now armed: ${now || "nothing"}.`);
     return true;
   } catch (e) {
     toast(e.message || String(e));
@@ -2524,7 +2531,7 @@ function mountPlays() {
       return load();
     }
     if (t.id === "pl-arm-all") {
-      if (await plArm(["*"], "every assigned play")) load();
+      if (await plArm(["*"], "every assigned play", { replace: true })) load();
       return;
     }
     if (t.id === "pl-seed") {
@@ -2605,11 +2612,13 @@ function mountPlays() {
         toast(`${key} ${rec.enabled ? "disabled" : "enabled"}.`);
       } else if (act === "arm") {
         if (rec.armed) {
-          /* Per-row disarm is the global disarm: the arm file is one file, and
-             pretending otherwise by silently rewriting its key list would make
-             one button quietly change what another one armed. Say so. */
-          const r = await POST("/api/optlab/plays/disarm", {});
-          toast(r.note || "Disarmed everything — the arm file is one file.");
+          /* Disarm THIS key only; the rest of the set stays armed. The server
+             answers 409 when everything is armed with "*", because a named key
+             cannot be subtracted from "*" without silently freezing the set --
+             the toast passes that sentence straight through rather than
+             guessing at what the person meant. */
+          const r = await POST("/api/optlab/plays/disarm", { keys: [key] });
+          toast(r.note || `Disarmed ${key}.`);
         } else {
           await plArm([key], key);
         }
