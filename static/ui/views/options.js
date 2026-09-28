@@ -3029,22 +3029,27 @@ function ovBar(frac) {
 function ovCapital(d) {
   const k = d.risk || {};
   const frac = mv(k.utilization);
-  const pctOfBp = k.fraction == null ? "the ceiling"
+  /* There is no ceiling any more -- the capital cap was removed -- so when the
+     backend sends no fraction the honest subtitle says what bounds size
+     instead, rather than naming a limit that does not exist. */
+  const pctOfBp = k.fraction == null ? "none set — the broker is the limit"
     : (Number(k.fraction) * 100).toFixed(0) + "% of options BP";
   return card("Capital at risk", `
     <div class="pl-stats">
       ${stat("At risk now", pfv(k.at_risk, mny), pfn(k.at_risk, "open position"))}
       ${stat("Ceiling", pfv(k.ceiling, mny), pfs(k.ceiling, pctOfBp))}
-      ${stat("Used", pfv(k.utilization, fracPc1), pfs(k.utilization, "of the ceiling"))}
+      ${stat("Used", pfv(k.utilization, fracPc1),
+             pfs(k.utilization, "of options buying power"))}
       ${stat("Headroom", pfv(k.headroom, roomv),
              pfs(k.headroom, (mv(k.headroom) || 0) < 0
-                 ? "already through the ceiling" : "left for a new play"))}
+                 ? "past what the broker will fund" : "the broker will fund"))}
     </div>
     ${ovBar(frac)}
     <div class="pl-stats" style="margin-top:12px">
       ${stat("Options BP", pfv(k.bp, mny), pfs(k.bp, "from the account"))}
-      ${stat("Positions", `${n0(k.positions_open)}<span class="faint">/${n0(k.positions_cap)}</span>`,
-             "open against the cap")}
+      ${stat("Positions", n0(k.positions_open),
+             k.positions_cap == null ? "open — no cap"
+                                     : `open of ${n0(k.positions_cap)} allowed`)}
     </div>
     ${k.unbounded ? `<div class="note bad"><b>${n0(k.unbounded)} open
       position(s) have no bounded loss</b>, so the figure above is a floor and
