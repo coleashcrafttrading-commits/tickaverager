@@ -1261,6 +1261,14 @@ class Playbook:
             if sig.direction == "down" and want == "calls":
                 pr.reason = "signal is down but this ticker is set to calls only"
                 return
+            if params.get("same_session_only") and sig.session is not None:
+                today = _dt.datetime.now(NY).date()
+                if sig.session != today:
+                    pr.reason = ("the last closed hourly bar is from %s, not "
+                                 "today (%s) -- waiting for this session's "
+                                 "first bar to close rather than opening on a "
+                                 "stale cross" % (sig.session, today))
+                    return
             if params.get("one_per_bar") and sig.bar_id:
                 seen = [p for p in self.ledger.positions()
                         if p.symbol == a.symbol and p.play == a.play

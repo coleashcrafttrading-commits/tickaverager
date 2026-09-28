@@ -166,6 +166,15 @@ PLAYS: dict = {
             # One position per closed hourly bar. Without this the same bar
             # re-triggers on every cycle for the whole hour.
             "one_per_bar": True,
+            # THE BAR MUST BE FROM TODAY. The owner's rule is an EVENT -- "open
+            # when price moves and crosses above or below and closes in
+            # relation to those values" -- and an event from Friday is not a
+            # Monday event. Without this, the last closed bar at 09:31 on
+            # Monday is still Friday's 15:30 bar, so the system would open at
+            # the open on a 2.5-day-old cross, straight into the weekend gap it
+            # knows nothing about. With it, the first swing entry of a session
+            # is at 10:30 ET, when that session's first hourly bar closes.
+            "same_session_only": True,
         },
         editable=("contracts", "target_dte", "profit_pct", "stop_pct",
                   "direction", "max_open"),
