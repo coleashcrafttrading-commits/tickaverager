@@ -65,6 +65,7 @@ import greeks as G
 import optdata
 import optexec
 import optguard
+import options
 import optplays as P
 import optsignal
 import optsym
@@ -101,7 +102,47 @@ ARM_DEFAULT_DAYS = 7
 #: Portfolio ceilings, checked against the live account every cycle. These are
 #: the last thing between a bug in the proposal path and the whole account.
 MAX_CONCURRENT_POSITIONS = 24
-MAX_OPEN_RISK_FRACTION = 0.60      # of options buying power, all plays together
+
+#: Capital is allocated PER TIER and the tiers do not share a dollar. The
+#: owner's rule is that the index credit spreads sell "every day ... no matter
+#: what", because they are the income that funds the buying, and a SHARED
+#: ceiling cannot express that however it is ordered. Measured on the live
+#: account 28 Sep 2026: options BP $18,674.80, a 60% ceiling of $11,204.88, and
+#: six 33-DTE swings holding $11,185.00 of it -- $19.88 of headroom against a
+#: SPY spread needing $1,735 and a QQQ spread needing $1,705. Neither was
+#: outranked; the money was spent in earlier cycles by positions with
+#: max_open=1 that will not give it back for a month. Priority reorders
+#: proposals INSIDE one cycle and cannot reclaim what a previous one spent.
+CREDIT_RISK_FRACTION = 0.40        # of options BP, the income tier only
+DEBIT_RISK_FRACTION = 0.20         # of options BP, the swing tier only
+
+#: WHY 0.40, and it is arithmetic rather than taste. Measured 27-28 Sep 2026:
+#: SPY 744/742p x10 is $1,750 of defined risk and QQQ 707/705p x10 is $1,705 --
+#: call the pair $3,455 -- and the pair is written AGAIN every session, so what
+#: the tier needs is that pair times the number of sessions a spread is still
+#: open when the next one is written. Against $18,674.80 of options BP:
+#:      1 session of pairs   $3,455   0.185 of BP
+#:      2 sessions           $6,910   0.370 of BP   <- 0.40 covers this
+#:      3 sessions          $10,365   0.555 of BP   (0.045 left for every swing)
+#:      6 sessions          $20,730   1.110 of BP   (max_open=6: unfundable)
+#: 0.40 is the smallest round fraction that funds a second consecutive session
+#: without the first one having closed. It is a CHOICE, not a measurement: this
+#: stack has never carried a spread to its target, so the real holding period
+#: is unknown, and if it runs past two sessions the third day's spread is
+#: refused for want of capital -- loudly, naming this number, which is the
+#: honest failure. max_open=6 says the owner expects to stack six; six needs
+#: $20,730 against $18,674 of buying power, so at this account size the binding
+#: constraint is the ACCOUNT and no fraction of it fixes that.
+
+#: The total cap is kept as the SUM and never as its own number, so it cannot
+#: drift away from the two allocations that actually bind. It is still 0.60 of
+#: options buying power: this re-divides that money, it does not widen it.
+#: Raising it is a risk decision and is not the code's to make.
+#: app.py, optperf.py and test_optperf.py read this name.
+# Rounded because 0.40 + 0.20 is 0.6000000000000001 in binary floating
+# point, and that number reaches the dashboard and the perf report.
+MAX_OPEN_RISK_FRACTION = round(CREDIT_RISK_FRACTION
+                               + DEBIT_RISK_FRACTION, 4)
 
 #: Cycle period for the worker.
 CYCLE_S = 20.0
@@ -114,6 +155,113 @@ CLOSE_SHORT_AT_DTE = 2
 #: A resting exit that has not filled in this long is repriced rather than
 #: duplicated.
 EXIT_REPRICE_AFTER_S = 300.0
+
+#: Resting the profit target can be refused for a reason that is TEMPORARY (a
+#: rate limit, a broker hiccup) or PERMANENT (the structure cannot rest as one
+#: order). A single refusal must not demote a position to loop-managed for the
+#: rest of its life, and an endless retry must not hammer /orders every 20s, so
+#: the cover is retried a few times, spaced out, and then left to the loop with
+#: the reason recorded on the position.
+REST_RETRY_AFTER_S = 300.0
+REST_MAX_ATTEMPTS = 3
+
+#: What the resting profit target asks for, and what it falls back to.
+#:
+#: MEASURED on PA3ILNUY5E4F, 28 Sep 2026, by reading the account's own order
+#: history rather than by placing anything: order
+#: ec9e004f-acf8-41e8-bfd0-afca8a666610, submitted 2026-09-18T20:15:56Z --
+#: 16:15 ET, AFTER the close -- order_class=mleg, time_in_force=gtc, two SPY
+#: option legs. Alpaca ACCEPTED it: it has an id, failed_at is null, and its
+#: status is "canceled", not "rejected". Both legs come back carrying
+#: time_in_force=gtc with expires_at=null, while the mleg DAY orders in the
+#: same history carry expires_at=2026-09-21T20:15:00Z -- so GTC was honoured
+#: on the legs and not quietly coerced to day. The cancel was the prober's
+#: own: the DAY mleg orders beside it were cancelled 344 and 356 ms after
+#: submission and this one 365 ms after, which is a client round trip and not
+#: a broker verdict.
+#:
+#: WHAT IS STILL NOT MEASURED. That order was OPENING (buy_to_open /
+#: sell_to_open). The resting exit built below is CLOSING, and no closing mleg
+#: order has ever been sent from this account. Settling that would mean
+#: placing an order on a live account, which is not ours to do, so the
+#: difference is covered by the fallback instead of by an assumption.
+REST_TIF_PREFERRED = "gtc"
+REST_TIF_FALLBACK = "day"
+
+#: The two kinds of refusal, and they are NOT the same fact.
+#:
+#: STRUCTURAL means the broker will never accept this body: five legs when mleg
+#: is 2-4, an order class that does not exist, a contract that is not listed.
+#: Retrying it tomorrow gets the same 422, so the attempt count is allowed to
+#: give up on it for good and hand the target to the loop.
+#:
+#: TEMPORARY means the same body would be accepted at another moment: the
+#: session's order window has shut, a rate limit, a 5xx, a dropped connection.
+#: Measured, CLAUDE.md: "Alpaca rejects option orders after 15:30 ET on broad
+#: ETFs (15:15 on single names)". A position that fills at 15:14 on a single
+#: name therefore burns all three attempts inside fifteen minutes against a
+#: window that reopens at the next bell -- and used to be loop-owned for the
+#: rest of its life, with NO resting exit if this process died. A temporary
+#: refusal is spaced out and its count is stale at the next session; it never
+#: demotes a position permanently.
+REST_TEMPORARY = "temporary"
+REST_STRUCTURAL = "structural"
+
+#: Substrings of a refusal that mean "later", not "never". Lower-cased match.
+#: Deliberately short: anything not recognised is treated as STRUCTURAL, which
+#: is the conservative reading -- a misclassified temporary refusal costs a
+#: loop-managed target, a misclassified structural one hammers /orders forever.
+REST_TEMPORARY_HINTS = (
+    "429", "rate limit", "too many requests",
+    "500", "502", "503", "504", "gateway", "unavailable", "internal server",
+    "timeout", "timed out", "connection", "temporarily", "try again",
+    "market is closed", "not accepting",
+)
+
+#: The broad ETFs, which get the LATER of Alpaca's two option-order cutoffs.
+#: Anything not on this list is treated as a single name and gets the EARLIER
+#: one, because assuming the earlier cutoff can only make us read a refusal as
+#: temporary -- which keeps trying to cover a position rather than giving up on
+#: one. Guessing the other way strips an exit.
+BROAD_ETFS = frozenset({"SPY", "QQQ", "IWM", "DIA", "VOO", "IVV", "VTI"})
+ORDER_CUTOFF_BROAD_ET = 15 * 60 + 30      # 15:30 ET
+ORDER_CUTOFF_SINGLE_ET = 15 * 60 + 15     # 15:15 ET
+SESSION_END_ET = 16 * 60                  # 16:00 ET
+
+#: Proposal order, and it is a POLICY rather than an accident. The index credit
+#: spreads are the income leg that funds the buying -- the owner: "we are
+#: constantly selling options on the index etfs in order to fund our buying" --
+#: and they open "every day ... no matter what". `Assignments.active()` is
+#: sorted by SYMBOL, so AAPL, AMZN, GOOGL, META, MSFT and NVDA all sorted ahead
+#: of QQQ and SPY and the seven swing buys consumed the whole 60%-of-buying-
+#: power ceiling before either spread was ever priced. Measured on 28 Sep 2026:
+#: "$1760 of risk needs $1760 of room; $8922 open against a $10515 ceiling".
+#: Alphabetical order deciding which strategy gets funded is not a decision
+#: anybody made.
+PLAY_PRIORITY = {P.CREDIT_SPREAD: 0, P.LONG_SINGLE: 1}
+UNRANKED_PRIORITY = 9
+
+#: Which allocation a play spends from. Ordering says who is asked first;
+#: THIS says whose money it is. Anything not in this map -- a mistyped play, or
+#: the "monitored" kind an ADOPTED broker position carries -- spends the DEBIT
+#: budget, for the same reason a typo sorts at UNRANKED_PRIORITY. Glenn's own
+#: trades and hand-placed ones live on this account and adopt as monitored;
+#: they are real risk and must be counted somewhere, and counting them against
+#: the swings rather than the income tier keeps the one guarantee the owner
+#: asked for out of reach of anything this system did not open itself.
+TIER_CREDIT = "credit"
+TIER_DEBIT = "debit"
+PLAY_TIER = {P.CREDIT_SPREAD: TIER_CREDIT, P.LONG_SINGLE: TIER_DEBIT}
+TIER_FRACTION = {TIER_CREDIT: CREDIT_RISK_FRACTION,
+                 TIER_DEBIT: DEBIT_RISK_FRACTION}
+
+
+def tier_of_kind(kind: str) -> str:
+    return PLAY_TIER.get(str(kind or ""), TIER_DEBIT)
+
+#: Where the measured requirement of each income play is remembered between
+#: sessions, so a swing cannot spend headroom a spread will need later today.
+RESERVE_PATH = OPT_STATE_DIR / "play_reserve.json"
 
 
 class PlaybookError(Exception):
@@ -376,9 +524,47 @@ class PlayPosition:
     stop_px: Optional[float] = None
     rest_order_id: str = ""
     rest_refused: str = ""
+    #: What the resting exit is sized for. A partial fill that later grows is a
+    #: bigger position than the cover on it, and a cover for 3 of 10 contracts
+    #: is seven naked ones.
+    rest_contracts: int = 0
+    rest_attempts: int = 0
+    rest_refused_at: float = 0.0
+    #: Which time_in_force the resting exit is ACTUALLY on, "" when nothing
+    #: rests. Not cosmetic: a GTC rest is there overnight and over a weekend,
+    #: a DAY rest is gone at the close. "This position has a resting exit" and
+    #: "this position has a resting exit tomorrow morning" are different facts
+    #: and this is the field that tells them apart.
+    rest_tif: str = ""
+    #: The ET session key a DAY rest was last SEEN WORKING in. Empty on the
+    #: GTC path, where it would mean nothing -- a date there would read as if
+    #: it did. NOT `rest_session`, which is the session a REFUSAL was counted
+    #: in: one is about an order that exists, the other about one that never
+    #: got placed, and sharing a field would have each clobber the other.
+    rest_tif_session: str = ""
+    #: The broker's own words when it refused the GTC form on this position,
+    #: empty when it did not. A position on the DAY fallback has an exit that
+    #: dies every afternoon and is re-placed by a process that may not be
+    #: running, so the reason travels with the position and not just the
+    #: outcome.
+    rest_downgraded: str = ""
+    #: Whether the last refusal was TEMPORARY or STRUCTURAL, and the session it
+    #: happened in. Both exist so an attempt count cannot outlive the reason it
+    #: was counting: three refusals inside the fifteen minutes after a single
+    #: name's 15:15 cutoff say nothing about whether the broker will take the
+    #: order tomorrow morning. An old row that has neither field reads as
+    #: structural, which is how this behaved before they existed.
+    rest_kind: str = ""
+    rest_session: str = ""
     mark: Optional[float] = None            # $/share now, same sign as entry
     pl: Optional[float] = None              # dollars, whole position
     pl_pct: Optional[float] = None
+    #: Why this position has no mark, when it has none. "No mark" and "no move"
+    #: are the same blank cell on a screen and they are not the same thing: one
+    #: means nothing happened, the other means the profit and stop comparisons
+    #: were never reached. Six positions ran a whole session on the second one.
+    mark_error: str = ""
+    mark_at: float = 0.0
     closed_at: str = ""
     close_reason: str = ""
     close_net: Optional[float] = None
@@ -400,10 +586,48 @@ class PlayPosition:
     def short_legs(self) -> list:
         return [l for l in self.legs if l.get("side") == "sell"]
 
+    @property
+    def priced(self) -> bool:
+        return self.mark is not None and not self.mark_error
+
+    @property
+    def exit_cover(self) -> str:
+        """Who owns the way out of this position right now.
+
+        The point of naming it is `none`: an OPEN position with a threshold set,
+        no resting order at the broker and no recorded refusal is a bug, not a
+        state, and it is the exact shape all six live positions were in. The
+        dashboard draws it red rather than leaving the cell blank.
+        """
+        if not self.is_open:
+            return "closed"
+        if self.state == "closing":
+            return "closing"
+        if self.adopted:
+            # Never given thresholds, so the guard is the whole of its cover
+            # and that is deliberate -- see _adopt.
+            return "guard_only"
+        if self.state == "pending":
+            return "pending"
+        if self.rest_order_id:
+            # A DAY rest is a resting exit that dies at the close. Reporting it
+            # as plain "resting" would let a position that is uncovered every
+            # evening read exactly like one covered around the clock, which is
+            # the silent failure this whole path exists to prevent.
+            return ("resting_day" if self.rest_tif == REST_TIF_FALLBACK
+                    else "resting")
+        if self.target_px is None:
+            return "none"
+        if self.rest_refused:
+            return "loop"
+        return "none"
+
     def as_dict(self) -> dict:
         d = dict(self.__dict__)
         d["is_open"] = self.is_open
         d["is_credit"] = self.is_credit
+        d["priced"] = self.priced
+        d["exit_cover"] = self.exit_cover
         try:
             d["dte"] = (_dt.date.fromisoformat(self.expiry)
                         - _dt.datetime.now(NY).date()).days
@@ -585,20 +809,326 @@ class Ledger:
         return [p for p in self.open_positions()
                 if p.symbol == str(symbol).upper() and p.play == play_id]
 
-    def open_risk(self) -> float:
-        """Dollars at risk across every open play position."""
+    def open_risk(self, tier: Optional[str] = None) -> float:
+        """Dollars at risk across every open play position.
+
+        `tier` narrows it to ONE allocation, credit or debit, and that is the
+        number the proposal path sizes against -- the two tiers do not share
+        money, so a swing measured against the total would still be blocked by
+        capital it was never allowed to spend. None is the total, which is what
+        the board and optperf report.
+
+        A PENDING position counts at its REQUESTED size. The order is out; the
+        capital is committed whether or not the fill has come back. Counting it
+        at zero until reconcile confirmed it is what let seven swing proposals
+        in one cycle each measure themselves against a ceiling none of the
+        others had touched yet, and all seven get funded.
+        """
         total = 0.0
         for p in self.open_positions():
-            if p.entry_net is None or not p.contracts:
+            if tier is not None and tier_of_kind(p.kind) != tier:
+                continue
+            ct = p.contracts or (p.requested if p.state == "pending" else 0)
+            if p.entry_net is None or not ct:
                 continue
             if p.is_credit:
                 # width less credit; width is recoverable from the strikes
                 ks = sorted(float(l.get("strike") or 0.0) for l in p.legs)
                 width = (ks[-1] - ks[0]) if len(ks) >= 2 else 0.0
-                total += max(0.0, width - abs(p.entry_net)) * MULT * p.contracts
+                total += max(0.0, width - abs(p.entry_net)) * MULT * ct
             else:
-                total += abs(p.entry_net) * MULT * p.contracts
+                total += abs(p.entry_net) * MULT * ct
         return round(total, 2)
+
+
+class ReadOnlyLedger(Ledger):
+    """The ledger a DRY-RUN Playbook gets. It reads the file and cannot write.
+
+    WHY A DIFFERENT CLASS AND NOT `if self.dry_run` AT EVERY CALL SITE. The
+    dashboard's Preview button builds a Playbook with dry_run=True on the SAME
+    state dir the worker writes, so the preview and the live worker share one
+    ledger file. `dry_run` was a flag each method had to remember to check, and
+    _close did not check it until three lines after it had already written
+    state="closing" and a close_reason into that shared file -- so pressing
+    Preview marked a live position as closing and the ledger then lied about
+    what the worker owned. A guard every future method must opt into is the
+    same bug waiting to be written again.
+
+    So the write is not guarded, it is ABSENT. record() is the only mutating
+    method on a Ledger (it is the one place that appends to the file and the
+    one place that applies an event to the replay), and here it appends
+    nothing, applies nothing, and remembers the event it did not write so the
+    preview can show it. Every current caller and every future one gets that
+    for free, whether or not its author thought about dry runs.
+
+    Reads are untouched: load(), follow(), positions() and the rest see exactly
+    what the worker wrote, which is the whole point of a preview.
+    """
+
+    #: Kept for the preview and for the tests, bounded so a long-lived preview
+    #: instance cannot grow a list forever.
+    MAX_REMEMBERED = 500
+
+    def __init__(self, path: Path = LEDGER_PATH):
+        self.refused: list = []
+        super().__init__(path)
+
+    def record(self, pid: str, event: str, /, **fields) -> dict:
+        ev = {"ts": time.time(), "at": _utc(), "id": pid, "event": event,
+              "fields": fields, "dry_run": True, "written": False}
+        with self._lock:
+            self.refused.append(ev)
+            if len(self.refused) > self.MAX_REMEMBERED:
+                del self.refused[:-self.MAX_REMEMBERED]
+        LOG.debug("dry run: not recording %s %s", pid, event)
+        return ev
+
+
+class ReadOnlyViolation(PlaybookError):
+    """A dry-run instance reached for a broker write. It did not happen."""
+
+
+class ReadOnlyBroker:
+    """The Alpaca client with every write amputated, for a dry-run Playbook.
+
+    The companion to ReadOnlyLedger, and for the same reason: `dry_run` was a
+    flag, and _cancel_rest and _cancel_working never checked it. A second
+    Playbook built with dry_run=True on a live ledger cancelled a real resting
+    take-profit off a real position -- the Preview button stripping the exit
+    off a live trade.
+
+    The pattern is the repo's own: optguard.install_exercise_block makes the
+    exercise endpoint unreachable at the REQUEST LAYER rather than trusting
+    every future caller not to reach for it. This does the same for every
+    mutation, one level up, because the client is SHARED with the live share
+    fleet -- monkeypatching it in place would disarm the ladder too. So this
+    wraps rather than patches, and only the dry-run Playbook holds the wrapper.
+
+    Reads pass straight through. Anything that could change the account raises
+    ReadOnlyViolation, which is a PlaybookError and therefore lands in
+    res.errors like any other refusal instead of killing the cycle.
+    """
+
+    #: HTTP methods that cannot change anything at the broker.
+    SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+    #: Named mutators on broker.Alpaca. The _req check below already stops all
+    #: of them, since every one of these ends up there -- this list is so the
+    #: refusal names the method the caller actually used, and so a future
+    #: client that talks to the wire some other way is still stopped.
+    BLOCKED = frozenset({
+        "submit", "cancel", "cancel_all", "close_position",
+        "close_all_positions", "replace_order", "exercise",
+        "buy_market", "sell_market", "buy_limit", "sell_limit",
+        "buy_limit_gtc", "sell_limit_gtc", "buy_limit_day", "sell_limit_day",
+        "trailing_stop_gtc",
+    })
+
+    def __init__(self, inner: Any):
+        # Straight into __dict__: __setattr__ below refuses ordinary writes and
+        # would refuse these two.
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "refused", [])
+
+    # -- the wire ----------------------------------------------------------
+    def _req(self, method: str, url: str, path: str, **kw):
+        m = str(method or "").upper()
+        if m not in self.SAFE_METHODS:
+            self._refuse("%s %s" % (m, path), kw.get("json"))
+        return self._inner._req(method, url, path, **kw)
+
+    def _refuse(self, what: str, body: Any = None):
+        self.refused.append({"at": _utc(), "call": what, "body": body})
+        raise ReadOnlyViolation(
+            "this Playbook is dry_run: it may not change the account. "
+            "Refused: %s" % what)
+
+    # -- everything else ---------------------------------------------------
+    def __getattr__(self, name: str):
+        # Only reached when the attribute is not on this object, so the two
+        # methods above always win.
+        if name in self.BLOCKED:
+            def _blocked(*a, **kw):
+                self._refuse("%s()" % name, {"args": a, "kwargs": kw})
+            return _blocked
+        return getattr(self._inner, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # optguard.install_exercise_block sets _req and a flag ON THE CLIENT.
+        # Letting that land on the wrapper is correct and necessary: the
+        # replacement it installs calls the _req it read from us, so the
+        # exercise block ends up ON TOP of this guard rather than under it.
+        # What must never happen is a write reaching the shared inner client.
+        object.__setattr__(self, name, value)
+
+    def __repr__(self) -> str:                       # pragma: no cover
+        return "<ReadOnlyBroker %r>" % (self._inner,)
+
+
+# =============================================================== the reserve
+class Reserve:
+    """What each income play must be LEFT, measured and remembered.
+
+    The owner's rule is that the index credit spreads open "every day ... no
+    matter what", because they are what funds the buying. Proposing them first
+    was necessary and not sufficient, and so was holding money back inside one
+    cycle: what actually blocked both spreads on 28 Sep was capital spent in
+    earlier cycles by 33-DTE swings that will not return it for a month. The
+    guarantee now lives in CREDIT_RISK_FRACTION -- an allocation the debit tier
+    cannot reach at all -- and not in this file.
+
+    So each time a credit structure is priced, its max_loss is written here,
+    keyed SYMBOL:play. It no longer holds anything back from a swing. What it
+    is for now is the one failure separate budgets cannot fix by themselves:
+    whether the credit ALLOCATION is large enough for what today's income legs
+    actually cost. That question can only be answered with the measured price
+    of the real structures, which is what this remembers between sessions.
+
+    MEASURED, NEVER GUESSED. Until a play has been priced once there is no
+    number and this says so -- `measured: False`, reservation of nothing. An
+    invented reservation is wrong in both directions: too big and it blocks
+    every swing forever, too small and it protects nothing while looking like it
+    does. The honest first session is "the credit plays go first and nothing is
+    held back"; from the second session on the reservation is a real dollar
+    figure this system observed.
+    """
+
+    def __init__(self, path: Path = RESERVE_PATH):
+        self.path = Path(path)
+        self._lock = threading.RLock()
+        self._rows: dict = {}
+        self.load()
+
+    def load(self) -> None:
+        with self._lock:
+            self._rows = {}
+            try:
+                d = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                # A missing or corrupt memo is "nothing measured yet", which is
+                # the safe reading: it reserves nothing and says it reserved
+                # nothing. It must never read as a reservation of zero dollars
+                # that somebody measured.
+                return
+            for k, v in (d.get("reserves") or {}).items():
+                if isinstance(v, dict):
+                    self._rows[str(k)] = v
+
+    def save(self) -> None:
+        with self._lock:
+            payload = {"updated": _utc(), "reserves": self._rows}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=str(self.path.parent),
+                                       prefix=".reserve-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+                fh.write("\n")
+            os.replace(tmp, self.path)
+
+    def get(self, key: str) -> Optional[dict]:
+        with self._lock:
+            r = self._rows.get(str(key))
+            return dict(r) if r else None
+
+    def note(self, key: str, *, max_loss: Optional[float], contracts: int,
+             label: str = "") -> Optional[dict]:
+        """Remember what this play costs, as measured on a live chain."""
+        ml = _num(max_loss)
+        if ml is None or ml <= 0:
+            return None
+        with self._lock:
+            cur = self._rows.get(str(key)) or {}
+            prev = _num(cur.get("max_loss"))
+            row = {"max_loss": round(float(ml), 2), "contracts": int(contracts),
+                   "label": str(label or ""), "at": _utc()}
+            self._rows[str(key)] = row
+            # Only touch the disk when the number actually moved. A cycle every
+            # 20 seconds rewriting an identical file all day is wear for nothing
+            # and noise in any diff of the state directory.
+            if prev is None or abs(prev - ml) > max(1.0, 0.01 * ml):
+                self.save()
+            return dict(row)
+
+    def as_dict(self) -> dict:
+        with self._lock:
+            return {k: dict(v) for k, v in self._rows.items()}
+
+
+# =============================================================== the budgets
+@dataclass
+class TierBudget:
+    """One tier's allocation and what is left of it, right now.
+
+    Two budgets, and neither tier may spend the other's. Not a soft
+    reservation: a dollar that can be borrowed is a dollar the guarantee does
+    not have, and the guarantee is the owner's -- the index spreads sell "every
+    day ... no matter what". A swing cannot take this money by being early,
+    being first in the cycle, or being open since last month.
+
+    `allocation` is None when options buying power could not be read. Unknown
+    is not unlimited and it is not zero, so it is None (house rule), and see
+    `fits` for what the sizing path does with that.
+    """
+    tier: str
+    fraction: float
+    bp: Optional[float] = None
+    open_risk: float = 0.0
+
+    @property
+    def allocation(self) -> Optional[float]:
+        return None if self.bp is None else round(self.bp * self.fraction, 2)
+
+    @property
+    def free(self) -> Optional[float]:
+        a = self.allocation
+        return None if a is None else round(a - self.open_risk, 2)
+
+    def fits(self, cost: Optional[float]) -> bool:
+        """Whether this tier can afford `cost`.
+
+        With no buying power reading the answer is True, which is the
+        behaviour this check has always had: the ceiling is unknown and the
+        proposal goes on to optexec.plan, whose own pre-flight is against the
+        live account. Refusing here instead would mean one failed snapshot
+        stops the income legs, which is the failure this whole change exists to
+        prevent. An unpriced structure (`cost` None) is nobody's to size.
+        """
+        if cost is None or self.allocation is None:
+            return True
+        return float(cost) <= (self.free or 0.0)
+
+    def other(self) -> str:
+        return TIER_DEBIT if self.tier == TIER_CREDIT else TIER_CREDIT
+
+    def refusal(self, cost: float) -> str:
+        """Why this play cannot be funded, in the terms that make it readable.
+
+        It must say WHOSE money ran out. "Refused because the swings have
+        their own budget and it is full" is a policy working as intended;
+        "refused because the income tier's money is untouchable" is the same
+        sentence pointing at a different number, and they must not read alike.
+        """
+        oth = self.other()
+        oth_alloc = (None if self.bp is None
+                     else round(self.bp * TIER_FRACTION[oth], 2))
+        left = self.free or 0.0
+        # "leaving $-7450" is a number nobody reads twice. Over budget is a
+        # different sentence from short of room, and it is the one that says
+        # the book has to shrink before anything here opens again.
+        rest = ("leaving $%.0f" % left if left >= 0
+                else "$%.0f OVER it" % -left)
+        return ("$%.0f of risk needs $%.0f of room; the %s allocation is "
+                "$%.0f (%.0f%% of $%.0f options BP) with $%.0f open, %s. "
+                "The %s allocation ($%.0f) is the other tier's own money "
+                "and this play may never spend it -- it is not headroom"
+                % (cost, cost, self.tier, self.allocation or 0.0,
+                   100 * self.fraction, self.bp or 0.0, self.open_risk, rest,
+                   oth, oth_alloc or 0.0))
+
+    def as_dict(self) -> dict:
+        return {"tier": self.tier, "fraction": self.fraction,
+                "allocation": self.allocation, "open_risk": self.open_risk,
+                "free": self.free}
 
 
 # ============================================================== the proposal
@@ -613,6 +1143,16 @@ class Proposal:
     signal: Optional[dict] = None
     submitted: bool = False
     response: dict = field(default_factory=dict)
+    #: 0 is the income leg, 1 the swing buying. Shown so a refusal on a swing
+    #: can be read next to the spread that outranked it.
+    priority: int = UNRANKED_PRIORITY
+    #: Which allocation this play spends from, and the state of that budget
+    #: when it was sized. A bare number is what made the first refusal
+    #: unreadable -- "$1760 of risk needs $1760 of room" never said WHOSE money
+    #: was gone, so a swing refused by policy and a book that is genuinely full
+    #: read identically.
+    tier: str = ""
+    budget: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {"symbol": self.symbol, "play": self.play, "ok": self.ok,
@@ -620,7 +1160,8 @@ class Proposal:
                 "structure": self.structure.as_dict() if self.structure else None,
                 "plan": self.plan.as_dict() if self.plan else None,
                 "signal": self.signal, "submitted": self.submitted,
-                "response": self.response}
+                "response": self.response, "priority": self.priority,
+                "tier": self.tier, "budget": dict(self.budget)}
 
 
 @dataclass
@@ -664,8 +1205,17 @@ class Playbook:
                  state_dir: Path = STATE_DIR,
                  arm_path: Optional[Path] = None,
                  decisions_path: Optional[Path] = None,
-                 dry_run: bool = False):
-        self.a = alpaca
+                 dry_run: bool = False,
+                 clock: Optional[Any] = None):
+        self.dry_run = bool(dry_run)
+        # A DRY-RUN INSTANCE NEVER HOLDS A WRITEABLE HANDLE. Not "checks a flag
+        # before writing" -- does not hold one. The dashboard's Preview builds
+        # one of these on the same state dir the worker writes, so the two
+        # share a ledger file and an account, and every write path in this
+        # class reaches them through exactly these two attributes. Swapping
+        # them here is what makes dry_run mean one thing everywhere, including
+        # in methods nobody has written yet. See ReadOnlyBroker/ReadOnlyLedger.
+        self.a = ReadOnlyBroker(alpaca) if self.dry_run else alpaca
         self.state_dir = Path(state_dir)
         # Every path hangs off state_dir so a second account gets its own arm
         # file, its own ledger and its own assignments. Sharing a ledger between
@@ -675,25 +1225,86 @@ class Playbook:
         self.decisions_path = (Path(decisions_path) if decisions_path
                                else opt / "play_decisions.jsonl")
         self.assignments = assignments or P.Assignments(opt / "plays.json")
-        self.ledger = ledger or Ledger(opt / "play_ledger.jsonl")
-        self.od = optdata.OptionData(alpaca)
-        self.reader = reader or optsignal.SignalReader(alpaca)
-        self.dry_run = bool(dry_run)
+        led_path = ledger.path if ledger is not None else opt / "play_ledger.jsonl"
+        # A ledger handed in is still only a PATH to a dry-run instance. Taking
+        # the object would take its record(), and that object writes.
+        self.ledger = (ReadOnlyLedger(led_path) if self.dry_run
+                       else (ledger or Ledger(led_path)))
+        self.reserve = Reserve(opt / "play_reserve.json")
+        # TWO CLASSES ARE CALLED OptionData IN THIS REPO AND THEY ARE NOT
+        # INTERCHANGEABLE. Holding both, deliberately, and naming which is for
+        # what, because holding one and passing it to the wrong caller is
+        # exactly the bug that ran all of 28 Sep 2026:
+        #
+        #   self.od  optdata.OptionData -- the cached chain reader. .chain(),
+        #            .expirations() and .spot(), which is all strike selection
+        #            needs. It has NO snapshots().
+        #   self.oq  options.OptionData -- the quote reader. It is the only one
+        #            with .snapshots(), which is what optexec.requote() calls,
+        #            and it is the class optexec.plan() constructs for itself.
+        #            Marking through it means the marking path and the order
+        #            path read the same book.
+        #
+        # Passing self.od to requote() raised AttributeError on every cycle.
+        # _manage swallowed it into res.errors, every mark stayed None, and the
+        # profit and stop comparisons below it were never reached -- so six
+        # positions ran a full session with no take-profit and no stop of any
+        # kind. quote_legs() is the ONE place either of these reaches requote,
+        # so a second class cannot get passed there again by accident.
+        #
+        # All three take self.a, not `alpaca`: on a dry-run instance that is
+        # the read-only wrapper, and these are read paths, so they lose
+        # nothing. It also means there is no writeable handle anywhere on a
+        # preview object for a later method to find.
+        self.od = optdata.OptionData(self.a)
+        self.oq = options.OptionData(self.a)
+        self.reader = reader or optsignal.SignalReader(self.a)
+        #: The clock, injectable. Everything in this class that asks what time
+        #: it is asks self.now(), so a test can stand at 15:31 ET without being
+        #: a different test at 15:29. A module that reads the wall clock
+        #: directly cannot be tested twice with the same answer, and a suite
+        #: that passes before 15:30 and fails after it teaches people to ignore
+        #: the suite. See F3 in test_optplays.py section 36.
+        self._clock = clock
         self._lock = threading.RLock()
         self.last: Optional[CycleResult] = None
         # The exercise endpoint is blocked at the request layer for the life of
         # this client. An assignment we cause ourselves is the one risk the
         # whole design exists to avoid, and a guard that lives in a different
         # module's constructor is a guard that is not installed on this path.
+        # `alpaca`, not self.a: the block belongs on the SHARED client so it is
+        # installed for everything that holds it, and a dry-run wrapper would
+        # have refused the exercise call anyway (DELETE and POST are not safe
+        # methods). Installing it on the wrapper instead would leave the real
+        # client unblocked, which is the opposite of the point.
         try:
             optguard.install_exercise_block(alpaca)
         except Exception as e:                       # pragma: no cover
             LOG.warning("could not install the exercise block: %s", e)
 
     # ------------------------------------------------------------- plumbing
+    def now(self) -> _dt.datetime:
+        """What time it is, in New York, from the injected clock if there is one.
+
+        getattr rather than self._clock because fake_playbook() in the tests
+        builds this class with __new__ and sets only what it needs; a helper
+        that raises AttributeError on an object somebody else assembled is a
+        helper that gets worked around instead of used.
+        """
+        c = getattr(self, "_clock", None)
+        n = c() if c else _dt.datetime.now(NY)
+        if n.tzinfo is None:
+            n = n.replace(tzinfo=NY)
+        return n.astimezone(NY)
+
     def decide(self, kind: str, **fields) -> dict:
+        # `dry_run` on every row: the preview and the worker append to ONE
+        # decisions file, and a reader could not tell a preview's "closing"
+        # from the worker's. A log that cannot say who wrote a row is a log
+        # that gets believed about the wrong process.
         return _append(self.decisions_path,
-                       {"ts": time.time(), "at": _utc(), "kind": kind, **fields})
+                       {"ts": time.time(), "at": _utc(), "kind": kind,
+                        "dry_run": self.dry_run, **fields})
 
     def arm(self) -> Arm:
         return load_arm(self.arm_path)
@@ -744,10 +1355,15 @@ class Playbook:
         return solved, "%d of %d rows priced" % (priced, len(solved))
 
     def quote_legs(self, legs) -> dict:
-        """Fresh quotes keyed by OCC for a set of ledger legs."""
+        """Fresh quotes keyed by OCC for a set of ledger legs.
+
+        `self.oq`, never `self.od` -- see the constructor. This raises rather
+        than returning {} on a data failure, and the caller must turn that into
+        a VISIBLE unpriced state instead of a blank mark.
+        """
         shaped = [{"symbol": l.get("symbol"),
                    "row": {"symbol": l.get("symbol")}} for l in legs]
-        return optexec.requote(self.od, shaped)
+        return optexec.requote(self.oq, shaped)
 
     # ============================================================ 1. reconcile
     def _reconcile(self, res: CycleResult) -> None:
@@ -868,9 +1484,24 @@ class Playbook:
                             error=str(e))
 
     def _manage_one(self, pos: PlayPosition, res: CycleResult) -> None:
-        quotes = self.quote_legs(pos.legs)
-        res.trading_calls += 1
-        mark = self._mark(pos, quotes)
+        # A data failure here is NOT allowed to become a missing mark. It is
+        # caught, named on the position, and the guards still run underneath
+        # it: an expiring short leg does not care that the quote host is down,
+        # and _close_body already knows how to cross a one-sided or absent book
+        # when it is urgent.
+        quotes: dict = {}
+        why_unpriced = ""
+        try:
+            quotes = self.quote_legs(pos.legs)
+            res.trading_calls += 1
+        except Exception as e:
+            why_unpriced = "cannot quote the legs: %s: %s" % (type(e).__name__, e)
+
+        mark = None
+        if not why_unpriced:
+            mark, why_unpriced = self._mark(pos, quotes)
+        if why_unpriced:
+            self._unpriced(pos, why_unpriced, res)
         acted = None
 
         # ---- the guards, first and unconditionally ----
@@ -881,17 +1512,26 @@ class Playbook:
         # ---- then the thresholds, which an adopted position does not have ----
         elif (not pos.adopted and mark is not None
                 and pos.target_px is not None and pos.stop_px is not None):
+            # WHO OWNS THE TARGET. When a real order is resting at the profit
+            # price, that order IS the target and this loop must not race it:
+            # firing here cancels a good GTC order to send a worse one for the
+            # same fill, and every cancel is a window in which the position is
+            # uncovered. The loop owns the target only where the broker refused
+            # the rest -- which is what the module docstring has always promised
+            # and what this now actually does. The STOP is always the loop's: a
+            # resting limit to buy back at a worse price fills immediately.
+            owns_target = not pos.rest_order_id
             if pos.is_credit:
                 # A credit spread is closed by BUYING it back. Cheaper is
                 # better, so the target is the LOW side.
-                if mark <= pos.target_px:
+                if owns_target and mark <= pos.target_px:
                     acted = self._close(pos, "profit target: buy back at %.2f <= %.2f"
                                         % (mark, pos.target_px), quotes, res)
                 elif mark >= pos.stop_px:
                     acted = self._close(pos, "stop: buy back at %.2f >= %.2f"
                                         % (mark, pos.stop_px), quotes, res)
             else:
-                if mark >= pos.target_px:
+                if owns_target and mark >= pos.target_px:
                     acted = self._close(pos, "profit target: sell at %.2f >= %.2f"
                                         % (mark, pos.target_px), quotes, res)
                 elif mark <= pos.stop_px:
@@ -904,23 +1544,59 @@ class Playbook:
             "mark": mark, "pl": pos.pl, "pl_pct": pos.pl_pct,
             "target": pos.target_px, "stop": pos.stop_px,
             "adopted": pos.adopted, "action": acted or "hold",
+            "mark_error": pos.mark_error, "exit_cover": pos.exit_cover,
+            "target_owner": ("resting" if pos.rest_order_id else "loop"),
         })
 
-    def _mark(self, pos: PlayPosition, quotes: dict) -> Optional[float]:
-        """Current per-share value of the structure, signed like the entry.
+    def _unpriced(self, pos: PlayPosition, why: str, res: CycleResult) -> None:
+        """Raise the position to a VISIBLY unpriced state, and say why.
 
-        None where any leg has no two-sided quote. A mark built from a one-sided
-        book is how a stop fires on a spread nobody would trade at that price.
+        The blank cell is the whole problem. A position whose mark is None
+        because the quote call raised looks exactly like a position whose mark
+        has not moved, so the board showed six ordinary rows for a book in which
+        nothing could close. This CLEARS the stale mark rather than leaving the
+        last good one on screen -- a price from an hour ago presented as now is
+        worse than no price -- names the reason on the position for the
+        dashboard, and puts it on the cycle's error list so the worker log
+        carries it too.
+        """
+        self.ledger.record(pos.id, "unpriced", mark=None, pl=None, pl_pct=None,
+                           mark_error=why[:300])
+        self.decide("unpriced", id=pos.id, symbol=pos.symbol, play=pos.play,
+                    reason=why[:300])
+        res.errors.append("%s %s is UNPRICED: %s" % (pos.symbol, pos.id, why))
+
+    def _mark(self, pos: PlayPosition, quotes: dict) -> tuple:
+        """(mark, why_not) -- the per-share value of the structure now.
+
+        Returns the reason ALONGSIDE the None rather than just the None, because
+        the caller has to be able to show the difference between "no move" and
+        "no price". A mark built from a one-sided book is how a stop fires on a
+        spread nobody would trade at that price, so a missing side is a refusal
+        to mark and not a guess.
         """
         total = 0.0
         for l in pos.legs:
-            q = quotes.get(str(l.get("symbol"))) or {}
+            occ = str(l.get("symbol"))
+            q = quotes.get(occ) or {}
             mid = _num(q.get("mid"))
             if mid is None:
-                return None
+                return None, ("no two-sided quote on %s (bid %s / ask %s)"
+                              % (occ, q.get("bid"), q.get("ask")))
             total += mid if l.get("side") == "sell" else -mid
-        # For a credit structure the value to CLOSE is a positive debit, so the
-        # sign flips back to a cost here; for a long it is a positive credit.
+        # A credit structure is worth a positive amount to buy back and a debit
+        # one a positive amount to sell. If the signed total lands on the WRONG
+        # side of zero the book is crossed or the legs are recorded wrong, and
+        # the abs() below would quietly turn that into a flattering number: a
+        # credit spread priced at -0.05 would read as "bought back for 0.05",
+        # more than the full credit, and trip the take-profit on nonsense.
+        if pos.entry_net is not None:
+            if pos.is_credit and total < 0:
+                return None, ("the book prices this credit spread at %+.2f, "
+                              "which is the wrong side of zero" % total)
+            if not pos.is_credit and total > 0:
+                return None, ("the book prices this debit position at %+.2f, "
+                              "which is the wrong side of zero" % total)
         mark = round(abs(total), 4)
         pl = None
         if pos.entry_net is not None and pos.contracts:
@@ -932,8 +1608,13 @@ class Playbook:
         if pl is not None and pos.entry_net:
             stake = abs(pos.entry_net) * MULT * pos.contracts
             pct = round(pl / stake, 4) if stake else None
-        self.ledger.record(pos.id, "marked", mark=mark, pl=pl, pl_pct=pct)
-        return mark
+        # mark_error is cleared HERE, not only set in _unpriced: a position
+        # that could not be priced last cycle and can be now must stop showing
+        # red, and the ledger is a replay so the field only changes when an
+        # event says it does.
+        self.ledger.record(pos.id, "marked", mark=mark, pl=pl, pl_pct=pct,
+                           mark_error="", mark_at=time.time())
+        return mark, ""
 
     def _guard_reason(self, pos: PlayPosition) -> str:
         """Why this position must be closed now regardless of P/L, or ""."""
@@ -943,7 +1624,7 @@ class Playbook:
             # is a loss and not a hazard, and the stop handles the value.
             try:
                 d = (_dt.date.fromisoformat(pos.expiry)
-                     - _dt.datetime.now(NY).date()).days
+                     - self.now().date()).days
             except ValueError:
                 return ""
             if d <= 0:
@@ -951,7 +1632,7 @@ class Playbook:
             return ""
         try:
             d = (_dt.date.fromisoformat(pos.expiry)
-                 - _dt.datetime.now(NY).date()).days
+                 - self.now().date()).days
         except ValueError:
             return "cannot read the expiry %r -- close it and find out why" % pos.expiry
         if d <= 0:
@@ -1010,12 +1691,21 @@ class Playbook:
             res.errors.append("%s: cannot price a close for %s" % (pos.id, pos.symbol))
             return "cannot price the close"
 
+        # THE DRY-RUN RETURN COMES BEFORE THE LEDGER WRITE, not three lines
+        # after it. That write went into the file the WORKER reads -- a preview
+        # marked a live position state="closing" with a close_reason, and the
+        # ledger then said the worker was exiting a trade nobody had touched.
+        # ReadOnlyLedger refuses it now whatever the order, but a preview that
+        # reports "would close" while having already written "closing" is a lie
+        # in the return value as well as in the file.
+        if self.dry_run:
+            self.decide("close_dry_run", id=pos.id, symbol=pos.symbol,
+                        play=pos.play, reason=reason, body=body, urgent=urgent)
+            return "dry run: would close (%s)" % reason
         self.ledger.record(pos.id, "closing", state="closing",
                            close_reason=reason, last_exit_at=time.time())
         self.decide("closing", id=pos.id, symbol=pos.symbol, play=pos.play,
                     reason=reason, body=body, urgent=urgent)
-        if self.dry_run:
-            return "dry run: would close (%s)" % reason
         try:
             resp = self.a._req("POST", "%s/v2/orders" % self.a.base, "/orders",
                                json=body)
@@ -1131,9 +1821,24 @@ class Playbook:
                 "limit_price": "%.2f" % px, "legs": legs}
 
     def _cancel_rest(self, pos: PlayPosition) -> bool:
-        """Cancel the resting target and CONFIRM it is gone."""
+        """Cancel the resting target and CONFIRM it is gone.
+
+        THIS METHOD IS WHY dry_run HAD TO STOP BEING A FLAG. It had no guard at
+        all, so a Playbook built dry_run=True for the dashboard's Preview --
+        sharing the worker's ledger and the worker's account -- cancelled a
+        REAL resting take-profit off a REAL position the moment the preview's
+        mark crossed the stop. ReadOnlyBroker refuses the cancel now whatever
+        this method does; the check below is so the preview says what it would
+        have done instead of sitting through three confirmation reads of an
+        order it was never going to touch.
+        """
         oid = pos.rest_order_id
         if not oid:
+            return True
+        if self.dry_run:
+            self.decide("rest_cancel_dry_run", id=pos.id, symbol=pos.symbol,
+                        order=oid,
+                        note="a preview never cancels a live resting exit")
             return True
         try:
             self.a.cancel(oid)
@@ -1163,6 +1868,12 @@ class Playbook:
 
     def _cancel_working(self, pos: PlayPosition) -> None:
         """Cancel any working close on this position's legs."""
+        if self.dry_run:
+            # The other unguarded cancel. Same story as _cancel_rest.
+            self.decide("stale_exit_cancel_dry_run", id=pos.id,
+                        symbol=pos.symbol,
+                        note="a preview never cancels a live working order")
+            return
         occs = {str(l.get("symbol")) for l in pos.legs}
         try:
             orders = self.a.orders(status="open", limit=200)
@@ -1183,7 +1894,7 @@ class Playbook:
 
     # ========================================================== 3/4. propose
     def _propose(self, res: CycleResult, arm: Arm) -> None:
-        rows = self.assignments.active()
+        rows = proposal_order(self.assignments.active())
         if not rows:
             return
         # One data call covers every swing symbol's signal.
@@ -1194,25 +1905,125 @@ class Playbook:
         acct = optexec.account_snapshot(self.a)
         res.trading_calls += 1
         bp = _num(acct.get("options_buying_power"))
-        open_risk = self.ledger.open_risk()
-        n_open = len(self.ledger.open_positions())
+        self._credit_budget_alarm(rows, bp, res)
 
         for a in rows:
-            pr = Proposal(symbol=a.symbol, play=a.play)
+            # Each play is sized against ITS OWN tier's allocation. The debit
+            # tier cannot see the credit tier's dollars at all, so a swing can
+            # no longer take -- in this cycle or in any earlier one -- money the
+            # index spreads are going to need today.
+            tier = tier_of_play(a.play)
+            # Recomputed per row, not once for the loop. A position submitted
+            # two rows ago is committed capital even though the fill has not
+            # come back, and open_risk() counts a pending at its requested size
+            # for exactly this reason.
+            budget = TierBudget(tier=tier, fraction=TIER_FRACTION[tier], bp=bp,
+                                open_risk=self.ledger.open_risk(tier))
+            pr = Proposal(symbol=a.symbol, play=a.play,
+                          priority=priority_of(a.play), tier=tier,
+                          budget=budget.as_dict())
+            n_open = len(self.ledger.open_positions())
             try:
-                self._propose_one(a, pr, sigs, bp, open_risk, n_open, arm, res)
+                self._propose_one(a, pr, sigs, budget, n_open, arm, res)
             except Exception as e:
                 pr.ok, pr.reason = False, "error: %s" % e
                 res.errors.append("propose %s %s: %s" % (a.symbol, a.play, e))
             res.proposals.append(pr)
             self.decide("proposal", symbol=pr.symbol, play=pr.play, ok=pr.ok,
-                        reason=pr.reason,
+                        reason=pr.reason, priority=pr.priority, tier=pr.tier,
+                        budget=pr.budget,
                         structure=pr.structure.as_dict() if pr.structure else None,
                         submitted=pr.submitted)
 
+    def _credit_budget_alarm(self, rows, bp: Optional[float],
+                             res: CycleResult) -> None:
+        """Say so when the credit allocation cannot fund today's income legs.
+
+        This gates NOTHING. The allocation is ring-fenced, so a swing can never
+        be the cause any more and there is nothing here for the cycle to
+        decide. It exists because the one failure separate budgets cannot fix
+        by themselves is an allocation too SMALL for what the spreads cost --
+        and that has to be a named line in the decisions log rather than two
+        spreads that quietly never opened, which is exactly how the shared
+        ceiling failed.
+        """
+        if bp is None:
+            return
+        holds = self._outstanding_reservations(rows)
+        need = round(sum(h["max_loss"] for h in holds.values()
+                         if h["measured"]
+                         and tier_of_play(h["play"]) == TIER_CREDIT), 2)
+        if need <= 0:
+            return                       # never priced: nothing measured to owe
+        alloc = round(bp * CREDIT_RISK_FRACTION, 2)
+        open_credit = self.ledger.open_risk(TIER_CREDIT)
+        free = round(alloc - open_credit, 2)
+        if need <= free:
+            return
+        self.decide("credit_budget_short", needed=need, free=free,
+                    allocation=alloc, bp=bp, open_risk=open_credit,
+                    holds={k: h["max_loss"] for k, h in holds.items()
+                           if tier_of_play(h["play"]) == TIER_CREDIT},
+                    reason=("the income plays still to open today need $%.0f "
+                            "and their own allocation has $%.0f free ($%.0f, "
+                            "%.0f%% of $%.0f options BP) -- no swing can be "
+                            "blamed for this one and no ordering fixes it: it "
+                            "is CREDIT_RISK_FRACTION, the contract count, or "
+                            "the size of the account"
+                            % (need, free, alloc,
+                               100 * CREDIT_RISK_FRACTION, bp)))
+        res.errors.append("credit allocation short: need $%.0f, free $%.0f"
+                          % (need, free))
+
+    def _outstanding_reservations(self, rows) -> dict:
+        """What each play still needs today and has not yet spent.
+
+        A reservation is OUTSTANDING only while the play could still open this
+        session: enabled, under its max_open, not already used up by a
+        one-per-session rule, and not past its entry cutoff for the day. Once it
+        opens, its capital is in open_risk and reserving it as well would
+        double-count it; once its window has closed, holding money back for a
+        trade that cannot happen today starves the swings for nothing.
+        """
+        out: dict = {}
+        sess = P.session_key(now=self.now())
+        for a in rows:
+            prio = priority_of(a.play)
+            try:
+                params = a.effective()
+            except P.PlayError:
+                continue
+            if len(self.ledger.open_for(a.symbol, a.play)) >= int(
+                    params.get("max_open", 1) or 1):
+                continue
+            if params.get("one_per_session"):
+                if [p for p in self.ledger.positions()
+                        if p.symbol == a.symbol and p.play == a.play
+                        and p.session == sess]:
+                    continue
+            # self.now(), never the wall clock. THIS LINE WAS THE WALL-CLOCK
+            # BOMB: the index spread's cutoff is 15:30 ET, so every test that
+            # summed these holds passed before 15:30 and failed after it, every
+            # day, and both index spreads dropped out of the sum to 0.0.
+            if _past_entry_cutoff(params, now=self.now()):
+                continue
+            memo = self.reserve.get(a.key())
+            ml = _num((memo or {}).get("max_loss"))
+            out[a.key()] = {
+                "priority": prio, "symbol": a.symbol, "play": a.play,
+                "max_loss": float(ml) if ml is not None else 0.0,
+                "measured": ml is not None,
+                "measured_at": (memo or {}).get("at"),
+                "label": ("%s %s ($%.0f)" % (a.symbol, a.play, ml)
+                          if ml is not None
+                          else "%s %s (never priced -- nothing held back)"
+                               % (a.symbol, a.play)),
+            }
+        return out
+
     def _propose_one(self, a: P.Assignment, pr: Proposal, sigs: dict,
-                     bp: Optional[float], open_risk: float, n_open: int,
-                     arm: Arm, res: CycleResult) -> None:
+                     budget: TierBudget, n_open: int, arm: Arm,
+                     res: CycleResult) -> None:
         params = a.effective()
         spec = P.play(a.play)
 
@@ -1228,13 +2039,13 @@ class Playbook:
             return
 
         # ---- the time-of-day window ----
-        in_win, why = P.in_entry_window(params)
+        in_win, why = P.in_entry_window(params, now=self.now())
         if not in_win:
             pr.reason = why
             return
 
         # ---- one per session / one per bar ----
-        sess = P.session_key()
+        sess = P.session_key(now=self.now())
         if params.get("one_per_session"):
             today = [p for p in self.ledger.positions()
                      if p.symbol == a.symbol and p.play == a.play
@@ -1262,7 +2073,7 @@ class Playbook:
                 pr.reason = "signal is down but this ticker is set to calls only"
                 return
             if params.get("same_session_only") and sig.session is not None:
-                today = _dt.datetime.now(NY).date()
+                today = self.now().date()
                 if sig.session != today:
                     pr.reason = ("the last closed hourly bar is from %s, not "
                                  "today (%s) -- waiting for this session's "
@@ -1309,16 +2120,23 @@ class Playbook:
             return
         pr.structure = st
 
-        # ---- the risk ceiling, on the real number ----
-        if st.max_loss is not None and bp is not None:
-            room = bp * MAX_OPEN_RISK_FRACTION - open_risk
-            if st.max_loss > room:
-                pr.reason = ("$%.0f of risk needs $%.0f of room; $%.0f open "
-                             "against a $%.0f ceiling (%.0f%% of $%.0f BP)"
-                             % (st.max_loss, st.max_loss, open_risk,
-                                bp * MAX_OPEN_RISK_FRACTION,
-                                100 * MAX_OPEN_RISK_FRACTION, bp))
-                return
+        # ---- what this play costs, remembered for the reservation ----
+        # Written whenever it is priced, whether or not it opens: the number is
+        # only useful for holding headroom on the days it is NOT ready yet.
+        if spec.kind == P.CREDIT_SPREAD and st.max_loss is not None:
+            # st.max_loss is dollars for the WHOLE position already -- see
+            # optplays.Structure. Only Structure.candidate() divides it down to
+            # per-contract, because optexec.plan multiplies it back up.
+            self.reserve.note(a.key(), max_loss=float(st.max_loss),
+                              contracts=ct, label=st.label)
+
+        # ---- this tier's allocation, on the real number ----
+        # The measured max_loss and never the requested size: what the
+        # structure priced at on THIS chain is the only number that can
+        # honestly be compared with a budget.
+        if not budget.fits(st.max_loss):
+            pr.reason = budget.refusal(float(st.max_loss))
+            return
 
         # ---- the full pre-flight, reusing the one order path's checks ----
         plan = optexec.plan(self.a, st.candidate(), st.exec_legs(),
@@ -1381,7 +2199,16 @@ class Playbook:
             self.decide("submitted", id=pid, symbol=a.symbol, play=a.play,
                         order=oid, structure=st.as_dict(),
                         target=target, stop=stop)
-            self._rest_target(pid, st, target, res)
+            # THE RESTING TARGET IS NOT PLACED HERE. It used to be, one line
+            # after the entry was accepted -- and every one came back
+            #   422 {"code":42210000,"message":"position intent mismatch,
+            #        inferred: sell_to_open, specified: sell_to_close"}
+            # because "accepted" is not "filled". At that instant the account
+            # holds nothing, so Alpaca infers a sell would OPEN a short, and
+            # level 3 cannot sell naked. The cover goes on once the BROKER
+            # confirms the position -- _cover(), after reconcile has moved it
+            # pending -> open -- and for the count the broker confirms, which on
+            # a partial fill is not the count that was requested.
         else:
             self.ledger.record(pid, "refused", state="closed",
                                closed_at=_utc(),
@@ -1423,46 +2250,379 @@ class Playbook:
         ex._record("placed", {"label": st.label, "body": body, "response": resp})
         return {"placed": True, "response": resp, "body": body}
 
-    def _rest_target(self, pid: str, st, target: float, res: CycleResult) -> None:
-        """Rest the profit-taking limit, GTC, right after the entry goes out.
+    # ================================================================ covering
+    def _cover(self, res: CycleResult) -> None:
+        """Make sure every confirmed position has its resting profit target.
 
-        This is the "limit order at 50 percent profit" as an actual order, so a
-        target is hit even when this process is not running. A refusal is
-        recorded on the position rather than swallowed: the loop then owns the
-        target, and the dashboard says which.
+        Runs every cycle, after reconcile has said what the broker really holds
+        and after manage has had its chance to close anything due. It is
+        IDEMPOTENT in two independent ways, because one was not enough:
+
+          * the ledger's own `rest_order_id` / `rest_refused`, which is cheap;
+          * the broker's live open orders, which is the truth. A ledger flag
+            lost to a crash between the POST and the record would otherwise
+            stack a second GTC order on one position, and two resting sells
+            against one long option is a naked short the moment both fill.
+
+        The second check also heals the other way: a rest cancelled by hand at
+        the broker leaves `rest_order_id` set on a position with nothing
+        working, and this notices and re-covers it.
         """
-        if self.dry_run:
+        want = [p for p in self.ledger.open_positions() if self._needs_cover(p)]
+        if not want:
             return
+        working = self._working_by_leg(res)
+        if working is None:
+            # We could not read the order book. Covering blind is how a second
+            # GTC order gets stacked, so this waits for the next cycle and says
+            # so rather than guessing.
+            self.decide("cover_deferred",
+                        reason="cannot read open orders; not covering blind",
+                        positions=[p.id for p in want])
+            return
+        for pos in want:
+            try:
+                self._ensure_rest(pos, working, res)
+            except Exception as e:
+                res.errors.append("cover %s: %s" % (pos.id, e))
+                self.decide("cover_failed", id=pos.id, symbol=pos.symbol,
+                            error=str(e))
+
+    def _needs_cover(self, pos: PlayPosition) -> bool:
+        """Whether this position is one we owe a resting profit target."""
+        if pos.adopted:
+            # Its thresholds were never set, so there is no price to rest at.
+            return False
+        if pos.state != "open" or not pos.contracts:
+            return False
+        if pos.target_px is None:
+            return False
+        if (pos.rest_order_id and pos.rest_contracts == pos.contracts
+                and not self._rest_stale(pos)):
+            # The stale check is what makes the DAY fallback real: that order
+            # is gone at the close, so on a new session this has to go back to
+            # the order book and look rather than trust the recorded id. On the
+            # GTC path _rest_stale is always False and nothing changes.
+            return False
+        if not pos.rest_refused:
+            return True
+
+        # A REFUSAL IS NOT A VERDICT ON THE POSITION, it is a verdict on one
+        # attempt, and the two kinds expire differently. A position that filled
+        # at 15:14 on a single name spent all three attempts inside the fifteen
+        # minutes before Alpaca's 15:15 cutoff, against a window that reopens
+        # at the next bell -- and was then loop-owned for the rest of its life,
+        # with no resting exit at all if this process died. That is the
+        # opposite of what the counter is for.
+        kind = str(pos.rest_kind or REST_STRUCTURAL)
+        attempts = int(pos.rest_attempts or 0)
+        sess = P.session_key(now=self.now())
+        if kind == REST_TEMPORARY and str(pos.rest_session or "") != sess:
+            # New session, new window: the count belongs to a day that is over.
+            attempts = 0
+        if kind == REST_STRUCTURAL and attempts >= REST_MAX_ATTEMPTS:
+            # The broker will not accept this body today or tomorrow. The loop
+            # owns the target, and it says so on the position.
+            return False
+        if (attempts and time.time() - (pos.rest_refused_at or 0.0)
+                < REST_RETRY_AFTER_S):
+            return False
+        if kind == REST_TEMPORARY and order_cutoff_shut(pos.symbol, self.now()):
+            # Still inside the window that refused it. Retrying now buys a
+            # fourth identical rejection; the next session's first cycle is
+            # where this gets its exit.
+            return False
+        return True
+
+    def _rest_stale(self, pos: PlayPosition, *,
+                    now: Optional[_dt.datetime] = None) -> bool:
+        """Whether a DAY resting exit has outlived the session it was placed in.
+
+        A GTC rest is never stale, which is the entire reason it is preferred.
+        A DAY rest dies at the close, so a position on the fallback path has NO
+        resting exit from that moment until something re-places it -- and the
+        "something" is this process, which may not be running. Answering True
+        on a new session is what sends `_cover` back to the order book to see
+        whether the order is still there.
+
+        Alpaca carries a DAY order placed after hours into the NEXT session
+        (measured: the mleg DAY orders of 2026-09-18T21:45Z carry
+        expires_at=2026-09-21T20:15:00Z), so a stale session key means "go and
+        look", never "it is definitely gone". _ensure_rest does the looking.
+
+        The clock comes from self.now() so a test can fix it. A test that reads
+        the wall clock passes in the morning and fails in the evening.
+        """
+        if not pos.rest_order_id or pos.rest_tif != REST_TIF_FALLBACK:
+            return False
+        return pos.rest_tif_session != P.session_key(now=now or self.now())
+
+    def _working_by_leg(self, res: CycleResult):
+        """{OCC: [order ids]} for every open order touching an option leg.
+
+        None when the order book could not be read -- which is a different
+        thing from "nothing is working" and must not be confused with it.
+        """
+        try:
+            orders = self.a.orders(status="open", limit=200)
+        except Exception as e:
+            LOG.warning("cannot list open orders: %s", e)
+            return None
+        res.trading_calls += 1
+        out: dict = {}
+        for o in orders or []:
+            syms = {str(o.get("symbol") or "")}
+            for leg in (o.get("legs") or []):
+                syms.add(str(leg.get("symbol") or ""))
+            for sym in syms:
+                if sym:
+                    out.setdefault(sym, []).append(str(o.get("id") or ""))
+        return out
+
+    def _ensure_rest(self, pos: PlayPosition, working: dict,
+                     res: CycleResult) -> str:
+        """Place (or re-place) the resting profit target for ONE position.
+
+        "Resting" and not "GTC": a position whose GTC form the broker refused
+        is on a DAY order that has to be re-placed every session, and this is
+        the method that notices and does it. See _send_rest and _rest_stale.
+        """
+        occs = [str(l.get("symbol")) for l in pos.legs]
+        live = [oid for occ in occs for oid in working.get(occ, [])]
+
+        # Read the id BEFORE cancelling: _cancel_rest records rest_order_id=""
+        # and the ledger replays that onto this very object, so comparing
+        # against pos.rest_order_id afterwards compares against "" and the
+        # order we just cancelled reads as somebody else's.
+        ours = pos.rest_order_id
+        if (ours and ours in live
+                and int(pos.rest_contracts) == int(pos.contracts)):
+            # A stale DAY rest brought us back here on a new session and the
+            # broker still shows the order working -- Alpaca carries a DAY
+            # order placed after hours into the next session. So there is
+            # nothing to replace. Re-stamp the session and leave it alone:
+            # cancelling a live exit to place an identical one is a window in
+            # which the position is uncovered, for no gain.
+            self.ledger.record(pos.id, "rest_carried",
+                               rest_tif_session=P.session_key(now=self.now()))
+            self.decide("target_rest_carried", id=pos.id, symbol=pos.symbol,
+                        order=ours, tif=pos.rest_tif,
+                        reason="the DAY rest is still working this session")
+            return "the resting target is still working"
+        if ours and ours in live:
+            # Something is resting, but for the wrong size -- a partial fill
+            # that later grew. Cancel it and re-cover at the confirmed count
+            # rather than leave part of the position naked, or add a second
+            # order beside the first.
+            if not self._cancel_rest(pos):
+                return "could not clear the undersized rest"
+            live = [oid for oid in live if oid != ours]
+
+        if live:
+            # A working order on these legs that is not the one we recorded. It
+            # could be somebody else's -- Glenn's stack and hand-placed trades
+            # live on this account too -- or ours from before a crash. Either
+            # way, adding to it is the one thing that must not happen.
+            self.decide("cover_skipped", id=pos.id, symbol=pos.symbol,
+                        orders=live,
+                        reason="an order is already working on these legs")
+            self.ledger.record(pos.id, "cover_skipped",
+                               note="order(s) %s already working on these legs"
+                                    % ", ".join(live))
+            return "an order is already working on these legs"
+
+        body = self._rest_body(pos)
+        if body is None:
+            # STRUCTURAL by construction and not by guesswork: no order was
+            # sent, because these legs cannot be expressed as one resting
+            # order at all (mleg is 2-4 legs). Waiting for a better hour
+            # changes nothing about that.
+            self._rest_refused(pos, "cannot build a resting close for these legs",
+                               kind=REST_STRUCTURAL)
+            return "cannot build a resting close"
+        if self.dry_run:
+            self.decide("target_rest_dry_run", id=pos.id, symbol=pos.symbol,
+                        limit=pos.target_px, body=body)
+            return "dry run: would rest the target"
+        sent = self._send_rest(pos, body, res)
+        if sent["response"] is None:
+            self._rest_refused(pos, sent["error"])
+            return "rest refused: %s" % sent["error"]
+        tif, why = sent["tif"], sent["downgraded"]
+        self.ledger.record(pos.id, "target_rested",
+                           rest_order_id=str((sent["response"] or {}).get("id")
+                                             or ""),
+                           rest_contracts=int(pos.contracts),
+                           rest_tif=tif,
+                           # Only the DAY path has a session to go stale
+                           # against; "" on the GTC path says so plainly
+                           # instead of parking a date that means nothing.
+                           rest_tif_session=(P.session_key(now=self.now())
+                                             if tif == REST_TIF_FALLBACK
+                                             else ""),
+                           rest_downgraded=(why or pos.rest_downgraded),
+                           rest_refused="", rest_attempts=0,
+                           rest_refused_at=0.0)
+        if why:
+            # LOUD. This position's exit now dies at every close and is
+            # re-placed by this loop, so it is only there while this process
+            # is. That is a materially worse exit than the one that was asked
+            # for and it must not read like the same thing.
+            LOG.warning("%s %s: resting exit DOWNGRADED to %s -- %s",
+                        pos.id, pos.symbol, REST_TIF_FALLBACK, why)
+            self.decide("target_rest_downgraded", id=pos.id, symbol=pos.symbol,
+                        order=(sent["response"] or {}).get("id"), tif=tif,
+                        error=why,
+                        note="this exit dies at the close and is re-placed "
+                             "each session; it is NOT there if this process "
+                             "is not running")
+        self.decide("target_rested", id=pos.id, symbol=pos.symbol,
+                    order=(sent["response"] or {}).get("id"),
+                    limit=pos.target_px, contracts=pos.contracts, tif=tif,
+                    body=sent["body"])
+        return "target rested at %.2f" % float(pos.target_px)
+
+    def _send_rest(self, pos: PlayPosition, body: dict,
+                   res: CycleResult) -> dict:
+        """POST the resting close, downgrading GTC to DAY if it is refused.
+
+        Returns {response, body, tif, downgraded, error}. `response` is None
+        exactly when nothing was accepted and `error` then says why; `body` is
+        what actually went on the wire, which is not the `body` passed in when
+        the downgrade fired.
+
+        WHY THIS EXISTS. Until 28 Sep 2026 nothing in this repo had ever sent
+        order_class=mleg with time_in_force=gtc -- every other mleg body here
+        is "day" and the only GTC option order was single-leg. The account's
+        own order history then settled the OPENING case (see
+        REST_TIF_PREFERRED), but the CLOSING form is still unmeasured, and
+        settling it would mean placing an order on a live account. An
+        unverified assumption in the exit path has to degrade loudly rather
+        than silently leave a position with nothing working.
+
+        WHEN A SECOND BODY MAY BE SENT. Only when the broker ANSWERED and
+        refused. broker._req retries three times on a connection failure, so a
+        timeout may well mean the order landed; re-sending after one would
+        stack a second resting exit on one position, and two fills against one
+        long option is a naked short. A 4xx is a verdict; nothing else is --
+        see _rest_rejected.
+
+        The downgrade fires on ANY clean 4xx rather than on a message that
+        mentions time_in_force, because nobody knows what Alpaca's refusal of
+        this form would say and guessing the wording is how a fallback never
+        fires. Being wrong costs one extra rejected POST, and both errors are
+        recorded together.
+        """
+        url = "%s/v2/orders" % self.a.base
+        try:
+            resp = self.a._req("POST", url, "/orders", json=body)
+            res.trading_calls += 1
+            return {"response": resp, "body": body,
+                    "tif": str(body.get("time_in_force") or ""),
+                    "downgraded": "", "error": ""}
+        except Exception as e:
+            res.trading_calls += 1
+            if (str(body.get("time_in_force") or "") != REST_TIF_PREFERRED
+                    or not _rest_rejected(e)):
+                return {"response": None, "body": body, "tif": "",
+                        "downgraded": "", "error": str(e)}
+            first = str(e)
+
+        day = dict(body, time_in_force=REST_TIF_FALLBACK)
+        LOG.warning("%s: the broker refused the %s resting exit (%s); "
+                    "trying %s", pos.id, REST_TIF_PREFERRED, first[:200],
+                    REST_TIF_FALLBACK)
+        try:
+            resp = self.a._req("POST", url, "/orders", json=day)
+            res.trading_calls += 1
+        except Exception as e2:
+            # Both bodies refused. Neither error is dropped: the first is the
+            # one that says whether the GTC form was the problem at all.
+            return {"response": None, "body": day, "tif": "", "downgraded": "",
+                    "error": "%s (and as %s: %s)" % (first, REST_TIF_FALLBACK,
+                                                     e2)}
+        return {"response": resp, "body": day, "tif": REST_TIF_FALLBACK,
+                "downgraded": first[:300], "error": ""}
+
+    def _rest_refused(self, pos: PlayPosition, error: str, *,
+                      kind: str = "") -> None:
+        """Record that the broker would not hold this target, and who owns it.
+
+        A refusal is never swallowed. It goes on the position, so the loop knows
+        it owns the target and the dashboard can say which -- degrading loudly
+        beats a position that silently has no target. The attempt count is what
+        stops a transient refusal from demoting a position for life, and a
+        permanent one from hammering /orders every twenty seconds.
+
+        WHAT KIND of refusal is recorded alongside it, with the session it
+        happened in, because the count alone cannot tell "the broker will never
+        take this" from "the broker is not taking it at 15:22". Only the first
+        is allowed to be final; the second is stale at the next bell. Pass
+        `kind` to override the classification -- a caller that already knows
+        (a body this code could not build at all) should not be guessed at.
+        """
+        kind = kind or rest_refusal_kind(error, pos.symbol, self.now())
+        sess = P.session_key(now=self.now())
+        prior = int(pos.rest_attempts or 0)
+        if kind == REST_TEMPORARY and str(pos.rest_session or "") != sess:
+            prior = 0
+        n = prior + 1
+        final = (kind == REST_STRUCTURAL and n >= REST_MAX_ATTEMPTS)
+        self.ledger.record(pos.id, "rest_refused", rest_refused=str(error)[:300],
+                           rest_attempts=n, rest_refused_at=time.time(),
+                           rest_kind=kind, rest_session=sess,
+                           rest_order_id="", rest_contracts=0)
+        self.decide("target_rest_refused", id=pos.id, symbol=pos.symbol,
+                    limit=pos.target_px, attempt=n, kind=kind, session=sess,
+                    error=str(error)[:300],
+                    note=("the loop will manage the target instead"
+                          if final else
+                          "temporary -- retried in %ds, and the count is reset "
+                          "at the next session" % int(REST_RETRY_AFTER_S)
+                          if kind == REST_TEMPORARY
+                          else "will retry in %ds" % int(REST_RETRY_AFTER_S)))
+
+    def _rest_body(self, pos: PlayPosition) -> Optional[dict]:
+        """The resting closing limit that takes the profit on this position.
+
+        Sized to `pos.contracts`, which is what the BROKER confirms, never
+        `pos.requested`. A cover larger than the position is an OPENING order
+        for the difference.
+
+        GTC unless this position has already been downgraded, in which case it
+        stays on DAY for the rest of its life. Re-probing the GTC form every
+        session would buy one rejected order a day to re-learn a fact already
+        written on the position.
+        """
+        ct = int(pos.contracts)
+        if ct <= 0 or pos.target_px is None:
+            return None
+        tif = REST_TIF_FALLBACK if pos.rest_downgraded else REST_TIF_PREFERRED
         legs = []
-        for l in st.legs:
-            closing = "buy" if l.side == "sell" else "sell"
-            legs.append({"symbol": l.symbol, "ratio_qty": "1", "side": closing,
+        for l in pos.legs:
+            occ = str(l.get("symbol") or "")
+            if not occ:
+                return None
+            closing = "buy" if l.get("side") == "sell" else "sell"
+            legs.append({"symbol": occ, "ratio_qty": "1", "side": closing,
                          "position_intent": "buy_to_close" if closing == "buy"
                                             else "sell_to_close"})
+        px = "%.2f" % max(0.01, float(pos.target_px))
         if len(legs) == 1:
-            body = {"symbol": legs[0]["symbol"], "qty": str(int(st.contracts)),
+            # mleg rejects anything under 2 legs with a 422, so a single leg is
+            # a plain order. Not a stylistic choice.
+            return {"symbol": legs[0]["symbol"], "qty": str(ct),
                     "side": legs[0]["side"], "type": "limit",
-                    "time_in_force": "gtc",
+                    "time_in_force": tif,
                     "position_intent": legs[0]["position_intent"],
-                    "limit_price": "%.2f" % target}
-        else:
-            # Buying a credit spread back is a DEBIT: positive limit price.
-            body = {"order_class": "mleg", "qty": str(int(st.contracts)),
-                    "type": "limit", "time_in_force": "gtc",
-                    "limit_price": "%.2f" % target, "legs": legs}
-        try:
-            resp = self.a._req("POST", "%s/v2/orders" % self.a.base, "/orders",
-                               json=body)
-            res.trading_calls += 1
-            self.ledger.record(pid, "target_rested",
-                               rest_order_id=str((resp or {}).get("id") or ""))
-            self.decide("target_rested", id=pid, order=(resp or {}).get("id"),
-                        limit=target, body=body)
-        except Exception as e:
-            self.ledger.record(pid, "rest_refused", rest_refused=str(e)[:300])
-            self.decide("target_rest_refused", id=pid, limit=target,
-                        error=str(e)[:300],
-                        note="the loop will manage the target instead")
+                    "limit_price": px}
+        if len(legs) > 4:
+            # mleg is 2-4 legs. Anything wider cannot rest as one order, so the
+            # loop has to own it -- which is a refusal, said out loud.
+            return None
+        # Buying a credit spread back is a DEBIT, which Alpaca wants POSITIVE.
+        return {"order_class": "mleg", "qty": str(ct), "type": "limit",
+                "time_in_force": tif, "limit_price": px, "legs": legs}
 
     # ================================================================== cycle
     def refresh_stores(self) -> None:
@@ -1486,6 +2646,12 @@ class Playbook:
             # an expiring short leg does not care that we think we are shut.
             self._reconcile(res)
             self._manage(res)
+            # 2b. COVER. After manage, so a position the guard is closing this
+            # cycle is not first given a target it would immediately have to
+            # cancel; and whatever the clock says, because a GTC limit is
+            # accepted while the market is shut and rests until the open, which
+            # is the only order that does anything at all out of hours.
+            self._cover(res)
 
             if is_open:
                 self._propose(res, arm)
@@ -1511,14 +2677,24 @@ class Playbook:
         self.refresh_stores()
         arm = self.arm()
         rows = []
-        for a in self.assignments.all():
+        holds = self._outstanding_reservations(proposal_order(
+            self.assignments.active()))
+        for a in proposal_order(self.assignments.all()):
             open_pos = self.ledger.open_for(a.symbol, a.play)
             permitted, why = arm.permits(a.symbol, a.play)
+            hold = holds.get(a.key())
             rows.append({
                 **a.as_dict(),
                 "armed": permitted, "arm_why": why,
                 "open": [p.as_dict() for p in open_pos],
                 "open_count": len(open_pos),
+                # The order these are proposed and sized in, on the row itself,
+                # because "why did the swing get the money and not the spread"
+                # is unanswerable from a screen that does not show it.
+                "priority": priority_of(a.play),
+                "reserves": (round(hold["max_loss"], 2)
+                             if hold and hold["measured"] else None),
+                "reserve_why": (hold or {}).get("label") or "",
             })
         last = self.last.as_dict() if self.last else None
         return {
@@ -1532,9 +2708,43 @@ class Playbook:
             "closed_recent": [p.as_dict() for p in self.ledger.positions()
                               if not p.is_open][-25:],
             "open_risk": self.ledger.open_risk(),
+            # Per tier as well as in total, because the total is the number
+            # that hid the failure: $11,185 open against an $11,205 ceiling
+            # read as a full book while the credit tier had spent nothing.
+            "open_risk_by_tier": {
+                TIER_CREDIT: self.ledger.open_risk(TIER_CREDIT),
+                TIER_DEBIT: self.ledger.open_risk(TIER_DEBIT)},
             "caps": {"max_concurrent": MAX_CONCURRENT_POSITIONS,
                      "max_risk_fraction": MAX_OPEN_RISK_FRACTION,
+                     "credit_risk_fraction": CREDIT_RISK_FRACTION,
+                     "debit_risk_fraction": DEBIT_RISK_FRACTION,
                      "close_short_at_dte": CLOSE_SHORT_AT_DTE},
+            # board() takes no account snapshot (it makes no trading call), so
+            # the dollar allocations are not knowable on this path. The
+            # fractions are, and the worker writes the dollars onto every
+            # proposal it records.
+            "priority": {"order": [P.CREDIT_SPREAD, P.LONG_SINGLE],
+                         "why": ("the index credit spreads are the income leg "
+                                 "that funds the buying, so they are proposed "
+                                 "first AND hold their own allocation (%.0f%% "
+                                 "of options buying power) that the swing "
+                                 "debits (%.0f%%) may never spend"
+                                 % (100 * CREDIT_RISK_FRACTION,
+                                    100 * DEBIT_RISK_FRACTION))},
+            # What the income legs still to open today are MEASURED to
+            # cost. Nothing is held back from anybody any more -- the
+            # credit allocation does that structurally -- so this is the
+            # number to compare CREDIT_RISK_FRACTION against, not a
+            # claim on a swing's headroom.
+            "reserved": round(sum(h["max_loss"] for h in holds.values()), 2),
+            "reserves": {k: h for k, h in holds.items()},
+            # A position that is OPEN with no resting exit and no recorded
+            # refusal is a bug, not a state. Counting it here is what makes it
+            # detectable without reading a ledger by hand.
+            "uncovered": [p.id for p in self.ledger.open_positions()
+                          if p.exit_cover == "none"],
+            "unpriced": [p.id for p in self.ledger.open_positions()
+                         if p.mark_error],
             "last_cycle": last,
         }
 
@@ -1542,6 +2752,104 @@ class Playbook:
 def PLAYS_KIND(play_id: str) -> str:
     p = P.PLAYS.get(play_id)
     return p.kind if p else ""
+
+
+def tier_of_play(play_id: str) -> str:
+    """Whose money this play spends. An unknown play spends the debit
+    allocation and never the income tier's."""
+    return tier_of_kind(PLAYS_KIND(play_id))
+
+
+def priority_of(play_id: str) -> int:
+    """Lower goes first. An unknown play sorts last, never ahead of a known
+    one -- a typo in an assignment must not outrank the income leg."""
+    return PLAY_PRIORITY.get(PLAYS_KIND(play_id), UNRANKED_PRIORITY)
+
+
+def proposal_order(rows) -> list:
+    """The order plays are proposed and sized in. See PLAY_PRIORITY.
+
+    Symbol is the tie-break INSIDE a tier only, so it can no longer decide
+    which strategy gets funded.
+    """
+    return sorted(rows, key=lambda a: (priority_of(a.play), a.symbol, a.play))
+
+
+def _past_entry_cutoff(params: dict, *, now: Optional[_dt.datetime] = None
+                       ) -> bool:
+    """Whether this play's entry window has already shut for the day.
+
+    `P.in_entry_window` answers "may it open now", which is False both before
+    10:30 and after 15:30 -- and those two mean opposite things to a
+    reservation. Before the window the money must still be held; after it, the
+    trade cannot happen today and holding it back starves the swings for
+    nothing.
+    """
+    before = P.parse_hhmm(params.get("entry_before_et"))
+    if before is None:
+        return False
+    n = (now or _dt.datetime.now(NY)).astimezone(NY)
+    return (n.hour * 60 + n.minute) >= before
+
+
+def _rest_rejected(e: Exception) -> bool:
+    """Whether the broker ANSWERED and refused, as opposed to not answering.
+
+    This is the question that decides whether a second order body may be sent,
+    so it is asked narrowly. A 4xx is the broker's own verdict: it read the
+    body, nothing was accepted, nothing is working, and a different body may be
+    tried. A timeout or a connection reset is NOT a refusal -- broker._req
+    retries three times, so the order may well have landed, and re-sending
+    after one would stack a second resting exit against one position. 429 is
+    excluded for the same reason: throttling is not a verdict on the body.
+
+    Duck-typed on `.status` rather than isinstance(broker.AlpacaError) so a
+    wrapped or re-raised error that still carries the code is still understood.
+    """
+    st = getattr(e, "status", None)
+    return isinstance(st, int) and 400 <= st < 500 and st != 429
+
+
+def order_cutoff_shut(symbol: str, now: Optional[_dt.datetime] = None) -> bool:
+    """Whether Alpaca is refusing option orders on this symbol RIGHT NOW.
+
+    MEASURED, CLAUDE.md: "Alpaca rejects option orders after 15:30 ET on broad
+    ETFs (15:15 on single names) and begins auto-liquidating expiring positions
+    at 15:45."
+
+    NOT the same question as "is the market open". The same file records that
+    "LIMIT orders, day or GTC, are accepted while the market is closed and rest
+    until the open -- which is how a Monday open is traded from a Friday
+    evening", so overnight is a fine time to place a resting target. The dead
+    zone is the TAIL of a session and nothing else: the cutoff through 16:00 ET
+    on a weekday. A holiday afternoon reads as shut here, which costs one
+    deferred retry and nothing else.
+    """
+    n = (now or _dt.datetime.now(NY)).astimezone(NY)
+    if n.weekday() >= 5:
+        return False
+    cutoff = (ORDER_CUTOFF_BROAD_ET if str(symbol).upper() in BROAD_ETFS
+              else ORDER_CUTOFF_SINGLE_ET)
+    mins = n.hour * 60 + n.minute
+    return cutoff <= mins < SESSION_END_ET
+
+
+def rest_refusal_kind(error: str, symbol: str = "",
+                      now: Optional[_dt.datetime] = None) -> str:
+    """REST_TEMPORARY or REST_STRUCTURAL for one refusal.
+
+    THE CLOCK OUTRANKS THE MESSAGE. Alpaca's wording for the afternoon cutoff
+    is not something this repo has measured, and inventing a substring to match
+    it is how an exit gets stripped by a typo. If the order window is shut for
+    this symbol at the moment of the refusal, the refusal is temporary WHATEVER
+    it said -- that is a fact about the clock, not about the text.
+    """
+    if order_cutoff_shut(symbol, now):
+        return REST_TEMPORARY
+    low = str(error or "").lower()
+    if any(h in low for h in REST_TEMPORARY_HINTS):
+        return REST_TEMPORARY
+    return REST_STRUCTURAL
 
 
 # =================================================================== the CLI

@@ -415,9 +415,29 @@ Worth knowing before arming, because "one contract" sounds small and is not:
 | META | 750 put x1 | $4,050 | $1,012 |
 
 A 33-DTE ATM option on a $750 stock costs $4,050. Seven Mag-7 swings at once is
-~$11,500 committed against $23,890 of options buying power, which is why
-`MAX_OPEN_RISK_FRACTION` (60% of options BP, all plays together) exists and will
-bind. **-25% on a credit spread is also a TIGHT stop**: the credit is $0.25-0.30
+~$11,500 committed against $23,890 of options buying power, which is why a risk
+cap exists and will bind.
+
+**The cap is split in two, and the tiers do not share (28 Sep 2026).** A single
+ceiling could not express "the spreads sell every day no matter what": six
+33-DTE swings held $11,185.00 of an $11,204.88 ceiling and both spreads were
+refused over $19.88 of headroom. They were not outranked -- priority reorders
+one cycle and cannot reclaim what an earlier cycle spent, and those swings have
+max_open=1 and a month to run. So `CREDIT_RISK_FRACTION` (0.40 of options BP)
+is the income tier's own allocation, `DEBIT_RISK_FRACTION` (0.20) is the swing
+tier's, `MAX_OPEN_RISK_FRACTION` is their SUM and is still 0.60, and neither
+tier may spend the other's dollar -- not by being early, not by being first in
+the cycle, not by having been open since last month. 0.40 is arithmetic: the
+measured pair is $1,750 + $1,705 = $3,455 a session and it is written again
+every session, so at $18,674.80 of BP a $7,469.92 allocation funds two
+consecutive sessions ($6,910) and not a third ($10,365). Beyond that the
+spread is refused for want of capital and says so by name
+(`credit_budget_short` in the decisions log). max_open=6 would need $20,730,
+which is more than the whole account: at this size the binding constraint is
+the ACCOUNT, and raising the 60% cap is a risk decision for the owner, not a
+code change.
+
+**-25% on a credit spread is also a TIGHT stop**: the credit is $0.25-0.30
 on a $2 wing, so a quarter of it is 6-8 cents and the bid-ask is a few cents by
 itself. It is implemented exactly as specified and flagged rather than quietly
 widened; `stop_pct` is editable per ticker.
@@ -526,7 +546,8 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_entry_rule test_fractional test_greeks test_indicators test_latency
   test_optapi test_optbacktest test_optbank test_optbook test_optcal
   test_optdata test_optengine test_optexec test_optgates test_optgrade
-  test_options test_options_api test_optquotes test_optrun
+  test_options test_options_api test_optquotes test_optrest
+  test_optrun
   test_optstructures test_optsym test_optview test_optvol test_presets
   test_reconcile test_refresh_trend test_report test_research test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
@@ -689,3 +710,40 @@ open inventory and its age alongside it, because that is where the risk is.
   changed. Turning extended hours on requires re-placing resting TPs.
 - The engine reads market data from the fleet snapshot, never directly. Adding
   per-symbol polling would blow the ~200 req/min account rate limit.
+
+## mleg + GTC, measured 28 Sep 2026 (the resting options exit)
+
+`optplaybook._rest_body` rests the profit target as `order_class=mleg` with
+`time_in_force=gtc`, and until this was checked **nothing in this repo had ever
+sent that combination**: every other mleg body here is `day`
+(`optexec.py:855`, `optplaybook.py` both market closes) and the only GTC option
+order was single-leg. The note above -- "LIMIT orders, day or GTC, are accepted
+while the market is closed" -- was written about SINGLE-LEG orders.
+
+**Alpaca accepts it.** Measured by reading PA3ILNUY5E4F's own order history,
+not by placing anything: order `ec9e004f-acf8-41e8-bfd0-afca8a666610`,
+submitted `2026-09-18T20:15:56Z` (16:15 ET, *after* the close),
+`order_class=mleg`, `time_in_force=gtc`, two SPY option legs. It has an id,
+`failed_at` is null, and its status is `canceled` -- not `rejected`. Both legs
+come back carrying `time_in_force=gtc` with `expires_at=null`, while the mleg
+DAY orders in the same history carry `expires_at=2026-09-21T20:15:00Z`, so GTC
+was honoured on the legs and not quietly coerced to day. The cancel was the
+prober's own: the DAY mleg orders beside it were cancelled 344 ms and 356 ms
+after submission and this one 365 ms after -- a client round trip, not a broker
+verdict.
+
+**What is still NOT measured**: that order was OPENING (`buy_to_open` /
+`sell_to_open`). The resting exit is CLOSING, and no closing mleg order has
+ever been sent from this account. Settling it would mean placing an order on a
+live account, so it is covered by code instead: a clean 4xx on the GTC form
+downgrades to a DAY order (`_send_rest`), the position records `rest_tif`,
+`rest_tif_session` and `rest_downgraded`, `exit_cover` reads `resting_day`
+rather than `resting`, and `_rest_stale` makes `_needs_cover` re-place that
+order every session -- because a DAY order is gone at the close and a position
+on it has no exit until this process puts one back. A second body is only ever
+sent on a **4xx**; a timeout or a 5xx may mean the first order landed, and
+re-sending would stack two resting exits on one position. `test_optrest.py`.
+
+Also measured, and worth knowing separately: those mleg orders were accepted at
+16:15 and 17:45 ET, i.e. LIMIT option orders are taken well past the 15:30
+cutoff that applies to opening market orders.

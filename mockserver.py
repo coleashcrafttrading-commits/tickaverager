@@ -53,6 +53,13 @@ Each one is a reviewer's failing input, reproducible in a browser:
   boardclash   a watched ticker the share ladder also trades, so the board
                has to carry the disjointness banner
   boardfail    GET /board answers 502, for the stranded-board case
+  perf         the Options Overview with a real book behind it: 14 closed,
+               6 open, one of them with no mark at all
+  perfempty    a fresh account. The overview must read as "nothing yet",
+               never as a broken page and never as a row of zeroes
+  perfstub     optperf.py has not landed, so every calculated figure is a
+               dash and the page has to say so once instead of looking empty
+  perffail     GET /perf answers 502, for the stranded-overview case
 """
 from __future__ import annotations
 
@@ -79,7 +86,9 @@ SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
              "bankfail", "deep", "boardempty", "boardlimit", "boardclash",
              "boardfail",
              # the Plays room, which replaced the board as the landing tab
-             "plays", "playsempty", "playsfrozen", "playsnoquote"]
+             "plays", "playsempty", "playsfrozen", "playsnoquote",
+             # the Overview room, which is now the landing tab itself
+             "perf", "perfempty", "perfstub", "perffail"]
 
 # ------------------------------------------------------------- plays fixtures
 # The Plays room's routes, faked. Same trap as everywhere else in this file: a
@@ -264,6 +273,363 @@ def plays_board(scenario="plays"):
             "reconciled": 4, "adopted": 1, "managed": [], "proposals": [],
             "submitted": 0, "closed": 0, "errors": [], "trading_calls": 21,
         },
+    }
+
+
+# ------------------------------------------------------ performance fixtures
+# GET /api/optlab/perf, faked. Same discipline as everywhere else in this file:
+# the SHAPE and the UNITS are the real route's, and the ones that could be read
+# two ways are named, because a harness that agrees with the view on the wrong
+# unit verifies a lying page clean -- which this file's header exists because
+# of.
+#
+#   a METRIC is optperf.metric()'s dict, and nothing else:
+#       {"value", "n", "unit", "reason", "thin"}
+#   unit "pct"     a FRACTION, 0.643 for 64.3%          (win_rate, utilization)
+#   unit "usd"     DOLLARS for the whole position, never per share
+#   unit "ratio"   a bare multiple                      (profit factor, R)
+#   unit "days"    calendar days
+#   `reason` is set when the value is null OR when `thin` is true -- never
+#   alongside a number the page may trust without a caveat.
+#
+# These are typed out rather than generated, and that is the one deliberate
+# exception to this file's "generate from the real module" rule: optperf
+# imports optplaybook, which imports optdata and optexec, and this harness may
+# not import anything that can reach a broker. So the shape is copied from
+# optperf.metric / _outcomes / _exits / _risk_block / _assignment_block /
+# _holding / _bucket_row / _attention / _decisions_block, and if one of those
+# moves, THIS BLOCK IS THE THING THAT GOES STALE. The browser checks under
+# /check are what would notice.
+#
+# Four scenarios, because three are states this account has actually been in
+# and the fourth is the one it was in on the day the owner asked for this page:
+#
+#   perf       a book with history: 14 closed, 6 open, one unpriceable, one
+#              with no resting exit, and the two refusals that kept SPY and
+#              QQQ out of the market all day
+#   perfempty  a fresh account. Must read as "nothing yet", never as a broken
+#              page and never as a row of zeroes that look like flat results
+#   perfstub   optperf did not answer, so no averaged figure exists at all and
+#              the page must say that once rather than draw empty cards
+#   perffail   the route itself 502s, for the stranded-overview case
+
+
+def _m(value, n, unit, reason=None, thin=False):
+    """One metric, in optperf.metric()'s shape and nobody else's."""
+    return {"value": value, "n": int(n), "unit": unit,
+            "reason": reason if (value is None or thin) else None,
+            "thin": bool(thin)}
+
+
+_PERF_CAPS = {"max_concurrent": 24, "max_risk_fraction": 0.6,
+              "close_short_at_dte": 2}
+_PERF_STATE = {"frozen": "", "armed": True, "arm_why": "",
+               "account": "PA3ILNUY5E4F"}
+_HEDGE_NOTE = ("a short leg is counted net of a long of the same underlying, "
+               "right and expiry that is actually protective; the overnight "
+               "gap between assignment and exercising that long is NOT zero "
+               "and is not modelled here")
+
+# The breakdown reconciles with the headline on purpose: 6 + 14 judged,
+# realized 640 + 1670 = 2310, open 85 - 552.50 = -467.50. A fixture whose rows
+# do not add up to its own totals teaches the page to render a contradiction
+# and nobody notices until the real route does it.
+_PERF_BY_PLAY = [
+    {"key": "index-put-credit-spread", "label": "index-put-credit-spread",
+     "open": 2, "closed": 6, "judged": 6,
+     "realized": _m(640.0, 6, "usd"), "open_pl": _m(85.0, 2, "usd"),
+     "win_rate": _m(0.8333, 6, "pct", reason="6 trades is not a sample",
+                    thin=True),
+     "expectancy": _m(106.67, 6, "usd", reason="6 trades is not a sample",
+                      thin=True),
+     "at_risk": _m(3500.0, 2, "usd")},
+    {"key": "swing-atm-hourly", "label": "swing-atm-hourly",
+     "open": 4, "closed": 14, "judged": 14,
+     "realized": _m(1670.0, 14, "usd"), "open_pl": _m(-552.5, 3, "usd"),
+     "win_rate": _m(0.5714, 14, "pct"),
+     "expectancy": _m(119.29, 14, "usd"),
+     "at_risk": _m(5422.0, 4, "usd")},
+]
+
+# GOOGL has nothing open, so its open P/L is ABSENT with its reason rather
+# than 0.00. A fixture that sent 0 there would never exercise the dash.
+_PERF_BY_TICKER = [
+    ("SPY", 1, 3, 380.0, 40.0, 1.0, 126.67, 1750.0, None),
+    ("QQQ", 1, 3, 260.0, 45.0, 0.6667, 86.67, 1750.0, None),
+    ("AAPL", 1, 3, 520.0, -120.0, 0.6667, 173.33, 1172.0, None),
+    ("META", 1, 3, 410.0, -300.0, 0.5, 136.67, 4050.0, None),
+    ("NVDA", 1, 3, 700.0, -60.0, 0.6667, 233.33, 2200.0, None),
+    ("TSLA", 1, 3, -20.0, -72.5, 0.3333, -6.67, 1500.0, None),
+    ("GOOGL", 0, 2, 60.0, None, 0.5, 30.0, None, "no open position"),
+]
+
+_PERF_EXIT_MIX = [
+    ("profit_target", "profit target", 8, 0.5714, 3120.0, 390.0),
+    ("stop", "stop", 4, 0.2857, -1044.0, -261.0),
+    ("assignment_guard", "assignment guard", 1, 0.0714, -212.0, -212.0),
+    ("expiry", "closed before expiry", 1, 0.0714, 446.0, 446.0),
+    ("gone", "gone from the broker", 0, 0.0, None, None),
+    ("other", "other", 0, 0.0, None, None),
+]
+
+# Every one of these is a state the account was actually in on 27-28 Sep.
+_PERF_ATTENTION = [
+    {"severity": "critical", "code": "no_resting_exit",
+     "id": "SPY-index-put-credit-spread-20260927T143000", "symbol": "SPY",
+     "message": ("open with no resting take-profit and no recorded refusal -- "
+                 "nothing will close this if the loop stops")},
+    {"severity": "critical", "code": "no_mark",
+     "id": "QQQ-index-put-credit-spread-20260927T144000", "symbol": "QQQ",
+     "message": ("no mark has ever been taken -- neither the profit target "
+                 "nor the stop can trip on a position with no price")},
+    {"severity": "warn", "code": "partial_fill",
+     "id": "QQQ-index-put-credit-spread-20260927T144000", "symbol": "QQQ",
+     "message": ("filled 3 of 10 requested -- every exit must be for 3")},
+    {"severity": "warn", "code": "rest_refused",
+     "id": "META-swing-atm-hourly-20260927T151500", "symbol": "META",
+     "message": ("the broker refused the resting exit (422 position intent "
+                 "mismatch, inferred: sell_to_open) -- the loop owns the "
+                 "target")},
+    {"severity": "info", "code": "adopted",
+     "id": "adopted-AAPL261016C00350000", "symbol": "AAPL",
+     "message": ("adopted from the broker: guarded and marked, never closed "
+                 "for profit or loss")},
+]
+
+# The two sentences that kept SPY and QQQ out of the market all day. They are
+# the reason this page exists, so the fixture carries them verbatim.
+_PERF_REFUSALS = [
+    {"class": "assignment_capacity", "n": 41,
+     "last_at": None, "symbols": ["QQQ", "SPY"],
+     "example": ("assignment_capacity: $0 open plus $741000 here is $741000 "
+                 "against a $53155 cap")},
+    {"class": "risk_ceiling", "n": 12,
+     "last_at": None, "symbols": ["QQQ", "SPY"],
+     "example": ("$1760 of risk needs $1760 of room; $8922 open against a "
+                 "$10515 ceiling (60% of $17524 BP)")},
+    {"class": "already_open", "n": 6, "last_at": None,
+     "symbols": ["AAPL", "META", "NVDA"],
+     "example": "one entry per session and this session already has one"},
+]
+
+
+def _perf_ticker_rows():
+    out = []
+    for sym, op, judged, real, opl, wr, exp, risk, why in _PERF_BY_TICKER:
+        out.append({
+            "key": sym, "label": sym, "open": op, "closed": judged,
+            "judged": judged,
+            "realized": _m(real, judged, "usd"),
+            "open_pl": _m(opl, op, "usd", reason=why),
+            "win_rate": _m(wr, judged, "pct",
+                           reason="%d trades is not a sample" % judged,
+                           thin=True),
+            "expectancy": _m(exp, judged, "usd",
+                             reason="%d trades is not a sample" % judged,
+                             thin=True),
+            "at_risk": _m(risk, op, "usd",
+                          reason=None if risk is not None else
+                          "nothing here bounds the loss"),
+        })
+    return out
+
+
+def _perf_blank():
+    """Every metric block on an EMPTY ledger, with optperf's own sentences.
+
+    Each reason below was read off a real `optperf.report()` against an empty
+    ledger, not invented here. They differ from one another on purpose --
+    "nothing is open" and "no closed trade has a P/L yet" are different facts,
+    and a harness that flattened them to one string would let the page get away
+    with flattening them too.
+    """
+    none_why = "no closed trade has a P/L yet"
+    hold_why = "no closed trade with both a fill time and a close time"
+    return {
+        "pl": {
+            "open": _m(None, 0, "usd", reason="nothing is open"),
+            "realized": _m(None, 0, "usd", reason=none_why),
+            "realized_booked": _m(None, 0, "usd",
+                                  reason="no closing fill price was recorded"),
+            "realized_estimated": _m(None, 0, "usd",
+                                     reason="nothing estimated"),
+            "estimated_share": _m(None, 0, "pct",
+                                  reason="no closed trade yet"),
+            "total": _m(None, 0, "usd", reason="nothing measurable yet"),
+        },
+        "outcomes": {
+            "win_rate": _m(None, 0, "pct", reason=none_why),
+            "win_rate_lo": _m(None, 0, "pct", reason=none_why),
+            "win_rate_hi": _m(None, 0, "pct", reason=none_why),
+            "wins": 0, "losses": 0, "scratches": 0,
+            "avg_win": _m(None, 0, "usd", reason="no winning trade yet"),
+            "avg_loss": _m(None, 0, "usd", reason="no losing trade yet"),
+            "win_loss_ratio": _m(None, 0, "ratio",
+                                 reason="needs at least one win and one loss"),
+            "expectancy": _m(None, 0, "usd", reason=none_why),
+            "expectancy_r": _m(None, 0, "ratio",
+                               reason="no closed trade with a measurable risk"),
+            "profit_factor": _m(None, 0, "ratio", reason=none_why),
+            "largest_win": _m(None, 0, "usd", reason="no winning trade yet"),
+            "largest_loss": _m(None, 0, "usd", reason="no losing trade yet"),
+            "sample": {"judged": 0, "min_for_rate": 20,
+                       "min_for_expectancy": 30, "thin": True},
+        },
+        "holding": {
+            "median_days": _m(None, 0, "days", reason=hold_why),
+            "mean_days": _m(None, 0, "days", reason=hold_why),
+            "longest_days": _m(None, 0, "days", reason=hold_why),
+            "shortest_days": _m(None, 0, "days", reason=hold_why),
+            "open_median_days": _m(None, 0, "days", reason="nothing is open"),
+            "open_oldest_days": _m(None, 0, "days", reason="nothing is open"),
+        },
+    }
+
+
+def perf(scenario="perf"):
+    """The /api/optlab/perf payload, per scenario."""
+    if scenario == "perfstub":
+        # app.py's own fallback: optperf did not answer, so there is no metric
+        # block at all. The counts survive because they are a reading off the
+        # ledger rather than arithmetic.
+        return {
+            "ok": False, "source": "unavailable",
+            "error": "ModuleNotFoundError: No module named 'optperf'",
+            "state": dict(_PERF_STATE), "caps": dict(_PERF_CAPS),
+            "counts": {"positions": 6, "open": 6, "closed": 0, "pending": 0,
+                       "filled": 0, "refused": 0, "adopted": 1, "judged": 0},
+            "warnings": [{"code": "no_metrics",
+                          "message": "optperf.report() did not answer"}],
+        }
+
+    if scenario == "perfempty":
+        d = {
+            "ok": True, "source": "optperf", "as_of": _plays_iso(0),
+            "state": {"frozen": "", "armed": False,
+                      "arm_why": "not armed (no arm file)",
+                      "account": "PA3ILNUY5E4F"},
+            "caps": dict(_PERF_CAPS),
+            "sources": {"ledger": "state/options/play_ledger.jsonl",
+                        "decisions": "state/options/play_decisions.jsonl",
+                        "events": 0, "decision_rows": 0, "first_at": None,
+                        "last_at": None, "ledger_bytes": 0},
+            "warnings": [],
+            "counts": {"positions": 0, "open": 0, "pending": 0, "closed": 0,
+                       "filled": 0, "refused": 0, "adopted": 0, "judged": 0},
+            "exits": {"n": 0, "mix": []},
+            # A measured ZERO, not an unknown: nothing is open, so nothing is
+            # at risk. The ceiling is real money and belongs on screen on day
+            # one -- it is the room this account has before anything uses it.
+            "risk": {"at_risk": _m(0.0, 0, "usd"),
+                     "ledger_at_risk": 0.0,
+                     "ceiling": _m(14334.0, 1, "usd"),
+                     "headroom": _m(14334.0, 0, "usd"),
+                     "utilization": _m(0.0, 0, "pct"),
+                     "bp": _m(23890.0, 1, "usd"),
+                     "fraction": 0.6, "positions_open": 0,
+                     "positions_cap": 24, "unbounded": 0, "rows": []},
+            "assignment": {"gross": _m(0.0, 0, "usd"),
+                           "net_of_hedge": _m(0.0, 0, "usd"),
+                           "uncovered_contracts": 0,
+                           "assumes": _HEDGE_NOTE, "rows": []},
+            "by_play": [], "by_ticker": [], "daily": [], "positions": [],
+            "attention": [],
+            "decisions": {"window_h": 24.0, "proposals": 0, "ok": 0,
+                          "refused": 0, "submitted": 0, "refusals": [],
+                          "by_symbol": {}},
+        }
+        d.update(_perf_blank())
+        return d
+
+    return {
+        "ok": True, "source": "optperf", "as_of": _plays_iso(0),
+        "state": dict(_PERF_STATE), "caps": dict(_PERF_CAPS),
+        "sources": {"ledger": "state/options/play_ledger.jsonl",
+                    "decisions": "state/options/play_decisions.jsonl",
+                    "events": 214, "decision_rows": 612,
+                    "first_at": _plays_iso(-9), "last_at": _plays_iso(0),
+                    "ledger_bytes": 118304},
+        "warnings": [
+            {"code": "unpriced_open",
+             "message": ("1 open position(s) have no price, so the open P/L "
+                         "below is incomplete")},
+        ],
+        "counts": {"positions": 21, "open": 6, "pending": 0, "closed": 14,
+                   "filled": 20, "refused": 1, "adopted": 1, "judged": 14},
+        "pl": {
+            "open": _m(-467.5, 5, "usd",
+                       reason="1 of 6 open positions could not be priced",
+                       thin=True),
+            "realized": _m(2310.0, 14, "usd"),
+            "realized_booked": _m(1980.0, 12, "usd"),
+            "realized_estimated": _m(330.0, 2, "usd"),
+            "estimated_share": _m(0.1429, 14, "pct"),
+            "total": _m(1842.5, 19, "usd",
+                        reason="1 open position(s) are missing from this total",
+                        thin=True),
+        },
+        "outcomes": {
+            "win_rate": _m(0.6429, 14, "pct",
+                           reason="14 closed trades is not a sample",
+                           thin=True),
+            "win_rate_lo": _m(0.3862, 14, "pct"),
+            "win_rate_hi": _m(0.8371, 14, "pct"),
+            "wins": 9, "losses": 5, "scratches": 0,
+            "avg_win": _m(402.0, 9, "usd"),
+            "avg_loss": _m(261.0, 5, "usd"),        # POSITIVE by contract
+            "win_loss_ratio": _m(1.54, 5, "ratio"),
+            "expectancy": _m(165.0, 14, "usd",
+                             reason="14 closed trades is not a sample",
+                             thin=True),
+            "expectancy_r": _m(0.214, 14, "ratio",
+                               reason="14 closed trades is not a sample",
+                               thin=True),
+            "profit_factor": _m(2.772, 14, "ratio"),
+            "largest_win": _m(980.0, 9, "usd"),
+            "largest_loss": _m(-612.0, 5, "usd"),
+            "sample": {"judged": 14, "min_for_rate": 20,
+                       "min_for_expectancy": 30, "thin": True},
+        },
+        "exits": {"n": 14, "mix": [
+            {"class": c, "label": lbl, "n": n, "share": share,
+             "realized": _m(pl, n, "usd",
+                            reason=None if pl is not None
+                            else "no exit of this kind"),
+             "avg_realized": _m(avg, n, "usd",
+                                reason=None if avg is not None
+                                else "nothing to average",
+                                thin=bool(avg is not None and n < 5))}
+            for c, lbl, n, share, pl, avg in _PERF_EXIT_MIX]},
+        # 8922 against 10515 is 84.9% of the ceiling, which is the state the
+        # account was actually in when the two index spreads were refused. The
+        # meter has to show that as nearly full, because a number printed
+        # beside another number does not.
+        "risk": {"at_risk": _m(8922.0, 6, "usd"),
+                 "ledger_at_risk": 8922.0,
+                 "ceiling": _m(10515.0, 1, "usd"),
+                 "headroom": _m(1593.0, 6, "usd"),
+                 "utilization": _m(0.8485, 6, "pct"),
+                 "bp": _m(17524.0, 1, "usd"),
+                 "fraction": 0.6, "positions_open": 6, "positions_cap": 24,
+                 "unbounded": 0, "rows": []},
+        "assignment": {"gross": _m(1448000.0, 2, "usd"),
+                       "net_of_hedge": _m(4000.0, 2, "usd"),
+                       "uncovered_contracts": 0,
+                       "assumes": _HEDGE_NOTE, "rows": []},
+        "holding": {"median_days": _m(5.0, 14, "days"),
+                    "mean_days": _m(6.4, 14, "days"),
+                    "longest_days": _m(19.0, 14, "days"),
+                    "shortest_days": _m(0.4, 14, "days"),
+                    "open_median_days": _m(2.1, 6, "days"),
+                    "open_oldest_days": _m(4.0, 6, "days")},
+        "by_play": [dict(r) for r in _PERF_BY_PLAY],
+        "by_ticker": _perf_ticker_rows(),
+        "daily": [], "positions": [],
+        "attention": [dict(r) for r in _PERF_ATTENTION],
+        "decisions": {"window_h": 24.0, "proposals": 68, "ok": 7,
+                      "refused": 61, "submitted": 7,
+                      "refusals": [dict(r) for r in _PERF_REFUSALS],
+                      "by_symbol": {}},
     }
 
 
@@ -670,7 +1036,7 @@ function el(id) { return document.getElementById(id); }
 /* "chain" is still here even though it left the real tab bar: it is
    reachable at #/options/chain for debugging and its checks below still
    mount it. */
-const TABS = ["board", "strategies", "backtest", "chain"];
+const TABS = ["perf", "plays", "board", "strategies", "backtest", "chain"];
 el("mkTabs").innerHTML = TABS.map((t) =>
   `<button data-tab="${t}" class="btn sm">${t}</button>`).join("");
 el("mkTabs").onclick = (e) => {
@@ -692,7 +1058,7 @@ el("mkScen").onclick = async (e) => {
   }
 };
 
-show((location.hash || "#board").slice(1));
+show((location.hash || "#perf").slice(1));
 window.__show = show;
 </script></body></html>
 """
@@ -1250,6 +1616,10 @@ class Handler(BaseHTTPRequestHandler):
         # shorter path would never match the longer one here, but the reverse
         # order is the bug that bites the moment a suffix route is added, so the
         # specific path goes first as a matter of habit.
+        if p.endswith("/optlab/perf"):
+            if scen == "perffail":
+                return self._fail(502, "mock: the performance route blew up")
+            return self._json(perf(scen))
         if p.endswith("/optlab/plays/signals"):
             return self._json(plays_signals(scen))
         if p.endswith("/optlab/plays"):
@@ -1486,6 +1856,79 @@ check("the board is still on screen behind it",
       el("view").querySelectorAll(".b-row").length > 0, true);
 check("and Refresh is a button again, not stuck on Measuring",
       el("obGo").textContent.trim(), "Refresh");
+await scen("default");
+
+section(10, "the Options Overview: measured, or it says why not");
+await scen("perf");
+await mount("perf");
+const ovText = () => el("view").textContent.replace(/\\s+/g, " ");
+check("the headline is total P/L, not booked alone",
+      /Total P\\/L/.test(ovText()), true);
+check("realized and open sit beside it, separately",
+      /Realized/.test(ovText()) && /Open/.test(ovText()), true);
+check("realized that is only ESTIMATED is called out as not money yet",
+      /is ESTIMATED/.test(ovText()), true);
+check("the win rate carries the trade count behind it",
+      /14 closed trades/.test(ovText()), true);
+check("average loss is on the card with average win",
+      /Average loss/.test(ovText()), true);
+check("and expectancy, which is the one that settles it",
+      /Expectancy/.test(ovText()), true);
+check("a thin number is marked rather than silently trusted",
+      el("view").querySelectorAll(".ov-thin").length > 0, true);
+check("the exit mix names the assignment guard",
+      /assignment guard/.test(ovText()), true);
+check("capital at risk is drawn as a proportion of the ceiling",
+      el("view").querySelectorAll(".ov-meter").length, 1);
+check("and 84.9% of it reads as nearly full",
+      el("view").querySelector(".ov-meter i").className, "near");
+check("assignment exposure shows gross AND net of the hedge",
+      /Net of hedge/.test(ovText()) && /Gross notional/.test(ovText()), true);
+check("and states what the hedge assumes rather than implying it is free",
+      /overnight gap/.test(ovText()), true);
+check("a ticker with nothing open prints a dash, not 0.00",
+      [...el("view").querySelectorAll("td")]
+        .some((td) => td.textContent.trim() === "\u2014"), true);
+
+section(11, "the two states that were invisible before this page existed");
+check("an open position with no resting exit is the first thing on it",
+      /no resting take-profit/.test(ovText()), true);
+check("and it is drawn as critical, not as a note",
+      el("view").querySelectorAll("#ov-attn .note.bad").length > 0, true);
+check("an open position with no mark is called out too",
+      /no mark has ever been taken/.test(ovText()), true);
+check("a partial fill says what every exit must be for",
+      /filled 3 of 10 requested/.test(ovText()), true);
+check("why a play did not open is on the page, not in a log",
+      /Why a play did not open/.test(ovText()), true);
+check("and it names the check that refused it",
+      /assignment_capacity/.test(ovText()), true);
+check("with the sentence it actually printed",
+      /\\$741000 against a \\$53155 cap/.test(ovText()), true);
+
+section(12, "a fresh account reads as nothing yet, not as a broken page");
+await scen("perfempty");
+await mount("perf");
+check("it says no play has opened yet",
+      /No play has opened yet/.test(ovText()), true);
+check("and no unmeasured metric is faked as a zero",
+      /0 closed trades/.test(ovText()), false);
+check("the capital card is still real money",
+      /Ceiling/.test(ovText()), true);
+check("nothing on it is drawn as a fault",
+      el("view").querySelectorAll(".note.bad").length, 0);
+
+section(13, "no metrics module is a STATED fact, not a page of empty cards");
+await scen("perfstub");
+await mount("perf");
+check("the page says so once, at the top",
+      /No metric could be measured/.test(ovText()), true);
+check("and names the reason it cannot",
+      /No module named/.test(ovText()), true);
+check("the ledger counts are still there, because they are readings",
+      /What is still true/.test(ovText()), true);
+check("and no averaged card is drawn empty beside them",
+      /How positions ended/.test(ovText()), false);
 await scen("default");
 
 el("out").innerHTML = lines.join("")

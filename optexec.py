@@ -129,6 +129,9 @@ class Plan:
     credit_planned: Optional[float] = None
     credit_requoted: Optional[float] = None
     assignment_notional: float = 0.0
+    #: The `assignment_exposure` breakdowns behind `assignment_notional`, the
+    #: open book and this proposal kept apart. Empty on an unexamined plan.
+    assignment_detail: dict = field(default_factory=dict)
     buying_power_required: float = 0.0
     buying_power_available: Optional[float] = None
     walk: Sequence[float] = DEFAULT_WALK
@@ -159,6 +162,7 @@ class Plan:
             "credit_planned": self.credit_planned,
             "credit_requoted": self.credit_requoted,
             "assignment_notional": self.assignment_notional,
+            "assignment_detail": self.assignment_detail,
             "buying_power_required": self.buying_power_required,
             "buying_power_available": self.buying_power_available,
             "note": self.note,
@@ -294,6 +298,304 @@ def _occ_strike(symbol: str) -> Optional[float]:
     return int(tail) / 1000.0
 
 
+def _occ_right(symbol: str) -> Optional[str]:
+    """"C" or "P" from an OCC symbol, None when it is not one."""
+    s = symbol.strip().upper()
+    if _occ_strike(s) is None:
+        return None
+    return s[-9]
+
+
+def _occ_expiry(symbol: str) -> Optional[str]:
+    """The expiry an OCC symbol carries, as an ISO date string.
+
+    Two-digit year, so 26 is 2026. It is only ever compared with another
+    expiry read the same way, and a date that will not build returns None --
+    which makes the leg unhedgeable rather than making it match the wrong one.
+    """
+    s = symbol.strip().upper()
+    if _occ_strike(s) is None:
+        return None
+    ymd = s[-15:-9]
+    if not ymd.isdigit():
+        return None
+    try:
+        return _dt.date(2000 + int(ymd[:2]), int(ymd[2:4]),
+                        int(ymd[4:6])).isoformat()
+    except ValueError:
+        return None
+
+
+# --------------------------------------------------- assignment exposure ---
+#: What a hedged short leg still costs between being assigned and being able to
+#: use the long leg that protects it, as a fraction of the shares delivered.
+#:
+#: THE HEDGE IS NOT FREE AND THIS NUMBER IS WHERE THAT IS WRITTEN DOWN.
+#: Assignment arrives after the close. The width bounds the loss only while the
+#: long leg can still be exercised, and there is one night when it cannot: the
+#: short finishes a few cents in the money and is assigned AT expiry, the long
+#: finishes out of the money and expires worthless, and the account wakes up
+#: owning the shares outright with nothing under them until the next session.
+#: A 1% overnight move on an index ETF is an ordinary night, so 1% of the
+#: delivered notional is charged against the cap for every hedged contract.
+#: It is an ALLOWANCE, not a measurement. It is stated here so that "the long
+#: covers it" can never be read in this file as "this costs nothing".
+#:
+#: Note the deliberate disagreement with `optgates.assignment_notional`, which
+#: nets nothing and says so: assignment arrives overnight and the long leg has
+#: to be exercised or sold the next session, and in between the cash is owed in
+#: full. That is true, and it is a question about CASH, which is what the
+#: separate buying-power check in `plan` answers. This check asks what could be
+#: LOST, against a cap derived from equity, and for a defined-risk vertical the
+#: answer is the width -- not the strike. Two questions, two numbers.
+HEDGE_GAP_FRACTION = 0.01
+
+
+@dataclass(frozen=True)
+class AssignmentLeg:
+    """One option leg reduced to the five things assignment risk depends on.
+
+    `qty` is SIGNED contracts -- negative is short -- because that is the one
+    convention in this repo (greeks._signed_qty). `right` is "C" or "P".
+    `underlying` and `expiry` are empty strings when they could not be read,
+    and such a leg is NEVER allowed to hedge or to be hedged: a hedge that
+    cannot be proved is not a hedge, and the fallback has to be gross.
+    """
+    underlying: str
+    right: str
+    expiry: str
+    strike: float
+    qty: float
+
+
+def _norm_right(raw: Any) -> str:
+    """put / P / Put all become P. Anything else becomes "" -- unknown, and an
+    unknown right can never match another leg, so it can never net."""
+    s = str(raw or "").strip()[:1].upper()
+    return s if s in ("C", "P") else ""
+
+
+def _leg_identity(row: dict, symbol: str) -> tuple[str, str, str, float]:
+    """Underlying, right, expiry and strike for one planned leg.
+
+    The row is believed first, because that is what the caller built the
+    structure from; the OCC symbol is the fallback and it is a good one, since
+    every field here is encoded in it. A row may say `right` or `type`
+    depending on which builder produced it, so both are read -- optplays
+    writes `right`, the older screeners write `type`, and reading only one of
+    them would silently make every leg unhedgeable.
+    """
+    und = str(row.get("underlying") or _occ_root(symbol) or "").upper()
+    right = (_norm_right(row.get("right") or row.get("type"))
+             or _norm_right(_occ_right(symbol)))
+    exp = str(row.get("expiration") or "")[:10] or (_occ_expiry(symbol) or "")
+    strike = _num(row.get("strike"))
+    if strike is None:
+        strike = _occ_strike(symbol)
+    return und, right, exp, float(strike or 0.0)
+
+
+def plan_exposure_legs(legs: Sequence[dict], *, contracts: int = 1
+                       ) -> list[AssignmentLeg]:
+    """The legs of a proposed structure, as signed AssignmentLegs.
+
+    `contracts` multiplies exactly once, here, the same way the inline sum in
+    `plan` did before this existed: a leg's qty is its RATIO within one
+    structure, and `contracts` is how many structures.
+    """
+    out: list[AssignmentLeg] = []
+    for lg in legs:
+        row = lg.get("row") or {}
+        sym = str(row.get("symbol") or lg.get("symbol") or "")
+        und, right, exp, strike = _leg_identity(row, sym)
+        qty = abs(int(lg.get("qty") or 1)) * max(1, int(contracts))
+        signed = -qty if str(lg.get("side")) == "sell" else qty
+        out.append(AssignmentLeg(und, right, exp, strike, float(signed)))
+    return out
+
+
+def position_exposure_legs(positions: Sequence[dict]
+                           ) -> tuple[list[AssignmentLeg], float]:
+    """Broker positions as AssignmentLegs, plus the dollars we could not read.
+
+    A short whose symbol will not parse keeps exactly the behaviour
+    `live_assignment_notional` already had: it is counted at its market value,
+    which is an underestimate, and it is never netted against anything. `plan`
+    refuses outright on such a position anyway (`positions_readable`); this is
+    the belt to that pair of braces.
+    """
+    out: list[AssignmentLeg] = []
+    opaque = 0.0
+    for p in positions:
+        sym = str(p.get("symbol", ""))
+        qty = _signed_contracts(p)
+        strike = _occ_strike(sym)
+        if strike is None:
+            if qty < 0:
+                opaque += abs(_num(p.get("market_value")) or 0.0)
+            continue
+        out.append(AssignmentLeg(
+            str(_occ_root(sym) or "").upper(), _norm_right(_occ_right(sym)),
+            _occ_expiry(sym) or "", float(strike), float(qty)))
+    return out, round(opaque, 2)
+
+
+def _hedge_key(lg: AssignmentLeg) -> Optional[tuple]:
+    """The bucket inside which a leg may hedge: same underlying, same right,
+    same expiry. Anything unreadable returns None and hedges nothing."""
+    if not lg.underlying or not lg.right or not lg.expiry or lg.strike <= 0:
+        return None
+    return (lg.underlying, lg.right, lg.expiry)
+
+
+def _protects(right: str, short_strike: float, long_strike: float) -> bool:
+    """Whether a long at this strike actually caps a short at that one.
+
+    A long PUT protects a short put only from BELOW -- buy the shares at the
+    short strike, sell them at the long strike -- and a long CALL only from
+    ABOVE. A long on the wrong side of the strike is a separate trade that
+    happens to be in the same account; it is not a hedge and must not net.
+    Equal strikes protect completely: the pair is flat, width zero, and the
+    overnight gap is still charged because the shares still arrive.
+    """
+    if right == "P":
+        return long_strike <= short_strike
+    if right == "C":
+        return long_strike >= short_strike
+    return False
+
+
+def assignment_exposure(legs: Sequence[AssignmentLeg], *,
+                        gap_fraction: float = HEDGE_GAP_FRACTION,
+                        opaque: float = 0.0) -> dict:
+    """What the short legs put at risk on assignment, net of REAL hedges.
+
+    GROSS IS THE RIGHT MEASURE FOR A NAKED OR CASH-SECURED SHORT AND THE WRONG
+    ONE FOR A VERTICAL. If a short 741 put is assigned we buy 1,000 shares for
+    $741,000; for a naked short that is the exposure and this returns it
+    unchanged. Hold ten 739 puts against it and those shares can be sold for
+    $739,000 the same morning, so the exposure is the WIDTH -- $2,000 -- plus
+    the overnight gap allowance above. Measuring the vertical at $741,000 made
+    the capacity check unpassable by construction for every index spread, which
+    is precisely what it did all day on 27 Sep 2026: $741,000 against a $53,155
+    cap, every cycle, on a trade whose real worst case was about $2,000.
+
+    A short is netted only against a long of the SAME underlying, the SAME
+    right and the SAME expiry whose strike genuinely protects. Ratios are
+    honoured contract by contract: in a 1x2 the covered short is measured at
+    its width and the uncovered one is measured gross. Everything that cannot
+    be PROVED a hedge falls back to gross, because the failure that costs money
+    is calling something protected when it is not.
+
+    Pairing rule: the nearest-the-money short is served first, from the closest
+    protecting strike -- the pairing a holder would actually exercise. The
+    total does not depend on which short receives which long as long as the
+    same longs are consumed, since it is the sum of the short strikes less the
+    sum of the matched long strikes; the rule is about a readable breakdown,
+    not about the number.
+
+    Returns dollars and never None. `total` is what the cap is compared
+    against, `gross` is what the old measure would have said, and the rest is
+    the arithmetic in between so that a refusal can explain itself.
+    """
+    groups: dict[tuple, dict[str, list[list[float]]]] = {}
+    gross = naked = width = hedged_notional = 0.0
+    naked_ct = hedged_ct = 0.0
+    for lg in legs:
+        if lg.strike <= 0 or not lg.qty:
+            continue
+        if lg.qty < 0:
+            gross += lg.strike * 100.0 * abs(lg.qty)
+        key = _hedge_key(lg)
+        if key is None:
+            # Unreadable, therefore unhedgeable. A long we cannot place is
+            # ignored; a short we cannot place is charged in full.
+            if lg.qty < 0:
+                naked += lg.strike * 100.0 * abs(lg.qty)
+                naked_ct += abs(lg.qty)
+            continue
+        g = groups.setdefault(key, {"short": [], "long": []})
+        g["short" if lg.qty < 0 else "long"].append([lg.strike, abs(lg.qty)])
+
+    detail: list[dict] = []
+    for (und, right, exp), g in groups.items():
+        # Nearest the money first: that short is the one most likely to be
+        # assigned, so it is the one that gets the protection.
+        g["short"].sort(key=lambda r: -r[0] if right == "P" else r[0])
+        for s_strike, s_qty in g["short"]:
+            remaining = s_qty
+            while remaining > 1e-9:
+                pick = None
+                for cand in g["long"]:
+                    if cand[1] <= 1e-9 or not _protects(right, s_strike, cand[0]):
+                        continue
+                    if (pick is None
+                            or abs(cand[0] - s_strike) < abs(pick[0] - s_strike)):
+                        pick = cand
+                if pick is None:
+                    break
+                take = min(remaining, pick[1])
+                width += abs(s_strike - pick[0]) * 100.0 * take
+                hedged_notional += s_strike * 100.0 * take
+                hedged_ct += take
+                detail.append({"underlying": und, "right": right, "expiry": exp,
+                               "short": s_strike, "long": pick[0],
+                               "contracts": take, "hedged": True})
+                pick[1] -= take
+                remaining -= take
+            if remaining > 1e-9:
+                naked += s_strike * 100.0 * remaining
+                naked_ct += remaining
+                detail.append({"underlying": und, "right": right, "expiry": exp,
+                               "short": s_strike, "long": None,
+                               "contracts": remaining, "hedged": False})
+    gap = hedged_notional * float(gap_fraction)
+    return {
+        "total": round(naked + width + gap + float(opaque), 2),
+        "gross": round(gross + float(opaque), 2),
+        "naked": round(naked + float(opaque), 2),
+        "width": round(width, 2),
+        "hedged_notional": round(hedged_notional, 2),
+        "gap": round(gap, 2),
+        "gap_fraction": float(gap_fraction),
+        "hedged_contracts": round(hedged_ct, 4),
+        "naked_contracts": round(naked_ct, 4),
+        "unreadable_dollars": round(float(opaque), 2),
+        "legs": detail,
+    }
+
+
+def live_assignment_exposure(positions: Sequence[dict], *,
+                             gap_fraction: float = HEDGE_GAP_FRACTION) -> dict:
+    """`assignment_exposure` for the book the broker says we actually hold.
+
+    The netted twin of `live_assignment_notional`, which stays exactly as it
+    was and stays GROSS: that function answers "what cash would every short
+    assign for at once", which is a different question from "what could this
+    book lose". The capacity check asks the second one.
+
+    The open book is measured SEPARATELY from whatever is being proposed and
+    the two are never netted against each other. A long we have not bought yet
+    must not be allowed to cover a short that is already on the account, and
+    keeping the two apart is what lets a refusal say which side of the ledger
+    consumed the room.
+    """
+    legs, opaque = position_exposure_legs(positions)
+    return assignment_exposure(legs, gap_fraction=gap_fraction, opaque=opaque)
+
+
+def exposure_note(d: dict) -> str:
+    """One clause explaining an exposure number, for the refusal line."""
+    if not d.get("hedged_contracts"):
+        return "nothing is hedged, so measured gross"
+    return ("net of hedges: $%.0f naked plus $%.0f of width plus $%.0f for the "
+            "overnight gap on $%.0f delivered (%.1f%%); gross would be $%.0f"
+            % (d.get("naked") or 0.0, d.get("width") or 0.0,
+               d.get("gap") or 0.0, d.get("hedged_notional") or 0.0,
+               100.0 * float(d.get("gap_fraction") or 0.0),
+               d.get("gross") or 0.0))
+
+
 def requote(od: Any, legs: Sequence[dict], *, feed: str = "opra") -> dict:
     """Fresh two-sided quotes for exactly these contracts.
 
@@ -419,23 +721,39 @@ def plan(alpaca: Any, candidate: dict, legs: Sequence[dict], *,
     p.checks.append(Check("positions_readable", not bad,
                           "cannot read the strike of open short %s" % ", ".join(bad)
                           if bad else "every open short position parsed", bad))
-    open_notional = live_assignment_notional(positions)
-    here = 0.0
-    for lg in legs:
-        if str(lg.get("side")) != "sell":
-            continue
-        k = _num((lg.get("row") or {}).get("strike")) or 0.0
-        here += k * 100.0 * int(lg.get("qty") or 1) * contracts
+    # NET OF REAL HEDGES, GROSS OTHERWISE. This used to sum strike x 100 x qty
+    # over every SELL leg, which is the correct measure for a naked or
+    # cash-secured short and an absurd one for a vertical: it read a 741/739
+    # put credit spread at 10 contracts as $741,000 of exposure against a
+    # $53,155 cap and refused it every cycle of 27 Sep 2026, on a trade whose
+    # worst case is about $2,000. `assignment_exposure` nets a short against a
+    # long that genuinely protects it -- same underlying, same right, same
+    # expiry, strike on the protecting side -- and leaves everything else
+    # exactly where it was. See HEDGE_GAP_FRACTION for what the hedge still
+    # costs; it is not treated as free.
+    exposure_legs = plan_exposure_legs(legs, contracts=contracts)
+    open_exp = live_assignment_exposure(positions)
+    here_exp = assignment_exposure(exposure_legs)
+    open_notional = open_exp["total"]
+    here = here_exp["total"]
+    p.assignment_detail = {"open": open_exp, "here": here_exp}
     p.assignment_notional = round(open_notional + here, 2)
     cap = assignment_cap if assignment_cap is not None else (acct.get("equity") or 0.0)
     p.checks.append(Check(
         "assignment_capacity", cap > 0 and p.assignment_notional <= cap,
-        "$%.0f open plus $%.0f here is $%.0f against a $%.0f cap"
-        % (open_notional, here, p.assignment_notional, cap), p.assignment_notional))
+        "$%.0f open plus $%.0f here is $%.0f against a $%.0f cap -- %s"
+        % (open_notional, here, p.assignment_notional, cap,
+           exposure_note(here_exp)), p.assignment_notional))
 
     # ---- buying power (C5) ----
     max_loss = _num(candidate.get("max_loss"))
-    p.buying_power_required = round((max_loss or here) * contracts, 2)
+    # The fallback stays on the GROSS proposal notional and not on the netted
+    # one. Buying power is a question about CASH the account has to find, and a
+    # long leg caps the loss without lending anything: a hedged short put still
+    # takes delivery of the whole strike overnight. Every caller that supplies
+    # max_loss -- which is every caller in this repo -- is unaffected either
+    # way, and the one that does not keeps today's conservative number.
+    p.buying_power_required = round((max_loss or here_exp["gross"]) * contracts, 2)
     have = p.buying_power_available
     p.checks.append(Check(
         "buying_power", have is not None and have >= p.buying_power_required,

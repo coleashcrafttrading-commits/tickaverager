@@ -51,6 +51,7 @@ Routes
   GET    /api/optlab/board             the watched tickers and what we know
   POST   /api/optlab/board/refresh     force a measurement (rate-limited)
   POST   /api/optlab/watch             add/remove/enable/disable a symbol
+  GET    /api/optlab/perf              options performance, every metric measured
 
   /api/options/* and the /options page belong to optapi.py's router, which is
   the engine that trades. Nothing in THIS file registers a path under it.
@@ -2807,6 +2808,118 @@ def optlab_plays_seed(f: Fleet = Depends(cur)):
     """
     rows = _play_assignments(f).seed_owner_set(by="dashboard")
     return {"ok": True, "assignments": [r.as_dict() for r in rows]}
+
+
+
+
+# ==================================================== optlab / performance
+# The Options performance overview: what these plays have actually DONE.
+#
+# optperf.py owns every piece of arithmetic behind this page, and this route is
+# deliberately thin. It takes the two snapshots optperf refuses to take for
+# itself -- the broker's option positions and the account -- calls report(),
+# adds the arm and freeze state, and passes everything else through UNCHANGED.
+# Re-shaping a metrics module's answer here would create a second place for the
+# two halves to disagree, and it is the first thing that rots.
+#
+# A metric is optperf's own shape: {"value", "n", "unit", "reason", "thin"}.
+# `n` is the sample size behind the number -- a win rate with no trade count
+# beside it is a figure anybody can make say anything -- `reason` is the
+# sentence the page prints where the value would have been, and `thin` marks a
+# number that exists but rests on too little to lean on. Nothing on this page
+# may print 0 for "we do not know": on a performance page a zero and an unknown
+# look identical and only one of them is information.
+_PERF_POS_TTL = 20.0                  # seconds
+_PERF_POS: dict = {}
+_PERF_POS_LOCK = threading.RLock()
+
+
+def _perf_positions(f: Fleet):
+    """The broker's own option positions, cached for _PERF_POS_TTL seconds.
+
+    Alpaca is the truth about what is held, so the overview marks against the
+    broker rather than against the loop's last mark. But the positions endpoint
+    is on the 200/min TRADING budget the live share ladders spend from, and
+    this page polls, so the cache is what makes "read the broker" and "do not
+    spend the budget" both true at once.
+
+    A failure here returns None rather than raising, and that is not a silent
+    swallow: optperf's own warnings say, in that case, that the open P/L is the
+    loop's last mark and may be stale.
+    """
+    key = f.account_id
+    now = time.time()
+    with _PERF_POS_LOCK:
+        hit = _PERF_POS.get(key)
+        if hit and now - hit[0] < _PERF_POS_TTL:
+            return hit[1]
+    rows = None
+    try:
+        # Imported here rather than at module scope: optexec is the ONLY order
+        # path in the repo, and a read of it from the dashboard should be
+        # visible at the line that does it. open_option_positions is a GET.
+        import optexec as _oexec
+        rows = _oexec.open_option_positions(f.broker)
+    except Exception as e:
+        logging.getLogger("app").warning("optlab perf positions: %r", e)
+        return None
+    with _PERF_POS_LOCK:
+        _PERF_POS[key] = (now, rows)
+    return rows
+
+
+@app.get("/api/a/{acct}/optlab/perf")
+@app.get("/api/optlab/perf")
+def optlab_perf(f: Fleet = Depends(cur)):
+    """How the options playbook has actually performed. Read-only, no orders.
+
+    Realized and OPEN P/L come back as separate numbers AND as their sum, never
+    as realized alone: a system with a take-profit and a stop looks brilliant on
+    booked P/L right up until the moment it does not, and the open half is where
+    that shows first.
+    """
+    pb = _playbook(f)
+    pb.refresh_stores()
+    arm = pb.arm()
+    state = {
+        "frozen": pb.frozen(),
+        "armed": bool(arm.valid),
+        "arm_why": arm.why_not(),
+        "account": (f.account or {}).get("account_number", ""),
+    }
+    caps = {"max_concurrent": _pbook.MAX_CONCURRENT_POSITIONS,
+            "max_risk_fraction": _pbook.MAX_OPEN_RISK_FRACTION,
+            "close_short_at_dte": _pbook.CLOSE_SHORT_AT_DTE}
+    try:
+        import optperf as _operf
+        payload = _operf.report(
+            ledger=pb.ledger,
+            decisions_path=pb.decisions_path,
+            broker_positions=_perf_positions(f),
+            account=dict(f.account or {}),
+        )
+    except Exception as e:
+        # The page is still worth serving: the arm state and the ledger's own
+        # position count are readings rather than arithmetic, and they stay
+        # true when the metrics module does not answer. What must NOT happen is
+        # a page of zeroes -- so ok is false, the reason is on it, and the page
+        # says so once at the top rather than looking merely empty.
+        logging.getLogger("app").exception("optlab perf")
+        opened = [p for p in pb.ledger.positions() if p.is_open]
+        return {"ok": False, "source": "unavailable",
+                "error": "%s: %s" % (e.__class__.__name__, e),
+                "state": state, "caps": caps,
+                "counts": {"positions": len(pb.ledger.positions()),
+                           "open": len(opened), "closed": 0, "pending": 0,
+                           "filled": 0, "refused": 0,
+                           "adopted": len([p for p in opened if p.adopted]),
+                           "judged": 0},
+                "warnings": [{"code": "no_metrics", "message":
+                              "optperf.report() did not answer"}]}
+    payload["source"] = "optperf"
+    payload["state"] = state
+    payload["caps"] = caps
+    return payload
 
 
 @app.on_event("startup")

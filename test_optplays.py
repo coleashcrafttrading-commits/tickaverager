@@ -125,17 +125,30 @@ def minute_tape(days, *, base=100.0, drift=0.01, last_close=None,
 
 
 class FakeBroker:
-    """No network at all. Records the bodies it was asked to send."""
+    """No network at all. Records the bodies it was asked to send.
+
+    `positions` and `working` exist because the cover path reads BOTH: what the
+    broker confirms it holds, and what is already resting against those legs.
+    `reject_orders` reproduces the 422 that killed every resting target.
+    """
     base = "https://paper-api.alpaca.markets"
 
-    def __init__(self, open_market=True):
+    def __init__(self, open_market=True, positions=None, working=None,
+                 reject_orders=""):
         self.sent = []
         self.open_market = open_market
+        self.positions = list(positions or [])
+        self.working = list(working or [])
+        self.reject_orders = reject_orders
 
     def _req(self, method, url, path, **kw):
         if path == "/orders":
+            if self.reject_orders:
+                raise RuntimeError(self.reject_orders)
             self.sent.append(kw.get("json"))
             return {"id": "ord-%d" % len(self.sent), "status": "accepted"}
+        if path == "/positions":
+            return self.positions
         if path == "/clock":
             # optexec.market_open reads the clock through _req, not through
             # .clock(), so a fake that only implements .clock() silently reports
@@ -150,31 +163,108 @@ class FakeBroker:
                 "timestamp": "2026-09-27T20:00:00-04:00"}
 
     def orders(self, **kw):
-        return []
+        return list(self.working)
 
     def cancel(self, oid):
+        self.working = [o for o in self.working if str(o.get("id")) != str(oid)]
         return {}
 
 
-def fake_playbook(fb, state_dir, arm_path, ledger):
+class BlindBroker(FakeBroker):
+    """A broker whose order book cannot be read. Not the same as an empty one."""
+
+    def orders(self, **kw):
+        raise RuntimeError("503 from /orders")
+
+
+#: An expiry far enough out that no calendar rule fires on it, COMPUTED.
+#: A literal date in a fixture is a fuse: the 2-DTE close-out rule turns every
+#: position built on it into "close it now" the week that date arrives, and the
+#: suite goes red for a reason that has nothing to do with the code. The
+#: sections above still pin 2026-10-30 -- see the report; it burns in Oct 2026.
+FAR = (dt.date.today() + dt.timedelta(days=33)).isoformat()
+
+
+def at_et(hh, mm, *, day=None):
+    """A clock function standing at hh:mm ET on `day` (today by default).
+
+    THE TIME OF DAY IS PINNED AND THE DATE IS NOT, deliberately. The time of
+    day is what the bombs are made of -- an entry cutoff at 15:30, an order
+    cutoff at 15:15 -- and a test that reads the wall clock for it passes all
+    morning and fails all afternoon. The DATE has to stay live because the
+    fixtures here are date-relative: FakeChain lists today+33, signals carry
+    dt.date.today(), and pinning the date would make those stale instead.
+    """
+    def _clock():
+        n = dt.datetime.now(PB.NY) if day is None else dt.datetime(
+            day.year, day.month, day.day, tzinfo=PB.NY)
+        return n.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    return _clock
+
+
+def fake_playbook(fb, state_dir, arm_path, ledger, *, clock=None,
+                  dry_run=False):
     """A Playbook wired to a fake broker, with no constructor side effects.
 
     __init__ is bypassed deliberately: it installs the exercise block on a real
     client and builds an OptionData, and neither belongs in a unit test of the
     close path.
+
+    IT CARRIES A CLOCK, and that is not decoration. On 2026-09-28 this suite
+    was a wall-clock bomb: _outstanding_reservations asks whether a play is
+    past its entry cutoff, the index spread's cutoff is 15:30 ET, so after
+    15:30 both spreads dropped out of the holds and section 33 summed 0.0
+    instead of 3510.0 -- then fell through into optexec.plan and died with
+    "FakeBroker object has no attribute 'data'". Every day. A test whose
+    result depends on when it is run teaches people to ignore the suite.
+    11:00 ET is inside every window these plays have.
     """
     import pathlib as _pl
     import threading as _th
     pb = PB.Playbook.__new__(PB.Playbook)
-    pb.a = fb
+    # Exactly what __init__ does with dry_run, because that is the property
+    # under test: a dry-run instance is not a live one holding a flag, it is
+    # one that never held a writeable handle to the account or the ledger.
+    pb.a = PB.ReadOnlyBroker(fb) if dry_run else fb
     pb.state_dir = _pl.Path(state_dir)
     pb.arm_path = _pl.Path(arm_path)
     pb.decisions_path = _pl.Path(state_dir) / "decisions.jsonl"
-    pb.ledger = ledger
-    pb.dry_run = False
+    pb.ledger = PB.ReadOnlyLedger(ledger.path) if dry_run else ledger
+    pb.reserve = PB.Reserve(_pl.Path(state_dir) / "reserve.json")
+    pb.assignments = P.Assignments(_pl.Path(state_dir) / "plays.json")
+    pb.dry_run = bool(dry_run)
+    pb._clock = clock or at_et(11, 0)
     pb._lock = _th.RLock()
     pb.last = None
     return pb
+
+
+class FakeQuotes:
+    """Stands in for options.OptionData for quote_legs. Raises on demand,
+    because a quote failure must be VISIBLE and not a blank mark."""
+
+    def __init__(self, book=None, boom=""):
+        self.book = dict(book or {})
+        self.boom = boom
+
+    def snapshots(self, underlying, feed="opra", **kw):
+        if self.boom:
+            raise RuntimeError(self.boom)
+        return {sym: {"latestQuote": {"bp": q[0], "ap": q[1]}}
+                for sym, q in self.book.items()}
+
+
+class FakeChain:
+    """Stands in for optdata.OptionData in a proposal: spot and expirations."""
+
+    def __init__(self, spot=750.0):
+        self._spot = spot
+
+    def spot(self, symbol, ttl=None):
+        return self._spot
+
+    def expirations(self, symbol, min_dte=0, max_dte=60, **kw):
+        return [dt.date.today() + dt.timedelta(days=33)]
 
 
 def main() -> int:
@@ -781,6 +871,668 @@ def main() -> int:
                                                        tzinfo=S.NY))
     check("an all-overnight tape gives no direction", og.direction, None)
     check("...and no closed hourly bars at all", og.bars_used, 0)
+    print("\n26. THE MARKING PATH USES THE CLASS THAT HAS snapshots()")
+    # The bug that ran a whole session. Two classes in this repo are called
+    # OptionData; only options.OptionData has snapshots(), which is what
+    # optexec.requote() calls. The playbook held optdata.OptionData, so
+    # quote_legs raised AttributeError every cycle, _manage swallowed it, and
+    # every mark stayed None -- so the profit and stop comparisons below the
+    # mark were never reached on any of the six live positions. Reproduced:
+    #   requote(optdata.OptionData(al), ...) -> AttributeError
+    #   requote(options.OptionData(al), ...) -> {'bid':10.7,'ask':11.0,...}
+    import optdata as _optdata
+    import options as _options
+    check("optdata.OptionData still has NO snapshots -- this is the trap",
+          hasattr(_optdata.OptionData, "snapshots"), False)
+    check("options.OptionData is the one that has it",
+          hasattr(_options.OptionData, "snapshots"), True)
+    mk_dir = tempfile.mkdtemp()
+    mled = PB.Ledger(os.path.join(mk_dir, "m.jsonl"))
+    mfb = FakeBroker()
+    mpb = fake_playbook(mfb, mk_dir, ap, mled)
+    mpb.oq = FakeQuotes({"AAPL261030C00340000": (10.30, 10.90)})
+    mpb.od = FakeChain()
+    q = mpb.quote_legs([{"symbol": "AAPL261030C00340000"}])
+    approx("quote_legs prices a real OCC leg off the quote reader",
+           q["AAPL261030C00340000"]["mid"], 10.60, 1e-9)
+    mled.record("m-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+                contracts=1, requested=1, entry_net=-11.70, target_px=13.45,
+                stop_px=8.77,
+                legs=[{"symbol": "AAPL261030C00340000", "right": "call",
+                       "strike": 340.0, "side": "buy", "entry_px": 11.70}])
+    mres = PB.CycleResult()
+    mpb._manage_one(mled.get("m-1"), mres)
+    approx("...and the position gets a real mark", mled.get("m-1").mark,
+           10.60, 1e-9)
+    approx("...and a real P/L in dollars", mled.get("m-1").pl, -110.0, 1e-9)
+    check("...with nothing on the error list", mres.errors, [])
+
+    print("\n27. A POSITION THAT CANNOT BE PRICED IS VISIBLE, NOT BLANK")
+    # "No mark" and "no move" are the same empty cell on a screen, and they are
+    # not the same thing. A quote failure must clear the stale mark, name the
+    # reason on the position and reach the cycle's error list.
+    mpb.oq = FakeQuotes(boom="503 from the quote host")
+    mres2 = PB.CycleResult()
+    mpb._manage_one(mled.get("m-1"), mres2)
+    pos27 = mled.get("m-1")
+    check("the stale mark is cleared, not left on screen", pos27.mark, None)
+    check("...and the P/L with it", pos27.pl, None)
+    check("...the reason is on the position",
+          "503 from the quote host" in pos27.mark_error, True)
+    check("...it is NOT priced", pos27.priced, False)
+    check("...and the cycle carries the error", len(mres2.errors), 1)
+    check("...and the board lists it as unpriced",
+          "m-1" in [p.id for p in mled.open_positions() if p.mark_error], True)
+    # one-sided books are a refusal to mark, with their own reason
+    mpb.oq = FakeQuotes({"AAPL261030C00340000": (10.30, None)})
+    mpb._manage_one(mled.get("m-1"), PB.CycleResult())
+    check("a one-sided book says so rather than guessing a mid",
+          "no two-sided quote" in mled.get("m-1").mark_error, True)
+    # and recovery clears the flag, or the row stays red forever
+    mpb.oq = FakeQuotes({"AAPL261030C00340000": (10.30, 10.90)})
+    mpb._manage_one(mled.get("m-1"), PB.CycleResult())
+    check("a recovered quote clears the flag", mled.get("m-1").mark_error, "")
+    check("...and the position is priced again", mled.get("m-1").priced, True)
+    # a credit spread the book prices on the wrong side of zero is nonsense,
+    # not a full-credit profit waiting to trip the take-profit
+    mled.record("m-2", "opening", symbol="SPY", play="index-put-credit-spread",
+                kind=P.CREDIT_SPREAD, expiry="2026-10-30", state="open",
+                contracts=10, requested=10, entry_net=0.30, target_px=0.15,
+                stop_px=0.38,
+                legs=[{"symbol": "SPY261030P00744000", "right": "put",
+                       "strike": 744.0, "side": "sell", "entry_px": 4.25},
+                      {"symbol": "SPY261030P00742000", "right": "put",
+                       "strike": 742.0, "side": "buy", "entry_px": 3.95}])
+    mark, why = mpb._mark(mled.get("m-2"),
+                          {"SPY261030P00744000": {"mid": 3.90},
+                           "SPY261030P00742000": {"mid": 3.95}})
+    check("an inverted credit spread does not mark as a profit", mark, None)
+    check("...it says the book is on the wrong side of zero",
+          "wrong side of zero" in why, True)
+
+    print("\n28. THE RESTING TARGET GOES ON AT THE FILL, NOT AT THE SEND")
+    # Every one of the six came back 422 {"code":42210000,"message":"position
+    # intent mismatch, inferred: sell_to_open, specified: sell_to_close"}
+    # because the rest was sent immediately after the OPENING order was
+    # accepted. At that instant the account holds nothing, so Alpaca infers a
+    # sell would open a short, and level 3 cannot sell naked.
+    check("the pre-fill rest call is gone from the playbook",
+          hasattr(PB.Playbook, "_rest_target"), False)
+    cv_dir = tempfile.mkdtemp()
+    cled = PB.Ledger(os.path.join(cv_dir, "c.jsonl"))
+    occ = "AAPL261030C00340000"
+    cled.record("c-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                kind=P.LONG_SINGLE, expiry="2026-10-30", state="pending",
+                contracts=0, requested=1, entry_net=-11.70, target_px=13.45,
+                stop_px=8.77,
+                legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                       "side": "buy", "entry_px": 11.70}])
+    cfb = FakeBroker(positions=[])
+    cpb = fake_playbook(cfb, cv_dir, ap, cled)
+    check("a PENDING position is not covered -- there is nothing to sell",
+          cpb._needs_cover(cled.get("c-1")), False)
+    cpb._cover(PB.CycleResult())
+    check("...so nothing is sent while it is pending", len(cfb.sent), 0)
+    # now the broker confirms it, exactly as reconcile sees it
+    cfb.positions = [{"symbol": occ, "qty": "1", "side": "long",
+                      "asset_class": "us_option", "avg_entry_price": "11.70"}]
+    rres = PB.CycleResult()
+    cpb._reconcile(rres)
+    check("reconcile moves it to open", cled.get("c-1").state, "open")
+    check("...at the count the broker confirms", cled.get("c-1").contracts, 1)
+    cpb._cover(PB.CycleResult())
+    check("NOW the resting target goes out", len(cfb.sent), 1)
+    rest = cfb.sent[0]
+    check("...good till cancelled", rest["time_in_force"], "gtc")
+    check("...selling to close, which is what the 422 was about",
+          rest["position_intent"], "sell_to_close")
+    check("...at the profit price", rest["limit_price"], "13.45")
+    check("...for one contract", rest["qty"], "1")
+    check("...and the position knows it is covered",
+          cled.get("c-1").exit_cover, "resting")
+
+    print("\n29. COVERING IS IDEMPOTENT, AND SIZED TO THE BROKER'S COUNT")
+    # Reconcile runs every 20 seconds. Two resting sells against one long
+    # option is a naked short the moment both fill.
+    cfb.working = [{"id": cled.get("c-1").rest_order_id, "symbol": occ}]
+    cpb._cover(PB.CycleResult())
+    check("a second cycle does not stack a second GTC order", len(cfb.sent), 1)
+    # a working order we did not place is never added to
+    cled.record("c-1", "forgot", rest_order_id="", rest_contracts=0)
+    cfb.working = [{"id": "someone-elses", "symbol": occ}]
+    cpb._cover(PB.CycleResult())
+    check("...nor is a working order this loop did not place", len(cfb.sent), 1)
+    check("...and the skip is recorded on the position",
+          "already working" in cled.get("c-1").note, True)
+    # the order book being unreadable is not the same as it being empty
+    bfb = BlindBroker(positions=cfb.positions)
+    bpb = fake_playbook(bfb, cv_dir, ap, cled)
+    bpb._cover(PB.CycleResult())
+    check("an unreadable order book defers the cover, never guesses",
+          len(bfb.sent), 0)
+    # a partial fill that later grows must have its cover resized, not left
+    # covering three of ten contracts
+    pf_dir = tempfile.mkdtemp()
+    pled = PB.Ledger(os.path.join(pf_dir, "p.jsonl"))
+    pled.record("p-1", "opening", symbol="SPY", play="index-put-credit-spread",
+                kind=P.CREDIT_SPREAD, expiry="2026-10-30", state="open",
+                contracts=3, requested=10, entry_net=0.30, target_px=0.15,
+                stop_px=0.38,
+                legs=[{"symbol": "SPY261030P00744000", "right": "put",
+                       "strike": 744.0, "side": "sell", "entry_px": 4.25},
+                      {"symbol": "SPY261030P00742000", "right": "put",
+                       "strike": 742.0, "side": "buy", "entry_px": 3.95}])
+    pfb = FakeBroker()
+    ppb = fake_playbook(pfb, pf_dir, ap, pled)
+    ppb._cover(PB.CycleResult())
+    check("the cover is for what the broker confirms, not what was requested",
+          pfb.sent[0]["qty"], "3")
+    check("...and a two-leg cover is an mleg order",
+          pfb.sent[0]["order_class"], "mleg")
+    check("...bought back, which is a POSITIVE (debit) limit",
+          float(pfb.sent[0]["limit_price"]) > 0, True)
+    pled.record("p-1", "resized", contracts=10)
+    pfb.working = [{"id": pled.get("p-1").rest_order_id,
+                    "legs": [{"symbol": "SPY261030P00744000"},
+                             {"symbol": "SPY261030P00742000"}]}]
+    check("a grown position is seen as needing cover again",
+          ppb._needs_cover(pled.get("p-1")), True)
+    ppb._cover(PB.CycleResult())
+    check("...and the undersized rest is replaced, not added to",
+          pfb.sent[-1]["qty"], "10")
+
+    print("\n30. A REFUSED REST IS RECORDED, RETRIED, THEN OWNED BY THE LOOP")
+    # Degrading loudly beats a position that silently has no target. But one
+    # transient refusal must not demote a position for life, and a permanent
+    # one must not hammer /orders every twenty seconds.
+    rf_dir = tempfile.mkdtemp()
+    rled = PB.Ledger(os.path.join(rf_dir, "r.jsonl"))
+    rled.record("r-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+                contracts=1, requested=1, entry_net=-11.70, target_px=13.45,
+                stop_px=8.77,
+                legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                       "side": "buy", "entry_px": 11.70}])
+    rfb = FakeBroker(reject_orders="422 position intent mismatch")
+    rpb = fake_playbook(rfb, rf_dir, ap, rled)
+    rpb._cover(PB.CycleResult())
+    check("the refusal is recorded on the position",
+          "422" in rled.get("r-1").rest_refused, True)
+    check("...and counted", rled.get("r-1").rest_attempts, 1)
+    check("...and the LOOP now owns the target", rled.get("r-1").exit_cover,
+          "loop")
+    check("...and it does not retry in the same second",
+          rpb._needs_cover(rled.get("r-1")), False)
+    for n in (2, 3):
+        rled.record("r-1", "retry_due", rest_refused_at=0.0)
+        rpb._cover(PB.CycleResult())
+        check("attempt %d is made once the backoff has passed" % n,
+              rled.get("r-1").rest_attempts, n)
+    rled.record("r-1", "retry_due", rest_refused_at=0.0)
+    check("after %d attempts it stops asking" % PB.REST_MAX_ATTEMPTS,
+          rpb._needs_cover(rled.get("r-1")), False)
+    check("...and the position still says the loop owns the target",
+          rled.get("r-1").exit_cover, "loop")
+
+    print("\n31. THE LOOP OWNS THE STOP ALWAYS, THE TARGET ONLY IF NO REST")
+    # A resting GTC limit IS the target. Firing here as well cancels a good
+    # order to send a worse one for the same fill, and every cancel is a window
+    # in which the position is uncovered. The stop can never be a resting limit
+    # -- a limit to buy back at a worse price fills immediately.
+    lp_dir = tempfile.mkdtemp()
+    lled = PB.Ledger(os.path.join(lp_dir, "l.jsonl"))
+    lled.record("l-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+                contracts=1, requested=1, entry_net=-11.70, target_px=13.45,
+                stop_px=8.77, rest_order_id="ord-9", rest_contracts=1,
+                legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                       "side": "buy", "entry_px": 11.70}])
+    lfb = FakeBroker()
+    lpb = fake_playbook(lfb, lp_dir, ap, lled)
+    lpb.oq = FakeQuotes({occ: (13.90, 14.10)})       # well through the target
+    lres = PB.CycleResult()
+    lpb._manage_one(lled.get("l-1"), lres)
+    check("with a rest working, the loop does NOT race it to the target",
+          len(lfb.sent), 0)
+    check("...and says who owns the target",
+          lres.managed[0]["target_owner"], "resting")
+    lled.record("l-1", "rest_gone", rest_order_id="", rest_contracts=0,
+                rest_refused="broker said no")
+    lpb._manage_one(lled.get("l-1"), PB.CycleResult())
+    check("with no rest, the loop takes the profit itself", len(lfb.sent), 1)
+    check("...selling to close", lfb.sent[0]["position_intent"],
+          "sell_to_close")
+    # the stop is the loop's whether or not a target is resting
+    lled.record("l-1", "reopened", state="open", rest_order_id="ord-9",
+                rest_contracts=1, rest_refused="")
+    lfb.sent.clear()
+    lpb.oq = FakeQuotes({occ: (8.00, 8.20)})          # through the stop
+    lpb._manage_one(lled.get("l-1"), PB.CycleResult())
+    check("the stop fires even with a target resting", len(lfb.sent), 1)
+    check("...after cancelling the rest first, so two fills cannot happen",
+          lled.get("l-1").rest_order_id, "")
+
+    print("\n32. THE INCOME LEG IS PROPOSED BEFORE THE SWING BUYING")
+    # The owner: "we are constantly selling options on the index etfs in order
+    # to fund our buying", and they must open "every day ... no matter what".
+    # Assignments.active() is sorted by SYMBOL, so AAPL, AMZN, GOOGL, META,
+    # MSFT and NVDA all sorted ahead of QQQ and SPY and consumed the whole 60%
+    # ceiling before either spread was ever priced.
+    pr_dir = tempfile.mkdtemp()
+    asg = P.Assignments(os.path.join(pr_dir, "plays.json"))
+    asg.seed_owner_set(by="test")
+    alpha = [a.key() for a in asg.active()]
+    check("Assignments.active() is still alphabetical -- that is the trap",
+          alpha[0].split(":")[0], "AAPL")
+    order = [a.key() for a in PB.proposal_order(asg.active())]
+    check("both index spreads are proposed first",
+          [k.split(":")[0] for k in order[:2]], ["QQQ", "SPY"])
+    check("...and every swing comes after them",
+          {PB.PLAYS_KIND(k.split(":", 1)[1]) for k in order[2:]},
+          {P.LONG_SINGLE})
+    check("a credit play outranks a debit one",
+          PB.priority_of("index-put-credit-spread")
+          < PB.priority_of("swing-atm-hourly"), True)
+    check("an unknown play sorts LAST, never ahead of the income leg",
+          PB.priority_of("no-such-play"), PB.UNRANKED_PRIORITY)
+    # a pending position is committed capital even before the fill comes back;
+    # counting it at zero is what let seven swings each measure against a
+    # ceiling none of the others had touched
+    prled = PB.Ledger(os.path.join(pr_dir, "pr.jsonl"))
+    prled.record("x", "opening", symbol="META", play="swing-atm-hourly",
+                 kind=P.LONG_SINGLE, expiry="2026-10-30", state="pending",
+                 contracts=0, requested=1, entry_net=-40.50,
+                 legs=[{"symbol": "M", "strike": 750.0, "side": "buy"}])
+    approx("a PENDING order counts at its requested size",
+           prled.open_risk(), 4050.0, 1e-6)
+
+    print("\n33. THE CREDIT TIER HAS A BUDGET THE SWINGS MAY NEVER SPEND")
+    # What this replaced: six 33-DTE swings held $11,185.00 of an $11,204.88
+    # ceiling and both index spreads were refused over $19.88 of headroom. They
+    # were not outranked. Priority reorders the proposals inside ONE cycle and
+    # cannot reclaim what an earlier cycle already spent, and those swings have
+    # max_open=1 and a month to run. So the tiers hold SEPARATE allocations now
+    # and neither may spend the other's.
+    rs_dir = tempfile.mkdtemp()
+    rsv = PB.Reserve(os.path.join(rs_dir, "reserve.json"))
+    check("nothing is reserved before anything has been measured",
+          rsv.get("SPY:index-put-credit-spread"), None)
+    rsv.note("SPY:index-put-credit-spread", max_loss=1760.0, contracts=10,
+             label="SPY 741/739p x10")
+    rsv.note("QQQ:index-put-credit-spread", max_loss=1750.0, contracts=10,
+             label="QQQ 707/705p x10")
+    check("a measured price survives a restart, because the worker is a "
+          "different process",
+          PB.Reserve(os.path.join(rs_dir, "reserve.json"))
+          .get("SPY:index-put-credit-spread")["max_loss"], 1760.0)
+
+    sled = PB.Ledger(os.path.join(rs_dir, "s.jsonl"))
+    sfb = FakeBroker()
+    spb = fake_playbook(sfb, rs_dir, ap, sled)
+    # 11:00 ET, INJECTED. Read from the wall clock this section passed all
+    # morning and failed every afternoon: the index entry cutoff is 15:30, so
+    # after it the spreads cannot open today and owe nothing.
+    spb._clock = lambda: dt.datetime(2026, 9, 28, 11, 0, tzinfo=PB.NY)
+    spb.reserve = rsv
+    spb.assignments = P.Assignments(os.path.join(rs_dir, "plays.json"))
+    spb.assignments.seed_owner_set(by="test")
+    spb.od = FakeChain(spot=750.0)
+    spb.chain_rows = lambda sym, exp, spot, pct=0.12: (put_chain(), "ok")
+    active = PB.proposal_order(spb.assignments.active())
+    holds = spb._outstanding_reservations(active)
+    approx("both index spreads still owe their measured requirement at 11:00",
+           sum(h["max_loss"] for h in holds.values()), 3510.0, 1e-6)
+    check("...and a swing has never been priced, so it owes nothing invented",
+          holds["META:swing-atm-hourly"]["measured"], False)
+    spb._clock = lambda: dt.datetime(2026, 9, 28, 15, 31, tzinfo=PB.NY)
+    approx("...and after the 15:30 cutoff they owe nothing, because they can "
+           "no longer open today",
+           sum(h["max_loss"] for h
+               in spb._outstanding_reservations(active).values()), 0.0, 1e-6)
+    spb._clock = lambda: dt.datetime(2026, 9, 28, 11, 0, tzinfo=PB.NY)
+
+    check("a credit spread spends the credit allocation",
+          PB.tier_of_play("index-put-credit-spread"), PB.TIER_CREDIT)
+    check("a swing spends the debit allocation",
+          PB.tier_of_play("swing-atm-hourly"), PB.TIER_DEBIT)
+    check("a mistyped play spends the DEBIT allocation and can never reach "
+          "the income tier's money",
+          PB.tier_of_play("no-such-play"), PB.TIER_DEBIT)
+
+    # The live book of 28 Sep 2026, to the dollar: six long options, one
+    # contract each, $11,185.00 of debit risk.
+    six = PB.Ledger(os.path.join(rs_dir, "six.jsonl"))
+    for n, px in enumerate([11.70, 17.65, 22.50, 30.00, 10.00, 20.00]):
+        six.record("sw%d" % n, "opening", symbol="S%d" % n,
+                   play="swing-atm-hourly", kind=P.LONG_SINGLE,
+                   expiry="2026-10-30", state="open", contracts=1,
+                   requested=1, entry_net=-px,
+                   legs=[{"symbol": "X%d" % n, "strike": 750.0, "side": "buy"}])
+    bp = 18674.80
+    approx("the six swings hold $11,185 of DEBIT risk",
+           six.open_risk(PB.TIER_DEBIT), 11185.0, 1e-6)
+    approx("...and none of it is the credit tier's",
+           six.open_risk(PB.TIER_CREDIT), 0.0, 1e-6)
+    approx("...and the total is still the total",
+           six.open_risk(), 11185.0, 1e-6)
+    approx("under the shared ceiling that book left $19.88 of headroom",
+           round(bp * PB.MAX_OPEN_RISK_FRACTION - 11185.0, 2), 19.88, 1e-6)
+    credit = PB.TierBudget(tier=PB.TIER_CREDIT,
+                           fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
+                           open_risk=six.open_risk(PB.TIER_CREDIT))
+    approx("the credit allocation is 40% of options buying power",
+           credit.allocation, 7469.92, 1e-6)
+    check("the SPY spread fits it with all six swings open -- THE WHOLE POINT",
+          credit.fits(1750.0), True)
+    check("...and QQQ fits beside it the same session",
+          PB.TierBudget(tier=PB.TIER_CREDIT,
+                        fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
+                        open_risk=1750.0).fits(1705.0), True)
+    check("...and tomorrow's pair stacks on top of today's",
+          PB.TierBudget(tier=PB.TIER_CREDIT,
+                        fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
+                        open_risk=3455.0 + 1750.0).fits(1705.0), True)
+    # Honest about where it stops: a third session of pairs needs $10,365 and
+    # the allocation is $7,469.92. That is the account, not a bug, and the
+    # refusal has to say so rather than look like the old silent one.
+    check("a THIRD consecutive session is refused -- the measured limit of "
+          "this account, not a defect",
+          PB.TierBudget(tier=PB.TIER_CREDIT,
+                        fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
+                        open_risk=6910.0).fits(1750.0), False)
+    debit = PB.TierBudget(tier=PB.TIER_DEBIT, fraction=PB.DEBIT_RISK_FRACTION,
+                          bp=bp, open_risk=six.open_risk(PB.TIER_DEBIT))
+    approx("the debit allocation is 20% of options buying power",
+           debit.allocation, 3734.96, 1e-6)
+    check("the six swings are OVER their own allocation, so no new swing opens",
+          debit.fits(1172.0), False)
+    rwhy = debit.refusal(1172.0)
+    check("...and the refusal names the allocation that ran out",
+          "debit allocation" in rwhy, True)
+    check("...and says the other tier's money is not headroom",
+          "may never spend it" in rwhy, True)
+    check("...and never reads as a hold that a swing could outwait",
+          "first call on the headroom" in rwhy, False)
+
+    # End to end through the proposal path, on the same book.
+    spb.ledger = six
+    meta = spb.assignments.get("META", "swing-atm-hourly")
+    sig = S.Signal(symbol="META", direction="up", reason="up",
+                   session=dt.date(2026, 9, 28),
+                   bar_start=dt.datetime(2026, 9, 28, 10, 30, tzinfo=PB.NY))
+    pr = PB.Proposal(symbol="META", play="swing-atm-hourly")
+    spb._propose_one(meta, pr, {"META": sig}, debit, 0, PB.Arm(),
+                     PB.CycleResult())
+    check("the swing is refused by its own budget", pr.ok, False)
+    check("...naming the debit allocation", "debit allocation" in pr.reason,
+          True)
+    approx("...on a $1,600 structure that priced fine",
+           pr.structure.max_loss, 1600.0, 1e-6)
+    # ...and the same six swings do NOT refuse the income leg any more.
+    spy = spb.assignments.get("SPY", "index-put-credit-spread")
+    pr2 = PB.Proposal(symbol="SPY", play="index-put-credit-spread")
+    try:
+        # Past the allocation it reaches optexec.plan, which needs a live
+        # account. Getting that far IS the result: the budget let it through.
+        spb._propose_one(spy, pr2, {}, credit, 0, PB.Arm(), PB.CycleResult())
+    except AttributeError:
+        pass
+    check("the SPY spread is NOT refused for room, six swings notwithstanding",
+          "of risk needs" in pr2.reason, False)
+    check("...and the board reports each tier's risk separately, because the "
+          "total is the number that hid this",
+          spb.board()["open_risk_by_tier"][PB.TIER_CREDIT], 0.0)
+    approx("...while the debit tier carries all of it",
+           spb.board()["open_risk_by_tier"][PB.TIER_DEBIT], 11185.0, 1e-6)
+    check("...and the board shows the income leg first",
+          [r["priority"] for r in spb.board()["assignments"]][:2], [0, 0])
+    approx("...and the two allocations add up to the unchanged 60% cap",
+           spb.board()["caps"]["credit_risk_fraction"]
+           + spb.board()["caps"]["debit_risk_fraction"], 0.60, 1e-9)
+
+    print("\n34. A DRY RUN CANNOT TOUCH THE BROKER OR THE SHARED LEDGER")
+    # THE BUG THIS PINS. The dashboard's Preview button builds a Playbook with
+    # dry_run=True on the SAME state dir the worker writes, so the two share
+    # one ledger file and one account. dry_run was a flag each method had to
+    # remember: _cancel_rest and _cancel_working never checked it at all, and
+    # _close wrote state="closing" into the shared file THREE LINES before it
+    # did. Demonstrated with this fixture: the worker rests a GTC target, the
+    # preview marks at the stop, and the preview cancelled the live resting
+    # take-profit and left the ledger saying a position nobody had touched was
+    # closing. Pressing a read-only button stripped the exit off a live trade.
+    dr_dir = tempfile.mkdtemp()
+    dr_path = os.path.join(dr_dir, "shared.jsonl")
+    live_led = PB.Ledger(dr_path)
+    live_led.record("d-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                    kind=P.LONG_SINGLE, expiry=FAR, state="open",
+                    contracts=1, requested=1, entry_net=-11.70,
+                    target_px=17.55, stop_px=8.77,
+                    legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                           "side": "buy", "entry_px": 11.70}])
+    live_fb = FakeBroker()
+    live_pb = fake_playbook(live_fb, dr_dir, ap, live_led)
+    live_pb._cover(PB.CycleResult())
+    rest_id = live_led.get("d-1").rest_order_id
+    check("the worker rests its GTC target", rest_id, "ord-1")
+
+    # The preview: a SECOND Playbook on the SAME file and the SAME account,
+    # with the worker's order live on the book.
+    dry_fb = FakeBroker(working=[{"id": rest_id, "symbol": occ}])
+    dry_pb = fake_playbook(dry_fb, dr_dir, ap, live_led, dry_run=True)
+    # A digest, not the bytes: a failure here must be readable, and "the file
+    # changed" is the whole assertion either way.
+    def _fing(path):
+        import hashlib
+        b = open(path, "rb").read()
+        return "%d bytes sha %s" % (len(b), hashlib.sha256(b).hexdigest()[:12])
+    before = _fing(dr_path)
+    dpos = dry_pb.ledger.get("d-1")
+    at_stop = {occ: {"bid": 8.70, "ask": 8.84, "mid": 8.77}}
+    out = dry_pb._close(dpos, "stop", at_stop, PB.CycleResult())
+    check("the preview reports what it WOULD do", out.startswith("dry run"), True)
+    check("...and the live resting take-profit is still on the book",
+          [o["id"] for o in dry_fb.working], [rest_id])
+    check("...and the preview sent no order", dry_fb.sent, [])
+    check("...and the shared ledger is byte-for-byte what the worker left",
+          _fing(dr_path), before)
+    check("...and the position is still open, not 'closing'",
+          PB.Ledger(dr_path).get("d-1").state, "open")
+
+    # The two methods that had no guard whatsoever.
+    dry_pb._cancel_working(dpos)
+    check("_cancel_working leaves a live working order alone",
+          [o["id"] for o in dry_fb.working], [rest_id])
+    check("_cancel_rest says the cancel would be confirmed...",
+          dry_pb._cancel_rest(dpos), True)
+    check("...without the order going anywhere",
+          [o["id"] for o in dry_fb.working], [rest_id])
+
+    # THE STRUCTURAL PART. A guard every future method has to opt into is the
+    # same bug waiting, so the handles themselves cannot write -- a method
+    # that has never heard of dry_run gets the refusal for free.
+    raises("a dry run cannot cancel an order at all",
+           lambda: dry_pb.a.cancel(rest_id), PB.ReadOnlyViolation)
+    raises("...nor POST one",
+           lambda: dry_pb.a._req("POST", "u", "/orders", json={"qty": "1"}),
+           PB.ReadOnlyViolation)
+    raises("...nor DELETE a position",
+           lambda: dry_pb.a.close_position("AAPL"), PB.ReadOnlyViolation)
+    raises("...nor submit()",
+           lambda: dry_pb.a.submit(symbol="AAPL", qty=1), PB.ReadOnlyViolation)
+    check("...while a read still goes straight through",
+          [o["id"] for o in dry_pb.a.orders(status="open")], [rest_id])
+    check("...and a GET on the wire is not a mutation",
+          dry_pb.a._req("GET", "u", "/positions"), [])
+    check("every refusal is remembered, not swallowed",
+          len(dry_pb.a.refused) >= 4, True)
+
+    dry_pb.ledger.record("d-1", "closed", state="closed", close_reason="oops")
+    check("a method that forgets the flag writes NOTHING to the shared file",
+          _fing(dr_path), before)
+    check("...and the refusal is recorded on the ledger object",
+          dry_pb.ledger.refused[-1]["event"], "closed")
+    check("...and the in-memory replay is untouched too",
+          dry_pb.ledger.get("d-1").state, "open")
+    check("...and a fresh read of the file agrees",
+          PB.Ledger(dr_path).get("d-1").state, "open")
+
+    # ...and none of that has disarmed the WORKER, which shares the file.
+    live_led.record("d-1", "marked", mark=8.77)
+    check("the live instance on the same file still writes",
+          _fing(dr_path) != before, True)
+    check("...and a dry-run decision row says which process wrote it",
+          json.loads(open(os.path.join(dr_dir, "decisions.jsonl"),
+                          encoding="utf-8").read().splitlines()[-1])["dry_run"],
+          True)
+
+    print("\n35. A TEMPORARY REFUSAL DOES NOT STRIP AN EXIT FOR LIFE")
+    # THE DAY IS PINNED TO A KNOWN MONDAY. The order-cutoff dead zone is a
+    # WEEKDAY fact -- nothing is refused for being 15:20 on a Saturday -- so a
+    # section that asked "today at 15:20" would pass Monday to Friday and fail
+    # at the weekend. Same disease as the 15:30 bomb in a different hat, and
+    # an hour-by-hour audit alone does not catch it.
+    mon, tue = dt.date(2026, 9, 28), dt.date(2026, 9, 29)
+    # CLAUDE.md, measured: "Alpaca rejects option orders after 15:30 ET on
+    # broad ETFs (15:15 on single names)". A position filling at 15:14 on a
+    # single name burned all three attempts inside fifteen minutes against a
+    # window that reopens at the next bell -- and nothing anywhere reset the
+    # count, so it was loop-owned for the rest of its life with no resting
+    # exit if the process died.
+    check("the order window is shut for a single name at 15:20 ET",
+          PB.order_cutoff_shut("AAPL", at_et(15, 20, day=mon)()), True)
+    check("...and still open for a broad ETF, which has until 15:30",
+          PB.order_cutoff_shut("SPY", at_et(15, 20, day=mon)()), False)
+    check("...and shut for it twenty minutes later",
+          PB.order_cutoff_shut("SPY", at_et(15, 40, day=mon)()), True)
+    check("...and open again at 09:30",
+          PB.order_cutoff_shut("AAPL", at_et(9, 30, day=mon)()), False)
+    check("OVERNIGHT IS NOT THE DEAD ZONE -- a GTC limit is accepted while the "
+          "market is shut and rests until the open",
+          PB.order_cutoff_shut("AAPL", at_et(20, 0, day=mon)()), False)
+    check("a 429 at midday is temporary",
+          PB.rest_refusal_kind("429 too many requests", "AAPL",
+                               at_et(12, 0, day=mon)()), PB.REST_TEMPORARY)
+    check("a 422 at midday is structural",
+          PB.rest_refusal_kind("422 position intent mismatch", "AAPL",
+                               at_et(12, 0, day=mon)()), PB.REST_STRUCTURAL)
+    check("...and THE SAME 422 at 15:20 is temporary, because the clock "
+          "outranks the message",
+          PB.rest_refusal_kind("422 position intent mismatch", "AAPL",
+                               at_et(15, 20, day=mon)()), PB.REST_TEMPORARY)
+
+    tr_dir = tempfile.mkdtemp()
+    tled = PB.Ledger(os.path.join(tr_dir, "t.jsonl"))
+    tled.record("t-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                kind=P.LONG_SINGLE, expiry=FAR, state="open",
+                contracts=1, requested=1, entry_net=-11.70, target_px=17.55,
+                stop_px=8.77,
+                legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                       "side": "buy", "entry_px": 11.70}])
+    tfb = FakeBroker(reject_orders="403 forbidden")
+    tpb = fake_playbook(tfb, tr_dir, ap, tled, clock=at_et(15, 20, day=mon))
+    tpb._cover(PB.CycleResult())
+    check("the first attempt is refused", tled.get("t-1").rest_attempts, 1)
+    check("...and classed TEMPORARY", tled.get("t-1").rest_kind,
+          PB.REST_TEMPORARY)
+    check("...and stamped with the session it belongs to",
+          tled.get("t-1").rest_session, P.session_key(now=at_et(15, 20, day=mon)()))
+    tled.record("t-1", "retry_due", rest_refused_at=0.0)
+    check("IT DOES NOT BURN THE OTHER TWO ATTEMPTS against a window that is "
+          "shut -- that is how fifteen minutes used to cost a position its "
+          "exit for life", tpb._needs_cover(tled.get("t-1")), False)
+    # A temporary refusal with the window OPEN does retry, and keeps retrying:
+    # the count exists to space the retries out, not to give up on the exit.
+    rl_dir = tempfile.mkdtemp()
+    rlled = PB.Ledger(os.path.join(rl_dir, "rl.jsonl"))
+    rlled.record("rl-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                 kind=P.LONG_SINGLE, expiry=FAR, state="open",
+                 contracts=1, requested=1, entry_net=-11.70, target_px=17.55,
+                 stop_px=8.77,
+                 legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                        "side": "buy", "entry_px": 11.70}])
+    rlfb = FakeBroker(reject_orders="429 too many requests")
+    rlpb = fake_playbook(rlfb, rl_dir, ap, rlled, clock=at_et(11, 0, day=mon))
+    for n in (1, 2, 3, 4):
+        rlled.record("rl-1", "retry_due", rest_refused_at=0.0)
+        rlpb._cover(PB.CycleResult())
+        check("a rate limit at 11:00 is retried, attempt %d" % n,
+              rlled.get("rl-1").rest_attempts, n)
+    check("...and it is not hammering /orders: inside the backoff it waits",
+          rlpb._needs_cover(rlled.get("rl-1")), False)
+    rlled.record("rl-1", "retry_due", rest_refused_at=0.0)
+    check("...but PAST %d attempts it is still asking, because a rate limit is "
+          "not a verdict on the position" % PB.REST_MAX_ATTEMPTS,
+          rlpb._needs_cover(rlled.get("rl-1")), True)
+
+    tpb2 = fake_playbook(tfb, tr_dir, ap, tled, clock=at_et(10, 0, day=tue))
+    check("...BUT THE NEXT SESSION IT ASKS AGAIN -- the window reopened and "
+          "the count belonged to a day that is over",
+          tpb2._needs_cover(tled.get("t-1")), True)
+
+    # ...and the other kind is still final, or the counter would mean nothing.
+    sled2 = PB.Ledger(os.path.join(tr_dir, "s2.jsonl"))
+    sled2.record("s-1", "opening", symbol="AAPL", play="swing-atm-hourly",
+                 kind=P.LONG_SINGLE, expiry=FAR, state="open",
+                 contracts=1, requested=1, entry_net=-11.70, target_px=17.55,
+                 stop_px=8.77,
+                 legs=[{"symbol": occ, "right": "call", "strike": 340.0,
+                        "side": "buy", "entry_px": 11.70}])
+    sfb2 = FakeBroker(reject_orders="422 position intent mismatch")
+    spb2 = fake_playbook(sfb2, tr_dir, ap, sled2, clock=at_et(11, 0, day=mon))
+    for _ in range(3):
+        sled2.record("s-1", "retry_due", rest_refused_at=0.0)
+        spb2._cover(PB.CycleResult())
+    check("a 422 in the middle of the session is STRUCTURAL",
+          sled2.get("s-1").rest_kind, PB.REST_STRUCTURAL)
+    sled2.record("s-1", "retry_due", rest_refused_at=0.0)
+    spb3 = fake_playbook(sfb2, tr_dir, ap, sled2,
+                         clock=at_et(11, 0, day=tue))
+    check("...and a new session does NOT revive it: the broker will never "
+          "accept this body", spb3._needs_cover(sled2.get("s-1")), False)
+    check("...and the position still says the loop owns the target",
+          sled2.get("s-1").exit_cover, "loop")
+    # an old row written before rest_kind existed behaves exactly as it did
+    sled2.record("s-1", "legacy", rest_kind="", rest_session="",
+                 rest_refused_at=0.0)
+    check("a pre-existing row with no kind reads as structural",
+          spb3._needs_cover(sled2.get("s-1")), False)
+
+    print("\n36. THE SUITE IS NOT A WALL-CLOCK BOMB")
+    # Run at 15:35 ET on 2026-09-28, section 33 summed 0.0 instead of 3510.0
+    # and then fell through into optexec.plan and died with "FakeBroker object
+    # has no attribute 'data'". Before 15:30 it passed. A test whose result
+    # depends on the hour it ran teaches people to ignore the suite, so the
+    # clock is injected and the hour is an INPUT here, never an accident.
+    cl_dir = tempfile.mkdtemp()
+    cled = PB.Ledger(os.path.join(cl_dir, "c.jsonl"))
+    cpb = fake_playbook(FakeBroker(), cl_dir, ap, cled)
+    check("every Playbook this suite builds stands at 11:00 ET, whatever hour "
+          "it is really run at", cpb.now().strftime("%H:%M"), "11:00")
+    cpb.assignments = P.Assignments(os.path.join(cl_dir, "plays.json"))
+    cpb.assignments.seed_owner_set(by="test")
+    cpb.reserve.note("SPY:index-put-credit-spread", max_loss=1760.0,
+                     contracts=10, label="SPY 741/739p x10")
+    cpb.reserve.note("QQQ:index-put-credit-spread", max_loss=1750.0,
+                     contracts=10, label="QQQ 707/705p x10")
+    crows = PB.proposal_order(cpb.assignments.active())
+    # The index spread's entry cutoff is 15:30 ET, so the answer genuinely
+    # changes across the day -- which is the point. WHICH answer comes from
+    # the injected clock and never from when the suite happened to run.
+    for hh, mm, want in ((3, 0, 3510.0), (10, 30, 3510.0), (15, 29, 3510.0),
+                         (15, 31, 0.0), (23, 0, 0.0)):
+        cpb._clock = at_et(hh, mm)
+        approx("the holds at %02d:%02d ET" % (hh, mm),
+               sum(h["max_loss"]
+                   for h in cpb._outstanding_reservations(crows).values()),
+               want, 1e-6)
+    check("...and self.now() is answering from the injected clock",
+          cpb.now().strftime("%H:%M"), "23:00")
+    cpb._clock = None
+    check("...with no clock injected it falls back to the wall, and does not "
+          "raise on an object assembled by __new__",
+          cpb.now().tzinfo is not None, True)
+
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
     return 1 if FAIL else 0
 

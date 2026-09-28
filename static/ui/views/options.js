@@ -2,12 +2,16 @@
    options.js -- the Options tab: the board, the shelf, and what the sweep
    actually proved.
 
-   NOTHING ON THIS PAGE IS ARMED AND NOTHING ON IT CAN TRADE. There is no
-   options position, no order path behind any route it calls, and no arm
-   switch on it. The Board says so in its first line, and that line is a
-   constant on the server too, because it is a fact about the code rather
-   than a reading -- when it stops being true it has to change in the same
-   commit that makes it untrue.
+   THIS PAGE CAN ARM, and this paragraph used to say the opposite. It read
+   "nothing on this page is armed and nothing on it can trade", which was true
+   until the Plays room landed and stopped being true in the same commit
+   without anybody moving the line. Exactly what is true now: the Plays room
+   writes the arm file, and it can send ONE kind of order -- a CLOSING one,
+   through /api/optlab/plays/close, which test_optboard.py asserts is the only
+   write in this namespace that reaches the broker. /plays/cycle is built
+   dry_run=True whatever the arm says, so it prices, records, and sends
+   nothing. Every other room here only reads. The Board's own "armed: false"
+   is still a constant on the server and it is a fact about the BOARD.
 
    LIVE POSITIONS ARE NOT HERE. They live on the engine's own page
    at /options (optapi.py + static/options.html), which is the stack that
@@ -15,10 +19,18 @@
    removed, and nothing was lost with it. Everything below reads
    /api/optlab/* -- the research and evidence side.
 
-   Three rooms, and each one exists because a number that matters has nowhere
+   Five rooms, and each one exists because a number that matters has nowhere
    else to live:
 
-     Board       THE LANDING ROOM, and it replaced the live chain. One card
+     Overview    THE LANDING ROOM. What the playbook has actually done: what
+                 needs acting on, why a play did not open, realized and open
+                 P/L kept apart, the record, the exit mix, capital at risk
+                 against its ceiling, and assignment exposure gross and net of
+                 its hedge. Its own header, down at mountPerf, says why it is
+                 first and why each number on it is there.
+     Plays       the control room -- the two plays, the tickers they are on,
+                 the arm switch, and the one closing order this file can send.
+     Board       once the landing room, and it replaced the live chain. One card
                  per watched ticker: spot, IV, IV rank with the number of
                  sessions of recorded history behind it, realised vol, VRP,
                  term slope, skew, liquidity grade, earnings and ex-dividend
@@ -83,6 +95,19 @@
    app.py owns these; this file only consumes them, and treats every field as
    optional. A missing number prints as an em dash and a missing guard prints
    as UNKNOWN -- never as zero and never as OK.
+
+     GET /api/optlab/perf                                        (scoped)
+       optperf.report() as app.py returns it, plus {state:{frozen, armed,
+       arm_why, account}, caps, source}. Every figure is a METRIC:
+       {value, n, unit, reason, thin} -- `n` the sample size behind it,
+       `reason` the sentence to print where the value would have been, `thin`
+       a number that exists but rests on too little to lean on. Blocks:
+       counts, warnings[], pl, outcomes, exits{n, mix[]}, risk, assignment,
+       holding, by_play[], by_ticker[], attention[], decisions, daily[].
+       `ok: false` means the metrics module did not answer at all, which is a
+       different page from "nothing has traded" and is drawn differently.
+       UNITS: "pct" is a FRACTION (0.643 is 64.3%), "usd" is dollars for the
+       WHOLE position and never per share.
 
      GET /api/optlab/board                                       (scoped)
        {armed: false, status:{level, headline, detail},
@@ -191,6 +216,7 @@ for (const p of ["/api/optlab/bank", "/api/optlab/sweep"]) {
    terminal. It is not in TABS, so nothing navigates there by accident, and
    activeTab below lights Board for anyone arriving on an old bookmark. */
 const TABS = [
+  ["perf", "Overview"],
   ["plays", "Plays"],
   ["data", "Data"],
   ["strategies", "Strategies"],
@@ -198,6 +224,7 @@ const TABS = [
 ];
 
 const SUB = {
+  perf: "what these plays have actually done -- booked, open, and the mix behind it",
   plays: "the two plays, the tickers they are on, and what is open right now",
   data: "the tickers we watch, and what we actually know about each one",
   board: "the tickers we watch, and what we actually know about each one",
@@ -208,7 +235,7 @@ const SUB = {
 
 VIEWS.options = {
   title: () => "Options",
-  sub: (ov, v) => SUB[v.tab || "plays"] || SUB.plays,
+  sub: (ov, v) => SUB[v.tab || "perf"] || SUB.perf,
   tabs: TABS,
 
   /* An old link to #/options/chain still renders the chain, and lights Board
@@ -216,7 +243,7 @@ VIEWS.options = {
      nothing highlighted at all. core.js's MOVED map cannot do this one: it
      rewrites a whole view, and the chain is still a real page in this one. */
   activeTab: (v) => (v.tab === "chain" ? "data"
-                     : v.tab === "board" ? "data" : (v.tab || "plays")),
+                     : v.tab === "board" ? "data" : (v.tab || "perf")),
 
   mount(v) {
     /* Every timer this view starts is stamped with the mount that started it
@@ -230,7 +257,10 @@ VIEWS.options = {
     /* "board" is the old name for the data room. An existing bookmark or a
        link in a chat still lands somewhere real rather than on a blank view. */
     if (t === "data" || t === "board") return mountBoard();
-    return mountPlays();
+    if (t === "plays") return mountPlays();
+    /* The Overview is the landing room: see its own header below for why the
+       report opens and the control room is one click away. */
+    return mountPerf();
   },
 
   /* No paint(). The fleet poll runs every two seconds and repainting a
@@ -538,6 +568,24 @@ const CSS = `
 .pl-scroll td, .pl-scroll th { font-variant-numeric: tabular-nums; }
 .pl-scroll .sm { font-size: 11px; }
 
+/* ---- the overview room -------------------------------------------------
+   Two additions, and neither is decoration. A metric that never formed is a
+   dash carrying its reason on hover, in the Board's own weight for an empty
+   fact. And the capital meter is a PROPORTION, because "at risk against the
+   ceiling" is the check that refused every index spread all day and a number
+   printed beside another number does not show how close it came. */
+.ov-no { color: var(--faint); cursor: help; }
+/* A number that EXISTS but rests on too little to lean on. It keeps its full
+   weight -- it is a real measurement -- and is marked rather than hidden,
+   because hiding it would leave the cell looking unmeasured instead. */
+.ov-thin { border-bottom: 1px dotted var(--warn); cursor: help; }
+.ov-meter { height: 8px; border-radius: var(--radius-pill); margin-top: 6px;
+            background: var(--surface-2); border: 1px solid var(--hairline);
+            overflow: hidden; }
+.ov-meter i { display: block; height: 100%; background: var(--accent-2); }
+.ov-meter i.near { background: var(--warn); }
+.ov-meter i.full { background: var(--down); }
+
 @media (max-width: 560px) {
   .pl-row-btns { margin-left: 0; width: 100%; }
   .pl-row-btns .btn { font-size: 11px; padding: 3px 9px; }
@@ -570,6 +618,32 @@ const dol = (v, dp = 2) => has(v) ? "$" + Number(v).toFixed(dp) : DASH;
    one extra question asked first. */
 const mny = (v, dp = 2) => has(v) ? money(v, dp) : DASH;
 const pnl = (v, dp = 2) => has(v) ? sgn(v, dp) : DASH;
+/* A LOSS SIZE, drawn as the loss it is. optperf returns avg_loss POSITIVE by
+   contract -- it is the SIZE of the average loser, not a signed P/L -- and
+   handing that to pnl() printed "+$1,000.00" in green: the one number whose
+   job is to stop a 75% win rate reading as success was drawn as a profit.
+   Negated for display so it reads and colours like "Largest loss", which
+   arrives already signed; abs() first so a ledger that ever sends this field
+   signed cannot flip it back to green. */
+const lossv = (v, dp = 2) =>
+  has(v) ? pnl(-Math.abs(Number(v)), dp) : DASH;
+/* A SIGNED RATIO. Expectancy in dollars is coloured and expectancy in R is the
+   same fact per dollar risked; drawing one red and the other in body text is
+   how a negative R gets read past. Magnitude ratios -- win/loss size, profit
+   factor -- are NOT this: they cannot go negative and a "+" on them would be
+   noise. */
+const sgnr = (v, dp = 2) => {
+  if (!has(v)) return DASH;
+  const n = Number(v);
+  const c = n > 0 ? "up" : n < 0 ? "down" : "faint";
+  return `<span class="${c}">${n > 0 ? "+" : ""}${n.toFixed(dp)}</span>`;
+};
+/* Headroom is ROOM, not profit. A positive one is a fact and gets body text --
+   green would say the account earned it. A NEGATIVE one means the book is
+   already through its own ceiling, and that must not render in the same ink as
+   every other dollar on the card. */
+const roomv = (v, dp = 2) => (!has(v) ? DASH
+  : Number(v) < 0 ? `<span class="down">${mny(v, dp)}</span>` : mny(v, dp));
 /* IV is stored as a decimal; nobody reads 0.1843. */
 const ivTxt = (v) => has(v) ? (Number(v) * 100).toFixed(1) + "%" : DASH;
 /* Already a percentage on the wire: the sweep's fill_rate and win_rate are
@@ -2642,4 +2716,445 @@ function mountPlays() {
      calls, so this is cheap -- but the marks only change when the WORKER
      cycles, so polling faster than it would show the same numbers. */
   every(10000, "pl-strip", load);
+}
+
+/* ==================================================== the overview room
+   "an options performance overview with metrics and calculations ... there
+   isnt anything really there right now" -- the owner, 28 Sep 2026.
+
+   THIS IS THE LANDING ROOM of the Options tab, ahead of Plays, and that is a
+   decision rather than a default. Plays is the CONTROL room: assign, arm,
+   preview, close. This is the REPORT -- the page somebody reads to decide
+   whether to keep running the thing at all. Stacking the report on top of the
+   controls would push the arm switch off the first screen, and hiding it
+   behind a later tab would leave the Options tab opening on exactly the room
+   he said had nothing on it. So the report opens, the control room is one
+   click away, and the arm and freeze state is repeated at the top of this page
+   so it is never something anybody has to go looking for.
+
+   THE ORDER OF THE PAGE IS THE ORDER OF THE QUESTIONS, and the first two are
+   not P/L:
+
+     WHAT NEEDS ACTING ON. optperf's attention list: open with no resting exit,
+     open with no mark, a partial fill whose exit must be for what filled, a
+     short leg inside the close-out rule. Every one of those is a state this
+     account has actually been in, and every one was INVISIBLE before -- a
+     position with no mark looks exactly like a position that has not moved.
+
+     WHY A PLAY DID NOT OPEN. The day SPY and QQQ never opened, the answer was
+     in the decision log and nowhere on screen. The refusals are grouped and
+     counted here so that question is one line at the top of a page rather
+     than a grep.
+
+   Then the numbers, and each one is here rather than the prettier alternative:
+
+     REALIZED AND OPEN P/L, separately and added up. Never realized alone. A
+     system with a take-profit and a stop books its winners and carries its
+     losers, so booked P/L climbs in a straight line while the open book rots.
+     The share ladder's History tab learnt this the hard way; the rule is the
+     same here. Realized that is ESTIMATED from a last mark rather than booked
+     from a fill is shown as its own number, because it is not money yet.
+
+     WIN RATE NEXT TO average win and average loss, with the trade count under
+     it and its confidence interval beside it. A win rate on its own is the
+     classic lie for a strategy with a wide stop -- and the reverse trap lives
+     here too: -25% on a credit spread is a six-cent stop, so this book can
+     lose most of the time on noise and still be fine. Expectancy, in dollars
+     and in R, is what settles either argument, so it sits on the same card.
+
+     THE EXIT MIX -- profit target, stop, assignment guard, expiry, by hand.
+     That mix IS the strategy working or not. All-expiry means the resting
+     take-profit never fills; all-guard means the playbook is being saved by
+     its guard rather than run by its rules.
+
+     CAPITAL AT RISK against the ceiling, and assignment exposure gross AND net
+     of its hedge. These are the two numbers that refuse a trade, and on the day
+     SPY and QQQ never opened they were the whole story. The hedge assumption is
+     printed rather than implied, because a hedge is not free.
+
+   EVERY NUMBER CARRIES ITS SAMPLE SIZE, and an absent one carries its reason:
+   pfv() draws a dash with the sentence on hover, pfn() prints it where the
+   count would have gone, and a number optperf marks `thin` is drawn as thin
+   rather than silently trusted. Nothing here may print 0 for "we do not know"
+   -- on a performance page those two look identical on screen and only one of
+   them is information. It is the rule the Board already follows for IV rank.
+
+   Data: GET /api/optlab/perf -- optperf.report() plus the arm state, passed
+   through unchanged. A metric is {value, n, unit, reason, thin}. */
+
+/* A metric's number, or null. A string, a NaN and a missing key are the same
+   answer here: we do not have it. */
+const mv = (m) => (m && m.value != null && Number.isFinite(Number(m.value))
+  ? Number(m.value) : null);
+const mwhy = (m) => (m && m.reason ? String(m.reason) : "not measured");
+/* The same sentence for a number that DID form. optperf drops the caveat off a
+   healthy metric, so a thin one with nothing to caveat fell through to "not
+   measured" -- which is what the dash means, and this is not a dash. The
+   average loss on a one-loss ledger read "-$1,000.00" under a tooltip saying
+   it had not been measured. */
+const mthin = (m) => (m && m.reason ? String(m.reason)
+  : "measured, but on too few closed trades to lean on");
+/* rows in the breakdown tables carry plain numbers beside their metrics */
+const rv = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+
+/* the value, or a dash that carries its reason rather than hiding it. A number
+   optperf marked `thin` exists but rests on too little to lean on, so it is
+   drawn as thin and keeps the sentence saying why. */
+function pfv(m, fmt) {
+  const v = mv(m);
+  if (v == null) {
+    return `<span class="ov-no" title="${esc(mwhy(m))}">—</span>`;
+  }
+  const txt = (fmt || n2)(v);
+  if (!(m && m.thin)) return txt;
+  return `<span class="ov-thin" title="${esc(mthin(m))}">${txt}</span>`;
+}
+
+/* The reason, printed where a caption goes. ESCAPED, because it carries text
+   straight off the server, and SHORTENED, because the same sentence repeated
+   under a dozen stats is a wall rather than an explanation -- the whole of it
+   is on hover. */
+function ovWhy(m) {
+  const w = mwhy(m);
+  const short = w.length > 44 ? w.slice(0, 41).replace(/\s+$/, "") + "…" : w;
+  return `<span class="ov-no" title="${esc(w)}">${esc(short)}</span>`;
+}
+
+/* The noun that matters on this page is "loss", and a bare +"s" printed
+   "2 losss" under the average loss -- on the one card that has to be read
+   carefully. Sibilant endings take "es"; nothing here is irregular. */
+const plural = (noun, n) => (n === 1 ? noun
+  : /(s|x|z|ch|sh)$/.test(noun) ? noun + "es" : noun + "s");
+
+/* the caption under a stat: the sample size, or the reason there is none */
+function pfn(m, noun) {
+  if (mv(m) == null) return ovWhy(m);
+  const n = m && m.n != null ? Number(m.n) : null;
+  if (n == null || !Number.isFinite(n)) return "";
+  return n + " " + plural(noun || "trade", n);
+}
+
+/* a FIXED caption, which becomes the reason when the number never formed: an
+   absent value whose caption still reads "per closed trade" looks like a
+   measurement that came out empty rather than one that was never taken */
+const pfs = (m, when) => (mv(m) == null ? ovWhy(m) : when);
+
+const dys = (v) => n2(v, 1) + "d";
+
+function ovState(d) {
+  const st = d.state || {};
+  if (st.frozen) {
+    return `<div class="pl-state froze"><b>FROZEN</b>
+      <span>${esc(String(st.frozen))} — nothing opens, whatever the arm says.
+      Open positions are still managed and still exit.</span></div>`;
+  }
+  if (st.armed) {
+    return `<div class="pl-state on"><b>ARMED</b>
+      <span>opening is live. Everything below is what that has produced so
+      far.</span></div>`;
+  }
+  return `<div class="pl-state off"><b>DISARMED</b>
+    <span>${esc(st.arm_why || "opening is off")}. Open positions are still
+    marked and still exit — closing is never gated by the arm.</span></div>`;
+}
+
+/* The route answered but the arithmetic behind it did not. Saying that once,
+   at the top, is the difference between "nothing has traded" and "this page is
+   broken", and those two must never look alike. */
+function ovDead(d) {
+  if (d.ok !== false) return "";
+  return `<div class="note bad"><b>No metric could be measured.</b>
+    ${esc(d.error || "the metrics module did not answer")} — the arm state and
+    the position count below are read straight off the ledger and are still
+    true; every calculated figure is missing, not zero.</div>`;
+}
+
+/* optperf's own warnings: the caveats that apply to the WHOLE page, such as
+   realized P/L that is a last mark rather than a booked fill. */
+function ovWarn(d) {
+  return (d.warnings || []).map((w) =>
+    `<div class="note warn">${esc(w.message || w.code || "")}</div>`).join("");
+}
+
+/* The empty account. A fresh ledger must read as "nothing yet", never as a
+   broken page and never as a row of zeroes that look like flat performance. */
+function ovEmpty(d) {
+  if (((d.counts || {}).positions || 0) > 0) return "";
+  return `<div class="note info"><b>No play has opened yet.</b>
+    Every averaged figure on this page is measured from the play ledger, and
+    the ledger is empty, so there is nothing to average. The capital card is
+    still real — it is the room this account has before anything uses it.</div>`;
+}
+
+const SEV = { critical: "bad", warn: "warn", info: "info" };
+
+/* The rows somebody has to act on. This card is FIRST because the two states
+   it exists for -- open with no resting exit, open with no mark -- are exactly
+   the two the owner found by reading the broker rather than this dashboard. */
+/* With no metrics there is nothing to average, so the metric cards are not
+   drawn at all rather than drawn empty: a card of dashes reads as a
+   measurement that came out blank. These three are readings off the ledger
+   and stay true, so they are what is left on the page. */
+function ovDeadCounts(d) {
+  const c = d.counts || {};
+  return card("What is still true", `
+    <div class="pl-stats">
+      ${stat("Positions", n0(c.positions), "in the ledger")}
+      ${stat("Open", n0(c.open), "right now")}
+      ${stat("Adopted", n0(c.adopted), "held but never sized here")}
+    </div>
+    <div class="tip">These come from the play ledger, which is a local file, so
+      they survive the metrics module not answering. Every averaged figure
+      needs that module and is missing until it answers.</div>`);
+}
+
+function ovAttention(d) {
+  const rows = d.attention || [];
+  if (!rows.length) {
+    const open = (d.counts || {}).open;
+    return card("Needs attention", `<div class="note">Nothing.
+      ${n0(open)} open position(s): each one is priced, each one has a resting
+      exit or a recorded refusal, and none is inside the close-out rule.</div>`);
+  }
+  const body = rows.map((r) => `<div class="note ${SEV[r.severity] || ""}">
+    <b>${esc(String(r.symbol || "?"))}</b>
+    <span class="faint">${esc(String(r.code || ""))}</span> —
+    ${esc(String(r.message || ""))}</div>`).join("");
+  const crit = rows.filter((r) => r.severity === "critical").length;
+  return card("Needs attention", body,
+    `<span class="faint">${n0(crit)} critical of ${n0(rows.length)}</span>`);
+}
+
+/* Why a play did not open. The refusal that mattered was a line in a log
+   nobody reads; grouped and counted, it is the first thing on the page. */
+function ovWhyNot(d) {
+  const b = d.decisions || {};
+  const rows = (b.refusals || []).map((g) => `<tr>
+    <td>${esc(String(g.class || "?"))}</td>
+    <td class="num">${n0(g.n)}</td>
+    <td>${esc((g.symbols || []).join(", ") || "—")}</td>
+    <td class="sm faint">${esc(String(g.example || ""))}</td>
+  </tr>`);
+  const head = `<div class="pl-stats">
+    ${stat("Proposals", n0(b.proposals), "in the last " + n2(b.window_h, 0) + "h")}
+    ${stat("Priced and allowed", n0(b.ok), "passed every check")}
+    ${stat("Refused", n0(b.refused), "and why, below")}
+    ${stat("Submitted", n0(b.submitted), "orders actually sent")}
+  </div>`;
+  const body = rows.length
+    ? `<div class="pl-scroll">${tableHTML(
+        ["Refused by", "Times", "Tickers", "The sentence it printed"], rows)}</div>`
+    : `<div class="note">No proposal was refused in this window.</div>`;
+  return card("Why a play did not open", head + body,
+    `<span class="faint">the decision log</span>`);
+}
+
+function ovPL(d) {
+  const p = d.pl || {};
+  const c = d.counts || {};
+  const est = mv(p.realized_estimated);
+  return card("Profit and loss", `
+    <div class="pl-stats">
+      ${stat("Total P/L", pfv(p.total, pnl), pfs(p.total, "booked plus open"))}
+      ${stat("Realized", pfv(p.realized, pnl), pfn(p.realized, "closed trade"))}
+      ${stat("Open", pfv(p.open, pnl), pfn(p.open, "priced position"))}
+      ${stat("Positions", n0(c.positions),
+             `${n0(c.open)} open · ${n0(c.closed)} closed`)}
+    </div>
+    ${est ? `<div class="note warn"><b>${pnl(est)} of the realized figure is
+      ESTIMATED</b> from the last mark before the close rather than booked from
+      a closing fill. It is a number, not money.</div>` : ""}
+    <div class="tip">Realized alone is what flatters a book with a take-profit
+      and a stop: the winners close and the losers stay open. Total is the
+      headline here for that reason, and Open is the half that moves first.</div>`,
+    `<span class="faint">${n0(c.adopted)} adopted</span>`);
+}
+
+function ovRecord(d) {
+  const r = d.outcomes || {};
+  const band = (mv(r.win_rate_lo) == null || mv(r.win_rate_hi) == null) ? ""
+    : `${fracPc1(mv(r.win_rate_lo))}–${fracPc1(mv(r.win_rate_hi))} at 95%`;
+  return card("The record", `
+    <div class="pl-stats">
+      ${stat("Win rate", pfv(r.win_rate, fracPc1), band || pfn(r.win_rate, "closed trade"))}
+      ${stat("Expectancy", pfv(r.expectancy, pnl), pfn(r.expectancy, "closed trade"))}
+      ${stat("Expectancy, R", pfv(r.expectancy_r, sgnr), pfs(r.expectancy_r, "per dollar risked"))}
+      ${stat("Average win", pfv(r.avg_win, pnl), pfn(r.avg_win, "win"))}
+      ${stat("Average loss", pfv(r.avg_loss, lossv), pfn(r.avg_loss, "loss"))}
+      ${stat("Win / loss size", pfv(r.win_loss_ratio), pfs(r.win_loss_ratio, "avg win over avg loss"))}
+      ${stat("Profit factor", pfv(r.profit_factor), pfs(r.profit_factor, "won over lost"))}
+      ${stat("Largest win", pfv(r.largest_win, pnl), pfs(r.largest_win, "one trade"))}
+      ${stat("Largest loss", pfv(r.largest_loss, pnl), pfs(r.largest_loss, "one trade"))}
+      ${stat("Record", `${n0(r.wins)}–${n0(r.losses)}`,
+             `${n0(r.scratches)} scratch(es)`)}
+    </div>
+    <div class="tip">A win rate with no average loss beside it says nothing:
+      +50% / -25% is a 1:2 payoff, so this book can be right most of the time
+      and still lose. Expectancy is the win rate and both averages in one
+      number, and R states it per dollar risked — a $62 stop and a $1,012 stop
+      are not comparable in dollars, and this book runs both at once.</div>`);
+}
+
+const EXIT_NOTE = `The mix is the strategy. Mostly profit target is the
+  playbook running as written; mostly expiry means the resting take-profit is
+  not filling; mostly assignment guard means the guard is doing the job the
+  rules were supposed to.`;
+
+function ovExits(d) {
+  const b = d.exits || {};
+  const rows = (b.mix || []).map((x) => `<tr>
+    <td>${esc(String(x.label || x.class || "?"))}</td>
+    <td class="num">${n0(x.n)}</td>
+    <td class="num">${rv(x.share) == null ? DASH : fracPc1(rv(x.share))}</td>
+    <td class="num">${pfv(x.realized, pnl)}</td>
+    <td class="num">${pfv(x.avg_realized, pnl)}</td>
+  </tr>`);
+  const body = b.n
+    ? `<div class="pl-scroll">${tableHTML(
+        ["How it ended", "Trades", "Share", "P/L", "Average"], rows)}</div>`
+    : `<div class="note">Nothing has closed yet, so there is no mix to read.</div>`;
+  return card("How positions ended", `${body}
+    <div class="tip">${EXIT_NOTE}</div>`,
+    `<span class="faint">${n0(b.n)} closed</span>`);
+}
+
+/* The bar is a proportion, not decoration: "at risk against the ceiling" is
+   the check that refused every index spread all day, and a number printed
+   beside another number does not show how close it came. */
+function ovBar(frac) {
+  if (frac == null) return "";
+  const w = Math.max(0, Math.min(1, frac)) * 100;
+  const cls = frac >= 1 ? "full" : frac >= 0.8 ? "near" : "";
+  return `<div class="ov-meter"><i class="${cls}" style="width:${w.toFixed(1)}%"></i></div>`;
+}
+
+function ovCapital(d) {
+  const k = d.risk || {};
+  const frac = mv(k.utilization);
+  const pctOfBp = k.fraction == null ? "the ceiling"
+    : (Number(k.fraction) * 100).toFixed(0) + "% of options BP";
+  return card("Capital at risk", `
+    <div class="pl-stats">
+      ${stat("At risk now", pfv(k.at_risk, mny), pfn(k.at_risk, "open position"))}
+      ${stat("Ceiling", pfv(k.ceiling, mny), pfs(k.ceiling, pctOfBp))}
+      ${stat("Used", pfv(k.utilization, fracPc1), pfs(k.utilization, "of the ceiling"))}
+      ${stat("Headroom", pfv(k.headroom, roomv),
+             pfs(k.headroom, (mv(k.headroom) || 0) < 0
+                 ? "already through the ceiling" : "left for a new play"))}
+    </div>
+    ${ovBar(frac)}
+    <div class="pl-stats" style="margin-top:12px">
+      ${stat("Options BP", pfv(k.bp, mny), pfs(k.bp, "from the account"))}
+      ${stat("Positions", `${n0(k.positions_open)}<span class="faint">/${n0(k.positions_cap)}</span>`,
+             "open against the cap")}
+    </div>
+    ${k.unbounded ? `<div class="note bad"><b>${n0(k.unbounded)} open
+      position(s) have no bounded loss</b>, so the figure above is a floor and
+      not the risk.</div>` : ""}`);
+}
+
+function ovAssign(d) {
+  const a = d.assignment || {};
+  return card("Assignment exposure", `
+    <div class="pl-stats">
+      ${stat("Net of hedge", pfv(a.net_of_hedge, mny), pfn(a.net_of_hedge, "short position"))}
+      ${stat("Gross notional", pfv(a.gross, mny), pfs(a.gross, "if every short delivered"))}
+      ${stat("Uncovered", n0(a.uncovered_contracts), "contracts with no long behind them")}
+    </div>
+    <div class="tip">${esc(String(a.assumes || ""))}</div>`);
+}
+
+function ovHold(d) {
+  const h = d.holding || {};
+  const dte = (d.caps || {}).close_short_at_dte;
+  return card("How long they are held", `
+    <div class="pl-stats">
+      ${stat("Median, closed", pfv(h.median_days, dys), pfn(h.median_days, "closed trade"))}
+      ${stat("Mean, closed", pfv(h.mean_days, dys), pfs(h.mean_days, "average hold"))}
+      ${stat("Longest", pfv(h.longest_days, dys), pfs(h.longest_days, "one trade"))}
+      ${stat("Oldest open", pfv(h.open_oldest_days, dys), pfn(h.open_oldest_days, "open position"))}
+    </div>
+    <div class="tip">Short legs are closed at ${esc(String(dte == null ? "?" : dte))}
+      DTE by the calendar rule, so a holding time that keeps reaching the expiry
+      week is the exit rules not firing rather than a patient trade.</div>`);
+}
+
+/* One builder for both breakdowns: the columns are the same question asked of
+   a play and of a ticker, and two copies of this would drift. */
+function ovBreak(rows, head, title, sub) {
+  const body = (rows || []).map((x) => `<tr>
+    <td><b>${esc(String(x.label || x.key || "?"))}</b></td>
+    <td class="num">${n0(x.judged)}</td>
+    <td class="num">${n0(x.open)}</td>
+    <td class="num">${pfv(x.realized, pnl)}</td>
+    <td class="num">${pfv(x.open_pl, pnl)}</td>
+    <td class="num">${pfv(x.expectancy, pnl)}</td>
+    <td class="num">${pfv(x.win_rate, fracPc1)}</td>
+    <td class="num">${pfv(x.at_risk, mny)}</td>
+  </tr>`);
+  const table = body.length
+    ? `<div class="pl-scroll">${tableHTML(
+        [head, "Closed", "Open", "Realized", "Open P/L", "Expectancy",
+         "Win rate", "At risk"], body)}</div>`
+    : `<div class="note">Nothing recorded yet.</div>`;
+  return card(title, table, `<span class="faint">${esc(sub)}</span>`);
+}
+
+function ovHost() {
+  return `
+  <div id="ov-head">${loading("the options record")}</div>
+  <div id="ov-attn"></div>
+  <div id="ov-why"></div>
+  <div id="ov-pl"></div>
+  <div id="ov-record"></div>
+  <div class="grid main">
+    <div id="ov-exits"></div>
+    <div id="ov-capital"></div>
+  </div>
+  <div id="ov-assign"></div>
+  <div id="ov-hold"></div>
+  <div id="ov-plays"></div>
+  <div id="ov-tickers"></div>`;
+}
+
+function mountPerf() {
+  el("view").innerHTML = ovHost();
+
+  const BLOCKS = ["ov-why", "ov-pl", "ov-record", "ov-exits", "ov-capital",
+                  "ov-assign", "ov-hold", "ov-plays", "ov-tickers"];
+
+  const paint = (d) => {
+    put("ov-head", ovState(d) + ovDead(d) + ovWarn(d) + ovEmpty(d));
+    if (d.ok === false) {
+      put("ov-attn", ovDeadCounts(d));
+      for (const id of BLOCKS) put(id, "");
+      return;
+    }
+    put("ov-attn", ovAttention(d));
+    put("ov-why", ovWhyNot(d));
+    put("ov-pl", ovPL(d));
+    put("ov-record", ovRecord(d));
+    put("ov-exits", ovExits(d));
+    put("ov-capital", ovCapital(d));
+    put("ov-assign", ovAssign(d));
+    put("ov-hold", ovHold(d));
+    put("ov-plays", ovBreak(d.by_play, "Play", "By play",
+                            "which of the two is earning"));
+    put("ov-tickers", ovBreak(d.by_ticker, "Ticker", "By ticker",
+                              "where the money came from and went"));
+  };
+
+  const load = async () => {
+    try {
+      paint(await GET("/api/optlab/perf"));
+    } catch (e) {
+      put("ov-head", errNote(e));
+    }
+  };
+
+  load();
+  /* Fifteen seconds. The ledger is a local file and the broker snapshot behind
+     this route is cached server-side, but the marks only move when the WORKER
+     cycles, so polling faster would redraw the same numbers. */
+  every(15000, "ov-head", load);
 }

@@ -251,6 +251,187 @@ body = src.split('"""', 2)[-1]
 for banned in ('"market"', "'market'", "type\": \"market"):
     check("no %s" % banned, banned not in body, banned)
 
+print("13. a hedge only nets when it is really a hedge")
+# The live trade, in the exact size that was refused every cycle of 27 Sep
+# 2026: sell SPY 741P, buy SPY 739P, 10 contracts, same expiry.
+SPY_EXP = _dt.date.today() + _dt.timedelta(days=33)
+OTHER_EXP = SPY_EXP + _dt.timedelta(days=7)
+
+
+def occ(root, day, right, strike):
+    """The OCC symbol for a contract, built the way Alpaca prints it."""
+    return "%s%s%s%08d" % (root, day.strftime("%y%m%d"), right,
+                           round(strike * 1000))
+
+
+SPY_SHORT = occ("SPY", SPY_EXP, "P", 741.0)
+SPY_LONG = occ("SPY", SPY_EXP, "P", 739.0)
+
+
+def alg(right, strike, qty, *, und="SPY", exp=None):
+    return optexec.AssignmentLeg(und, right, str(exp or SPY_EXP), strike, qty)
+
+
+def total(*legs):
+    return optexec.assignment_exposure(list(legs))["total"]
+
+
+naked_put = optexec.assignment_exposure([alg("P", 741.0, -10)])
+check("a cash-secured 741 put x10 is still the whole $741,000",
+      naked_put["total"] == 741000.0, naked_put["total"])
+check("and nothing about it is called hedged",
+      naked_put["hedged_contracts"] == 0 and naked_put["naked"] == 741000.0,
+      naked_put)
+
+# $2 of width on 10 contracts is $2,000, and the overnight gap allowance is
+# 1% of the $741,000 that would actually be delivered: $7,410.
+vertical = optexec.assignment_exposure([alg("P", 741.0, -10),
+                                        alg("P", 739.0, 10)])
+check("the 741/739 vertical x10 measures $9,410, not $741,000",
+      vertical["total"] == 9410.0, vertical["total"])
+check("which is $2,000 of width plus $7,410 of overnight gap",
+      (vertical["width"], vertical["gap"], vertical["naked"])
+      == (2000.0, 7410.0, 0.0), vertical)
+check("and it still reports what gross would have said",
+      vertical["gross"] == 741000.0, vertical["gross"])
+
+check("a long leg on its own owes nothing", total(alg("P", 739.0, 10)) == 0.0)
+
+# Each of these is a short that is NOT protected, and each must measure gross.
+check("a different expiry is not a hedge",
+      total(alg("P", 741.0, -10), alg("P", 739.0, 10, exp=OTHER_EXP))
+      == 741000.0)
+check("a different underlying is not a hedge",
+      total(alg("P", 741.0, -10), alg("P", 739.0, 10, und="QQQ")) == 741000.0)
+check("a different right is not a hedge",
+      total(alg("P", 741.0, -10), alg("C", 739.0, 10)) == 741000.0)
+check("a long put ABOVE the short put does not protect it",
+      total(alg("P", 741.0, -10), alg("P", 743.0, 10)) == 741000.0)
+check("a long call BELOW the short call does not protect it",
+      total(alg("C", 292.0, -2), alg("C", 287.0, 2)) == 58400.0)
+check("a long call above the short call does",
+      total(alg("C", 287.0, -2), alg("C", 292.0, 2)) == 1574.0,
+      total(alg("C", 287.0, -2), alg("C", 292.0, 2)))
+
+# Ratios. Four longs cover four of the ten shorts and no more; the other six
+# are as naked as if the longs had never been bought.
+ratio = optexec.assignment_exposure([alg("P", 741.0, -10), alg("P", 739.0, 4)])
+check("a 10x4 ratio hedges four and leaves six gross",
+      ratio["total"] == round(6 * 741.0 * 100 + 4 * 2.0 * 100
+                              + 0.01 * 4 * 741.0 * 100, 2), ratio["total"])
+check("and it says so: four hedged, six naked",
+      (ratio["hedged_contracts"], ratio["naked_contracts"]) == (4.0, 6.0),
+      ratio)
+
+# A leg whose identity cannot be read can never be the thing that makes a
+# short look safe.
+blind = optexec.assignment_exposure(
+    [optexec.AssignmentLeg("SPY", "P", "", 741.0, -10),
+     optexec.AssignmentLeg("SPY", "P", "", 739.0, 10)])
+check("an unreadable expiry hedges nothing", blind["total"] == 741000.0,
+      blind["total"])
+
+print("14. the gap allowance is charged, and it is not zero")
+check("the module charges something for it", optexec.HEDGE_GAP_FRACTION > 0,
+      optexec.HEDGE_GAP_FRACTION)
+free = optexec.assignment_exposure([alg("P", 741.0, -10), alg("P", 739.0, 10)],
+                                   gap_fraction=0.0)
+check("at a zero allowance the vertical is exactly its width",
+      free["total"] == 2000.0, free["total"])
+check("the default is not zero, so a hedge is never free",
+      vertical["total"] > free["total"], (vertical["total"], free["total"]))
+
+print("15. the same arithmetic on the book the broker reports")
+# qty UNSIGNED with the direction in `side`, which is how Alpaca sends it.
+book = [{"symbol": SPY_SHORT, "qty": "10", "side": "short",
+         "asset_class": "us_option"},
+        {"symbol": SPY_LONG, "qty": "10", "side": "long",
+         "asset_class": "us_option"}]
+check("an open vertical measures net, so the next spread can still open",
+      optexec.live_assignment_exposure(book)["total"] == 9410.0,
+      optexec.live_assignment_exposure(book)["total"])
+# The gross function is a different question -- what cash every short would
+# assign for at once -- and it is deliberately left answering it.
+check("live_assignment_notional is untouched and still gross",
+      optexec.live_assignment_notional(book) == 741000.0,
+      optexec.live_assignment_notional(book))
+check("a naked short position on the book is still gross",
+      optexec.live_assignment_exposure([book[0]])["total"] == 741000.0,
+      optexec.live_assignment_exposure([book[0]])["total"])
+opaque = [{"symbol": "WEIRD", "qty": "-1", "market_value": "-123.45",
+           "asset_class": "us_option"}]
+check("an unreadable short counts at its market value and nets with nothing",
+      optexec.live_assignment_exposure(opaque)["total"] == 123.45,
+      optexec.live_assignment_exposure(opaque)["total"])
+
+print("16. the live refusal of 27 Sep 2026, end to end through plan()")
+
+
+def spy_row(sym, strike):
+    return {"symbol": sym, "underlying": "SPY", "strike": strike,
+            "right": "put", "expiration": str(SPY_EXP), "dte": 33}
+
+
+def spy_legs(hedged=True):
+    lg = [{"row": spy_row(SPY_SHORT, 741.0), "side": "sell", "qty": 1}]
+    if hedged:
+        lg.append({"row": spy_row(SPY_LONG, 739.0), "side": "buy", "qty": 1})
+    return lg
+
+
+class FakeSPY(Fake):
+    """The same broker, quoting the index spread instead of the IWM one.
+
+    equity and options buying power are the numbers this account actually
+    showed on 27 Sep 2026, because the cap is equity when no cap is passed and
+    that is the comparison being fixed.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**({"equity": 53155.0, "obp": 17524.0} | kw))
+
+    def snapshots_payload(self):
+        return {"snapshots": {
+            SPY_SHORT: {"latestQuote": {"bp": 0.30, "ap": 0.34,
+                                        "bs": 50, "as": 50}},
+            SPY_LONG: {"latestQuote": {"bp": 0.03, "ap": 0.07,
+                                       "bs": 50, "as": 50}}}}
+
+
+# credit 0.32 - 0.05 = 0.27 a share, $270 on ten contracts; max_loss is per
+# contract because plan() multiplies by contracts itself.
+SPY_CAND = {"label": "index-put-credit-spread SPY -741/+739", "grade": None,
+            "credit": 270.0, "max_loss": 173.0}
+ps = patched_plan(FakeSPY(), SPY_CAND, spy_legs(), contracts=10)
+cap_check = [c for c in ps.checks if c.name == "assignment_capacity"][0]
+check("no assignment cap is passed, so the cap is the account's equity",
+      "$53155 cap" in cap_check.reason, cap_check.reason)
+check("the spread that was refused all day now passes every check",
+      ps.ok, ps.why())
+check("and it is measured at $9,410 rather than $741,000",
+      ps.assignment_notional == 9410.0, ps.assignment_notional)
+check("the breakdown is on the plan for the dashboard to draw",
+      (ps.assignment_detail.get("here") or {}).get("gross") == 741000.0,
+      ps.assignment_detail.get("here"))
+
+NAKED_CAND = {"label": "naked SPY 741 put", "grade": None,
+              "credit": 320.0, "max_loss": 74100.0}
+pn2 = patched_plan(FakeSPY(), NAKED_CAND, spy_legs(hedged=False), contracts=10)
+check("a naked 741 put x10 is still refused on capacity",
+      "assignment_capacity" in pn2.blocked_by, pn2.blocked_by)
+check("at the full $741,000, exactly as before",
+      pn2.assignment_notional == 741000.0, pn2.assignment_notional)
+check("and the refusal says nothing is hedged",
+      "measured gross" in pn2.why(), pn2.why()[:160])
+
+# The buying-power fallback is a CASH question and deliberately stayed gross:
+# a long leg caps the loss without lending anything.
+no_ml = patched_plan(FakeSPY(), {"label": "x", "credit": 270.0}, spy_legs(),
+                     contracts=10)
+check("with no max_loss the buying-power fallback is still the gross notional",
+      no_ml.buying_power_required == round(741000.0 * 10, 2),
+      no_ml.buying_power_required)
+
 print()
 if fails:
     print("FAILED: %s" % ", ".join(fails))
