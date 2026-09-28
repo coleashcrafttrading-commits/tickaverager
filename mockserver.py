@@ -77,7 +77,266 @@ LOCK = threading.Lock()
 
 SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
              "bankfail", "deep", "boardempty", "boardlimit", "boardclash",
-             "boardfail"]
+             "boardfail",
+             # the Plays room, which replaced the board as the landing tab
+             "plays", "playsempty", "playsfrozen", "playsnoquote"]
+
+# ------------------------------------------------------------- plays fixtures
+# The Plays room's routes, faked. Same trap as everywhere else in this file: a
+# harness that disagrees with the real route hides bugs rather than finding
+# them, so the shapes here are GENERATED from the real modules -- optplays.PLAYS
+# for the catalogue and optplaybook's own field names for the rest -- rather
+# than typed out a second time. optplays imports nothing that can reach a
+# network (json, datetime, pathlib, threading), so importing it keeps this file
+# offline; optplaybook is NOT imported, because it pulls in broker.py.
+#
+# Scenarios, each a reviewer's failing input:
+#
+#   plays         armed on SPY only, one spread open at a profit, one swing
+#                 open at a loss, one adopted orphan, and three tickers each
+#                 refused for a different reason
+#   playsempty    nothing assigned at all -- the state a fresh install is in,
+#                 which must read as "nothing is assigned" and not as broken
+#   playsfrozen   armed AND state/FROZEN present, so the strip has to show that
+#                 FROZEN outranks the arm rather than claiming it is live
+#   playsnoquote  an open position whose legs have no two-sided quote, so mark,
+#                 P/L and % are all absent -- they must render as dashes and
+#                 never as 0.00, which is a different fact
+import datetime as _pdt
+
+
+def _plays_catalogue():
+    """The real catalogue, from the real module."""
+    import optplays as _op
+    return _op.listing()
+
+
+def _plays_iso(days=0, hours=0):
+    return (_pdt.datetime.now(_pdt.timezone.utc)
+            + _pdt.timedelta(days=days, hours=hours)).isoformat()
+
+
+def _plays_assignment(sym, play, *, enabled=True, params=None, armed=False,
+                      arm_why="", open_rows=()):
+    import optplays as _op
+    eff = _op.play(play).defaults()
+    eff.update(params or {})
+    return {
+        "symbol": sym, "play": play, "enabled": enabled,
+        "params": dict(params or {}), "effective": eff,
+        "added": _plays_iso(-3), "added_by": "dashboard", "note": "",
+        "key": "%s:%s" % (sym, play),
+        "armed": armed, "arm_why": arm_why,
+        "open": list(open_rows), "open_count": len(open_rows),
+    }
+
+
+def _plays_position(pid, sym, play, kind, legs, *, contracts=1, requested=None,
+                    entry=None, mark=None, target=None, stop=None, dte=33,
+                    state="open", adopted=False, rest_order_id="",
+                    rest_refused=""):
+    pl = pct = None
+    if entry is not None and mark is not None:
+        # Exactly optplaybook._mark's arithmetic: a credit structure profits as
+        # the buy-back price falls, a long one as the sale price rises.
+        pl = round(((abs(entry) - mark) if kind == "credit_spread"
+                    else (mark - abs(entry))) * 100 * contracts, 2)
+        stake = abs(entry) * 100 * contracts
+        pct = round(pl / stake, 4) if stake else None
+    return {
+        "id": pid, "symbol": sym, "play": play, "kind": kind,
+        "expiry": str((_pdt.date.today() + _pdt.timedelta(days=dte))),
+        "dte": dte, "legs": legs, "contracts": contracts,
+        "requested": requested if requested is not None else contracts,
+        "state": state, "direction": None, "entry_net": entry,
+        "entry_at": _plays_iso(-1), "coid": "mock-%s" % pid,
+        "target_px": target, "stop_px": stop, "rest_order_id": rest_order_id,
+        "rest_refused": rest_refused, "mark": mark, "pl": pl, "pl_pct": pct,
+        "closed_at": "", "close_reason": "", "close_net": None,
+        "adopted": adopted, "bar_id": "", "session": str(_pdt.date.today()),
+        "events": 4, "last_exit_at": 0.0, "note": "", "is_open": True,
+        "is_credit": kind == "credit_spread",
+    }
+
+
+def _spread_legs(short_k, long_k):
+    return [
+        {"symbol": "SPY261030P00%d000" % short_k, "right": "put",
+         "strike": float(short_k), "side": "sell", "entry_px": 4.25},
+        {"symbol": "SPY261030P00%d000" % long_k, "right": "put",
+         "strike": float(long_k), "side": "buy", "entry_px": 4.00},
+    ]
+
+
+def plays_board(scenario="plays"):
+    """The /api/optlab/plays payload, per scenario."""
+    if scenario == "playsempty":
+        return {
+            "plays": _plays_catalogue(), "assignments": [],
+            "arm": {"armed": False, "present": False, "keys": [],
+                    "expires": None, "reason": "", "by": "",
+                    "why_not": "not armed (no arm file)", "problems": []},
+            "arm_phrase": "ARM THE OPTIONS PLAYS", "frozen": "",
+            "positions": [], "closed_recent": [], "open_risk": 0.0,
+            "caps": {"max_concurrent": 24, "max_risk_fraction": 0.6,
+                     "close_short_at_dte": 2},
+            "last_cycle": None,
+        }
+
+    frozen = ("state/FROZEN set by cole at 09:12 -- checking a fill"
+              if scenario == "playsfrozen" else "")
+    noquote = scenario == "playsnoquote"
+
+    spread = _plays_position(
+        "SPY-index-put-credit-spread-20260927T143000", "SPY",
+        "index-put-credit-spread", "credit_spread", _spread_legs(744, 742),
+        contracts=10, entry=0.25, mark=None if noquote else 0.14,
+        target=0.13, stop=0.31, rest_order_id="ord-mock-rest-1")
+    swing = _plays_position(
+        "META-swing-atm-hourly-20260927T151500", "META", "swing-atm-hourly",
+        "long_single",
+        [{"symbol": "META261030P00750000", "right": "put", "strike": 750.0,
+          "side": "buy", "entry_px": 40.50}],
+        contracts=1, entry=-40.50, mark=None if noquote else 34.10,
+        target=60.75, stop=30.38,
+        rest_refused=("422 mleg/gtc rejected: the loop owns the target"
+                      if noquote else ""))
+    # A partial fill: the broker confirms 3 of the 10 that were asked for. The
+    # table has to show BOTH numbers -- treating the request as the position is
+    # how a closing order becomes an opening one for the difference.
+    partial = _plays_position(
+        "QQQ-index-put-credit-spread-20260927T144000", "QQQ",
+        "index-put-credit-spread", "credit_spread", _spread_legs(707, 705),
+        contracts=3, requested=10, entry=0.30,
+        mark=None if noquote else 0.44, target=0.15, stop=0.38)
+    orphan = _plays_position(
+        "adopted-AAPL261016C00350000", "AAPL", "(adopted)", "monitored",
+        [{"symbol": "AAPL261016C00350000", "right": "call", "strike": 350.0,
+          "side": "sell", "entry_px": 2.10}],
+        contracts=2, entry=None, mark=None, dte=19, adopted=True)
+
+    armed_keys = ["*"] if scenario == "playsfrozen" else ["SPY:index-put-credit-spread"]
+
+    def arm_for(key):
+        if "*" in armed_keys:
+            return True, "armed for everything until %s" % _plays_iso(6)[:16]
+        if key in armed_keys:
+            return True, "armed for %s until %s" % (key, _plays_iso(6)[:16])
+        return False, ("armed, but not for %s (armed: %s)"
+                       % (key, ", ".join(armed_keys)))
+
+    rows = []
+    for sym, play, extra in (
+            ("SPY", "index-put-credit-spread", {"open": [spread]}),
+            ("QQQ", "index-put-credit-spread", {"open": [partial]}),
+            ("META", "swing-atm-hourly", {"open": [swing]}),
+            ("AAPL", "swing-atm-hourly", {}),
+            ("NVDA", "swing-atm-hourly", {"params": {"contracts": 2}}),
+            ("TSLA", "swing-atm-hourly", {"params": {"direction": "puts"},
+                                          "enabled": False}),
+            ("GOOGL", "swing-atm-hourly", {}),
+    ):
+        key = "%s:%s" % (sym, play)
+        armed, why = arm_for(key)
+        rows.append(_plays_assignment(
+            sym, play, armed=armed, arm_why=why,
+            enabled=extra.get("enabled", True),
+            params=extra.get("params"), open_rows=extra.get("open", ())))
+
+    return {
+        "plays": _plays_catalogue(),
+        "assignments": rows,
+        "arm": {"armed": True, "present": True, "keys": armed_keys,
+                "expires": _plays_iso(6), "reason": "first live session, SPY only",
+                "by": "dashboard", "why_not": "", "problems": []},
+        "arm_phrase": "ARM THE OPTIONS PLAYS",
+        "frozen": frozen,
+        "positions": [spread, partial, swing, orphan],
+        "closed_recent": [],
+        "open_risk": 7005.0,
+        "caps": {"max_concurrent": 24, "max_risk_fraction": 0.6,
+                 "close_short_at_dte": 2},
+        "last_cycle": {
+            "started": _pdt.datetime.now(_pdt.timezone.utc).timestamp() - 8,
+            "finished": _pdt.datetime.now(_pdt.timezone.utc).timestamp() - 2,
+            "seconds": 6.36, "armed": True, "arm_why": "armed",
+            "market_open": True, "market_why": "market is open",
+            "reconciled": 4, "adopted": 1, "managed": [], "proposals": [],
+            "submitted": 0, "closed": 0, "errors": [], "trading_calls": 21,
+        },
+    }
+
+
+def plays_signals(scenario="plays"):
+    rows = [
+        ("AAPL", "up", 341.04, 339.33, 338.90),
+        ("GOOGL", None, 343.87, 343.44, 343.93),
+        ("META", "down", 751.90, 754.34, 752.66),
+        ("NVDA", "up", 225.08, 224.43, 224.70),
+        ("TSLA", "down", 372.08, 373.47, 372.73),
+    ]
+    out = []
+    for sym, d, close, ema, vwap in rows:
+        if d == "up":
+            why = ("closed %.2f above both the 9 EMA %.2f and VWAP %.2f"
+                   % (close, ema, vwap))
+        elif d == "down":
+            why = ("closed %.2f below both the 9 EMA %.2f and VWAP %.2f"
+                   % (close, ema, vwap))
+        else:
+            why = ("closed %.2f between VWAP and the 9 EMA (%.2f-%.2f)"
+                   % (close, min(ema, vwap), max(ema, vwap)))
+        out.append({"symbol": sym, "direction": d, "close": close, "ema": ema,
+                    "vwap": vwap, "bar_start": None, "bar_end": None,
+                    "session": str(_pdt.date.today()),
+                    "bar_id": "%s#1530" % _pdt.date.today(), "bars_used": 70,
+                    "reason": why, "as_of": None})
+    return {"signals": out, "ema_period": 9,
+            "note": "the hourly bars are built from minute bars and aligned to "
+                    "the 09:30 ET open"}
+
+
+def plays_cycle(scenario="plays"):
+    """What POST /plays/cycle returns: a preview that sent nothing."""
+    def prop(sym, play, ok, reason, st=None):
+        return {"symbol": sym, "play": play, "ok": ok, "reason": reason,
+                "structure": st, "plan": None, "signal": None,
+                "submitted": False, "response": {}}
+    exp = str(_pdt.date.today() + _pdt.timedelta(days=33))
+
+    def st(sym, legs, net, maxloss, ct, credit):
+        return {"play": "", "symbol": sym, "kind": "", "expiry": exp, "dte": 33,
+                "contracts": ct, "legs": legs, "net_per_contract": net / (100 * ct),
+                "net": net, "is_credit": credit, "max_loss": maxloss,
+                "width": 2.0 if credit else None, "direction": None,
+                "label": "", "note": ""}
+
+    return {"ok": True, "preview": True, "cycle": {
+        "started": 0, "finished": 0, "seconds": 5.9, "armed": True,
+        "arm_why": "armed", "market_open": True, "market_why": "market is open",
+        "reconciled": 4, "adopted": 0, "managed": [], "submitted": 0,
+        "closed": 0, "errors": [], "trading_calls": 24,
+        "proposals": [
+            prop("SPY", "index-put-credit-spread", True,
+                 "sell 744.0 delta -0.199 / buy 742.0, credit 0.25 on a 2.00 wing",
+                 st("SPY", _spread_legs(744, 742), 250.0, 1750.0, 10, True)),
+            prop("QQQ", "index-put-credit-spread", False,
+                 "1 already open on QQQ index-put-credit-spread, max_open is 6"),
+            prop("AAPL", "swing-atm-hourly", True,
+                 "buy the 340.0 call at 11.72 (spot 341.46), debit $1172.50 | "
+                 "would submit but armed, but not for AAPL:swing-atm-hourly",
+                 st("AAPL", [{"symbol": "AAPL261030C00340000", "right": "call",
+                              "strike": 340.0, "side": "buy", "entry_px": 11.72}],
+                    -1172.5, 1172.5, 1, False)),
+            prop("GOOGL", "swing-atm-hourly", False,
+                 "closed 343.87 between VWAP and the 9 EMA (343.44-343.93)"),
+            prop("META", "swing-atm-hourly", False,
+                 "$4050 of risk needs $4050 of room; $7005 open against a "
+                 "$14334 ceiling (60% of $23890 BP)"),
+            prop("NVDA", "swing-atm-hourly", False,
+                 "already acted on the %s#1530 bar" % _pdt.date.today()),
+        ],
+    }}
 
 # The watchlist the POST verbs mutate. A list rather than a set so the order
 # a human added names in survives, which is the order the real file keeps.
@@ -850,6 +1109,68 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["log"] = []
             return self._json({"cleared": True})
 
+        if p.endswith("/optlab/plays/cycle"):
+            return self._json(plays_cycle(scen))
+        if p.endswith("/optlab/plays/disarm"):
+            return self._json({"ok": True, "was_armed": True,
+                               "open_positions": 4,
+                               "note": "Opening is off. 4 open position(s) are "
+                                       "still managed to their target, stop "
+                                       "and assignment guard."})
+        if p.endswith("/optlab/plays/arm"):
+            keys = body.get("keys") or []
+            if not keys:
+                return self._fail(400, "keys is required: a list of "
+                                       "SYMBOL:play, or [\"*\"] for "
+                                       "everything assigned.")
+            if not str(body.get("reason") or "").strip():
+                return self._fail(400, "A reason is required -- it goes in the "
+                                       "audit log and it is the only record "
+                                       "of why.")
+            return self._json({"ok": True, "arm": {
+                "armed": True, "present": True, "keys": list(keys),
+                "expires": _plays_iso(int(body.get("days") or 7)),
+                "reason": str(body.get("reason")), "by": "dashboard",
+                "why_not": "", "problems": []}, "frozen": "", "warning": ""})
+        if p.endswith("/optlab/plays/assign"):
+            sym = str(body.get("symbol") or "").strip().upper()
+            if not sym:
+                return self._fail(400, "A symbol is required.")
+            import optplays as _op
+            pid = str(body.get("play") or "")
+            if pid not in _op.PLAYS:
+                return self._fail(400, "play %r is not one of: %s"
+                                       % (pid, ", ".join(sorted(_op.PLAYS))))
+            # The real route validates through optplays.Assignments._validate,
+            # so the harness calls the SAME function rather than restating its
+            # ranges -- a harness that accepted a value the real route refuses
+            # is how a field looks fine here and 400s in production.
+            over = dict(body.get("params") or {})
+            if body.get("contracts") not in (None, ""):
+                over["contracts"] = int(body["contracts"])
+            try:
+                _op.Assignments._validate(_op.play(pid), over)
+            except _op.PlayError as e:
+                return self._fail(400, str(e))
+            return self._json({"ok": True, "assignment": _plays_assignment(
+                sym, pid, params=over)})
+        if p.endswith("/optlab/plays/unassign"):
+            return self._json({"ok": True, "removed": "%s:%s"
+                               % (body.get("symbol"), body.get("play")),
+                               "still_open": [], "note": ""})
+        if p.endswith("/optlab/plays/enable"):
+            import optplays as _op
+            return self._json({"ok": True, "assignment": _plays_assignment(
+                str(body.get("symbol") or "").upper(),
+                str(body.get("play") or ""),
+                enabled=bool(body.get("enabled", True)))})
+        if p.endswith("/optlab/plays/seed"):
+            b = plays_board("plays")
+            return self._json({"ok": True, "assignments": b["assignments"]})
+        if p.endswith("/optlab/plays/close"):
+            return self._json({"ok": True, "id": body.get("id"),
+                               "result": "closing: manual: closed from the "
+                                         "dashboard", "errors": []})
         if p.endswith("/optlab/board/refresh"):
             if scen == "boardlimit":
                 # The real route refuses here, and the refusal is the point:
@@ -925,6 +1246,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, fh.read(), ctype + "; charset=utf-8")
 
         # ------------------------------------------------------ the reads
+        # /optlab/plays/signals is tested BEFORE /optlab/plays: endswith on the
+        # shorter path would never match the longer one here, but the reverse
+        # order is the bug that bites the moment a suffix route is added, so the
+        # specific path goes first as a matter of habit.
+        if p.endswith("/optlab/plays/signals"):
+            return self._json(plays_signals(scen))
+        if p.endswith("/optlab/plays"):
+            if scen == "playsfail":
+                return self._fail(502, "mock: the plays board blew up")
+            return self._json(plays_board(scen))
         if p.endswith("/optlab/board"):
             if scen == "boardfail":
                 return self._fail(502, "mock: the board blew up")

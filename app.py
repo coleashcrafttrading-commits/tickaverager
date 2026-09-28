@@ -60,6 +60,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -2490,6 +2491,298 @@ def _boot_fleet(f: Fleet) -> None:
         f.ev("WARN", f"Agent scheduler: {ready['problem']} -- {ready['fix']}")
     else:
         f.ev("INFO", f"[{f.label}] Agent scheduler up. Enabled: {', '.join(on) or 'none'}.")
+
+
+# ============================================================ optlab / plays
+# The two plays the owner named, the tickers they are on, and the arm switch.
+#
+# WHAT THIS ROUTE GROUP MAY AND MAY NOT DO. It reads state, it edits the
+# assignment file, and it writes or deletes the arm file. IT NEVER RUNS A CYCLE
+# THAT CAN SUBMIT. The worker process (optplaybook.py serve, systemd unit
+# tickaverager-plays.service) owns submission, and it owns it alone: two
+# processes both proposing against one account would race the per-session and
+# per-bar guards and could double-open a structure. /cycle here is a PREVIEW --
+# constructed dry_run=True, which records the order body and sends nothing.
+#
+# Disarming is the exception that must always work, so it has no rate limit,
+# needs no reason, and never depends on the broker being reachable.
+import optplaybook as _pbook
+import optplays as _plays
+
+_PLAYBOOKS: dict = {}
+_PLAY_LOCK = threading.RLock()
+
+
+def _playbook(f: Fleet, *, dry_run: bool = True) -> "_pbook.Playbook":
+    """One Playbook per account, cached. Reads its stores fresh on every use."""
+    if not f.broker:
+        raise HTTPException(503, "Broker not connected.")
+    key = (f.account_id, bool(dry_run))
+    with _PLAY_LOCK:
+        pb = _PLAYBOOKS.get(key)
+        if pb is None:
+            pb = _pbook.Playbook(f.broker, state_dir=f.state_dir,
+                                 dry_run=dry_run)
+            _PLAYBOOKS[key] = pb
+    return pb
+
+
+def _play_assignments(f: Fleet) -> "_plays.Assignments":
+    """The assignment store alone -- no broker, so editing works offline."""
+    a = _plays.Assignments(Path(f.state_dir) / "options" / "plays.json")
+    return a
+
+
+@app.get("/api/a/{acct}/optlab/plays")
+@app.get("/api/optlab/plays")
+def optlab_plays(f: Fleet = Depends(cur)):
+    """The whole Plays room in one read: catalogue, assignments, positions, arm.
+
+    No trading calls at all -- it is the ledger, the assignment file and the arm
+    file. The dashboard polls this, so it has to stay cheap; the live marks come
+    from the worker's own cycle, which writes them to the ledger.
+    """
+    return _playbook(f).board()
+
+
+@app.post("/api/a/{acct}/optlab/plays/assign")
+@app.post("/api/optlab/plays/assign")
+def optlab_plays_assign(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Put a play on a ticker, or edit the one already there.
+
+    This is the dropdown. `params` carries only what differs from the play's
+    default, so changing a default later reaches every ticker that did not
+    override it.
+
+    Assigning does NOT arm. A ticker with a play on it and no arm is a ticker
+    the loop builds and prices a proposal for and does not send -- which is
+    exactly the state to look at before arming anything.
+    """
+    sym = str(body.get("symbol") or "").strip().upper()
+    pid = str(body.get("play") or "").strip()
+    if not sym:
+        raise HTTPException(400, "A symbol is required.")
+    if pid not in _plays.PLAYS:
+        raise HTTPException(400, f"play {pid!r} is not one of: "
+                                f"{', '.join(sorted(_plays.PLAYS))}")
+    params = body.get("params")
+    if params is not None and not isinstance(params, dict):
+        raise HTTPException(400, "params must be an object.")
+    ct = body.get("contracts")
+    try:
+        row = _play_assignments(f).assign(
+            sym, pid,
+            contracts=None if ct in (None, "") else int(ct),
+            params=params,
+            enabled=bool(body.get("enabled", True)),
+            by=str(body.get("by") or "dashboard"),
+            note=str(body.get("note") or ""))
+    except (_plays.PlayError, ValueError) as e:
+        # 400 rather than 500: every one of these is the caller's value being
+        # out of range, and the message names the field and the range.
+        raise HTTPException(400, str(e))
+    return {"ok": True, "assignment": row.as_dict()}
+
+
+@app.post("/api/a/{acct}/optlab/plays/unassign")
+@app.post("/api/optlab/plays/unassign")
+def optlab_plays_unassign(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Take a play off a ticker.
+
+    OPEN POSITIONS ARE NOT CLOSED BY THIS and are not abandoned either. They
+    stay in the ledger and keep being managed to their target, stop and
+    assignment guard -- removing an assignment stops NEW entries, which is a
+    different thing from wanting out of what is already on. Closing early is
+    the /close route, deliberately a separate decision.
+    """
+    sym = str(body.get("symbol") or "").strip().upper()
+    pid = str(body.get("play") or "").strip()
+    a = _play_assignments(f)
+    if not a.get(sym, pid):
+        raise HTTPException(404, f"{sym} has no {pid} assigned.")
+    a.remove(sym, pid)
+    still = _playbook(f).ledger.open_for(sym, pid)
+    return {"ok": True, "removed": f"{sym}:{pid}",
+            "still_open": [p.as_dict() for p in still],
+            "note": ("%d open position(s) stay under management -- unassigning "
+                     "stops new entries only" % len(still)) if still else ""}
+
+
+@app.post("/api/a/{acct}/optlab/plays/enable")
+@app.post("/api/optlab/plays/enable")
+def optlab_plays_enable(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Switch one assignment on or off without losing its settings."""
+    sym = str(body.get("symbol") or "").strip().upper()
+    pid = str(body.get("play") or "").strip()
+    try:
+        row = _play_assignments(f).set_enabled(sym, pid,
+                                              bool(body.get("enabled", True)))
+    except _plays.PlayError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True, "assignment": row.as_dict()}
+
+
+@app.post("/api/a/{acct}/optlab/plays/arm")
+@app.post("/api/optlab/plays/arm")
+def optlab_plays_arm(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Arm opening, per SYMBOL:play, with an expiry and a reason.
+
+    Four things are required and none of them is decoration:
+
+      keys     what is armed. "*" arms everything assigned. Per-key is the
+               default because arming one ticker to watch it work is the sane
+               first step, and a single global switch does not allow it.
+      reason   goes in the audit log. Six months from now the only defensible
+               record of why the account was armed is the sentence written here.
+      days     the arm EXPIRES. A system armed in September and forgotten is
+               armed in January against a book nobody is watching.
+      phrase   the arm FILE carries a phrase, so a stray `touch` cannot arm
+               anything. This route writes it; the caller does not send it.
+
+    FROZEN outranks this. An armed playbook with state/FROZEN present opens
+    nothing, and the response says so rather than letting the button look like
+    it worked.
+    """
+    keys = body.get("keys")
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.split(",") if k.strip()]
+    keys = [str(k).strip() for k in (keys or []) if str(k).strip()]
+    reason = str(body.get("reason") or "").strip()
+    if not keys:
+        raise HTTPException(400, "keys is required: a list of SYMBOL:play, "
+                                 "or [\"*\"] for everything assigned.")
+    if not reason:
+        raise HTTPException(400, "A reason is required -- it goes in the audit "
+                                 "log and it is the only record of why.")
+    a = _play_assignments(f)
+    known = {f"{r.symbol}:{r.play}" for r in a.all()}
+    unknown = [k for k in keys if k != "*" and k not in known]
+    if unknown:
+        # Arming a key nothing is assigned to would look armed and never trade.
+        raise HTTPException(400, "nothing is assigned for: %s. Assign the play "
+                                 "to the ticker first." % ", ".join(unknown))
+    try:
+        arm = _pbook.write_arm(
+            keys, reason=reason, by=str(body.get("by") or "dashboard"),
+            days=int(body.get("days") or _pbook.ARM_DEFAULT_DAYS),
+            path=Path(f.state_dir) / "options" / "PLAYS_ARMED")
+    except (_pbook.PlaybookError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    fz = frozen(f.state_dir)
+    return {"ok": True, "arm": arm.as_dict(), "frozen": fz,
+            "warning": (f"Armed, but trading is FROZEN: {fz}. Nothing will "
+                        f"open until that is cleared.") if fz else ""}
+
+
+@app.post("/api/a/{acct}/optlab/plays/disarm")
+@app.post("/api/optlab/plays/disarm")
+def optlab_plays_disarm(f: Fleet = Depends(cur)):
+    """Stop opening. Never stops an exit.
+
+    No reason required, no rate limit, and no broker needed: the stop button has
+    to work when everything else does not. Open positions stay under
+    management, which is the point -- a disarm that also stopped the exits would
+    make the stop button the thing that strands a short leg into expiry.
+    """
+    path = Path(f.state_dir) / "options" / "PLAYS_ARMED"
+    was = _pbook.disarm(path)
+    open_n = len(_pbook.Ledger(Path(f.state_dir) / "options"
+                               / "play_ledger.jsonl").open_positions())
+    return {"ok": True, "was_armed": was,
+            "open_positions": open_n,
+            "note": ("Opening is off. %d open position(s) are still managed to "
+                     "their target, stop and assignment guard." % open_n)}
+
+
+@app.post("/api/a/{acct}/optlab/plays/cycle")
+@app.post("/api/optlab/plays/cycle")
+def optlab_plays_cycle(f: Fleet = Depends(cur)):
+    """Run ONE PREVIEW cycle now and return what it would have done.
+
+    dry_run=True, always, whatever the arm file says -- see the note at the top
+    of this group. This is the button that answers "what does it think right
+    now": it prices every assignment off the live chain and shows the structure
+    it would send and every reason it would refuse.
+
+    It spends trading-API calls (about 5 per assignment), so it is rate-limited
+    server-side against the 200/min the live share ladders also draw from.
+    """
+    import time as _time
+    pb = _playbook(f, dry_run=True)
+    with _PLAY_LOCK:
+        last = getattr(pb, "_ui_cycle_at", 0.0)
+        wait = 20.0 - (_time.monotonic() - last)
+        if wait > 0:
+            raise HTTPException(
+                429, f"A preview ran {20.0 - wait:.0f}s ago. One every 20s -- "
+                     f"it spends the same 200/min the live share ladders do. "
+                     f"{wait:.0f}s left.")
+        pb._ui_cycle_at = _time.monotonic()
+    res = pb.cycle()
+    return {"ok": True, "preview": True, "cycle": res.as_dict()}
+
+
+@app.post("/api/a/{acct}/optlab/plays/close")
+@app.post("/api/optlab/plays/close")
+def optlab_plays_close(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Close one open play position now, by hand.
+
+    NOT dry_run: this is the one route here that sends a real order, and it is a
+    CLOSING order only. It is deliberately not gated by the arm -- the arm gates
+    opening, and a human asking to get out must never be refused because the
+    system is disarmed.
+    """
+    pid = str(body.get("id") or "").strip()
+    if not pid:
+        raise HTTPException(400, "id is required (from the positions list).")
+    pb = _playbook(f, dry_run=False)
+    pb.refresh_stores()
+    pos = pb.ledger.get(pid)
+    if pos is None:
+        raise HTTPException(404, f"no position {pid!r} in the ledger.")
+    if not pos.is_open:
+        raise HTTPException(409, f"{pid} is {pos.state}, not open.")
+    reason = str(body.get("reason") or "").strip() or "closed by hand"
+    res = _pbook.CycleResult(started=time.time())
+    quotes = pb.quote_legs(pos.legs)
+    out = pb._close(pos, "manual: %s" % reason, quotes, res,
+                    urgent=bool(body.get("urgent")))
+    return {"ok": True, "id": pid, "result": out, "errors": res.errors}
+
+
+@app.get("/api/a/{acct}/optlab/plays/signals")
+@app.get("/api/optlab/plays/signals")
+def optlab_plays_signals(f: Fleet = Depends(cur)):
+    """The 1-hour trend read for every swing ticker, and why.
+
+    Market-data host only, one ranged request for all of them, cached ~90s --
+    the inputs only change when an hourly bar closes.
+    """
+    pb = _playbook(f)
+    pb.refresh_stores()
+    syms = [a.symbol for a in pb.assignments.all()
+            if _plays.PLAYS.get(a.play)
+            and _plays.PLAYS[a.play].kind == _plays.LONG_SINGLE]
+    if not syms:
+        return {"signals": [], "note": "no swing play is assigned to any ticker"}
+    sigs = pb.reader.signals(syms)
+    return {"signals": [sigs[s].as_dict() for s in sorted(sigs)],
+            "ema_period": pb.reader.ema_period,
+            "note": ("the hourly bars are built from minute bars and aligned to "
+                     "the 09:30 ET open, so they match a 1-hour chart rather "
+                     "than Alpaca's UTC-aligned 1Hour bars")}
+
+
+@app.post("/api/a/{acct}/optlab/plays/seed")
+@app.post("/api/optlab/plays/seed")
+def optlab_plays_seed(f: Fleet = Depends(cur)):
+    """Put the owner's named set on: SPY and QQQ on the spread, Mag 7 on swing.
+
+    Idempotent -- assign() updates a row that is already there rather than
+    duplicating it. Arms nothing.
+    """
+    rows = _play_assignments(f).seed_owner_set(by="dashboard")
+    return {"ok": True, "assignments": [r.as_dict() for r in rows]}
 
 
 @app.on_event("startup")

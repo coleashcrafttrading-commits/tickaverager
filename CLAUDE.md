@@ -339,6 +339,120 @@ not in the `/api/overview` path, but it will become a problem on its own.
 
 **Still not started, still Cole's call:** the actual slowness fix.
 
+
+## The options PLAYBOOK (from 27 Sep 2026) -- the part that actually trades
+
+Cole's instruction on 27 Sep: *"we are going to do away with all the calculated
+strategies for right now and just have a couple strateies that i will tell you
+what."* So the 231-document bank and the 86 compiled IRs stay on disk as a
+library, nothing runs them, and there are exactly **two hand-written plays**
+whose every number came from him.
+
+| | |
+|---|---|
+| `optsignal.py` | the 1-hour trend read: 9 EMA + session VWAP |
+| `optplays.py` | the two plays, strike/expiry selection, and which tickers they are on |
+| `optplaybook.py` | the cycle: reconcile -> manage -> propose -> size -> submit |
+| `deploy/tickaverager-plays.service` | the worker that runs it |
+
+**index-put-credit-spread** (SPY, QQQ): sell the ~0.20 delta put about a month
+out, buy the put two listed strikes below, 10 contracts, one entry per session,
+10:30-15:30 ET. 10:30 ET is 09:30 CENTRAL -- he asked for Central, it is
+converted once and stored as Eastern so there is one clock in the code.
+
+**swing-atm-hourly** (Mag 7 by default, any ticker): buy the ATM call when the
+1-hour bar closes above BOTH the 9 EMA and session VWAP, the ATM put when it
+closes below both. One contract, about a month out, no time-of-day filter.
+
+Both exit at **+50% / -25%** of the position, which is his 1:2. The profit side
+rests as a real GTC limit the moment the entry fills; the stop is measured by
+the loop and sent when it trips, after cancelling the resting target **and
+confirming the cancel** -- two fills against one position is a naked leg.
+
+### Things measured here that are easy to get wrong
+
+**Alpaca's `1Hour` bars are NOT the 1-hour chart.** They are aligned to the
+whole hour in UTC, so the 13:00Z bar spans 09:00-10:00 ET and carries half an
+hour of premarket, and the 20:00Z bar is 16:00-17:00 ET -- after the close, yet
+where the closing auction prints. Measured: AAPL's 2026-09-25 20:00Z bar carried
+6,995,362 shares and its 22:00Z bar carried 12,456. `optsignal` therefore builds
+the hourly series from ONE-MINUTE bars, bucketed from the 09:30 ET open
+(09:30-10:29 ... 15:30-15:59, seven buckets, the last genuinely 30 minutes).
+Nine symbols cost ONE `bars_multi_range` call on the market-data host.
+
+**The expiry rule is FORWARD ONLY.** "a month out, and if that day is not
+available take the next available DTE that is greater". `min(exps, key=abs
+difference)` is the obvious one-liner and it silently picks a SHORTER-dated
+trade -- at a 28-day target against listings at 26 and 33 days it returns 26.
+
+**`chain_greeks_merged(..., prefer="computed")` for strike selection.** This is
+the rule already in this file under "Alpaca DOES send greeks": on a mixed chain
+Alpaca's delta and ours differ by a median of -0.0207 (worst -0.082) because we
+price off the implied forward and they off the spot print. "The 0.20 delta put"
+must be measured with ONE ruler. Their greeks remain the better number for
+MARKING a position; they are the wrong one for COMPARING strikes.
+
+**`now` is not optional.** `chain_greeks` without it raises inside `_contract_T`,
+which is caught as "no expiry", and the merge then ERASES the skip reason -- so
+every row comes back with a delta from Alpaca and `mid` of None. A structure
+built off that has no price and no explanation for why.
+
+**An urgent close out of hours is a LIMIT.** Option MARKET orders are rejected
+outside 09:30-16:00 ET, so a guard-driven close that goes out as a market order
+while the market is shut is rejected and leaves the position with nothing
+working -- the exact failure the guard exists to prevent. `_close_body` checks
+the clock and prices a crossing limit instead.
+
+### What the sizes actually are, measured 27 Sep 2026
+
+Worth knowing before arming, because "one contract" sounds small and is not:
+
+| | structure | cost / collateral | the -25% stop |
+|---|---|---|---|
+| SPY | sell 744P / buy 742P x10 | $1,750 | $62 |
+| QQQ | sell 707P / buy 705P x10 | $1,695 | $76 |
+| AAPL | 340 call x1 | $1,172 | $293 |
+| META | 750 put x1 | $4,050 | $1,012 |
+
+A 33-DTE ATM option on a $750 stock costs $4,050. Seven Mag-7 swings at once is
+~$11,500 committed against $23,890 of options buying power, which is why
+`MAX_OPEN_RISK_FRACTION` (60% of options BP, all plays together) exists and will
+bind. **-25% on a credit spread is also a TIGHT stop**: the credit is $0.25-0.30
+on a $2 wing, so a quarter of it is 6-8 cents and the bid-ask is a few cents by
+itself. It is implemented exactly as specified and flagged rather than quietly
+widened; `stop_pct` is editable per ticker.
+
+### Arming
+
+`state/options/PLAYS_ARMED`, written only through the dashboard or
+`optplaybook.py arm`. It must carry the phrase `ARM THE OPTIONS PLAYS`, a
+reason, at least one `SYMBOL:play` key (or `*`), and an expiry no more than 30
+days out. Anything else -- missing, empty, corrupt, wrong phrase, no reason,
+expired -- is NOT ARMED, and the refusal says which.
+
+**Arming gates OPENING and nothing else.** Closing is never gated by the arm: an
+arm that expires or is deleted between an open and its close would otherwise
+make the stop button the thing that strands a short leg into expiry. There is a
+test for this (`test_optplays.py` section 13) and it is not a comment. `FROZEN`
+outranks the arm, and the dashboard draws it that way.
+
+### Hard rules for this stack
+
+- **One writer.** Only the `tickaverager-plays` worker may submit. The
+  dashboard's `/api/optlab/plays/cycle` constructs the Playbook `dry_run=True`
+  whatever the arm says, so it records order bodies and sends nothing. Two
+  processes proposing against one account would race the per-session and
+  per-bar guards and double-open a structure.
+- **`/api/optlab/plays/close` is the only route under `/api/optlab` that places
+  an order**, it places a CLOSING order only, and `test_optboard.py` asserts
+  that. A new write in that namespace needs the same scrutiny.
+- A broker option position the ledger does not know about is **adopted as
+  MONITORED**: marked, swept by the assignment guard, and closed before expiry
+  -- but never closed for profit or loss, because those thresholds were never
+  set for it. Glenn's stack and hand-placed trades live on this account too.
+- Short legs are closed at **2 DTE** by the calendar rule, so the expiry-day
+  deadline is a backstop and not the plan.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -416,7 +530,8 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_optstructures test_optsym test_optview test_optvol test_presets
   test_reconcile test_refresh_trend test_report test_research test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
-  test_touch_adds test_trail test_trend test_trend_v2 test_unwind`,
+  test_optplays test_touch_adds test_trail test_trend test_trend_v2
+  test_unwind`,
   each printing `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a
   scratch file. Two people build in this repo at once, so this list is the
   union of both stacks and it is the one that has to stay green -- a change

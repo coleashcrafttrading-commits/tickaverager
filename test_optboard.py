@@ -345,10 +345,29 @@ def main() -> int:
             if getattr(getattr(x, "endpoint", None), "__module__", "") == "app"
             and "optlab" in getattr(x, "path", "")
             and "POST" in (getattr(x, "methods", None) or set()))
-        check("the only writes on the optlab namespace are these two",
-              writes, ["/api/a/{acct}/optlab/board/refresh",
-                       "/api/a/{acct}/optlab/watch",
-                       "/api/optlab/board/refresh", "/api/optlab/watch"])
+        # This check exists so that an order path cannot appear in a namespace
+        # that was read-only without somebody naming it here. That happened, on
+        # purpose: the Plays room added the arm switch and the playbook's
+        # writes. So the list is UPDATED rather than loosened, and the one that
+        # matters is called out -- /plays/close is the ONLY route under
+        # /api/optlab that places an order with the broker, it places a CLOSING
+        # order only, and it is deliberately not gated by the arm because a
+        # human asking to get out must never be refused for being disarmed.
+        # /plays/cycle is a preview: it constructs the Playbook dry_run=True
+        # whatever the arm file says, so it records order bodies and sends
+        # nothing. If a new write appears here, it needs the same scrutiny.
+        expected_writes = sorted(
+            base + suffix
+            for base in ("/api/optlab", "/api/a/{acct}/optlab")
+            for suffix in ("/board/refresh", "/watch",
+                           "/plays/assign", "/plays/unassign", "/plays/enable",
+                           "/plays/arm", "/plays/disarm", "/plays/cycle",
+                           "/plays/close", "/plays/seed"))
+        check("every write on the optlab namespace is a named one",
+              writes, expected_writes)
+        check("exactly one of them can place an order, and it only closes",
+              [w for w in writes if w.endswith("/plays/close")],
+              ["/api/a/{acct}/optlab/plays/close", "/api/optlab/plays/close"])
 
         # ------------------------------------------------------------------
         print("\n1. the first GET answers instantly and says it is measuring")

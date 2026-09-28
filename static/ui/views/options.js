@@ -191,12 +191,15 @@ for (const p of ["/api/optlab/bank", "/api/optlab/sweep"]) {
    terminal. It is not in TABS, so nothing navigates there by accident, and
    activeTab below lights Board for anyone arriving on an old bookmark. */
 const TABS = [
-  ["board", "Board"],
+  ["plays", "Plays"],
+  ["data", "Data"],
   ["strategies", "Strategies"],
   ["backtest", "Backtest"],
 ];
 
 const SUB = {
+  plays: "the two plays, the tickers they are on, and what is open right now",
+  data: "the tickers we watch, and what we actually know about each one",
   board: "the tickers we watch, and what we actually know about each one",
   chain: "Alpaca's quotes; the IV and the greeks are solved here",
   strategies: "every structure on the shelf, and what this account may send",
@@ -205,25 +208,29 @@ const SUB = {
 
 VIEWS.options = {
   title: () => "Options",
-  sub: (ov, v) => SUB[v.tab || "board"] || SUB.board,
+  sub: (ov, v) => SUB[v.tab || "plays"] || SUB.plays,
   tabs: TABS,
 
   /* An old link to #/options/chain still renders the chain, and lights Board
      -- the tab it now lives behind -- rather than leaving the bar with
      nothing highlighted at all. core.js's MOVED map cannot do this one: it
      rewrites a whole view, and the chain is still a real page in this one. */
-  activeTab: (v) => (v.tab === "chain" ? "board" : (v.tab || "board")),
+  activeTab: (v) => (v.tab === "chain" ? "data"
+                     : v.tab === "board" ? "data" : (v.tab || "plays")),
 
   mount(v) {
     /* Every timer this view starts is stamped with the mount that started it
        and dies when a newer one exists. See every(). */
     MOUNT += 1;
     ensureStyle();
-    const t = v.tab || "board";
+    const t = v.tab || "plays";
     if (t === "strategies") return mountStrategies();
     if (t === "backtest") return mountBacktest();
     if (t === "chain") return mountChain();
-    return mountBoard();
+    /* "board" is the old name for the data room. An existing bookmark or a
+       link in a chat still lands somewhere real rather than on a blank view. */
+    if (t === "data" || t === "board") return mountBoard();
+    return mountPlays();
   },
 
   /* No paint(). The fleet poll runs every two seconds and repainting a
@@ -458,6 +465,85 @@ const CSS = `
           margin-bottom: 12px; }
 .o-mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .o-budget { font-size: 11px; color: var(--faint); }
+
+/* ---- the plays room ----------------------------------------------------
+   Theme tokens only, so both themes follow for free. The one thing here that
+   is not decoration is .pl-state: armed, disarmed and FROZEN have to be
+   distinguishable across a room, and colour alone does not do that, so each
+   also carries its own word in bold and its own left rail weight. */
+.pl-state { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+            padding: 12px 14px; border-radius: var(--radius-sm);
+            border: 1px solid var(--hairline); margin-bottom: 12px;
+            border-left-width: 5px; }
+.pl-state b { font-size: 15px; letter-spacing: .06em; white-space: nowrap; }
+.pl-state span { color: var(--muted); font-size: 12.5px; flex: 1 1 260px;
+                 min-width: 0; }
+.pl-state.on    { border-left-color: var(--up);
+                  background: color-mix(in srgb, var(--up) 10%, transparent); }
+.pl-state.on b  { color: var(--up); }
+.pl-state.off   { border-left-color: var(--faint); background: var(--surface); }
+.pl-state.off b { color: var(--muted); }
+.pl-state.froze { border-left-color: var(--down);
+                  background: color-mix(in srgb, var(--down) 12%, transparent); }
+.pl-state.froze b { color: var(--down); }
+
+.pl-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.pl-stats { display: grid; gap: 10px; margin-bottom: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+
+.pl-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+          margin-bottom: 12px; }
+.pl-add input, .pl-add select { background: var(--surface-2); color: var(--text);
+          border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+          padding: 6px 9px; font: inherit; font-size: 12.5px; }
+
+.pl-row { border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+          padding: 10px 12px; margin-bottom: 8px; background: var(--surface); }
+.pl-row.off { opacity: .55; }
+.pl-row-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pl-sym { font-size: 14px; letter-spacing: .02em; }
+.pl-play { color: var(--muted); font-size: 12px; }
+.pl-row-btns { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+
+.pl-fields { display: grid; gap: 8px; margin-top: 10px;
+             grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
+.pl-f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pl-f span { font-size: 10.5px; color: var(--faint); text-transform: uppercase;
+             letter-spacing: .05em; }
+.pl-f input, .pl-f select { background: var(--surface-2); color: var(--text);
+             border: 1px solid var(--hairline); border-radius: 8px;
+             padding: 5px 7px; font: inherit; font-size: 12.5px; width: 100%;
+             min-width: 0; font-variant-numeric: tabular-nums; }
+
+.pl-why { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+
+.pl-b { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+        padding: 2px 7px; border-radius: var(--radius-pill);
+        border: 1px solid var(--hairline2); white-space: nowrap; }
+.pl-b.on   { color: var(--up);
+             background: color-mix(in srgb, var(--up) 14%, transparent); }
+.pl-b.off  { color: var(--faint); }
+.pl-b.up   { color: var(--up);
+             background: color-mix(in srgb, var(--up) 14%, transparent); }
+.pl-b.dn   { color: var(--down);
+             background: color-mix(in srgb, var(--down) 14%, transparent); }
+.pl-b.flat { color: var(--muted); }
+.pl-b.open { color: var(--accent-2);
+             background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+
+/* A wide table on a narrow screen scrolls in its OWN container, so the page
+   body never scrolls sideways. */
+.pl-scroll { overflow-x: auto; }
+.pl-scroll table { min-width: 720px; }
+.pl-scroll td, .pl-scroll th { font-variant-numeric: tabular-nums; }
+.pl-scroll .sm { font-size: 11px; }
+
+@media (max-width: 560px) {
+  .pl-row-btns { margin-left: 0; width: 100%; }
+  .pl-row-btns .btn { font-size: 11px; padding: 3px 9px; }
+  .pl-add input, .pl-add select { flex: 1 1 auto; }
+  .pl-state b { font-size: 14px; }
+}
 `;
 
 function ensureStyle() {
@@ -2030,4 +2116,521 @@ function gradedRows(graded) {
     });
   }
   return out;
+}
+
+/* =================================================================== plays
+   THE LANDING ROOM. It replaced the data board, on the owner's instruction:
+   "please put the updated working system on the frontend dashboard in place of
+   the board that is current so that i can see this system working with
+   everything i need".
+
+   So this page has to answer, in the order a person actually asks:
+
+     1. Is it armed, and is anything stopping it?   -> the strip, first line
+     2. What is on, on which tickers, at what size? -> the assignments table
+     3. What is open right now and where is it?     -> the positions table
+     4. What does it think this minute, and why?    -> Preview
+     5. Why has nothing fired?                      -> the reason on every row
+
+   Two plays exist and only two, by instruction. Everything editable is edited
+   HERE -- the dropdown assigns a play to a ticker, contracts is a field, and
+   the delta, DTE, target and stop are fields on the same row.
+
+   THE HONEST-STATE RULES this page keeps, because they are the ones that make
+   a trading dashboard safe to read:
+
+     * ARMED IS THE LOUDEST THING ON THE PAGE, in both directions. "Armed"
+       must never be mistakable for "disarmed", and a disarmed system must not
+       look broken -- disarmed is the correct resting state.
+     * A NUMBER NOBODY MEASURED RENDERS AS A DASH, never as 0. A mark of 0.00
+       on a live spread and "we could not price it" are different facts and the
+       second one is the one that matters.
+     * FROZEN OUTRANKS ARMED and is drawn as such. An armed playbook with
+       state/FROZEN present opens nothing, and a strip that said only "ARMED"
+       would be lying.
+     * EVERY REFUSAL CARRIES ITS SENTENCE. "waiting" tells a person nothing;
+       "after the 15:30 ET entry cutoff (now 20:48 ET)" tells them everything,
+       and it is the backend's own words rather than this page's guess.
+     * DISARM IS ALWAYS AVAILABLE. It is never behind a confirm, never rate
+       limited, and its note says plainly that open positions stay managed --
+       because a stop button that also stopped the exits would be the thing
+       that caused an assignment.
+   ---------------------------------------------------------------------- */
+function playsHost() {
+  return `
+  <div id="pl-strip">${loading("the playbook")}</div>
+  <div id="pl-assign"></div>
+  <div id="pl-open"></div>
+  <div id="pl-preview"></div>`;
+}
+
+/* The two plays' fields, in the order they are shown. Labels are the owner's
+   language, not the code's: he says "delta", "a month out", "profit", "stop".
+   `pc` marks a value stored as a FRACTION and shown as a PERCENT -- 0.50 in
+   the file is "50%" on screen, and mixing those up is how a 50% target becomes
+   a 0.5% one. */
+const PL_FIELDS = {
+  "index-put-credit-spread": [
+    ["contracts", "Contracts", 0],
+    ["short_delta", "Short delta", 2],
+    ["strikes_below", "Long strikes below", 0],
+    ["target_dte", "Days out", 0],
+    ["profit_pct", "Take profit", "pc"],
+    ["stop_pct", "Stop", "pc"],
+    ["entry_after_et", "Entry from (ET)", "t"],
+    ["entry_before_et", "Entry until (ET)", "t"],
+    ["max_open", "Max open", 0],
+  ],
+  "swing-atm-hourly": [
+    ["contracts", "Contracts", 0],
+    ["target_dte", "Days out", 0],
+    ["profit_pct", "Take profit", "pc"],
+    ["stop_pct", "Stop", "pc"],
+    ["direction", "Direction", "sel"],
+    ["max_open", "Max open", 0],
+  ],
+};
+
+const PL_DIRS = ["both", "calls", "puts"];
+
+const plFieldVal = (eff, key, kind) => {
+  const v = eff ? eff[key] : null;
+  if (v == null) return "";
+  if (kind === "pc") return (Number(v) * 100).toFixed(0);
+  return String(v);
+};
+
+/* A signal badge. `null` direction is a real answer and the common one, so it
+   gets a neutral badge and its sentence, not an empty cell. */
+const plSigBadge = (s) => {
+  if (!s) return DASH;
+  if (s.direction === "up") return `<span class="pl-b up">CALLS</span>`;
+  if (s.direction === "down") return `<span class="pl-b dn">PUTS</span>`;
+  return `<span class="pl-b flat">no cross</span>`;
+};
+
+function plStrip(b) {
+  const arm = b.arm || {};
+  const armed = !!arm.armed;
+  const fz = b.frozen;
+  const caps = b.caps || {};
+  const risk = b.open_risk;
+  const nOpen = (b.positions || []).length;
+  const lc = b.last_cycle;
+
+  /* FROZEN first, then armed. The order is the precedence. */
+  let head;
+  if (fz) {
+    head = `<div class="pl-state froze">
+      <b>FROZEN</b>
+      <span>${esc(String(fz))} — nothing opens, whatever the arm says.
+      Open positions are still managed.</span></div>`;
+  } else if (armed) {
+    head = `<div class="pl-state on">
+      <b>ARMED</b>
+      <span>opening is live for ${esc((arm.keys || []).join(", ") || "?")}
+      until ${esc(String(arm.expires || "?").replace("T", " ").slice(0, 16))}
+      — ${esc(arm.reason || "no reason recorded")}</span></div>`;
+  } else {
+    head = `<div class="pl-state off">
+      <b>DISARMED</b>
+      <span>${esc(arm.why_not || "opening is off")}. Everything below is still
+      measured and priced every cycle — nothing is sent.</span></div>`;
+  }
+
+  const btns = `<div class="pl-acts">
+    ${armed
+      ? `<button class="btn danger" id="pl-disarm">Disarm</button>`
+      : `<button class="btn primary" id="pl-arm-all">Arm everything…</button>`}
+    <button class="btn" id="pl-preview-btn">Preview now</button>
+    <button class="btn" id="pl-seed">Assign the named set</button>
+  </div>`;
+
+  const cycle = lc
+    ? `${ago(new Date(lc.finished * 1000).toISOString())}, took
+       ${n2(lc.seconds, 1)}s, ${n0(lc.trading_calls)} trading calls
+       ${(lc.errors || []).length
+          ? `<span class="bad">· ${(lc.errors || []).length} error(s)</span>`
+          : ""}`
+    : `<span class="faint">no cycle has run in this process yet</span>`;
+
+  return card("The playbook", `
+    ${head}
+    ${btns}
+    <div class="pl-stats">
+      ${stat("Open positions", n0(nOpen))}
+      ${stat("Risk on the book", mny(risk))}
+      ${stat("Assignments", n0((b.assignments || []).length))}
+      ${stat("Close shorts at",
+        (caps.close_short_at_dte == null ? "?" : caps.close_short_at_dte)
+        + " DTE")}
+    </div>
+    <div class="note">Last cycle: ${cycle}.
+      ${lc && lc.market_open === false
+        ? `Market is closed — ${esc(lc.market_why || "")}. Reconciliation and
+           management still run; nothing new is proposed.` : ""}</div>`);
+}
+
+function plAssignTable(b) {
+  const rows = b.assignments || [];
+  const plays = b.plays || [];
+  const sigs = b._sigs || {};
+
+  const opts = plays.map((p) =>
+    `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join("");
+
+  const add = `<div class="pl-add">
+    <input id="pl-new-sym" placeholder="TICKER" maxlength="8" size="7">
+    <select id="pl-new-play">${opts}</select>
+    <input id="pl-new-ct" type="number" min="1" max="100" placeholder="qty" size="4">
+    <button class="btn primary" id="pl-add">Put this play on that ticker</button>
+  </div>`;
+
+  if (!rows.length) {
+    return card("Plays on tickers", `${add}
+      <div class="note">Nothing is assigned, so nothing can trade. Use
+      <b>Assign the named set</b> above for SPY and QQQ on the spread and the
+      seven large caps on the swing, or add one here.</div>`);
+  }
+
+  const body = rows.map((r) => {
+    const eff = r.effective || {};
+    const kind = (plays.find((p) => p.id === r.play) || {}).kind;
+    const fields = PL_FIELDS[r.play] || [];
+    const sig = kind === "long_single" ? sigs[r.symbol] : null;
+    const openN = r.open_count || 0;
+
+    const inputs = fields.map(([key, label, dp]) => {
+      const v = plFieldVal(eff, key, dp);
+      if (dp === "sel") {
+        return `<label class="pl-f"><span>${esc(label)}</span>
+          <select data-k="${esc(key)}">${PL_DIRS.map((d) =>
+            `<option value="${d}"${d === v ? " selected" : ""}>${d}</option>`
+          ).join("")}</select></label>`;
+      }
+      const attrs = dp === "t"
+        ? `type="text" size="5" placeholder="HH:MM"`
+        : `type="number" step="${dp === 2 ? "0.01" : "1"}" ${
+            dp === "pc" ? 'min="5" max="500"' : 'min="0"'}`;
+      return `<label class="pl-f"><span>${esc(label)}${
+        dp === "pc" ? " %" : ""}</span>
+        <input ${attrs} data-k="${esc(key)}" data-pc="${dp === "pc" ? 1 : 0}"
+               value="${esc(v)}"></label>`;
+    }).join("");
+
+    return `<div class="pl-row${r.enabled ? "" : " off"}"
+                 data-sym="${esc(r.symbol)}" data-play="${esc(r.play)}">
+      <div class="pl-row-h">
+        <b class="pl-sym">${esc(r.symbol)}</b>
+        <span class="pl-play">${esc((plays.find((p) => p.id === r.play) || {}).label || r.play)}</span>
+        ${r.armed ? `<span class="pl-b on">armed</span>`
+                  : `<span class="pl-b off" title="${esc(r.arm_why || "")}">not armed</span>`}
+        ${r.enabled ? "" : `<span class="pl-b flat">disabled</span>`}
+        ${openN ? `<span class="pl-b open">${openN} open</span>` : ""}
+        ${sig ? plSigBadge(sig) : ""}
+        <span class="pl-row-btns">
+          <button class="btn sm" data-a="save">Save</button>
+          <button class="btn sm" data-a="toggle">${r.enabled ? "Disable" : "Enable"}</button>
+          <button class="btn sm" data-a="arm">${r.armed ? "Disarm" : "Arm"}</button>
+          <button class="btn sm danger" data-a="remove">Remove</button>
+        </span>
+      </div>
+      <div class="pl-fields">${inputs}</div>
+      ${sig ? `<div class="pl-why">1-hour bar ${esc(sig.bar_id || "?")}:
+                 ${esc(sig.reason || "")}</div>` : ""}
+      ${r.arm_why && !r.armed
+        ? `<div class="pl-why faint">${esc(r.arm_why)}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  return card("Plays on tickers", `${add}
+    <div class="note">Change a number and press <b>Save</b> on that row. A field
+    left at the play's default follows the default if it ever changes; a field
+    you set here stays set. Assigning does not arm.</div>
+    ${body}`);
+}
+
+function plOpenTable(b) {
+  const pos = b.positions || [];
+  if (!pos.length) {
+    return card("Open positions", `<div class="note">Nothing is open. Positions
+      appear here the moment an entry is confirmed by the broker, with their
+      take-profit and stop prices.</div>`);
+  }
+  const rows = pos.map((p) => {
+    const legs = (p.legs || []).map((l) =>
+      `${l.side === "sell" ? "−" : "+"}${n2(l.strike, 0)}${
+        (l.right || "?")[0].toUpperCase()}`).join(" / ");
+    const plCls = p.pl == null ? "" : (p.pl >= 0 ? "good" : "bad");
+    return `<tr>
+      <td><b>${esc(p.symbol)}</b>${p.adopted
+        ? ` <span class="pl-b flat" title="a broker position this system did not open: guarded and closed before expiry, never traded on our thresholds">adopted</span>`
+        : ""}</td>
+      <td class="faint sm">${esc(p.play)}</td>
+      <td>${esc(legs)}</td>
+      <td>${n0(p.contracts)}${p.requested && p.contracts !== p.requested
+        ? ` <span class="bad sm" title="broker confirms ${p.contracts} of ${p.requested} requested">of ${n0(p.requested)}</span>` : ""}</td>
+      <td>${esc(p.expiry)}<span class="faint sm"> ${p.dte == null ? "" : p.dte + "d"}</span></td>
+      <td>${n2(p.entry_net == null ? null : Math.abs(p.entry_net))}</td>
+      <td>${n2(p.mark)}</td>
+      <td class="${plCls}">${pnl(p.pl)}</td>
+      <td class="${plCls}">${p.pl_pct == null ? DASH : fracPc1(p.pl_pct)}</td>
+      <td>${n2(p.target_px)}</td>
+      <td>${n2(p.stop_px)}</td>
+      <td>${esc(p.state)}${p.rest_refused
+        ? ` <span class="pl-b flat" title="${esc(p.rest_refused)}">no resting exit — the loop owns the target</span>`
+        : (p.rest_order_id ? ` <span class="pl-b on" title="a GTC limit is resting at the target">rested</span>` : "")}</td>
+      <td><button class="btn sm danger" data-close="${esc(p.id)}">Close</button></td>
+    </tr>`;
+  }).join("");
+  return card("Open positions", `
+    <div class="pl-scroll"><table class="t">
+      <thead><tr><th>Symbol</th><th>Play</th><th>Legs</th><th>Ct</th>
+        <th>Expiry</th><th>Entry</th><th>Mark</th><th>P/L</th><th>%</th>
+        <th>Target</th><th>Stop</th><th>State</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="note">Entry, mark, target and stop are per share — multiply by
+      100 for one contract. A dash in Mark means no two-sided quote this cycle,
+      which is why no threshold fired: a mark built off a one-sided book is how
+      a stop goes off at a price nobody would trade.</div>`);
+}
+
+function plPreview(cy) {
+  if (!cy) return "";
+  const ps = cy.proposals || [];
+  if (!ps.length) {
+    return card("Preview", `<div class="note">
+      ${cy.market_open === false
+        ? `The market is closed — ${esc(cy.market_why || "")}. Nothing is
+           proposed while it is shut; reconciliation and management still ran.`
+        : `No assignment produced a proposal.`}</div>`);
+  }
+  const rows = ps.map((p) => {
+    const s = p.structure;
+    const legs = s ? (s.legs || []).map((l) =>
+      `${l.side === "sell" ? "sell" : "buy"} ${n2(l.strike, 0)}${
+        (l.right || "?")[0].toUpperCase()}`).join(" / ") : DASH;
+    return `<tr>
+      <td><b>${esc(p.symbol)}</b></td>
+      <td class="${p.ok ? "good" : "faint"}">${p.ok ? "would open" : "no"}</td>
+      <td>${legs}</td>
+      <td>${s ? esc(s.expiry) : DASH}</td>
+      <td>${s ? n0(s.contracts) : DASH}</td>
+      <td>${s ? mny(s.net) : DASH}</td>
+      <td>${s ? mny(s.max_loss) : DASH}</td>
+      <td class="sm">${esc(p.reason || "")}</td>
+    </tr>`;
+  }).join("");
+  return card("Preview — what it would do right now", `
+    <div class="pl-scroll"><table class="t">
+      <thead><tr><th>Symbol</th><th></th><th>Legs</th><th>Expiry</th><th>Ct</th>
+        <th>Net</th><th>Risk</th><th>Reason</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="note">This was a preview: the order bodies were recorded and
+      nothing was sent, whatever the arm says. <b>Net</b> is positive for a
+      credit received and negative for a debit paid. <b>Risk</b> is the real
+      worst case — wing width less credit for a spread, the whole premium for a
+      long option.</div>`);
+}
+
+/* ---------------------------------------------------------------- actions */
+async function plArm(keys, label) {
+  const reason = await ask(
+    `Arming ${label}. Why? (it goes in the audit log)`, "");
+  if (reason == null || !String(reason).trim()) {
+    toast("Not armed — a reason is required.");
+    return false;
+  }
+  const days = await ask("Arm for how many days? (max 30)", "7");
+  if (days == null) return false;
+  try {
+    const r = await POST("/api/optlab/plays/arm", {
+      keys, reason: String(reason).trim(), days: Number(days) || 7,
+      by: "dashboard",
+    });
+    toast(r.warning ? r.warning : `Armed ${label}.`);
+    return true;
+  } catch (e) {
+    toast(e.message || String(e));
+    return false;
+  }
+}
+
+function plFieldsOf(row) {
+  /* Read every field on one assignment row back into the sparse params shape
+     the API takes. A percent field is divided by 100 here and nowhere else. */
+  const out = {};
+  row.querySelectorAll("[data-k]").forEach((el2) => {
+    const k = el2.getAttribute("data-k");
+    /* No ?? here: test_optview parses THIS view through the Babel that
+       ships inside dukpy, which does not accept nullish coalescing.
+       Other views use it freely because nothing parses them. */
+    const raw = String(el2.value == null ? "" : el2.value).trim();
+    if (raw === "") return;
+    if (el2.tagName === "SELECT") { out[k] = raw; return; }
+    if (el2.getAttribute("data-pc") === "1") {
+      const v = Number(raw);
+      if (Number.isFinite(v)) out[k] = v / 100;
+      return;
+    }
+    const v = Number(raw);
+    out[k] = Number.isFinite(v) ? v : raw;
+  });
+  return out;
+}
+
+function mountPlays() {
+  const host = el("view");
+  host.innerHTML = playsHost();
+  let board = null;
+
+  const paint = () => {
+    if (!board) return;
+    put("pl-strip", plStrip(board));
+    put("pl-assign", plAssignTable(board));
+    put("pl-open", plOpenTable(board));
+  };
+
+  const load = async () => {
+    try {
+      const b = await GET("/api/optlab/plays");
+      /* Signals are a second, cheaper call on the market-data host. A failure
+         there must not blank the page -- the assignments and positions are
+         the point and they do not depend on it. */
+      b._sigs = {};
+      try {
+        const s = await GET("/api/optlab/plays/signals");
+        for (const row of (s.signals || [])) b._sigs[row.symbol] = row;
+      } catch (e) { /* leave the badges as dashes */ }
+      board = b;
+      paint();
+    } catch (e) {
+      put("pl-strip", errNote(e));
+    }
+  };
+
+  /* One delegated listener for the whole page. Rows are re-rendered on every
+     refresh, so per-button listeners would be re-bound constantly and the ones
+     on replaced nodes would leak. */
+  host.addEventListener("click", async (ev) => {
+    const t = ev.target;
+    if (!(t instanceof HTMLElement)) return;
+
+    if (t.id === "pl-disarm") {
+      try {
+        const r = await POST("/api/optlab/plays/disarm", {});
+        toast(r.note || "Disarmed.");
+      } catch (e) { toast(e.message || String(e)); }
+      return load();
+    }
+    if (t.id === "pl-arm-all") {
+      if (await plArm(["*"], "every assigned play")) load();
+      return;
+    }
+    if (t.id === "pl-seed") {
+      try {
+        const r = await POST("/api/optlab/plays/seed", {});
+        toast(`Assigned ${(r.assignments || []).length} play(s). Nothing armed.`);
+      } catch (e) { toast(e.message || String(e)); }
+      return load();
+    }
+    if (t.id === "pl-add") {
+      const sym = String(el("pl-new-sym").value || "").trim().toUpperCase();
+      const play = String(el("pl-new-play").value || "");
+      const ct = String(el("pl-new-ct").value || "").trim();
+      if (!sym) { toast("A ticker is required."); return; }
+      try {
+        await POST("/api/optlab/plays/assign", {
+          symbol: sym, play,
+          contracts: ct === "" ? null : Number(ct), by: "dashboard",
+        });
+        el("pl-new-sym").value = "";
+        el("pl-new-ct").value = "";
+        toast(`${play} is on ${sym}. It is not armed.`);
+      } catch (e) { toast(e.message || String(e)); }
+      return load();
+    }
+    if (t.id === "pl-preview-btn") {
+      t.disabled = true;
+      t.textContent = "Pricing…";
+      try {
+        const r = await POST("/api/optlab/plays/cycle", {});
+        put("pl-preview", plPreview(r.cycle));
+        await load();
+      } catch (e) {
+        put("pl-preview", errNote(e));
+      } finally {
+        t.disabled = false;
+        t.textContent = "Preview now";
+      }
+      return;
+    }
+
+    const closeId = t.getAttribute("data-close");
+    if (closeId) {
+      const ok = await ask(
+        `Close ${closeId} now, at the market if it must? Type CLOSE.`, "");
+      if (String(ok || "").trim().toUpperCase() !== "CLOSE") {
+        toast("Left open.");
+        return;
+      }
+      try {
+        const r = await POST("/api/optlab/plays/close",
+                             { id: closeId, reason: "closed from the dashboard" });
+        toast(r.result || "Sent.");
+      } catch (e) { toast(e.message || String(e)); }
+      return load();
+    }
+
+    const act = t.getAttribute("data-a");
+    if (!act) return;
+    const row = t.closest(".pl-row");
+    if (!row) return;
+    const symbol = row.getAttribute("data-sym");
+    const play = row.getAttribute("data-play");
+    const key = `${symbol}:${play}`;
+    const rec = (board.assignments || []).find(
+      (r) => r.symbol === symbol && r.play === play) || {};
+
+    try {
+      if (act === "save") {
+        await POST("/api/optlab/plays/assign", {
+          symbol, play, params: plFieldsOf(row),
+          enabled: !!rec.enabled, by: "dashboard",
+        });
+        toast(`Saved ${key}.`);
+      } else if (act === "toggle") {
+        await POST("/api/optlab/plays/enable",
+                   { symbol, play, enabled: !rec.enabled });
+        toast(`${key} ${rec.enabled ? "disabled" : "enabled"}.`);
+      } else if (act === "arm") {
+        if (rec.armed) {
+          /* Per-row disarm is the global disarm: the arm file is one file, and
+             pretending otherwise by silently rewriting its key list would make
+             one button quietly change what another one armed. Say so. */
+          const r = await POST("/api/optlab/plays/disarm", {});
+          toast(r.note || "Disarmed everything — the arm file is one file.");
+        } else {
+          await plArm([key], key);
+        }
+      } else if (act === "remove") {
+        const ok = await ask(`Take ${play} off ${symbol}? Type REMOVE.`, "");
+        if (String(ok || "").trim().toUpperCase() !== "REMOVE") {
+          toast("Kept.");
+          return;
+        }
+        const r = await POST("/api/optlab/plays/unassign", { symbol, play });
+        toast(r.note || `Removed ${key}.`);
+      }
+    } catch (e) {
+      toast(e.message || String(e));
+    }
+    load();
+  });
+
+  load();
+  /* Ten seconds. The ledger is a local file and the route spends no trading
+     calls, so this is cheap -- but the marks only change when the WORKER
+     cycles, so polling faster than it would show the same numbers. */
+  every(10000, "pl-strip", load);
 }

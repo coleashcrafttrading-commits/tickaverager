@@ -1,0 +1,56 @@
+# The options playbook worker.
+#
+# WHY THIS IS A SEPARATE UNIT from tickaverager.service, rather than a thread
+# inside the dashboard:
+#
+#   * THE DASHBOARD MUST NEVER SUBMIT. Two processes both proposing against one
+#     account would race the per-session and per-bar guards and could double-
+#     open a structure. One writer, one process, and the web app's /plays/cycle
+#     route is a dry-run preview precisely so that stays true.
+#   * The dashboard is the thing that gets restarted, poked and profiled. An
+#     exit path that has to run every cycle should not share a lifetime with a
+#     page somebody is reloading.
+#   * It fails independently. If uvicorn wedges, this keeps managing open
+#     positions, which is the half that matters when something is wrong.
+#
+# Install (on the VM, as root):
+#   cp deploy/tickaverager-plays.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now tickaverager-plays
+#   systemctl status tickaverager-plays
+#
+# It starts DISARMED and stays that way until a human writes the arm file
+# through the dashboard. Starting this unit does not start trading.
+
+[Unit]
+Description=Tick Avenger -- options playbook worker
+After=network-online.target
+Wants=network-online.target
+# Not Requires=: the playbook must keep managing open positions even if the
+# dashboard is down, which is exactly when it matters most.
+After=tickaverager.service
+
+[Service]
+Type=simple
+User=coleashcraft_trading
+WorkingDirectory=/home/coleashcraft_trading/tickaverager
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/coleashcraft_trading/tickaverager/venv/bin/python optplaybook.py serve
+
+# Always come back. A worker that owns the exit path may not stay dead, and 10
+# seconds is long enough that a crash loop is visible in the journal rather
+# than being hidden by an instant restart.
+Restart=always
+RestartSec=10
+
+# A cycle that hangs on a broker call is worse than one that dies, because a
+# hung worker still looks alive. Kill it and let Restart bring it back.
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tickaverager-plays
+
+[Install]
+WantedBy=multi-user.target

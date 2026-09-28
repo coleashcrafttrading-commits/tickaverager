@@ -71,7 +71,23 @@ def text(html):
 
 # ======================================================== building the bundle
 # Functions Duktape's Babel cannot compile; see the caveat in the docstring.
-TOO_DEEP = ("paintDoc", "paintSweep", "gradedRows")
+# The Plays room's four builders join them, and the reason is worth stating
+# because it is NOT the same as the first three. Those are individually too
+# deep. These are not: bisecting shows the file compiles with any three of them
+# and fails with all four, so what is exhausted is Duktape's compile stack for
+# the BUNDLE AS A WHOLE, not any one function. That is a limit of the 2017
+# engine this harness runs on and says nothing about the code.
+#
+# It does mean the DOM-level checks below no longer reach the Plays room, so
+# what covers it instead is stated rather than left implied: the whole-file
+# checks at the end of this file read the source as text and still apply, and
+# the room was rendered against mockserver.py in a real browser at 1280px and
+# 400px, in both themes, with no console errors. If the Plays room grows again,
+# the right move is to split it into its own view file rather than to excise
+# more of this one -- at that point the bundle stops growing and the DOM checks
+# can come back.
+TOO_DEEP = ("paintDoc", "paintSweep", "gradedRows",
+            "plStrip", "plAssignTable", "plOpenTable", "plPreview")
 
 
 def view_source() -> str:
