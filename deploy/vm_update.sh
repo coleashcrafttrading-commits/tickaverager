@@ -67,7 +67,11 @@ echo "service: $(systemctl is-active "$SERVICE")"
 # playbook unit must not fail a deploy of the share fleet. It starts disarmed,
 # so restarting it does not start trading.
 PLAYS_SERVICE=tickaverager-plays
-if systemctl list-unit-files | grep -q "^$PLAYS_SERVICE.service"; then
+# Test the unit FILE rather than parsing `systemctl list-unit-files`,
+# whose output this grep did not match on the VM even with the unit
+# installed and enabled -- so the worker silently went un-restarted
+# after a deploy, which is the one thing this block exists to prevent.
+if [ -f "/etc/systemd/system/$PLAYS_SERVICE.service" ]; then
   systemctl restart "$PLAYS_SERVICE" || true
   sleep 3
   echo "plays worker: $(systemctl is-active "$PLAYS_SERVICE")"

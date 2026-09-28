@@ -730,6 +730,57 @@ def main() -> int:
           ["NEW:swing-atm-hourly"])
     check("the expired arm's key is NOT revived",
           fresh.permits("OLD", "index-put-credit-spread")[0], False)
+
+    print("\n24. The signal NEVER reads the overnight feed")
+    # Measured on the VM, 2026-09-27 21:26 ET: the fleet's `feed: auto` had
+    # correctly switched the whole client to `boats` (Blue Ocean, 20:00-04:00
+    # ET and nothing else), so a SignalReader built from it inherited the
+    # overnight tape. NVDA over 14 days returned 2,641 bars stamped 01:20Z and
+    # EXACTLY ZERO inside 09:30-16:00 ET, so every ticker read "needs 9 closed
+    # hourly bars, have 0" and no swing could ever trigger. The same request on
+    # sip returned 9,376 bars, 3,900 of them inside the session.
+    class FeedClient:
+        def __init__(self, feed):
+            self.feed = feed
+            self.asked = []
+
+        def bars_multi_range(self, syms, tf, start, **kw):
+            self.asked.append(kw.get("feed"))
+            return {s: [] for s in syms}
+
+    check("a client on the overnight feed is overridden to the day tape",
+          S.day_feed(FeedClient("boats")), "sip")
+    check("a sip client stays on sip", S.day_feed(FeedClient("sip")), "sip")
+    check("an iex-only account keeps iex -- it has no SIP entitlement",
+          S.day_feed(FeedClient("iex")), "iex")
+    check("an empty feed defaults to the day tape",
+          S.day_feed(FeedClient("")), "sip")
+    check("an explicit request wins", S.day_feed(FeedClient("sip"), "iex"), "iex")
+    check("...unless it asks for the overnight feed, which is always wrong",
+          S.day_feed(FeedClient("sip"), "boats"), "sip")
+    # and the reader must actually SEND it
+    fc = FeedClient("boats")
+    rd = S.SignalReader(fc)
+    check("the reader pins the day tape at construction", rd.feed, "sip")
+    rd.refresh(["NVDA"])
+    check("...and passes it on every request, never the client's own",
+          fc.asked, ["sip"])
+
+    print("\n25. Overnight bars produce no signal even if they arrive")
+    # Belt and braces: if an overnight tape ever reaches evaluate() anyway, it
+    # must read as "no closed hourly bars", never as a direction. A 6pm cross
+    # on twelve thousand shares is not a signal.
+    overnight = []
+    t0 = dt.datetime(2026, 9, 25, 0, 30, tzinfo=dt.timezone.utc)   # 20:30 ET
+    for i in range(400):
+        px = 100.0 + i * 0.01
+        overnight.append({"t": (t0 + dt.timedelta(minutes=i))
+                          .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                          "o": px, "h": px, "l": px, "c": px, "v": 50})
+    og = S.evaluate(overnight, "NVDA", now=dt.datetime(2026, 9, 25, 9, 0,
+                                                       tzinfo=S.NY))
+    check("an all-overnight tape gives no direction", og.direction, None)
+    check("...and no closed hourly bars at all", og.bars_used, 0)
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
     return 1 if FAIL else 0
 

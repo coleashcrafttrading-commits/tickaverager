@@ -65,6 +65,42 @@ LOOKBACK_SESSIONS = 5
 #: bucket closes, so polling harder buys nothing and spends the data budget.
 CACHE_TTL_S = 90.0
 
+#: THE OVERNIGHT FEED IS NOT THE DAY TAPE, and asking it for a 1-hour chart
+#: returns a chart with no hours in it.
+#:
+#: Alpaca's `boats` feed is Blue Ocean, which covers 20:00-04:00 ET AND NOTHING
+#: ELSE. The fleet's `feed: auto` correctly switches the whole client to it
+#: overnight, so a SignalReader built from the fleet's broker after 20:00 ET
+#: inherits it. Measured on NVDA, 14 days, 2026-09-27: `boats` returned 2,641
+#: minute bars, stamped 01:20Z-01:30Z, of which EXACTLY ZERO fall inside
+#: 09:30-16:00 ET -- so every symbol read "needs 9 closed hourly bars, have 0"
+#: and no swing could ever trigger. The same request on `sip` returned 9,376
+#: bars, 3,900 of them inside the session.
+#:
+#: fleet.py already carries this lesson for charts ("a history read that asks
+#: only the feed the engine happens to be trading on loses a whole session the
+#: moment the clock crosses 20:00, which is what emptied the charts"). The
+#: 1-hour chart is a REGULAR-HOURS object by definition, so this module pins
+#: the day tape itself rather than inheriting whatever the client is on.
+OVERNIGHT_FEED = "boats"
+DEFAULT_DAY_FEED = "sip"
+
+
+def day_feed(alpaca: Any, requested: str = "") -> str:
+    """The tape that carries 04:00-20:00 ET, never the overnight one.
+
+    An explicit `requested` wins, except that it may not be the overnight feed:
+    asking for `boats` here is always a mistake, and honouring it would produce
+    a signal that is silently never computed rather than an error anyone sees.
+    """
+    want = str(requested or "").strip().lower()
+    if want and want != OVERNIGHT_FEED:
+        return want
+    have = str(getattr(alpaca, "feed", "") or "").strip().lower()
+    # An account without SIP entitlement is polled on iex; anything else
+    # (including `boats`, which is what this exists to reject) gets sip.
+    return "iex" if have == "iex" else DEFAULT_DAY_FEED
+
 
 @dataclass
 class HourBar:
@@ -274,11 +310,12 @@ class SignalReader:
 
     def __init__(self, alpaca: Any, *, ttl: float = CACHE_TTL_S,
                  sessions: int = LOOKBACK_SESSIONS,
-                 ema_period: int = EMA_PERIOD):
+                 ema_period: int = EMA_PERIOD, feed: str = ""):
         self.a = alpaca
         self.ttl = float(ttl)
         self.sessions = int(sessions)
         self.ema_period = int(ema_period)
+        self.feed = day_feed(alpaca, feed)
         self._lock = threading.RLock()
         self._cache: dict = {}
         self._calls = 0
@@ -300,7 +337,8 @@ class SignalReader:
         if not syms:
             return {}
         self._calls += 1
-        tapes = self.a.bars_multi_range(syms, "1Min", self._start())
+        tapes = self.a.bars_multi_range(syms, "1Min", self._start(),
+                                        feed=self.feed)
         now = _dt.datetime.now(NY)
         stamp = _dt.datetime.now(_dt.timezone.utc).timestamp()
         out: dict = {}
