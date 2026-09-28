@@ -143,7 +143,6 @@ def playbook(fb, state_dir, ledger, clock):
     pb.arm_path = _pl.Path(state_dir) / "ARM"
     pb.decisions_path = _pl.Path(state_dir) / "decisions.jsonl"
     pb.ledger = ledger
-    pb.reserve = PB.Reserve(_pl.Path(state_dir) / "reserve.json")
     pb.assignments = P.Assignments(_pl.Path(state_dir) / "plays.json")
     pb.dry_run = False
     pb._clock = clock

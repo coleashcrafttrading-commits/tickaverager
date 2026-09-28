@@ -2887,9 +2887,12 @@ def optlab_perf(f: Fleet = Depends(cur)):
         "arm_why": arm.why_not(),
         "account": (f.account or {}).get("account_number", ""),
     }
-    caps = {"max_concurrent": _pbook.MAX_CONCURRENT_POSITIONS,
-            "max_risk_fraction": _pbook.MAX_OPEN_RISK_FRACTION,
-            "close_short_at_dte": _pbook.CLOSE_SHORT_AT_DTE}
+    # The close-out rule is the only cap left, and it is a SAFETY rule rather
+    # than a size limit -- a short leg comes off the book before expiry because
+    # share settlement can cost more than the structure's stated max loss.
+    # The capital ceiling and the position cap were removed at the owner's
+    # instruction; size is bounded by the broker alone.
+    caps = {"close_short_at_dte": _pbook.CLOSE_SHORT_AT_DTE}
     try:
         import optperf as _operf
         payload = _operf.report(

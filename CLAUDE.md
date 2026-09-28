@@ -415,27 +415,38 @@ Worth knowing before arming, because "one contract" sounds small and is not:
 | META | 750 put x1 | $4,050 | $1,012 |
 
 A 33-DTE ATM option on a $750 stock costs $4,050. Seven Mag-7 swings at once is
-~$11,500 committed against $23,890 of options buying power, which is why a risk
-cap exists and will bind.
+~$11,500 committed against $23,890 of options buying power. NOTHING CAPS THAT
+ANY MORE -- see the next paragraph -- so the size of the book is the owner's
+decision and the broker's, and this file's job is to make sure the number is
+in front of him rather than to pick one for him.
 
-**The cap is split in two, and the tiers do not share (28 Sep 2026).** A single
-ceiling could not express "the spreads sell every day no matter what": six
-33-DTE swings held $11,185.00 of an $11,204.88 ceiling and both spreads were
-refused over $19.88 of headroom. They were not outranked -- priority reorders
-one cycle and cannot reclaim what an earlier cycle spent, and those swings have
-max_open=1 and a month to run. So `CREDIT_RISK_FRACTION` (0.40 of options BP)
-is the income tier's own allocation, `DEBIT_RISK_FRACTION` (0.20) is the swing
-tier's, `MAX_OPEN_RISK_FRACTION` is their SUM and is still 0.60, and neither
-tier may spend the other's dollar -- not by being early, not by being first in
-the cycle, not by having been open since last month. 0.40 is arithmetic: the
-measured pair is $1,750 + $1,705 = $3,455 a session and it is written again
-every session, so at $18,674.80 of BP a $7,469.92 allocation funds two
-consecutive sessions ($6,910) and not a third ($10,365). Beyond that the
-spread is refused for want of capital and says so by name
-(`credit_budget_short` in the decisions log). max_open=6 would need $20,730,
-which is more than the whole account: at this size the binding constraint is
-the ACCOUNT, and raising the 60% cap is a risk decision for the owner, not a
-code change.
+**THERE IS NO CAPITAL CAP AND NO POSITION CAP (28 Sep 2026).** There were
+three -- a global concurrent-position ceiling, a per-ticker `max_open`, and a
+per-tier fraction of options buying power -- and the owner removed all of
+them: *"i did not ask you to cap the capital for options or have a cap of
+positions please remove that element."* Every one was this stack's own
+invention rather than anything he asked for, and the fraction is what
+silently blocked the SPY and QQQ spreads for a whole session: six 33-DTE
+swings held $11,185.00 of an $11,204.88 ceiling and both spreads were refused
+over $19.88 of headroom.
+
+It was also measuring the wrong pool. `options_buying_power` is EXACTLY
+`non_marginable_buying_power` on this account ($18,674.80 against $42,165.43
+of cash and $84,330.86 of Reg-T buying power) because a long option must be
+paid for in full. A put credit spread does not draw on that at all -- its max
+loss is held as margin. One ceiling over both was charging a spread's margin
+against the cash pool that buys long options.
+
+**What bounds size now is the broker**, which is the only limit that is real:
+`optexec.plan()` reads live options buying power and live assignment capacity
+on every proposal, and Alpaca rejects what it cannot collateralise. **What
+bounds frequency** is the owner's own rule and is not a cap on size -- one
+entry per session for the index spreads, one per closed hourly bar for the
+swings. Ordering survives (credit plays are proposed before debit ones,
+because they are the income leg) but it is ordering ONLY: no allocation
+behind it, no ceiling in front of it. Read that as the deliberate trade it
+is: nothing in this stack will now stop the book growing until the account
+itself does. Do not put a cap back without being asked for one.
 
 **-25% on a credit spread is also a TIGHT stop**: the credit is $0.25-0.30
 on a $2 wing, so a quarter of it is 6-8 cents and the bid-ask is a few cents by

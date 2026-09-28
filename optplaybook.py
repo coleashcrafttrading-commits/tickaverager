@@ -99,50 +99,25 @@ ARM_PHRASE = "ARM THE OPTIONS PLAYS"
 ARM_MAX_DAYS = 30
 ARM_DEFAULT_DAYS = 7
 
-#: Portfolio ceilings, checked against the live account every cycle. These are
-#: the last thing between a bug in the proposal path and the whole account.
-MAX_CONCURRENT_POSITIONS = 24
-
-#: Capital is allocated PER TIER and the tiers do not share a dollar. The
-#: owner's rule is that the index credit spreads sell "every day ... no matter
-#: what", because they are the income that funds the buying, and a SHARED
-#: ceiling cannot express that however it is ordered. Measured on the live
-#: account 28 Sep 2026: options BP $18,674.80, a 60% ceiling of $11,204.88, and
-#: six 33-DTE swings holding $11,185.00 of it -- $19.88 of headroom against a
-#: SPY spread needing $1,735 and a QQQ spread needing $1,705. Neither was
-#: outranked; the money was spent in earlier cycles by positions with
-#: max_open=1 that will not give it back for a month. Priority reorders
-#: proposals INSIDE one cycle and cannot reclaim what a previous one spent.
-CREDIT_RISK_FRACTION = 0.40        # of options BP, the income tier only
-DEBIT_RISK_FRACTION = 0.20         # of options BP, the swing tier only
-
-#: WHY 0.40, and it is arithmetic rather than taste. Measured 27-28 Sep 2026:
-#: SPY 744/742p x10 is $1,750 of defined risk and QQQ 707/705p x10 is $1,705 --
-#: call the pair $3,455 -- and the pair is written AGAIN every session, so what
-#: the tier needs is that pair times the number of sessions a spread is still
-#: open when the next one is written. Against $18,674.80 of options BP:
-#:      1 session of pairs   $3,455   0.185 of BP
-#:      2 sessions           $6,910   0.370 of BP   <- 0.40 covers this
-#:      3 sessions          $10,365   0.555 of BP   (0.045 left for every swing)
-#:      6 sessions          $20,730   1.110 of BP   (max_open=6: unfundable)
-#: 0.40 is the smallest round fraction that funds a second consecutive session
-#: without the first one having closed. It is a CHOICE, not a measurement: this
-#: stack has never carried a spread to its target, so the real holding period
-#: is unknown, and if it runs past two sessions the third day's spread is
-#: refused for want of capital -- loudly, naming this number, which is the
-#: honest failure. max_open=6 says the owner expects to stack six; six needs
-#: $20,730 against $18,674 of buying power, so at this account size the binding
-#: constraint is the ACCOUNT and no fraction of it fixes that.
-
-#: The total cap is kept as the SUM and never as its own number, so it cannot
-#: drift away from the two allocations that actually bind. It is still 0.60 of
-#: options buying power: this re-divides that money, it does not widen it.
-#: Raising it is a risk decision and is not the code's to make.
-#: app.py, optperf.py and test_optperf.py read this name.
-# Rounded because 0.40 + 0.20 is 0.6000000000000001 in binary floating
-# point, and that number reaches the dashboard and the perf report.
-MAX_OPEN_RISK_FRACTION = round(CREDIT_RISK_FRACTION
-                               + DEBIT_RISK_FRACTION, 4)
+#: NO CAPITAL CEILING AND NO POSITION CAP.
+#:
+#: There were three here and the owner removed all of them: "i did not ask
+#: you to cap the capital for options or have a cap of positions please
+#: remove that element." They were a global MAX_CONCURRENT_POSITIONS, a
+#: per-ticker max_open, and a per-tier fraction of options buying power --
+#: every one of them this module's own invention rather than anything he
+#: asked for, and the fraction was what silently blocked the SPY and QQQ
+#: spreads all day on 28 Sep 2026.
+#:
+#: WHAT BOUNDS SIZE NOW is the broker, which is the only limit that is real:
+#: optexec.plan() reads live options buying power and live assignment
+#: capacity on every proposal, and Alpaca rejects what it cannot
+#: collateralise. WHAT BOUNDS FREQUENCY is the owner's own rule and is not a
+#: cap on size -- one entry per session for the index spreads, one per closed
+#: hourly bar for the swings.
+#:
+#: Read that as the deliberate trade it is: nothing in this file will now
+#: stop the book growing until the account itself does.
 
 #: Cycle period for the worker.
 CYCLE_S = 20.0
@@ -252,8 +227,6 @@ UNRANKED_PRIORITY = 9
 TIER_CREDIT = "credit"
 TIER_DEBIT = "debit"
 PLAY_TIER = {P.CREDIT_SPREAD: TIER_CREDIT, P.LONG_SINGLE: TIER_DEBIT}
-TIER_FRACTION = {TIER_CREDIT: CREDIT_RISK_FRACTION,
-                 TIER_DEBIT: DEBIT_RISK_FRACTION}
 
 
 def tier_of_kind(kind: str) -> str:
@@ -966,171 +939,6 @@ class ReadOnlyBroker:
 
 
 # =============================================================== the reserve
-class Reserve:
-    """What each income play must be LEFT, measured and remembered.
-
-    The owner's rule is that the index credit spreads open "every day ... no
-    matter what", because they are what funds the buying. Proposing them first
-    was necessary and not sufficient, and so was holding money back inside one
-    cycle: what actually blocked both spreads on 28 Sep was capital spent in
-    earlier cycles by 33-DTE swings that will not return it for a month. The
-    guarantee now lives in CREDIT_RISK_FRACTION -- an allocation the debit tier
-    cannot reach at all -- and not in this file.
-
-    So each time a credit structure is priced, its max_loss is written here,
-    keyed SYMBOL:play. It no longer holds anything back from a swing. What it
-    is for now is the one failure separate budgets cannot fix by themselves:
-    whether the credit ALLOCATION is large enough for what today's income legs
-    actually cost. That question can only be answered with the measured price
-    of the real structures, which is what this remembers between sessions.
-
-    MEASURED, NEVER GUESSED. Until a play has been priced once there is no
-    number and this says so -- `measured: False`, reservation of nothing. An
-    invented reservation is wrong in both directions: too big and it blocks
-    every swing forever, too small and it protects nothing while looking like it
-    does. The honest first session is "the credit plays go first and nothing is
-    held back"; from the second session on the reservation is a real dollar
-    figure this system observed.
-    """
-
-    def __init__(self, path: Path = RESERVE_PATH):
-        self.path = Path(path)
-        self._lock = threading.RLock()
-        self._rows: dict = {}
-        self.load()
-
-    def load(self) -> None:
-        with self._lock:
-            self._rows = {}
-            try:
-                d = json.loads(self.path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                # A missing or corrupt memo is "nothing measured yet", which is
-                # the safe reading: it reserves nothing and says it reserved
-                # nothing. It must never read as a reservation of zero dollars
-                # that somebody measured.
-                return
-            for k, v in (d.get("reserves") or {}).items():
-                if isinstance(v, dict):
-                    self._rows[str(k)] = v
-
-    def save(self) -> None:
-        with self._lock:
-            payload = {"updated": _utc(), "reserves": self._rows}
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=str(self.path.parent),
-                                       prefix=".reserve-", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=2)
-                fh.write("\n")
-            os.replace(tmp, self.path)
-
-    def get(self, key: str) -> Optional[dict]:
-        with self._lock:
-            r = self._rows.get(str(key))
-            return dict(r) if r else None
-
-    def note(self, key: str, *, max_loss: Optional[float], contracts: int,
-             label: str = "") -> Optional[dict]:
-        """Remember what this play costs, as measured on a live chain."""
-        ml = _num(max_loss)
-        if ml is None or ml <= 0:
-            return None
-        with self._lock:
-            cur = self._rows.get(str(key)) or {}
-            prev = _num(cur.get("max_loss"))
-            row = {"max_loss": round(float(ml), 2), "contracts": int(contracts),
-                   "label": str(label or ""), "at": _utc()}
-            self._rows[str(key)] = row
-            # Only touch the disk when the number actually moved. A cycle every
-            # 20 seconds rewriting an identical file all day is wear for nothing
-            # and noise in any diff of the state directory.
-            if prev is None or abs(prev - ml) > max(1.0, 0.01 * ml):
-                self.save()
-            return dict(row)
-
-    def as_dict(self) -> dict:
-        with self._lock:
-            return {k: dict(v) for k, v in self._rows.items()}
-
-
-# =============================================================== the budgets
-@dataclass
-class TierBudget:
-    """One tier's allocation and what is left of it, right now.
-
-    Two budgets, and neither tier may spend the other's. Not a soft
-    reservation: a dollar that can be borrowed is a dollar the guarantee does
-    not have, and the guarantee is the owner's -- the index spreads sell "every
-    day ... no matter what". A swing cannot take this money by being early,
-    being first in the cycle, or being open since last month.
-
-    `allocation` is None when options buying power could not be read. Unknown
-    is not unlimited and it is not zero, so it is None (house rule), and see
-    `fits` for what the sizing path does with that.
-    """
-    tier: str
-    fraction: float
-    bp: Optional[float] = None
-    open_risk: float = 0.0
-
-    @property
-    def allocation(self) -> Optional[float]:
-        return None if self.bp is None else round(self.bp * self.fraction, 2)
-
-    @property
-    def free(self) -> Optional[float]:
-        a = self.allocation
-        return None if a is None else round(a - self.open_risk, 2)
-
-    def fits(self, cost: Optional[float]) -> bool:
-        """Whether this tier can afford `cost`.
-
-        With no buying power reading the answer is True, which is the
-        behaviour this check has always had: the ceiling is unknown and the
-        proposal goes on to optexec.plan, whose own pre-flight is against the
-        live account. Refusing here instead would mean one failed snapshot
-        stops the income legs, which is the failure this whole change exists to
-        prevent. An unpriced structure (`cost` None) is nobody's to size.
-        """
-        if cost is None or self.allocation is None:
-            return True
-        return float(cost) <= (self.free or 0.0)
-
-    def other(self) -> str:
-        return TIER_DEBIT if self.tier == TIER_CREDIT else TIER_CREDIT
-
-    def refusal(self, cost: float) -> str:
-        """Why this play cannot be funded, in the terms that make it readable.
-
-        It must say WHOSE money ran out. "Refused because the swings have
-        their own budget and it is full" is a policy working as intended;
-        "refused because the income tier's money is untouchable" is the same
-        sentence pointing at a different number, and they must not read alike.
-        """
-        oth = self.other()
-        oth_alloc = (None if self.bp is None
-                     else round(self.bp * TIER_FRACTION[oth], 2))
-        left = self.free or 0.0
-        # "leaving $-7450" is a number nobody reads twice. Over budget is a
-        # different sentence from short of room, and it is the one that says
-        # the book has to shrink before anything here opens again.
-        rest = ("leaving $%.0f" % left if left >= 0
-                else "$%.0f OVER it" % -left)
-        return ("$%.0f of risk needs $%.0f of room; the %s allocation is "
-                "$%.0f (%.0f%% of $%.0f options BP) with $%.0f open, %s. "
-                "The %s allocation ($%.0f) is the other tier's own money "
-                "and this play may never spend it -- it is not headroom"
-                % (cost, cost, self.tier, self.allocation or 0.0,
-                   100 * self.fraction, self.bp or 0.0, self.open_risk, rest,
-                   oth, oth_alloc or 0.0))
-
-    def as_dict(self) -> dict:
-        return {"tier": self.tier, "fraction": self.fraction,
-                "allocation": self.allocation, "open_risk": self.open_risk,
-                "free": self.free}
-
-
 # ============================================================== the proposal
 @dataclass
 class Proposal:
@@ -1230,7 +1038,6 @@ class Playbook:
         # the object would take its record(), and that object writes.
         self.ledger = (ReadOnlyLedger(led_path) if self.dry_run
                        else (ledger or Ledger(led_path)))
-        self.reserve = Reserve(opt / "play_reserve.json")
         # TWO CLASSES ARE CALLED OptionData IN THIS REPO AND THEY ARE NOT
         # INTERCHANGEABLE. Holding both, deliberately, and naming which is for
         # what, because holding one and passing it to the wrong caller is
@@ -1905,138 +1712,48 @@ class Playbook:
         acct = optexec.account_snapshot(self.a)
         res.trading_calls += 1
         bp = _num(acct.get("options_buying_power"))
-        self._credit_budget_alarm(rows, bp, res)
 
         for a in rows:
             # Each play is sized against ITS OWN tier's allocation. The debit
             # tier cannot see the credit tier's dollars at all, so a swing can
             # no longer take -- in this cycle or in any earlier one -- money the
             # index spreads are going to need today.
+            # Ordering only. The credit spreads are still asked FIRST, because
+            # they are the income leg that funds the buying -- but "first" is
+            # now the whole of it. There is no allocation behind it and no
+            # ceiling in front of it; a play is refused only by the broker's
+            # own buying power and assignment capacity, inside optexec.plan().
             tier = tier_of_play(a.play)
-            # Recomputed per row, not once for the loop. A position submitted
-            # two rows ago is committed capital even though the fill has not
-            # come back, and open_risk() counts a pending at its requested size
-            # for exactly this reason.
-            budget = TierBudget(tier=tier, fraction=TIER_FRACTION[tier], bp=bp,
-                                open_risk=self.ledger.open_risk(tier))
             pr = Proposal(symbol=a.symbol, play=a.play,
-                          priority=priority_of(a.play), tier=tier,
-                          budget=budget.as_dict())
-            n_open = len(self.ledger.open_positions())
+                          priority=priority_of(a.play), tier=tier)
             try:
-                self._propose_one(a, pr, sigs, budget, n_open, arm, res)
+                self._propose_one(a, pr, sigs, arm, res)
             except Exception as e:
                 pr.ok, pr.reason = False, "error: %s" % e
                 res.errors.append("propose %s %s: %s" % (a.symbol, a.play, e))
             res.proposals.append(pr)
             self.decide("proposal", symbol=pr.symbol, play=pr.play, ok=pr.ok,
                         reason=pr.reason, priority=pr.priority, tier=pr.tier,
-                        budget=pr.budget,
                         structure=pr.structure.as_dict() if pr.structure else None,
                         submitted=pr.submitted)
 
-    def _credit_budget_alarm(self, rows, bp: Optional[float],
-                             res: CycleResult) -> None:
-        """Say so when the credit allocation cannot fund today's income legs.
-
-        This gates NOTHING. The allocation is ring-fenced, so a swing can never
-        be the cause any more and there is nothing here for the cycle to
-        decide. It exists because the one failure separate budgets cannot fix
-        by themselves is an allocation too SMALL for what the spreads cost --
-        and that has to be a named line in the decisions log rather than two
-        spreads that quietly never opened, which is exactly how the shared
-        ceiling failed.
-        """
-        if bp is None:
-            return
-        holds = self._outstanding_reservations(rows)
-        need = round(sum(h["max_loss"] for h in holds.values()
-                         if h["measured"]
-                         and tier_of_play(h["play"]) == TIER_CREDIT), 2)
-        if need <= 0:
-            return                       # never priced: nothing measured to owe
-        alloc = round(bp * CREDIT_RISK_FRACTION, 2)
-        open_credit = self.ledger.open_risk(TIER_CREDIT)
-        free = round(alloc - open_credit, 2)
-        if need <= free:
-            return
-        self.decide("credit_budget_short", needed=need, free=free,
-                    allocation=alloc, bp=bp, open_risk=open_credit,
-                    holds={k: h["max_loss"] for k, h in holds.items()
-                           if tier_of_play(h["play"]) == TIER_CREDIT},
-                    reason=("the income plays still to open today need $%.0f "
-                            "and their own allocation has $%.0f free ($%.0f, "
-                            "%.0f%% of $%.0f options BP) -- no swing can be "
-                            "blamed for this one and no ordering fixes it: it "
-                            "is CREDIT_RISK_FRACTION, the contract count, or "
-                            "the size of the account"
-                            % (need, free, alloc,
-                               100 * CREDIT_RISK_FRACTION, bp)))
-        res.errors.append("credit allocation short: need $%.0f, free $%.0f"
-                          % (need, free))
-
-    def _outstanding_reservations(self, rows) -> dict:
-        """What each play still needs today and has not yet spent.
-
-        A reservation is OUTSTANDING only while the play could still open this
-        session: enabled, under its max_open, not already used up by a
-        one-per-session rule, and not past its entry cutoff for the day. Once it
-        opens, its capital is in open_risk and reserving it as well would
-        double-count it; once its window has closed, holding money back for a
-        trade that cannot happen today starves the swings for nothing.
-        """
-        out: dict = {}
-        sess = P.session_key(now=self.now())
-        for a in rows:
-            prio = priority_of(a.play)
-            try:
-                params = a.effective()
-            except P.PlayError:
-                continue
-            if len(self.ledger.open_for(a.symbol, a.play)) >= int(
-                    params.get("max_open", 1) or 1):
-                continue
-            if params.get("one_per_session"):
-                if [p for p in self.ledger.positions()
-                        if p.symbol == a.symbol and p.play == a.play
-                        and p.session == sess]:
-                    continue
-            # self.now(), never the wall clock. THIS LINE WAS THE WALL-CLOCK
-            # BOMB: the index spread's cutoff is 15:30 ET, so every test that
-            # summed these holds passed before 15:30 and failed after it, every
-            # day, and both index spreads dropped out of the sum to 0.0.
-            if _past_entry_cutoff(params, now=self.now()):
-                continue
-            memo = self.reserve.get(a.key())
-            ml = _num((memo or {}).get("max_loss"))
-            out[a.key()] = {
-                "priority": prio, "symbol": a.symbol, "play": a.play,
-                "max_loss": float(ml) if ml is not None else 0.0,
-                "measured": ml is not None,
-                "measured_at": (memo or {}).get("at"),
-                "label": ("%s %s ($%.0f)" % (a.symbol, a.play, ml)
-                          if ml is not None
-                          else "%s %s (never priced -- nothing held back)"
-                               % (a.symbol, a.play)),
-            }
-        return out
-
     def _propose_one(self, a: P.Assignment, pr: Proposal, sigs: dict,
-                     budget: TierBudget, n_open: int, arm: Arm,
-                     res: CycleResult) -> None:
+                     arm: Arm, res: CycleResult) -> None:
         params = a.effective()
         spec = P.play(a.play)
 
-        # ---- portfolio ceilings, before anything is priced ----
-        if n_open >= MAX_CONCURRENT_POSITIONS:
-            pr.reason = ("%d positions open, ceiling is %d"
-                         % (n_open, MAX_CONCURRENT_POSITIONS))
-            return
-        mine = self.ledger.open_for(a.symbol, a.play)
-        if len(mine) >= int(params.get("max_open", 1)):
-            pr.reason = ("%d already open on %s %s, max_open is %s"
-                         % (len(mine), a.symbol, a.play, params.get("max_open")))
-            return
+        # NO POSITION CAP AND NO CAPITAL CEILING. There used to be three here
+        # -- a global MAX_CONCURRENT_POSITIONS, a per-ticker max_open, and a
+        # per-tier fraction of options buying power. The owner asked for none
+        # of them and removed them: "i did not ask you to cap the capital for
+        # options or have a cap of positions please remove that element."
+        #
+        # What still bounds this is the BROKER, which is the only limit that
+        # is real: optexec.plan() checks the live options buying power and the
+        # live assignment capacity every time, and Alpaca rejects an order it
+        # cannot collateralise. What bounds FREQUENCY is the owner's own rule
+        # and is not a cap on size: one entry per session for the index
+        # spreads, one per closed hourly bar for the swings.
 
         # ---- the time-of-day window ----
         in_win, why = P.in_entry_window(params, now=self.now())
@@ -2123,20 +1840,6 @@ class Playbook:
         # ---- what this play costs, remembered for the reservation ----
         # Written whenever it is priced, whether or not it opens: the number is
         # only useful for holding headroom on the days it is NOT ready yet.
-        if spec.kind == P.CREDIT_SPREAD and st.max_loss is not None:
-            # st.max_loss is dollars for the WHOLE position already -- see
-            # optplays.Structure. Only Structure.candidate() divides it down to
-            # per-contract, because optexec.plan multiplies it back up.
-            self.reserve.note(a.key(), max_loss=float(st.max_loss),
-                              contracts=ct, label=st.label)
-
-        # ---- this tier's allocation, on the real number ----
-        # The measured max_loss and never the requested size: what the
-        # structure priced at on THIS chain is the only number that can
-        # honestly be compared with a budget.
-        if not budget.fits(st.max_loss):
-            pr.reason = budget.refusal(float(st.max_loss))
-            return
 
         # ---- the full pre-flight, reusing the one order path's checks ----
         plan = optexec.plan(self.a, st.candidate(), st.exec_legs(),
@@ -2677,8 +2380,6 @@ class Playbook:
         self.refresh_stores()
         arm = self.arm()
         rows = []
-        holds = self._outstanding_reservations(proposal_order(
-            self.assignments.active()))
         for a in proposal_order(self.assignments.all()):
             open_pos = self.ledger.open_for(a.symbol, a.play)
             permitted, why = arm.permits(a.symbol, a.play)
@@ -2714,30 +2415,22 @@ class Playbook:
             "open_risk_by_tier": {
                 TIER_CREDIT: self.ledger.open_risk(TIER_CREDIT),
                 TIER_DEBIT: self.ledger.open_risk(TIER_DEBIT)},
-            "caps": {"max_concurrent": MAX_CONCURRENT_POSITIONS,
-                     "max_risk_fraction": MAX_OPEN_RISK_FRACTION,
-                     "credit_risk_fraction": CREDIT_RISK_FRACTION,
-                     "debit_risk_fraction": DEBIT_RISK_FRACTION,
-                     "close_short_at_dte": CLOSE_SHORT_AT_DTE},
-            # board() takes no account snapshot (it makes no trading call), so
-            # the dollar allocations are not knowable on this path. The
-            # fractions are, and the worker writes the dollars onto every
-            # proposal it records.
+            # The only cap left is the assignment close-out, which is a SAFETY
+            # rule and not a size limit: a short leg goes off the book before
+            # expiry because share settlement can cost more than the
+            # structure's stated max loss. Everything that capped capital or
+            # position count was removed at the owner's instruction.
+            "caps": {"close_short_at_dte": CLOSE_SHORT_AT_DTE},
+            "limits": {"capital": None, "positions": None,
+                       "why": ("no ceiling and no position cap -- size is "
+                               "bounded by the broker's own options buying "
+                               "power and assignment capacity, checked live on "
+                               "every proposal inside optexec.plan()")},
             "priority": {"order": [P.CREDIT_SPREAD, P.LONG_SINGLE],
                          "why": ("the index credit spreads are the income leg "
                                  "that funds the buying, so they are proposed "
-                                 "first AND hold their own allocation (%.0f%% "
-                                 "of options buying power) that the swing "
-                                 "debits (%.0f%%) may never spend"
-                                 % (100 * CREDIT_RISK_FRACTION,
-                                    100 * DEBIT_RISK_FRACTION))},
-            # What the income legs still to open today are MEASURED to
-            # cost. Nothing is held back from anybody any more -- the
-            # credit allocation does that structurally -- so this is the
-            # number to compare CREDIT_RISK_FRACTION against, not a
-            # claim on a swing's headroom.
-            "reserved": round(sum(h["max_loss"] for h in holds.values()), 2),
-            "reserves": {k: h for k, h in holds.items()},
+                                 "first -- ordering only, with no allocation "
+                                 "behind it and no ceiling in front of it")},
             # A position that is OPEN with no resting exit and no recorded
             # refusal is a bug, not a state. Counting it here is what makes it
             # detectable without reading a ledger by hand.

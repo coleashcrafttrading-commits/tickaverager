@@ -1012,12 +1012,14 @@ def _risk_block(trades: list, account: Optional[dict],
             at_risk += t.risk
     rows.sort(key=lambda r: (r["risk"] is None, -(r["risk"] or 0.0)))
     bp = _num((account or {}).get("options_buying_power"))
-    ceiling = (round(bp * PB.MAX_OPEN_RISK_FRACTION, 2)
-               if bp is not None else None)
-    ceil_why = None if ceiling is not None else (
-        "no account snapshot -- options buying power is read live from the "
-        "broker and is never inferred, so the ceiling is unknown, not "
-        "unlimited")
+    # THERE IS NO CEILING. The owner removed the capital cap, so the honest
+    # comparison for what is at risk is the broker's own options buying power
+    # -- the number Alpaca will actually refuse an order against -- and not a
+    # fraction of it that this module invented.
+    ceiling = None
+    ceil_why = ("no ceiling is set: the capital cap was removed, so size is "
+                "bounded by the broker's own options buying power and "
+                "assignment capacity rather than by a fraction of it")
     at_risk_val = round(at_risk, 2)
     risk_why = None
     if unbounded:
@@ -1029,19 +1031,21 @@ def _risk_block(trades: list, account: Optional[dict],
         "ledger_at_risk": ledger_total,
         "ceiling": metric(ceiling, 1 if ceiling is not None else 0, "usd",
                           reason=ceil_why),
-        "headroom": metric(round(ceiling - at_risk_val, 2)
-                           if ceiling is not None else None,
-                           len(opens), "usd", reason=ceil_why),
-        "utilization": metric(round(at_risk_val / ceiling, 4)
-                              if ceiling else None, len(opens), "pct",
-                              reason=ceil_why or
-                              ("options buying power is zero" if ceiling == 0
-                               else None)),
+        # Against the BROKER's buying power, which is the real limit.
+        "headroom": metric(round(bp - at_risk_val, 2)
+                           if bp is not None else None,
+                           len(opens), "usd",
+                           reason=None if bp is not None else
+                           "no account snapshot, so buying power is unknown"),
+        "utilization": metric(round(at_risk_val / bp, 4) if bp else None,
+                              len(opens), "pct",
+                              reason=("options buying power is zero"
+                                      if bp == 0 else None)),
         "bp": metric(bp, 1 if bp is not None else 0, "usd",
                      reason=None if bp is not None else ceil_why),
-        "fraction": PB.MAX_OPEN_RISK_FRACTION,
+        "fraction": None,
         "positions_open": len(opens),
-        "positions_cap": PB.MAX_CONCURRENT_POSITIONS,
+        "positions_cap": None,
         "unbounded": unbounded,
         "rows": rows,
     }

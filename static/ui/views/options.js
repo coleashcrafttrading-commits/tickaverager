@@ -2253,7 +2253,6 @@ const PL_FIELDS = {
     ["stop_pct", "Stop", "pc"],
     ["entry_after_et", "Entry from (ET)", "t"],
     ["entry_before_et", "Entry until (ET)", "t"],
-    ["max_open", "Max open", 0],
   ],
   "swing-atm-hourly": [
     ["contracts", "Contracts", 0],
@@ -2261,7 +2260,6 @@ const PL_FIELDS = {
     ["profit_pct", "Take profit", "pc"],
     ["stop_pct", "Stop", "pc"],
     ["direction", "Direction", "sel"],
-    ["max_open", "Max open", 0],
   ],
 };
 

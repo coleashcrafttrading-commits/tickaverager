@@ -139,12 +139,11 @@ PLAYS: dict = {
             # Nothing new opened inside the last half hour; a spread opened at
             # 15:55 cannot be managed before the close.
             "entry_before_et": "15:30",
-            "max_open": 6,
             "one_per_session": True,
         },
         editable=("contracts", "short_delta", "strikes_below", "target_dte",
                   "profit_pct", "stop_pct", "entry_after_et",
-                  "entry_before_et", "max_open"),
+                  "entry_before_et"),
         suggested=("SPY", "QQQ"),
     ),
     "swing-atm-hourly": Play(
@@ -162,7 +161,6 @@ PLAYS: dict = {
             "stop_pct": 0.25,
             # "both" | "calls" | "puts" -- so one ticker can be long-only.
             "direction": "both",
-            "max_open": 1,
             # One position per closed hourly bar. Without this the same bar
             # re-triggers on every cycle for the whole hour.
             "one_per_bar": True,
@@ -177,7 +175,7 @@ PLAYS: dict = {
             "same_session_only": True,
         },
         editable=("contracts", "target_dte", "profit_pct", "stop_pct",
-                  "direction", "max_open"),
+                  "direction"),
         suggested=("AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA"),
     ),
 }
@@ -679,7 +677,6 @@ class Assignments:
         num("target_dte", 1, 400, int)
         num("profit_pct", 0.05, 5.0)
         num("stop_pct", 0.05, 5.0)
-        num("max_open", 1, 50, int)
         if "direction" in over and over["direction"] not in ("both", "calls", "puts"):
             raise PlayError("direction must be both, calls or puts, got %r"
                             % over["direction"])

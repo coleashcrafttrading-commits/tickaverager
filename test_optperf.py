@@ -176,10 +176,10 @@ def main() -> int:
           r["outcomes"]["win_rate_lo"]["value"], None)
     check("capital at risk with nothing open really is zero",
           r["risk"]["at_risk"]["value"], 0.0)
-    check("...but the ceiling is unknown, not unlimited",
+    check("...and there is no ceiling to report",
           r["risk"]["ceiling"]["value"], None)
-    check("...and says so", "never inferred" in
-          (r["risk"]["ceiling"]["reason"] or ""), True)
+    check("...which says so in words, so a dash is never read as zero",
+          "no ceiling" in (r["risk"]["ceiling"]["reason"] or ""), True)
     check("no exits", r["exits"]["n"], 0)
     check("nothing needs attention", r["attention"], [])
 
@@ -733,7 +733,7 @@ def main() -> int:
     check("its P/L still counts, as an estimate",
           r["pl"]["realized"]["value"], -1171.0)
 
-    print("\n25. The ceiling comes from a live account snapshot or from nothing")
+    print("\n25. There is NO ceiling; headroom is the broker's own number")
     p = tmp("ceiling")
     b = Build(p)
     b.opening("Y-1", "SPY", "index-put-credit-spread", P.CREDIT_SPREAD,
@@ -744,14 +744,20 @@ def main() -> int:
     r = rep(p, account={"options_buying_power": 17524.0})
     check("risk is width less credit, ten wide",
           r["risk"]["at_risk"]["value"], 1700.0)
-    approx("ceiling is 60% of options BP",
-           r["risk"]["ceiling"]["value"], 10514.4, 0.01)
-    approx("headroom", r["risk"]["headroom"]["value"], 8814.4, 0.01)
-    approx("utilization", r["risk"]["utilization"]["value"], 0.1617, 0.0005)
-    check("the fraction is the playbook's, not a copy",
-          r["risk"]["fraction"], PB.MAX_OPEN_RISK_FRACTION)
-    check("the cap is the playbook's too",
-          r["risk"]["positions_cap"], PB.MAX_CONCURRENT_POSITIONS)
+    # The capital ceiling and the position cap were removed at the owner's
+    # instruction, so there is nothing to compare at_risk against except the
+    # broker's OWN buying power -- the number Alpaca will actually refuse an
+    # order against. Reporting a fraction of it would be this module quietly
+    # putting back the limit he took out.
+    check("no ceiling is reported", r["risk"]["ceiling"]["value"], None)
+    check("...and it says why, rather than reading as zero",
+          "no ceiling" in (r["risk"]["ceiling"]["reason"] or ""), True)
+    approx("headroom is buying power less what is at risk",
+           r["risk"]["headroom"]["value"], 17524.0 - 1700.0, 0.01)
+    approx("utilization is measured against buying power",
+           r["risk"]["utilization"]["value"], 1700.0 / 17524.0, 0.0005)
+    check("no risk fraction is claimed", r["risk"]["fraction"], None)
+    check("no position cap is claimed", r["risk"]["positions_cap"], None)
     check("the per-position sum agrees with the ledger's own total",
           any(w["code"] == "risk_disagrees" for w in r["warnings"]), False)
     check("zero buying power is not a divide",

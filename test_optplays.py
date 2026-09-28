@@ -230,7 +230,6 @@ def fake_playbook(fb, state_dir, arm_path, ledger, *, clock=None,
     pb.arm_path = _pl.Path(arm_path)
     pb.decisions_path = _pl.Path(state_dir) / "decisions.jsonl"
     pb.ledger = PB.ReadOnlyLedger(ledger.path) if dry_run else ledger
-    pb.reserve = PB.Reserve(_pl.Path(state_dir) / "reserve.json")
     pb.assignments = P.Assignments(_pl.Path(state_dir) / "plays.json")
     pb.dry_run = bool(dry_run)
     pb._clock = clock or at_et(11, 0)
@@ -1147,150 +1146,6 @@ def main() -> int:
     approx("a PENDING order counts at its requested size",
            prled.open_risk(), 4050.0, 1e-6)
 
-    print("\n33. THE CREDIT TIER HAS A BUDGET THE SWINGS MAY NEVER SPEND")
-    # What this replaced: six 33-DTE swings held $11,185.00 of an $11,204.88
-    # ceiling and both index spreads were refused over $19.88 of headroom. They
-    # were not outranked. Priority reorders the proposals inside ONE cycle and
-    # cannot reclaim what an earlier cycle already spent, and those swings have
-    # max_open=1 and a month to run. So the tiers hold SEPARATE allocations now
-    # and neither may spend the other's.
-    rs_dir = tempfile.mkdtemp()
-    rsv = PB.Reserve(os.path.join(rs_dir, "reserve.json"))
-    check("nothing is reserved before anything has been measured",
-          rsv.get("SPY:index-put-credit-spread"), None)
-    rsv.note("SPY:index-put-credit-spread", max_loss=1760.0, contracts=10,
-             label="SPY 741/739p x10")
-    rsv.note("QQQ:index-put-credit-spread", max_loss=1750.0, contracts=10,
-             label="QQQ 707/705p x10")
-    check("a measured price survives a restart, because the worker is a "
-          "different process",
-          PB.Reserve(os.path.join(rs_dir, "reserve.json"))
-          .get("SPY:index-put-credit-spread")["max_loss"], 1760.0)
-
-    sled = PB.Ledger(os.path.join(rs_dir, "s.jsonl"))
-    sfb = FakeBroker()
-    spb = fake_playbook(sfb, rs_dir, ap, sled)
-    # 11:00 ET, INJECTED. Read from the wall clock this section passed all
-    # morning and failed every afternoon: the index entry cutoff is 15:30, so
-    # after it the spreads cannot open today and owe nothing.
-    spb._clock = lambda: dt.datetime(2026, 9, 28, 11, 0, tzinfo=PB.NY)
-    spb.reserve = rsv
-    spb.assignments = P.Assignments(os.path.join(rs_dir, "plays.json"))
-    spb.assignments.seed_owner_set(by="test")
-    spb.od = FakeChain(spot=750.0)
-    spb.chain_rows = lambda sym, exp, spot, pct=0.12: (put_chain(), "ok")
-    active = PB.proposal_order(spb.assignments.active())
-    holds = spb._outstanding_reservations(active)
-    approx("both index spreads still owe their measured requirement at 11:00",
-           sum(h["max_loss"] for h in holds.values()), 3510.0, 1e-6)
-    check("...and a swing has never been priced, so it owes nothing invented",
-          holds["META:swing-atm-hourly"]["measured"], False)
-    spb._clock = lambda: dt.datetime(2026, 9, 28, 15, 31, tzinfo=PB.NY)
-    approx("...and after the 15:30 cutoff they owe nothing, because they can "
-           "no longer open today",
-           sum(h["max_loss"] for h
-               in spb._outstanding_reservations(active).values()), 0.0, 1e-6)
-    spb._clock = lambda: dt.datetime(2026, 9, 28, 11, 0, tzinfo=PB.NY)
-
-    check("a credit spread spends the credit allocation",
-          PB.tier_of_play("index-put-credit-spread"), PB.TIER_CREDIT)
-    check("a swing spends the debit allocation",
-          PB.tier_of_play("swing-atm-hourly"), PB.TIER_DEBIT)
-    check("a mistyped play spends the DEBIT allocation and can never reach "
-          "the income tier's money",
-          PB.tier_of_play("no-such-play"), PB.TIER_DEBIT)
-
-    # The live book of 28 Sep 2026, to the dollar: six long options, one
-    # contract each, $11,185.00 of debit risk.
-    six = PB.Ledger(os.path.join(rs_dir, "six.jsonl"))
-    for n, px in enumerate([11.70, 17.65, 22.50, 30.00, 10.00, 20.00]):
-        six.record("sw%d" % n, "opening", symbol="S%d" % n,
-                   play="swing-atm-hourly", kind=P.LONG_SINGLE,
-                   expiry="2026-10-30", state="open", contracts=1,
-                   requested=1, entry_net=-px,
-                   legs=[{"symbol": "X%d" % n, "strike": 750.0, "side": "buy"}])
-    bp = 18674.80
-    approx("the six swings hold $11,185 of DEBIT risk",
-           six.open_risk(PB.TIER_DEBIT), 11185.0, 1e-6)
-    approx("...and none of it is the credit tier's",
-           six.open_risk(PB.TIER_CREDIT), 0.0, 1e-6)
-    approx("...and the total is still the total",
-           six.open_risk(), 11185.0, 1e-6)
-    approx("under the shared ceiling that book left $19.88 of headroom",
-           round(bp * PB.MAX_OPEN_RISK_FRACTION - 11185.0, 2), 19.88, 1e-6)
-    credit = PB.TierBudget(tier=PB.TIER_CREDIT,
-                           fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
-                           open_risk=six.open_risk(PB.TIER_CREDIT))
-    approx("the credit allocation is 40% of options buying power",
-           credit.allocation, 7469.92, 1e-6)
-    check("the SPY spread fits it with all six swings open -- THE WHOLE POINT",
-          credit.fits(1750.0), True)
-    check("...and QQQ fits beside it the same session",
-          PB.TierBudget(tier=PB.TIER_CREDIT,
-                        fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
-                        open_risk=1750.0).fits(1705.0), True)
-    check("...and tomorrow's pair stacks on top of today's",
-          PB.TierBudget(tier=PB.TIER_CREDIT,
-                        fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
-                        open_risk=3455.0 + 1750.0).fits(1705.0), True)
-    # Honest about where it stops: a third session of pairs needs $10,365 and
-    # the allocation is $7,469.92. That is the account, not a bug, and the
-    # refusal has to say so rather than look like the old silent one.
-    check("a THIRD consecutive session is refused -- the measured limit of "
-          "this account, not a defect",
-          PB.TierBudget(tier=PB.TIER_CREDIT,
-                        fraction=PB.CREDIT_RISK_FRACTION, bp=bp,
-                        open_risk=6910.0).fits(1750.0), False)
-    debit = PB.TierBudget(tier=PB.TIER_DEBIT, fraction=PB.DEBIT_RISK_FRACTION,
-                          bp=bp, open_risk=six.open_risk(PB.TIER_DEBIT))
-    approx("the debit allocation is 20% of options buying power",
-           debit.allocation, 3734.96, 1e-6)
-    check("the six swings are OVER their own allocation, so no new swing opens",
-          debit.fits(1172.0), False)
-    rwhy = debit.refusal(1172.0)
-    check("...and the refusal names the allocation that ran out",
-          "debit allocation" in rwhy, True)
-    check("...and says the other tier's money is not headroom",
-          "may never spend it" in rwhy, True)
-    check("...and never reads as a hold that a swing could outwait",
-          "first call on the headroom" in rwhy, False)
-
-    # End to end through the proposal path, on the same book.
-    spb.ledger = six
-    meta = spb.assignments.get("META", "swing-atm-hourly")
-    sig = S.Signal(symbol="META", direction="up", reason="up",
-                   session=dt.date(2026, 9, 28),
-                   bar_start=dt.datetime(2026, 9, 28, 10, 30, tzinfo=PB.NY))
-    pr = PB.Proposal(symbol="META", play="swing-atm-hourly")
-    spb._propose_one(meta, pr, {"META": sig}, debit, 0, PB.Arm(),
-                     PB.CycleResult())
-    check("the swing is refused by its own budget", pr.ok, False)
-    check("...naming the debit allocation", "debit allocation" in pr.reason,
-          True)
-    approx("...on a $1,600 structure that priced fine",
-           pr.structure.max_loss, 1600.0, 1e-6)
-    # ...and the same six swings do NOT refuse the income leg any more.
-    spy = spb.assignments.get("SPY", "index-put-credit-spread")
-    pr2 = PB.Proposal(symbol="SPY", play="index-put-credit-spread")
-    try:
-        # Past the allocation it reaches optexec.plan, which needs a live
-        # account. Getting that far IS the result: the budget let it through.
-        spb._propose_one(spy, pr2, {}, credit, 0, PB.Arm(), PB.CycleResult())
-    except AttributeError:
-        pass
-    check("the SPY spread is NOT refused for room, six swings notwithstanding",
-          "of risk needs" in pr2.reason, False)
-    check("...and the board reports each tier's risk separately, because the "
-          "total is the number that hid this",
-          spb.board()["open_risk_by_tier"][PB.TIER_CREDIT], 0.0)
-    approx("...while the debit tier carries all of it",
-           spb.board()["open_risk_by_tier"][PB.TIER_DEBIT], 11185.0, 1e-6)
-    check("...and the board shows the income leg first",
-          [r["priority"] for r in spb.board()["assignments"]][:2], [0, 0])
-    approx("...and the two allocations add up to the unchanged 60% cap",
-           spb.board()["caps"]["credit_risk_fraction"]
-           + spb.board()["caps"]["debit_risk_fraction"], 0.60, 1e-9)
-
     print("\n34. A DRY RUN CANNOT TOUCH THE BROKER OR THE SHARED LEDGER")
     # THE BUG THIS PINS. The dashboard's Preview button builds a Playbook with
     # dry_run=True on the SAME state dir the worker writes, so the two share
@@ -1511,21 +1366,18 @@ def main() -> int:
           "it is really run at", cpb.now().strftime("%H:%M"), "11:00")
     cpb.assignments = P.Assignments(os.path.join(cl_dir, "plays.json"))
     cpb.assignments.seed_owner_set(by="test")
-    cpb.reserve.note("SPY:index-put-credit-spread", max_loss=1760.0,
-                     contracts=10, label="SPY 741/739p x10")
-    cpb.reserve.note("QQQ:index-put-credit-spread", max_loss=1750.0,
-                     contracts=10, label="QQQ 707/705p x10")
-    crows = PB.proposal_order(cpb.assignments.active())
-    # The index spread's entry cutoff is 15:30 ET, so the answer genuinely
-    # changes across the day -- which is the point. WHICH answer comes from
-    # the injected clock and never from when the suite happened to run.
-    for hh, mm, want in ((3, 0, 3510.0), (10, 30, 3510.0), (15, 29, 3510.0),
-                         (15, 31, 0.0), (23, 0, 0.0)):
+    # The index spread's entry window is 10:30-15:30 ET, so the answer
+    # genuinely changes across the day -- which is the point. WHICH answer
+    # comes from the injected clock and never from when the suite ran.
+    # (This used to assert the reservation holds; the capital allocation was
+    # removed at the owner's instruction, so it now reads the entry window,
+    # which is the clock-dependent decision that is left.)
+    spread = P.play("index-put-credit-spread").defaults()
+    for hh, mm, want in ((3, 0, False), (10, 29, False), (10, 30, True),
+                         (15, 29, True), (15, 30, False), (23, 0, False)):
         cpb._clock = at_et(hh, mm)
-        approx("the holds at %02d:%02d ET" % (hh, mm),
-               sum(h["max_loss"]
-                   for h in cpb._outstanding_reservations(crows).values()),
-               want, 1e-6)
+        check("the index spread window at %02d:%02d ET" % (hh, mm),
+              P.in_entry_window(spread, now=cpb.now())[0], want)
     check("...and self.now() is answering from the injected clock",
           cpb.now().strftime("%H:%M"), "23:00")
     cpb._clock = None
