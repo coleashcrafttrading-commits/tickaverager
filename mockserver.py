@@ -60,6 +60,28 @@ Each one is a reviewer's failing input, reproducible in a browser:
   perfstub     optperf.py has not landed, so every calculated figure is a
                dash and the page has to say so once instead of looking empty
   perffail     GET /perf answers 502, for the stranded-overview case
+
+The TRADING HUB's scenarios are listed with the hub fixtures further down,
+because they are a different room with a different discipline: the hub routes
+are not hand-shaped here at all, they are produced by running the REAL `hub.py`
+aggregator over a stub fleet. They are, in one line each:
+
+  hub          the account as it stands: a ladder, two option plays as its
+               PEERS, an unclaimed hand-placed position and a watchlist row
+  hubnew       a brand new account -- must read "nothing yet", never zeroes
+  hubwatch     a ticker with NO strategy on it, carrying real market data
+  hubdouble    one ticker carrying TWO strategies at once
+  hubdrawdown  a book 18% off its peak
+  hubunclaimed a broker position and an option leg no strategy claims
+  hubclash     the ledger says long, the broker says short -- the loud one
+  hubthin      one sample per bucket, so every candle is a doji
+  hubfail      every /api/hub read and write answers 502
+
+Two accounts are served in every scenario -- "Options" (the default) and
+"Test" -- because the bug that started this work was one account's Overview
+looking different from the other's. They go through ONE code path here, so a
+view that renders them differently is the view's bug and it is visible before
+it ships.
 """
 from __future__ import annotations
 
@@ -88,7 +110,10 @@ SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
              # the Plays room, which replaced the board as the landing tab
              "plays", "playsempty", "playsfrozen", "playsnoquote",
              # the Overview room, which is now the landing tab itself
-             "perf", "perfempty", "perfstub", "perffail"]
+             "perf", "perfempty", "perfstub", "perffail",
+             # the trading hub: the strategy-agnostic model (see hub fixtures)
+             "hub", "hubnew", "hubwatch", "hubdouble", "hubdrawdown",
+             "hubunclaimed", "hubclash", "hubthin", "hubfail"]
 
 # ------------------------------------------------------------- plays fixtures
 # The Plays room's routes, faked. Same trap as everywhere else in this file: a
@@ -1393,6 +1418,1221 @@ def board(scen):
     }
 
 
+# ============================================================== hub fixtures
+# GET/POST/DELETE /api/hub/* -- the strategy-agnostic model, faked.
+#
+# THE DISCIPLINE HERE IS DIFFERENT FROM THE REST OF THIS FILE, and stronger.
+# Everywhere above, the SHAPE is typed out by hand and kept honest by comment
+# and by eye. That is what went wrong with `spread_pct` once. For the hub
+# routes the shape is not typed out at all: `hub.py` is stdlib-only at import
+# time (json, logging, math, os, threading, time, pathlib, typing) and every
+# calculation it does is duck-typed off a fleet, so THIS HARNESS RUNS THE REAL
+# AGGREGATOR. What is faked is the INPUT -- a stub fleet, a stub broker, stub
+# engines, stub play positions -- and `hub.portfolio`, `hub.tickers`,
+# `hub.strategies`, `hub.series` and `hub.ticker` then produce the payload
+# themselves, with their own units, their own metric envelopes and their own
+# reasons. A field cannot drift here without drifting in production too.
+#
+# Three seams are not the real code and are named so nobody assumes otherwise:
+#
+#   1. `OptionPlayStrategy` is constructed DIRECTLY with fixture rows instead
+#      of through `hub.option_play_strategies`, because that factory imports
+#      optplaybook, which imports broker. The CLASS is the real one, so its
+#      row, its claims, its realised arithmetic and its per-ticker card are
+#      production code; only the PlayPosition objects it is handed are stubs.
+#   2. `engine` is installed into sys.modules as a shim carrying nothing but
+#      the real `TICKER_DEFAULTS`, lifted out of engine.py's source with `ast`
+#      and never executed, so `LadderStrategy.settings_schema()` renders the
+#      engine's own fields rather than the empty list an ImportError gives.
+#      engine.py itself imports broker, which this file may not.
+#   3. The stub broker's `portfolio_history` and `latest_quotes` invent
+#      numbers. They are generated relative to NOW so the charts look alive,
+#      which means this harness is deliberately clock-dependent -- it is a
+#      browser fixture and not a test, and nothing under `--check` asserts on
+#      an absolute date.
+#
+# NOTHING HERE TOUCHES THE REPO'S state/ DIRECTORY. `hub.add_ticker` and
+# `hub.set_strategy` really do write `tickers.json` and `options/plays.json`,
+# so every scenario gets its own throwaway directory under the OS temp dir,
+# rebuilt from scratch whenever the scenario changes. Pointing the mock at the
+# live `state/` would have it writing the watchlist of a real paper account.
+#
+# --------------------------------------------------------------- scenarios
+#   hub          the account the owner actually has: a ladder on three names,
+#                two option plays as PEERS of it, an unclaimed hand-placed
+#                position, a watchlist-only ticker, and a real drawdown
+#   hubnew       a BRAND NEW account. No ladder, no play, no position, no
+#                journal, no history. Must read "nothing yet" everywhere and
+#                never as a row of zeroes -- a zero is a measurement and this
+#                account has not made one
+#   hubwatch     a ticker with NO strategy attached at all, beside one that
+#                has a ladder. The watchlist row must carry real market data
+#                and still say plainly that nothing trades it
+#   hubdouble    one ticker carrying TWO strategies at once, which is the
+#                whole point of the model and the case a ladder-shaped UI
+#                cannot render
+#   hubdrawdown  a book 18% off its peak, for the drawdown card and chart
+#   hubunclaimed a broker position and an option leg that NO strategy claims
+#   hubclash     the ledger says long and the broker says short: the
+#                `side_disagreement` warning, which must be loud
+#   hubthin      one sample per bucket, so `series` appends its doji note and
+#                the chart has to offer line or bar instead of candles
+#   hubfail      every /api/hub read answers 502, for the stranded-view case
+import ast as _ast
+import math
+import shutil as _shutil
+import sys as _sys
+import tempfile as _tempfile
+from pathlib import Path as _Path
+
+
+def _install_engine_shim() -> None:
+    """Put `TICKER_DEFAULTS` on a module named `engine`, without engine.py.
+
+    `hub.LadderStrategy.settings_schema` does `from engine import
+    TICKER_DEFAULTS`; engine.py imports broker.py, which this file is forbidden
+    to touch. So the literal is parsed out of the source with `ast` -- no code
+    from engine.py runs -- and handed over on a bare module object. The
+    settings pane therefore renders the ladder's REAL fields and real defaults,
+    and gains a new one the day engine.py does.
+    """
+    if "engine" in _sys.modules:
+        return
+    import types
+    defaults = {}
+    try:
+        with open(os.path.join(ROOT, "engine.py"), "r", encoding="utf-8") as fh:
+            src = fh.read()
+        for node in _ast.parse(src).body:
+            tgt = None
+            if isinstance(node, _ast.AnnAssign):
+                tgt = node.target
+            elif isinstance(node, _ast.Assign) and node.targets:
+                tgt = node.targets[0]
+            if isinstance(tgt, _ast.Name) and tgt.id == "TICKER_DEFAULTS":
+                defaults = _ast.literal_eval(node.value)
+                break
+    except Exception as e:                      # a shim that lies is worse
+        print("mock: could not read engine.TICKER_DEFAULTS (%r); the ladder's "
+              "settings schema will be empty" % (e,))
+    mod = types.ModuleType("engine")
+    mod.TICKER_DEFAULTS = defaults
+    mod.__doc__ = ("mockserver shim: the real TICKER_DEFAULTS literal, parsed "
+                   "from engine.py. NOT the engine.")
+    _sys.modules["engine"] = mod
+
+
+_install_engine_shim()
+
+import hub                                     # noqa: E402  (after the shim)
+import optplays as _optplays                   # noqa: E402
+
+# One throwaway state directory per scenario and account. hub really writes
+# tickers.json and options/plays.json, and the repo's own state/ belongs to a
+# live paper account.
+_HUB_TMP = os.path.join(_tempfile.gettempdir(), "tickaverager-mockhub")
+_HUB_DIRS: dict = {}
+
+
+#: (scenario, account) -> the LIVE engines dict, shared by every request.
+#
+# The fleet object is rebuilt per request (see `_hub_ctx`) but its engines must
+# NOT be: `hub.set_strategy` attaches a ladder by calling `fleet.add_ticker`,
+# and with a fresh dict each time that attach vanished before the next GET
+# could see it. The page then showed a ticker with no strategy on it and the
+# DELETE that should have been refused with 409 succeeded -- two wrong
+# behaviours a UI agent would have coded around, believing them to be the
+# contract.
+_HUB_ENGINES: dict = {}
+
+
+def _hub_engines(scen: str, acct: str, seed) -> dict:
+    key = "%s.%s" % (scen, acct)
+    eng = _HUB_ENGINES.get(key)
+    if eng is None:
+        eng = _HUB_ENGINES[key] = dict(seed)
+    return eng
+
+
+def _hub_state_dir(scen: str, acct: str) -> _Path:
+    key = "%s.%s" % (scen, acct)
+    d = _HUB_DIRS.get(key)
+    if d is None:
+        d = _Path(_HUB_TMP) / key
+        _shutil.rmtree(d, ignore_errors=True)
+        (d / "options").mkdir(parents=True, exist_ok=True)
+        _HUB_DIRS[key] = d
+    return d
+
+
+def hub_reset(scen: str = "") -> None:
+    """Forget every scratch directory, so a scenario switch starts clean.
+
+    Without this, a ticker added through the mock's own POST survives into the
+    next scenario and the "brand new account" case is no longer brand new --
+    the one scenario whose entire value is that it has nothing in it.
+    """
+    for key in [k for k in list(_HUB_DIRS) if not scen or k.startswith(scen + ".")]:
+        _shutil.rmtree(_HUB_DIRS.pop(key), ignore_errors=True)
+    for key in [k for k in list(_HUB_ENGINES) if not scen or k.startswith(scen + ".")]:
+        _HUB_ENGINES.pop(key, None)
+    hub._REGISTRIES.clear()
+    hub._SERIES_CACHE.clear()
+    hub._MARKETS.clear()
+
+
+# ----------------------------------------------------------- the stub fleet
+class _MockLedger:
+    """`e.ledger`: what hub reads off a lots ledger and nothing more.
+
+    `signed_shares` is SIGNED (negative on a short ladder) while the real
+    `Ledger.shares` is a magnitude. hub only ever reads the signed one, and
+    getting that wrong inverts a short book, so the stub carries only it.
+    """
+
+    def __init__(self, signed_shares, costs):
+        self.signed_shares = signed_shares
+        self.open_lots = [type("Lot", (), {"cost": c})() for c in costs]
+
+
+class _MockEngine:
+    """`fleet.engines[SYM]`: the ladder, as hub reads it."""
+
+    def __init__(self, sym, *, shares=0.0, costs=(), running=True,
+                 dry_run=True, halted=False, lots=0, max_lots=100000,
+                 avg=None, realized_all=0.0, realized_today=0.0,
+                 unrealized=None, in_sync=True, closed=0, preset="",
+                 block="", take_profit=0.10, state="running"):
+        self.symbol = sym
+        self.ledger = _MockLedger(shares, list(costs))
+        self.running = running
+        self.halted = halted
+        self.cfg = {"dry_run": dry_run, "preset": preset,
+                    "symbol": sym, "max_lots": max_lots}
+        self._s = {
+            "state": state, "running": running, "dry_run": dry_run,
+            "halted": halted, "lot_count": lots, "max_lots": max_lots,
+            "shares": abs(shares), "avg_price": avg,
+            "cost_basis": round(sum(costs), 2) if costs else 0.0,
+            "realized_all": realized_all, "realized_today": realized_today,
+            "unrealized": unrealized, "in_sync": in_sync,
+            "next_add_at": None, "take_profit": take_profit,
+            "block_reason": block, "closed_count": closed,
+        }
+
+    def summary(self):
+        return dict(self._s)
+
+    def update_config(self, patch):
+        self.cfg.update(patch)
+        return dict(self.cfg)
+
+
+class _MockBroker:
+    """The two calls hub makes on a broker, answered from literals.
+
+    `portfolio_history` is Alpaca's own shape -- parallel `timestamp` and
+    `equity` arrays plus a `base_value` -- because `hub._equity_history` reads
+    those three keys and nothing else. Handing it a different shape here would
+    prove a chart works against data the real route never sends.
+    """
+
+    def __init__(self, quotes, kind, base):
+        self._quotes = quotes
+        self._kind = kind                    # which story the equity tells
+        self._base = base
+
+    def latest_quotes(self, syms):
+        return {s: dict(self._quotes[s]) for s in syms if s in self._quotes}
+
+    def portfolio_history(self, period, timeframe, extended=True):
+        """A DIFFERENT series per window, which is what Alpaca actually does.
+
+        Serving one fixed curve for every period was this harness's own first
+        bug: `hub.series` buckets by timeframe, so a 6-hour curve came back as
+        ONE candle at tf=1M and every chart above a day looked broken. A
+        reviewer would have read that as a charting bug and gone hunting in
+        the view. The window now decides the span and the sample step, and the
+        page gets a real number of candles at every timeframe.
+        """
+        pts, base = _curve_for(self._kind, period, timeframe)
+        if not pts:
+            return {"timestamp": [], "equity": [], "base_value": None}
+        return {"timestamp": [t for t, _v in pts],
+                "equity": [v for _t, v in pts],
+                "base_value": base if base is not None else self._base,
+                "timeframe": timeframe, "period": period}
+
+
+class _MockFleet:
+    """Every attribute hub reaches for on a Fleet, and not one more.
+
+    A plain object rather than a Fleet subclass on purpose: the moment this
+    imports fleet.py it imports broker.py, and this file may not. If hub grows
+    a read the stub does not answer, hub's own getattr defaults take over and
+    the page shows a dash with a reason -- the correct, visible failure rather
+    than a traceback.
+    """
+
+    def __init__(self, *, account_id, label, state_dir, account, positions,
+                 engines, quotes, curve_kind, base, realized, journal_path,
+                 made_today=None, base_value=None, assets=()):
+        self.account_id = account_id
+        self.label = label
+        self.state_dir = state_dir
+        self.account = account
+        self.positions = positions
+        # NOT a copy: this dict is shared with `_HUB_ENGINES` on purpose, so
+        # an attach made through one request is there for the next one.
+        self.engines = engines
+        # The fleet polls quotes for LADDER symbols only; hub.Market is what
+        # covers the rest, and leaving this empty is what forces the code path
+        # a strategy-less ticker actually takes.
+        self.quotes = {}
+        self.snap_at = time.time()
+        self.broker = _MockBroker(quotes, curve_kind, base)
+        self.journal_path = journal_path
+        self._assets = list(assets)
+        self._realized = realized
+        self._made_today = made_today
+        self._base_value = base_value
+
+    def symbols(self):
+        return sorted(self.engines)
+
+    def realized_total(self):
+        return self._realized
+
+    def made_today(self):
+        """Alpaca equity less YESTERDAY'S CLOSE. None when there is no
+        yesterday to compare against, which is a brand new account's real
+        answer and must not be softened to 0.00 -- a zero there reads as a
+        flat day rather than as an account that has not had one yet."""
+        return self._made_today
+
+    def base_value(self):
+        """Alpaca's base value for the account, i.e. since inception. Falsy
+        means hub's `pl.total` comes back as a dash with its reason, which is
+        the correct rendering and not an error."""
+        return self._base_value
+
+    def bars_history_multi(self, syms, timeframe, start, adjustment="split"):
+        return {s: _daily_bars(s) for s in syms if s in _HUB_BAR_SEED}
+
+    # -- the two audited entry points hub.set_strategy delegates to ----------
+    def add_ticker(self, sym, patch=None):
+        """Adds a STOPPED, DRY-RUN ladder, exactly as the real one does.
+
+        `hub.set_strategy` promises "attaching never arms". If this stub came
+        back running and armed, a UI built against it would ship a button that
+        arms on attach and nobody would notice until it was live.
+        """
+        cfg = dict(patch or {})
+        self.engines[sym] = _MockEngine(sym, running=False, dry_run=True,
+                                        max_lots=int(cfg.get("max_lots") or 20),
+                                        state="stopped")
+        return {"ok": True, "symbol": sym, "state": "stopped"}
+
+    def remove_ticker(self, sym, force=False):
+        e = self.engines.get(sym)
+        if e is not None and e.ledger.open_lots and not force:
+            raise ValueError("%s still holds %d open lot(s). Close them or "
+                             "pass force." % (sym, len(e.ledger.open_lots)))
+        self.engines.pop(sym, None)
+        return {"ok": True, "removed": sym, "lots_file_kept": True}
+
+
+# ------------------------------------------------------- the play positions
+class _PlayPos:
+    """One `optplaybook.PlayPosition`, as `hub.OptionPlayStrategy` reads it.
+
+    `entry_net` is + for a CREDIT and - for a DEBIT, and `close_net` carries
+    the opposite side of that same convention, so hub SUMS the pair rather
+    than subtracting. The fixtures keep that convention; inverting it here
+    would turn every winner on screen into a loser and the page would still
+    look entirely plausible.
+    """
+
+    def __init__(self, pid, symbol, *, legs, contracts=1, is_open=True,
+                 entry_net=None, close_net=None, pl=None, pl_pct=None,
+                 mark=None, state="open", kind="credit_spread", expiry="",
+                 is_credit=True, requested=0, entry_at="", closed_at=""):
+        # `entry_at` / `closed_at` are what `hub._exposure_samples` walks to
+        # build the exposure curve. Leaving them off is not neutral: the play
+        # then contributes nothing to that chart and the line silently shows
+        # the ladder alone while the legend claims both.
+        self.entry_at = entry_at
+        self.closed_at = closed_at
+        self.id = pid
+        self.symbol = symbol
+        self.legs = legs
+        self.contracts = contracts
+        self.is_open = is_open
+        self.entry_net = entry_net
+        self.close_net = close_net
+        self.pl = pl
+        self.pl_pct = pl_pct
+        self.mark = mark
+        self.state = state
+        self.kind = kind
+        self.expiry = expiry
+        self.is_credit = is_credit
+        self.requested = requested
+
+
+def _leg(occ, side, strike, ratio=1):
+    return {"symbol": occ, "side": side, "strike": strike, "ratio": ratio}
+
+
+def _ago_iso(days, hours=14):
+    """An ISO timestamp N days back, relative to NOW. See seam note 3: this
+    harness is deliberately clock-relative so the charts look alive."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                         time.gmtime(time.time() - days * 86400 + hours * 3600))
+
+
+def _play_strategy(ctx, pid, rows, assigned):
+    """The REAL hub.OptionPlayStrategy over fixture rows. See seam note 1."""
+    p = _optplays.PLAYS.get(pid)
+    return hub.OptionPlayStrategy(ctx, pid, (p.label if p else pid),
+                                  rows, assigned, "mock: play_ledger.jsonl")
+
+
+# ------------------------------------------------------------ market fixtures
+# bid/ask in DOLLARS. hub._market_block computes spread_pct as
+# `round(spread / mid, 6)` -- a FRACTION, optdata.py's unit, the one this
+# file's header exists because of. Nothing here pre-computes a percentage.
+_HUB_QUOTES = {
+    "RAM":  {"bp": 12.84, "ap": 12.87},
+    "SPY":  {"bp": 641.18, "ap": 641.22},
+    "QQQ":  {"bp": 588.40, "ap": 588.49},
+    "NVDA": {"bp": 174.02, "ap": 174.06},
+    "TSLA": {"bp": 411.55, "ap": 411.74},
+    "MSTX": {"bp": 7.41, "ap": 7.49},
+    "AAPL": {"bp": 259.11, "ap": 259.14},
+    # a name with NO two-sided quote: its bid, ask and spread must render as
+    # dashes carrying a reason, never as 0.00
+    "ZZZQ": {},
+}
+_HUB_BAR_SEED = {"RAM": 12.5, "SPY": 630.0, "QQQ": 575.0, "NVDA": 168.0,
+                 "TSLA": 395.0, "MSTX": 8.2, "AAPL": 252.0}
+# ZZZQ is deliberately absent from the bar seed too, so `market.why`,
+# `day_range`, `year_range`, `volume` and `adv` all take their unmeasured path
+# at once. Every dashboard needs one row like this on screen before it ships.
+
+_HUB_NAMES = [
+    {"symbol": "RAM", "name": "Aries I Acquisition Corp"},
+    {"symbol": "SPY", "name": "SPDR S&P 500 ETF Trust"},
+    {"symbol": "QQQ", "name": "Invesco QQQ Trust"},
+    {"symbol": "NVDA", "name": "NVIDIA Corporation"},
+    {"symbol": "TSLA", "name": "Tesla, Inc."},
+    {"symbol": "MSTX", "name": "Defiance Daily Target 2X Long MSTR ETF"},
+    {"symbol": "AAPL", "name": "Apple Inc."},
+    # ZZZQ is not here either: `hub._asset_name` must then answer None and the
+    # table has to render a symbol with no company name behind it.
+]
+
+
+def _daily_bars(sym, days=260):
+    """260 sessions of deterministic daily OHLCV for one symbol.
+
+    Deterministic from the symbol rather than random: a chart that redraws
+    differently on every poll makes a rendering bug and a data change look the
+    same. The walk is a bounded pair of sines seeded off the symbol, so the
+    52-week range and the ADV computed from these bars are real numbers over
+    real bars and not literals typed beside them.
+    """
+    base = _HUB_BAR_SEED.get(sym)
+    if base is None:
+        return []
+    seed = sum(ord(c) for c in sym)
+    day = 86400
+    t0 = (int(time.time()) // day) * day - days * day
+    out = []
+    for i in range(days):
+        w = (math.sin((i + seed) / 17.0) * 0.06
+             + math.sin((i + seed) / 61.0) * 0.11)
+        c = base * (1.0 + w + i * 0.0006)
+        h = c * (1.0 + 0.004 + abs(math.sin((i + seed) / 7.0)) * 0.006)
+        lo = c * (1.0 - 0.004 - abs(math.cos((i + seed) / 11.0)) * 0.006)
+        o = (h + lo) / 2.0
+        v = 1_000_000 + (seed * 137 + i * 911) % 4_000_000
+        out.append({"t": t0 + i * day, "o": round(o, 2), "h": round(h, 2),
+                    "l": round(lo, 2), "c": round(c, 2), "v": float(v)})
+    return out
+
+
+# Alpaca's `period` -> how far back the window reaches, and `timeframe` ->
+# how often it samples. These are the same two knobs hub.TIMEFRAMES asks for,
+# read back the other way round, so every tf the UI can select gets a series
+# with a sensible number of points in it rather than one lonely candle.
+_PERIOD_SPAN = {"1D": 6.5 * 3600, "1W": 7 * 86400, "1M": 31 * 86400,
+                "3M": 93 * 86400, "6M": 186 * 86400, "1A": 366 * 86400,
+                "all": 900 * 86400}
+_GRAN_STEP = {"1Min": 60, "5Min": 300, "15Min": 900, "1H": 3600, "1D": 86400}
+_MAX_POINTS = 1500          # a harness, not a load test
+
+
+def _curve_for(kind, period, timeframe):
+    """(epoch, equity) pairs for ONE window, in Alpaca's own shape.
+
+    `kind` picks the story: a rising book, a book 18% off its peak, an account
+    with no history at all, or a curve so sparse that every bucket holds one
+    sample -- the case where a candle is a doji and `hub.series` says so in
+    `reason`. The thin case is built by sampling at exactly hub's own bucket
+    width for the window, so it is one-per-bucket by construction rather than
+    by a number that happens to work out today.
+    """
+    if kind == "empty":
+        return [], None
+    span = _PERIOD_SPAN.get(period, 31 * 86400)
+    step = _GRAN_STEP.get(timeframe, 3600)
+    if kind == "thin":
+        # hub buckets by tf, so sample at the bucket width for whichever tf
+        # asked for this (period, timeframe) pair
+        for _tf, (per, gran, bucket) in hub.TIMEFRAMES.items():
+            if per == period and gran == timeframe:
+                step = bucket
+                break
+    n = int(span / step)
+    n = max(2, min(n, _MAX_POINTS))
+    step = span / n
+    now = int(time.time())
+    seed = sum(ord(c) for c in str(period) + str(timeframe))
+    pts = []
+    for i in range(n + 1):
+        t = now - (n - i) * step
+        frac = i / float(n)
+        if kind == "drawdown":
+            knee = 0.62
+            if frac < knee:
+                v = 50000 + 14000.0 * (frac / knee)
+            else:
+                k = (frac - knee) / (1.0 - knee)
+                v = 64000 * (1.0 - 0.18 * k)
+            v += 180 * math.sin((i + seed) / 9.0)
+        elif kind == "thin":
+            v = 52000 + 900 * math.sin((i + seed) / 3.0) + 40.0 * i
+        else:
+            v = (96000 + 46000.0 * frac
+                 + 520 * math.sin((i + seed) / 23.0)
+                 + 180 * math.sin((i + seed) / 5.0))
+        pts.append((float(int(t)), round(v, 2)))
+    return pts, pts[0][1]
+
+
+# ------------------------------------------------------------ journal fixture
+def _journal_rows(profile="rich"):
+    """Closed-lot rows for the LADDER only, which is all the journal holds.
+
+    Two rows here are not trades and must not be counted as trades: one
+    carries `inferred: true` (a ledger correction the two-way reconciliation
+    writes, which `journal.is_bookkeeping` drops) and one carries
+    `dry_run: true`. They are in the fixture precisely so the trade count on
+    screen can be checked against a file that contains both.
+    """
+    if profile == "empty":
+        return []
+    now = time.time()
+
+    def ts(days_ago, h=15):
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                             time.gmtime(now - days_ago * 86400 + h * 3600))
+
+    rows = []
+    # Every closed lot is written as the PAIR the engine writes: an `open`
+    # carrying shares and entry_price, then a `close` carrying realized.
+    # `hub._exposure_samples` walks the opens to know what was held WHEN, so a
+    # journal of closes alone leaves the exposure chart empty while the P/L
+    # chart looks full -- which reads as a broken chart rather than as a
+    # fixture that never recorded the other half.
+    book = [("RAM", 44, 41, 18.55, 12.05), ("RAM", 36, 33, 22.10, 12.30),
+            ("RAM", 29, 27, -14.20, 13.05), ("SPY", 25, 22, 260.40, 618.40),
+            ("SPY", 19, 16, 118.75, 627.10), ("MSTX", 14, 12, -63.10, 8.60),
+            ("MSTX", 10, 9, 44.90, 7.95), ("RAM", 8, 6, 31.05, 12.44),
+            ("SPY", 5, 3, 96.30, 634.90), ("RAM", 2, 1, 12.40, 12.66)]
+    for i, (sym, opened, closed, pl, px) in enumerate(book):
+        lot = "L%03d" % i
+        shares = 100 if sym != "SPY" else 10
+        rows.append({"ts": ts(opened), "event": "open", "symbol": sym,
+                     "shares": shares, "entry_price": px, "lot_id": lot,
+                     "dry_run": False})
+        rows.append({"ts": ts(closed), "event": "close", "symbol": sym,
+                     "realized": pl, "shares": shares, "qty": shares,
+                     "entry_price": px, "price": round(px * 1.01, 2),
+                     "lot_id": lot, "dry_run": False})
+    # two lots still OPEN, so the exposure curve does not fall to zero at the
+    # right-hand edge while the positions table plainly shows shares held
+    rows.append({"ts": ts(20), "event": "open", "symbol": "RAM",
+                 "shares": 1800, "entry_price": 12.72, "lot_id": "L500",
+                 "dry_run": False})
+    rows.append({"ts": ts(7), "event": "open", "symbol": "MSTX",
+                 "shares": 600, "entry_price": 8.21, "lot_id": "L501",
+                 "dry_run": False})
+    rows.append({"ts": ts(2), "event": "close", "symbol": "RAM",
+                 "realized": 0.0, "qty": 100, "inferred": True,
+                 "lot_id": "L900", "dry_run": False})
+    rows.append({"ts": ts(2, 16), "event": "close", "symbol": "SPY",
+                 "realized": 999.0, "qty": 100, "lot_id": "L901",
+                 "dry_run": True})
+    rows.sort(key=lambda r: r["ts"])
+    return rows
+
+
+def _write_journal(path, rows):
+    """A real journal file, so `journal.load` is the code that reads it.
+
+    hub's per-ticker realised P/L walks the journal through journal.py -- its
+    `is_bookkeeping` filter included -- so the fixture is written to disk as
+    JSONL and parsed back, rather than handed over as a list of dicts that
+    would skip the parser the real route depends on.
+    """
+    with open(path, "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + "\n")
+    return path
+
+
+# ---------------------------------------------------------- broker positions
+# Alpaca's own position shape, the fields hub reads. `qty` arrives SIGNED for
+# equities and UNSIGNED for options -- the direction on an option lives in
+# `side` -- and `hub.signed_qty` honours `side` over `qty` for exactly that
+# reason. The fixtures keep both conventions so the two paths are both walked.
+def _pos(sym, qty, price, avg, upl, *, side=None, cls="us_equity", chg=None):
+    side = side or ("long" if qty >= 0 else "short")
+    return {"symbol": sym, "qty": qty, "side": side, "asset_class": cls,
+            "current_price": price, "avg_entry_price": avg,
+            "market_value": round(abs(qty) * price * (1 if qty >= 0 else -1), 2),
+            "unrealized_pl": upl, "change_today": chg}
+
+
+def _opt(occ, contracts, price, upl, side="long"):
+    """One option position. `qty` is contracts and UNSIGNED, as Alpaca sends
+    it; `side` carries the direction. Market value is per-contract price times
+    100 times contracts, signed by side."""
+    sgn_ = -1 if side == "short" else 1
+    return {"symbol": occ, "qty": contracts, "side": side,
+            "asset_class": "us_option", "current_price": price,
+            "avg_entry_price": price,
+            "market_value": round(sgn_ * contracts * price * 100.0, 2),
+            "unrealized_pl": upl}
+
+
+# The two accounts. The owner's complaint that started this work was that the
+# Overview looked one way on "Options" and another on "Test", so the harness
+# carries BOTH and serves them through one code path: if a view renders them
+# differently, that is the view's bug and it is visible here before it ships.
+HUB_ACCOUNTS = [
+    {"id": "PA3ILNUY5E4F", "label": "Options", "paper": True,
+     "is_default": True, "account_number": "PA3ILNUY5E4F"},
+    {"id": "PA7TESTACCT01", "label": "Test", "paper": True,
+     "is_default": False, "account_number": "PA7TESTACCT01"},
+]
+HUB_DEFAULT_ACCOUNT = HUB_ACCOUNTS[0]["id"]
+
+# OCC contracts used below. Written out rather than built by string maths so a
+# typo is visible: `optsym.parse` is what hub uses to find the underlying, and
+# a malformed symbol would silently become its own "ticker" in the table.
+_SPY_SHORT_PUT = "SPY261016P00625000"
+_SPY_LONG_PUT = "SPY261016P00620000"
+_QQQ_LONG_CALL = "QQQ261016C00590000"
+_AAPL_ORPHAN = "AAPL261016C00260000"
+_TSLA_UNCLAIMED = "TSLA261016C00420000"
+
+
+def _acct_block(equity, cash, long_mv, short_mv=0.0):
+    """The Alpaca account object, the four fields hub's portfolio reads.
+
+    THE FIXTURE MUST RECONCILE WITH ITSELF. cash + long + short IS equity on a
+    real account, and when this block said otherwise hub's new equity_residual
+    warning fired on every single scenario -- correctly, but drowning the one
+    case where it means something. An explicit `equity` still wins, because a
+    scenario that DELIBERATELY contradicts the book is how that warning gets
+    tested; it just has to be chosen rather than arrived at by accident.
+    """
+    implied = round(cash + long_mv + short_mv, 2)
+    if equity is None:
+        equity = implied
+    return {"equity": equity, "cash": cash, "long_market_value": long_mv,
+            "short_market_value": short_mv, "buying_power": cash * 2,
+            "status": "ACTIVE"}
+
+
+def _rich_engines():
+    """Three ladders: one armed and in profit, one dry-run, one HALTED.
+
+    A halted ladder is in the fixture on purpose. `state()` returns "halted"
+    for the whole strategy when any engine is, and a UI that only ever sees
+    the happy path renders that pill wrong the first time it matters.
+    """
+    return {
+        "RAM": _MockEngine("RAM", shares=1800.0,
+                           costs=[2310.0, 2280.0, 2266.5, 2242.0],
+                           running=True, dry_run=False, lots=4, max_lots=40,
+                           avg=12.72, realized_all=2974.23, realized_today=43.45,
+                           unrealized=216.0, closed=68, preset="steady",
+                           state="running"),
+        "MSTX": _MockEngine("MSTX", shares=600.0, costs=[4920.0, 4806.0],
+                            running=True, dry_run=True, lots=2, max_lots=25,
+                            avg=8.21, realized_all=-18.20, realized_today=0.0,
+                            unrealized=-234.0, closed=11, preset="scout",
+                            state="running"),
+        "SPY": _MockEngine("SPY", shares=0.0, costs=[], running=False,
+                           dry_run=True, halted=True, lots=0, max_lots=10,
+                           realized_all=475.45, closed=9, state="halted",
+                           block="the ledger and the broker disagree on SPY"),
+    }
+
+
+def _rich_plays(ctx, store_dir):
+    """Two assigned plays plus one ADOPTED orphan, all as PEERS of the ladder.
+
+    The orphan matters: a broker option position the ledger did not open is
+    adopted as MONITORED, never closed for profit or loss, and `state()`
+    answers "adopted" for it. A dashboard that only knows live/idle/off has
+    nowhere to put a real position that is on the account right now.
+    """
+    store = _optplays.Assignments(_Path(store_dir) / "options" / "plays.json")
+    spy = _optplays.Assignment(symbol="SPY", play="index-put-credit-spread",
+                               enabled=True, added_by="mock")
+    qqq = _optplays.Assignment(symbol="QQQ", play="swing-atm-hourly",
+                               enabled=False, added_by="mock")
+    for a in (spy, qqq):
+        try:
+            store.assign(a.symbol, a.play, enabled=a.enabled, by="mock")
+        except Exception:
+            pass                       # the store is a convenience, not truth
+    pcs_rows = [
+        # OPEN, at a profit. entry_net is + because it is a CREDIT.
+        _PlayPos("p-1001", "SPY", contracts=2, entry_net=1.35, pl=118.0,
+                 pl_pct=0.437, mark=0.76, expiry="2026-10-16",
+                 is_credit=True, kind="put_credit_spread",
+                 entry_at=_ago_iso(11),
+                 legs=[_leg(_SPY_SHORT_PUT, "sell", 625.0),
+                       _leg(_SPY_LONG_PUT, "buy", 620.0)]),
+        # CLOSED and won. close_net is the opposite side of the same
+        # convention, so hub SUMS the pair: (1.10 + -0.32) * 100 * 3 = 234.00
+        _PlayPos("p-0990", "SPY", contracts=3, is_open=False, entry_net=1.10,
+                 close_net=-0.32, expiry="2026-09-18", is_credit=True,
+                 kind="put_credit_spread", state="closed",
+                 entry_at=_ago_iso(38), closed_at=_ago_iso(19),
+                 legs=[_leg("SPY260918P00615000", "sell", 615.0),
+                       _leg("SPY260918P00610000", "buy", 610.0)]),
+        # CLOSED and lost: (0.95 + -1.80) * 100 * 1 = -85.00
+        _PlayPos("p-0975", "QQQ", contracts=1, is_open=False, entry_net=0.95,
+                 close_net=-1.80, expiry="2026-09-18", is_credit=True,
+                 kind="put_credit_spread", state="closed",
+                 entry_at=_ago_iso(34), closed_at=_ago_iso(16),
+                 legs=[_leg("QQQ260918P00560000", "sell", 560.0),
+                       _leg("QQQ260918P00555000", "buy", 555.0)]),
+    ]
+    swing_rows = [
+        # OPEN with NO MARK. `pl` is None, so hub's open_pl comes back as a
+        # dash with "1 open position(s) have no mark", and the page must
+        # render that rather than 0.00 -- a different fact entirely.
+        _PlayPos("p-1010", "QQQ", contracts=1, entry_net=-4.20, pl=None,
+                 mark=None, expiry="2026-10-16", is_credit=False,
+                 kind="long_call", entry_at=_ago_iso(5),
+                 legs=[_leg(_QQQ_LONG_CALL, "buy", 590.0)]),
+    ]
+    orphan_rows = [
+        _PlayPos("p-adopt-1", "AAPL", contracts=1, entry_net=-3.05, pl=62.0,
+                 pl_pct=0.203, mark=3.67, expiry="2026-10-16",
+                 is_credit=False, kind="long_call", state="monitored",
+                 entry_at=_ago_iso(9),
+                 legs=[_leg(_AAPL_ORPHAN, "buy", 260.0)]),
+    ]
+    return [
+        _play_strategy(ctx, "index-put-credit-spread", pcs_rows, [spy]),
+        _play_strategy(ctx, "swing-atm-hourly", swing_rows + orphan_rows, [qqq]),
+    ]
+
+
+def _rich_positions():
+    """The broker book: shares, option legs, and one position nobody claims.
+
+    TSLA is held and no strategy owns it. That bucket is not an error state --
+    the owner hand-places trades on this account and Glenn's stack runs on it
+    too -- so it has to have a home on the page rather than quietly inflating
+    or quietly vanishing from the totals.
+    """
+    shares = {
+        "RAM": _pos("RAM", 1800, 12.86, 12.72, 252.0, chg=0.0121),
+        "MSTX": _pos("MSTX", 600, 7.45, 8.21, -456.0, chg=-0.0284),
+        # held at the broker, claimed by nothing
+        "TSLA": _pos("TSLA", 150, 411.64, 402.10, 1431.0, chg=0.0067),
+    }
+    opts = [
+        _opt(_SPY_SHORT_PUT, 2, 0.81, 108.0, side="short"),
+        _opt(_SPY_LONG_PUT, 2, 0.43, 10.0, side="long"),
+        _opt(_QQQ_LONG_CALL, 1, 3.90, -30.0, side="long"),
+        _opt(_AAPL_ORPHAN, 1, 3.67, 62.0, side="long"),
+    ]
+    return shares, opts
+
+
+# ------------------------------------------------------------ scenario tables
+def _hub_profile(scen, acct):
+    """Everything one (scenario, account) pair is: the whole fixture in one
+    dict, so a scenario is readable top to bottom instead of assembled from
+    branches scattered through the builders."""
+    test_acct = acct != HUB_DEFAULT_ACCOUNT
+    shares, opts = _rich_positions()
+    engines = _rich_engines()
+
+    if scen == "hubnew":
+        # Nothing. Not zero -- NOTHING. Every number on this page must come
+        # back as a dash carrying its reason, and the page must read "nothing
+        # yet". A row of 0.00s here is the failure this scenario exists to
+        # catch: it looks like a flat day rather than an empty account.
+        # The equity is REAL (the account is funded) and nothing else is.
+        # Zeroing the equity too would make this the "Alpaca never answered"
+        # case, which is a different screen: here the broker answered and the
+        # answer is that nothing has happened yet.
+        return {"engines": {}, "shares": {}, "opts": [], "plays": "none",
+                "curve": "empty", "journal": "empty", "watch": [],
+                "account": _acct_block(100000.00, 100000.00, 0.0),
+                "made_today": None, "base_value": None,
+                "realized": None}
+
+    if scen == "hubwatch":
+        # One ladder, and two tickers nobody trades. ZZZQ has no quote and no
+        # bars either, so the watchlist row is a full page of dashes with
+        # reasons -- the hardest row to render and the one most likely to be
+        # skipped until a real symbol goes dark.
+        return {"engines": {"RAM": engines["RAM"]},
+                "shares": {"RAM": shares["RAM"]}, "opts": [], "plays": "none",
+                "curve": "rich", "journal": "rich",
+                "watch": ["NVDA", "ZZZQ"],
+                "account": _acct_block(None, 71240.10, 23150.00),
+                "made_today": 184.20, "base_value": 95000.00,
+                "realized": 2974.23}
+
+    if scen == "hubdouble":
+        # SPY carries the ladder AND the credit spread at once. Two strategy
+        # cards on one ticker, two settings panes, two sets of settings, one
+        # symbol -- the case a ladder-shaped page structurally cannot draw.
+        eng = {"SPY": _MockEngine("SPY", shares=200.0, costs=[64118.0],
+                                  running=True, dry_run=False, lots=1,
+                                  max_lots=6, avg=640.59, realized_all=475.45,
+                                  realized_today=96.30, unrealized=88.0,
+                                  closed=9, preset="index", state="running")}
+        return {"engines": eng,
+                "shares": {"SPY": _pos("SPY", 200, 641.20, 640.59, 122.0,
+                                       chg=0.0032)},
+                "opts": [_opt(_SPY_SHORT_PUT, 2, 0.81, 108.0, side="short"),
+                         _opt(_SPY_LONG_PUT, 2, 0.43, 10.0, side="long")],
+                "plays": "spy-only", "curve": "rich", "journal": "rich",
+                "watch": [],
+                "account": _acct_block(None, 84500.00, 128420.00),
+                "made_today": 218.30, "base_value": 200000.00,
+                "realized": 475.45}
+
+    if scen == "hubdrawdown":
+        return {"engines": engines, "shares": shares, "opts": opts,
+                "plays": "rich", "curve": "drawdown", "journal": "rich",
+                "watch": ["NVDA"],
+                "account": _acct_block(None, 19880.00, 31460.22),
+                "made_today": -812.44, "base_value": 60000.00,
+                "realized": 2974.23}
+
+    if scen == "hubunclaimed":
+        # A second unclaimed thing, and an OPTION one: hub keys option claims
+        # by CONTRACT, so a loose leg belongs in the unclaimed bucket beside
+        # the loose shares and not folded into whichever play is nearest.
+        return {"engines": {"RAM": engines["RAM"]},
+                "shares": {"RAM": shares["RAM"], "TSLA": shares["TSLA"],
+                           "QQQ": _pos("QQQ", 90, 588.45, 571.20, 1552.50,
+                                       chg=0.0041)},
+                "opts": [_opt(_TSLA_UNCLAIMED, 3, 5.15, -210.0, side="long")],
+                "plays": "none", "curve": "rich", "journal": "rich",
+                "watch": [],
+                "account": _acct_block(142900.00, 44100.00, 98800.00),
+                "made_today": 96.10, "base_value": 130000.00,
+                "realized": 2974.23}
+
+    if scen == "hubclash":
+        # THE LOUD ONE. The lots ledger says the ladder is LONG 1800 RAM and
+        # the broker says the account is SHORT 1800. These are not a rounding
+        # difference and netting them would report a position nobody holds, so
+        # hub raises `side_disagreement` and the page has to carry it where it
+        # cannot be missed.
+        return {"engines": {"RAM": engines["RAM"]},
+                "shares": {"RAM": _pos("RAM", -1800, 12.86, 12.72, -252.0,
+                                       side="short", chg=0.0121)},
+                "opts": [], "plays": "none", "curve": "rich",
+                "journal": "rich", "watch": [],
+                "account": _acct_block(98420.55, 121400.00, 0.0,
+                                       short_mv=-23148.00),
+                "made_today": 12.00, "base_value": 95000.00,
+                "realized": 2974.23}
+
+    if scen == "hubthin":
+        return {"engines": {"RAM": engines["RAM"]},
+                "shares": {"RAM": shares["RAM"]}, "opts": [], "plays": "none",
+                "curve": "thin", "journal": "rich", "watch": ["NVDA"],
+                "account": _acct_block(52400.00, 29250.00, 23150.00),
+                "made_today": 41.10, "base_value": 50000.00,
+                "realized": 2974.23}
+
+    # "hub": the account as it actually stands. The Test account is the SAME
+    # profile with the options book taken off it and a smaller ladder, because
+    # the bug that started this work was two accounts rendering differently --
+    # the harness has to be able to show a real difference in CONTENT while
+    # proving there is none in LAYOUT.
+    if test_acct:
+        return {"engines": {"RAM": engines["RAM"]},
+                "shares": {"RAM": shares["RAM"]}, "opts": [], "plays": "none",
+                "curve": "rich", "journal": "rich", "watch": ["SPY"],
+                "account": _acct_block(31420.18, 8260.44, 23150.00),
+                # base_value deliberately absent on the Test account, so ONE
+                # account on screen has `pl.total` as a dash with a reason
+                # while the other has a number. Two accounts that always agree
+                # never prove the unmeasured path renders.
+                "made_today": -44.90, "base_value": None,
+                "realized": 2974.23}
+    return {"engines": engines, "shares": shares, "opts": opts,
+            "plays": "rich", "curve": "rich", "journal": "rich",
+            "watch": ["NVDA", "ZZZQ"],
+            "account": _acct_block(146880.44, 41520.30, 105360.14),
+            "made_today": 612.85, "base_value": 125000.00,
+            "realized": 2974.23}
+
+
+def _hub_ctx(scen, acct):
+    """One request's worth of hub context: a stub fleet, a scratch state dir,
+    and the provider list swapped for this scenario's strategies.
+
+    A FRESH FLEET PER REQUEST on purpose. hub caches its equity history and its
+    Market against the fleet OBJECT, so a new one per call means every poll
+    re-reads the fixture and a scenario switch is visible immediately -- the
+    opposite of what you want in production and exactly what you want in a
+    harness someone is clicking through.
+    """
+    prof = _hub_profile(scen, acct)
+    sdir = _hub_state_dir(scen, acct)
+    jpath = sdir / "journal.jsonl"
+    if not jpath.exists():
+        _write_journal(jpath, _journal_rows(prof["journal"]))
+    meta = next((a for a in HUB_ACCOUNTS if a["id"] == acct), HUB_ACCOUNTS[0])
+
+    # THE ACCOUNT BLOCK IS DERIVED FROM THE BOOK THE FIXTURE ACTUALLY HOLDS.
+    # A hand-written long_market_value that disagrees with the positions beside
+    # it makes hub's equity_residual warning fire on every scenario, which
+    # trains a reader to ignore the one time it is real. Scenarios that WANT
+    # the disagreement set prof["account_exact"] and keep their own numbers.
+    _acct = dict(prof["account"])
+    if not prof.get("account_exact"):
+        _mvs = [float(v.get("market_value") or 0.0)
+                for v in list(prof["shares"].values())]
+        _mvs += [float(getattr(o, "market_value", 0.0) or 0.0)
+                 for o in (prof["opts"] or [])]
+        _long = round(sum(m for m in _mvs if m > 0), 2)
+        _short = round(sum(m for m in _mvs if m < 0), 2)
+        _cash = float(_acct.get("cash") or 0.0)
+        _acct.update({"long_market_value": _long, "short_market_value": _short,
+                      "equity": round(_cash + _long + _short, 2),
+                      "buying_power": _cash * 2})
+
+    fleet = _MockFleet(account_id=acct, label=meta["label"], state_dir=sdir,
+                       account=_acct, positions=dict(prof["shares"]),
+                       engines=_hub_engines(scen, acct, prof["engines"]),
+                       quotes=_HUB_QUOTES,
+                       curve_kind=prof["curve"], base=None,
+                       realized=prof["realized"],
+                       made_today=prof.get("made_today"),
+                       base_value=prof.get("base_value"),
+                       journal_path=jpath, assets=_HUB_NAMES)
+    ctx = hub.Ctx(fleet, option_positions=list(prof["opts"]))
+
+    # Seed the watchlist-only tickers through hub's OWN registry, which is the
+    # same call POST /api/hub/ticker makes. Seeding the file by hand would
+    # skip the writer the route depends on.
+    reg = hub.registry(ctx)
+    for sym in prof["watch"]:
+        if not reg.has(sym):
+            reg.add(sym, by="mock", note="watchlist only -- no strategy")
+
+    kind = prof["plays"]
+    if kind == "none":
+        providers = [hub.ladder_strategies]
+    elif kind == "spy-only":
+        def _spy_only(c):
+            store = _optplays.Assignments(_Path(sdir) / "options" / "plays.json")
+            a = _optplays.Assignment(symbol="SPY",
+                                     play="index-put-credit-spread",
+                                     enabled=True, added_by="mock")
+            try:
+                store.assign("SPY", "index-put-credit-spread", by="mock")
+            except Exception:
+                pass
+            rows = [_PlayPos("p-1001", "SPY", contracts=2, entry_net=1.35,
+                             pl=118.0, pl_pct=0.437, mark=0.76,
+                             expiry="2026-10-16", is_credit=True,
+                             kind="put_credit_spread", entry_at=_ago_iso(11),
+                             legs=[_leg(_SPY_SHORT_PUT, "sell", 625.0),
+                                   _leg(_SPY_LONG_PUT, "buy", 620.0)])]
+            return [_play_strategy(c, "index-put-credit-spread", rows, [a])]
+        providers = [hub.ladder_strategies, _spy_only]
+    else:
+        providers = [hub.ladder_strategies,
+                     lambda c: _rich_plays(c, sdir)]
+    return ctx, providers
+
+
+class _Providers:
+    """Swap `hub.PROVIDERS` for the length of one request, under a lock.
+
+    `hub.PROVIDERS` is module state and this server is threaded, so two
+    requests for different scenarios would otherwise read each other's
+    strategies -- which would make a scenario switch look flaky rather than
+    wrong, and flaky is the harder bug to chase.
+    """
+
+    def __init__(self, providers):
+        self.providers = providers
+
+    def __enter__(self):
+        HUB_LOCK.acquire()
+        self.saved = list(hub.PROVIDERS)
+        hub.PROVIDERS[:] = self.providers
+        return self
+
+    def __exit__(self, *exc):
+        hub.PROVIDERS[:] = self.saved
+        HUB_LOCK.release()
+        return False
+
+
+HUB_LOCK = threading.RLock()
+
+
+# ------------------------------------------------------------- the hub reads
+# Each of these is the real hub function under the real app.py envelope. The
+# envelopes are copied from app.py's route bodies (the `{ok, account, as_of,
+# tickers, warnings}` wrapper is app.py's, not hub's) because a view that
+# unwraps one shape here and a different one in production is a bug this
+# harness would otherwise hide.
+def hub_portfolio(scen, acct):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        return hub.portfolio(ctx)
+
+
+def hub_series(scen, acct, metric="value", tf="1D", form="line"):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        return hub.series(ctx, metric, tf, form)
+
+
+def hub_tickers(scen, acct):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        rows = hub.tickers(ctx)
+    return {"ok": True, "account": ctx.account_id, "as_of": ctx.now,
+            "tickers": rows, "warnings": ctx.warnings}
+
+
+def hub_strategies(scen, acct):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        rows = hub.strategies(ctx)
+    return {"ok": True, "account": ctx.account_id, "as_of": ctx.now,
+            "strategies": rows, "warnings": ctx.warnings}
+
+
+def hub_ticker(scen, acct, sym):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        return hub.ticker(ctx, sym)
+
+
+def hub_add_ticker(scen, acct, body):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        return hub.add_ticker(ctx, str(body.get("symbol") or "").strip().upper(),
+                              by=str(body.get("by") or "dashboard"),
+                              note=str(body.get("note") or ""))
+
+
+def hub_remove_ticker(scen, acct, sym):
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        return hub.remove_ticker(ctx, sym)
+
+
+def hub_set_strategy(scen, acct, sym, body):
+    settings = body.get("settings")
+    if settings is not None and not isinstance(settings, dict):
+        raise ValueError("settings must be an object.")
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        return hub.set_strategy(ctx, sym, str(body.get("strategy") or ""),
+                                action=str(body.get("action") or "attach"),
+                                settings=settings,
+                                by=str(body.get("by") or "dashboard"),
+                                force=bool(body.get("force")))
+
+
+# ------------------------------------------------------------- the shell
+# /api/accounts and /api/overview, enough for app.js to boot and for the
+# account switcher to have two accounts in it.
+#
+# THE OVERVIEW'S MONEY IS DERIVED FROM THE HUB PAYLOAD and not typed out
+# beside it. That is the whole bug the owner reported -- the same account
+# reading one way on one page and another way on another -- and a harness that
+# types the numbers twice is a harness in which the two can disagree without
+# anybody noticing. The LADDER-SHAPED fields below (`totals.lots`, the rail's
+# "0/100000 lots" line) are kept exactly as the current shell reads them, on
+# purpose: they are what is being replaced, and a view agent needs the old
+# shape on screen to see what changed.
+def hub_accounts():
+    return {"accounts": [dict(a) for a in HUB_ACCOUNTS],
+            "default": HUB_DEFAULT_ACCOUNT}
+
+
+def _m_val(m):
+    """The number out of a metric envelope, or None. NEVER 0.0 as a stand-in:
+    the legacy overview strip has no way to render a reason, so an unmeasured
+    figure has to arrive as null and let the shell print its own dash."""
+    return (m or {}).get("value")
+
+
+def hub_overview(scen, acct):
+    p = hub_portfolio(scen, acct)
+    ctx, providers = _hub_ctx(scen, acct)
+    with _Providers(providers):
+        engines = dict(ctx.fleet.engines)
+    meta = next((a for a in HUB_ACCOUNTS if a["id"] == acct), HUB_ACCOUNTS[0])
+
+    rows = []
+    for sym in sorted(engines):
+        s = engines[sym].summary()
+        rows.append({"symbol": sym, "running": s["running"],
+                     "dry_run": s["dry_run"], "halted": s["halted"],
+                     "lot_count": s["lot_count"], "max_lots": s["max_lots"],
+                     "shares": s["shares"], "avg_price": s["avg_price"],
+                     "unrealized": s["unrealized"],
+                     "realized_today": s["realized_today"],
+                     "state": s["state"], "in_sync": s["in_sync"]})
+    armed = any(r["running"] and not r["dry_run"] for r in rows)
+    booked = [r["realized_today"] for r in rows if r["realized_today"] is not None]
+    booked_today = round(sum(booked), 2) if booked else None
+    pl = p["pl"]
+    return {
+        "ok": True,
+        "account": {"id": acct, "label": meta["label"], "paper": True,
+                    "account_number": meta["account_number"],
+                    "equity": _m_val(p["value"]), "cash": _m_val(p["cash"])},
+        "accounts": [dict(a) for a in HUB_ACCOUNTS],
+        "paper": True,
+        "frozen": False,
+        "session": "regular",
+        "snap_age": 2,
+        "snap_error": "",
+        "events": [],
+        "tickers": rows,
+        "totals": {"count": len(rows),
+                   "running": sum(1 for r in rows if r["running"]),
+                   "halted": sum(1 for r in rows if r["halted"]),
+                   "armed": armed,
+                   "lots": sum(r["lot_count"] for r in rows),
+                   "shares": sum(r["shares"] for r in rows),
+                   "realized_today": booked_today},
+        # every figure here is the hub's own, unwrapped. If the hub cannot
+        # measure one it arrives as null and the strip prints a dash.
+        "portfolio": {
+            "account_value": _m_val(p["value"]),
+            "cash": _m_val(p["cash"]),
+            "invested": _m_val(p["invested"]),
+            "today_pl": _m_val(pl["today"]),
+            "made_today": _m_val(pl["today"]),
+            "total_pl": _m_val(pl["total"]),
+            # BOOKED today, which is the ladder's own closes -- NOT the
+            # account's change since yesterday's close. The legacy strip
+            # prints this under the word "booked", and `pl.today` is equity
+            # against yesterday: putting one where the other belongs is how a
+            # page comes to label a market move as realised profit.
+            "realized_today": booked_today,
+            "realized_total": _m_val(pl["realized"]),
+            "unrealized_total": _m_val(pl["open"]),
+            "open_pl": _m_val(pl["open"]),
+            "unrealized_today": None,
+            "open_today": None,
+        },
+        "warnings": p.get("warnings", []),
+    }
+
+
+HUB_SCENARIOS = ["hub", "hubnew", "hubwatch", "hubdouble", "hubdrawdown",
+                 "hubunclaimed", "hubclash", "hubthin", "hubfail"]
+
+
+def hub_account_of(path):
+    """The account id out of `/api/a/<id>/...`, or the default alias.
+
+    The unprefixed path is the DEFAULT ACCOUNT's alias in the real server, so
+    it resolves here to the same account rather than to "no account" -- getting
+    that wrong is how a view comes to behave differently before and after the
+    account list loads.
+    """
+    parts = [x for x in path.split("/") if x]
+    if len(parts) >= 3 and parts[0] == "api" and parts[1] == "a":
+        from urllib.parse import unquote
+        return unquote(parts[2])
+    return HUB_DEFAULT_ACCOUNT
+
+
+# The dashboard's own HTML asks for "/ui/app.css", because the real server
+# mounts static/ at the ROOT. Serving it only under /static/ meant the real
+# shell could not be opened here at all, and every UI agent was stuck
+# verifying views in isolation -- which is how a view passes on its own and
+# breaks the page it lives in.
+SHELL_INJECT = """
+<div id="mockbar" style="position:fixed;left:0;right:0;bottom:0;z-index:99999;
+     display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:6px 10px;
+     font:11px/1.5 ui-monospace,monospace;background:#1b1207;color:#f2b53b;
+     border-top:1px solid #6b4a12">
+  <b style="color:#ff9d3b">MOCK</b><span>no broker, no keys, no orders</span>
+  <span id="mockNow"></span></div>
+<script>
+(function () {
+  // The ONLY thing added to the real static/index.html. Everything above it
+  // is the shipping page byte for byte, so what is verified here is the page
+  // that deploys and not a copy of it.
+  var bar = document.getElementById("mockbar");
+  fetch("/mock/scenario").then(function (r) { return r.json(); }).then(function (s) {
+    s.all.forEach(function (n) {
+      var b = document.createElement("button");
+      b.textContent = n;
+      b.style.cssText = "font:inherit;cursor:pointer;padding:2px 7px;"
+        + "border-radius:5px;border:1px solid #6b4a12;background:"
+        + (n === s.now ? "#f2b53b" : "#2a1d0b") + ";color:"
+        + (n === s.now ? "#1b1207" : "#f2b53b");
+      b.onclick = function () {
+        fetch("/mock/scenario/" + n, { method: "POST" })
+          .then(function () { location.reload(); });
+      };
+      bar.appendChild(b);
+    });
+    document.getElementById("mockNow").textContent = "scenario: " + s.now;
+  });
+}());
+</script>
+"""
+
+
+def _shell_page():
+    """The REAL static/index.html, plus a scenario strip pinned to the bottom.
+
+    Read from disk on every request rather than cached, so an agent editing
+    the shell sees the edit on reload instead of after a restart.
+    """
+    with open(os.path.join(STATIC, "index.html"), "r", encoding="utf-8") as fh:
+        html = fh.read()
+    return html.replace("</body>", SHELL_INJECT + "</body>", 1)
+
+
 def _static_path(path):
     rel = path[len("/static/"):]
     full = os.path.normpath(os.path.join(STATIC, rel))
@@ -1462,6 +2702,12 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 STATE["scenario"] = name
                 STATE["log"] = []
+            # A hub scenario writes real files (tickers.json, plays.json)
+            # through hub's own writers, so a switch has to wipe them or the
+            # "brand new account" case arrives carrying the last scenario's
+            # watchlist -- and that is the one scenario whose whole value is
+            # that there is nothing in it.
+            hub_reset()
             return self._json({"now": name})
         if p == "/mock/heal":
             # The point of expfail: break it, let the page render its error,
@@ -1474,6 +2720,28 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 STATE["log"] = []
             return self._json({"cleared": True})
+
+        # -------------------------------------------------------- the hub
+        # THE TWO WRITES THAT MATTER. `hub.add_ticker` writes ONE registry row
+        # and builds no Engine; `hub.set_strategy` attaches and NEVER arms.
+        # Both run the real hub functions here, so a UI that expects an arm to
+        # come back from an attach finds out in the browser rather than on a
+        # live account.
+        if "/hub/" in p or p.endswith("/hub"):
+            if scen == "hubfail":
+                return self._fail(502, "mock: the hub write blew up")
+            acct = hub_account_of(p)
+            try:
+                if p.endswith("/hub/ticker"):
+                    return self._json(hub_add_ticker(scen, acct, body))
+                if p.endswith("/strategy") and "/hub/ticker/" in p:
+                    sym = p.rstrip("/").rsplit("/", 2)[-2]
+                    return self._json(hub_set_strategy(scen, acct, sym, body))
+            except ValueError as e:
+                return self._fail(400, str(e))
+            except KeyError as e:
+                return self._fail(404, str(e))
+            return self._fail(404, f"mock has no hub route for {p}")
 
         if p.endswith("/optlab/plays/cycle"):
             return self._json(plays_cycle(scen))
@@ -1577,6 +2845,30 @@ class Handler(BaseHTTPRequestHandler):
                                                       for x in WATCH]}})
         return self._fail(404, "not a mock route")
 
+    def do_DELETE(self):
+        """Only the hub has a DELETE, and it is the watchlist row.
+
+        It is REFUSED with 409 while a strategy still holds the ticker, which
+        is `hub.remove_ticker`'s own rule and not this file's: removing the row
+        while a ladder still owns shares would hide a live position, and that
+        is the one thing the model must never do.
+        """
+        p = urlparse(self.path).path
+        self._note("DELETE " + self.path)
+        self._body()                     # drain, for the same keep-alive reason
+        with LOCK:
+            scen = STATE["scenario"]
+        if "/hub/ticker/" in p:
+            if scen == "hubfail":
+                return self._fail(502, "mock: the hub write blew up")
+            sym = p.rstrip("/").rsplit("/", 1)[-1]
+            try:
+                return self._json(hub_remove_ticker(scen, hub_account_of(p),
+                                                    sym))
+            except ValueError as e:
+                return self._fail(409, str(e))
+        return self._fail(404, f"mock has no DELETE route for {p}")
+
     def do_GET(self):
         u = urlparse(self.path)
         p, q = u.path, parse_qs(u.query)
@@ -1596,13 +2888,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, HOST_PAGE, "text/html; charset=utf-8")
         if p == "/check":
             return self._send(200, CHECK_PAGE, "text/html; charset=utf-8")
+        if p == "/hubcheck":
+            return self._send(200, HUB_CHECK_PAGE, "text/html; charset=utf-8")
+        if p == "/shell":
+            return self._send(200, _shell_page(), "text/html; charset=utf-8")
         if p == "/mock/scenario":
             return self._json({"now": scen, "all": SCENARIOS})
         if p == "/mock/log":
             with LOCK:
                 return self._json({"requests": list(STATE["log"])})
-        if p.startswith("/static/"):
-            full = _static_path(p)
+        if p.startswith("/ui/") or p.startswith("/static/"):
+            full = _static_path(p if p.startswith("/static/")
+                                else "/static" + p)
             if full is None:
                 return self._fail(404, "no such file")
             ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
@@ -1655,10 +2952,48 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(doc)
         if "/optlab/sweep" in p:
             return self._json(sweep())
+
+        # -------------------------------------------------------- the hub
+        # Account-scoped and unprefixed both land here: `hub_account_of`
+        # resolves the bare path to the DEFAULT account, which is what the
+        # real server's alias does. A view that behaves differently before and
+        # after the account list loads is the bug that costs.
+        if "/hub/" in p or p.endswith("/hub"):
+            if scen == "hubfail":
+                return self._fail(502, "mock: the hub read blew up")
+            acct = hub_account_of(p)
+            try:
+                if p.endswith("/hub/portfolio"):
+                    return self._json(hub_portfolio(scen, acct))
+                if p.endswith("/hub/series"):
+                    return self._json(hub_series(
+                        scen, acct, (q.get("metric") or ["value"])[0],
+                        (q.get("tf") or ["1D"])[0],
+                        (q.get("form") or ["line"])[0]))
+                if p.endswith("/hub/tickers"):
+                    return self._json(hub_tickers(scen, acct))
+                if p.endswith("/hub/strategies"):
+                    return self._json(hub_strategies(scen, acct))
+                if "/hub/ticker/" in p:
+                    sym = p.rstrip("/").rsplit("/", 1)[-1]
+                    return self._json(hub_ticker(scen, acct, sym))
+            except KeyError as e:
+                return self._fail(404, "%s is not a ticker on this account."
+                                       % str(e).strip("'").upper())
+            except ValueError as e:
+                return self._fail(400, str(e))
+            return self._fail(404, f"mock has no hub route for {p}")
+
+        # -------------------------------------------------- the shell
         if p == "/api/accounts":
-            # core.js asks once; an empty account leaves every path unprefixed,
-            # which is the default-account alias the real server also serves.
-            return self._json({"accounts": [], "default": ""})
+            return self._json(hub_accounts())
+        if p.endswith("/overview") and p.startswith("/api"):
+            if scen == "hubfail":
+                return self._fail(502, "mock: the overview blew up")
+            return self._json(hub_overview(scen, hub_account_of(p)))
+        if p == "/api/health":
+            return self._json({"ok": True, "checks": [], "worst": "",
+                               "as_of": time.time()})
         return self._fail(404, f"mock has no route for {p}")
 
 
@@ -1939,6 +3274,271 @@ await scen("default");
 """
 
 
+
+# The hub half of the browser suite, at /hubcheck. It asserts the HARNESS,
+# not a view: every UI agent is about to build against these payloads, so the
+# invariants that would silently poison a whole dashboard -- a percentage
+# where a fraction belongs, a 0.00 where a dash belongs, an empty account that
+# renders as a flat day -- are checked here once rather than discovered six
+# views later. It runs in the browser rather than in Python so it exercises
+# the same fetch path core.js uses, headers and JSON parsing included.
+HUB_CHECK_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>hub fixtures -- browser checks</title>
+<link rel="stylesheet" href="/static/ui/theme.css">
+<link rel="stylesheet" href="/static/ui/app.css">
+<style>body{font:13px/1.6 ui-monospace,monospace;padding:16px;
+ overflow-wrap:anywhere}
+ .ok{color:#3ddc97}.bad{color:#ff6b8a}h2{font-size:14px;margin:18px 0 6px}</style>
+</head><body>
+<div id="out">running…</div>
+<script type="module">
+const lines = [];
+let fails = 0;
+function check(name, got, want) {
+  const ok = String(got) === String(want);
+  if (!ok) fails += 1;
+  lines.push(`<div class="${ok ? "ok" : "bad"}">${ok ? "ok  " : "FAIL"} `
+    + `${name}${ok ? "" : ` -- got ${got}, want ${want}`}</div>`);
+}
+function section(n, t) { lines.push(`<h2>${n}. ${t}</h2>`); }
+async function scen(name) {
+  await fetch("/mock/scenario/" + name, { method: "POST" });
+}
+async function get(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(path + " -> " + r.status);
+  return r.json();
+}
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body || {}) });
+  return { status: r.status, body: await r.json() };
+}
+async function del(path) {
+  const r = await fetch(path, { method: "DELETE" });
+  return { status: r.status, body: await r.json() };
+}
+/* A metric envelope and nothing else. The shape is hub.metric's, and a field
+   missing here means the page has a key it can read that the server does not
+   send -- which renders as undefined and looks like a styling bug. */
+function isMetric(m) {
+  return !!m && typeof m === "object"
+    && "value" in m && "n" in m && "unit" in m
+    && "reason" in m && "thin" in m && "as_of" in m;
+}
+const UNITS = ["usd", "pct", "ratio", "count", "qty", "days", "seconds"];
+function walkMetrics(o, out, path) {
+  out = out || []; path = path || "";
+  if (isMetric(o)) { out.push([path, o]); return out; }
+  if (Array.isArray(o)) {
+    o.forEach((v, i) => walkMetrics(v, out, path + "[" + i + "]"));
+    return out;
+  }
+  if (o && typeof o === "object") {
+    for (const k of Object.keys(o)) walkMetrics(o[k], out, path + "." + k);
+  }
+  return out;
+}
+
+section(1, "every metric on /hub/portfolio is a well-formed envelope");
+await scen("hub");
+const P = await get("/api/hub/portfolio");
+const ms = walkMetrics(P);
+check("the payload carries metrics at all", ms.length > 10, true);
+check("every unit is one hub knows", ms.every(([, m]) => UNITS.includes(m.unit)), true);
+check("no metric is null-valued without a reason",
+      ms.every(([, m]) => m.value !== null || !!m.reason), true);
+check("no metric carries a reason beside a trusted number",
+      ms.every(([, m]) => m.value === null || m.thin || m.reason === null), true);
+check("n is an integer everywhere", ms.every(([, m]) => Number.isInteger(m.n)), true);
+
+section(2, "pct is a FRACTION, not a percentage -- the 100x bug");
+const T = await get("/api/hub/tickers");
+const pcts = walkMetrics(T).filter(([, m]) => m.unit === "pct" && m.value !== null);
+check("there are pct metrics to judge", pcts.length > 0, true);
+/* A daily move and a spread are both small fractions. Anything at or above 1
+   here is a percentage that escaped, which is exactly how an uncloseable
+   0.04x0.07 wing once printed as the tightest quote on the board. */
+check("no pct metric is >= 1 (a percentage in a fraction's field)",
+      pcts.every(([, m]) => Math.abs(m.value) < 1), true);
+const ram = T.tickers.find((r) => r.symbol === "RAM");
+check("RAM's spread is a fraction under 1%", ram.market.spread_pct.value < 0.01, true);
+
+section(3, "the ladder is a PEER, not the frame");
+const S = await get("/api/hub/strategies");
+check("more than one strategy row", S.strategies.length > 1, true);
+const ids = S.strategies.map((r) => r.id);
+check("the ladder is one row among them", ids.includes("ladder"), true);
+check("an options play is a row of the same kind",
+      ids.includes("index-put-credit-spread"), true);
+const lad = S.strategies.find((r) => r.id === "ladder");
+const opt = S.strategies.find((r) => r.id === "index-put-credit-spread");
+const ladK = JSON.stringify(Object.keys(lad).sort());
+const optK = JSON.stringify(Object.keys(opt).sort());
+check("both rows carry the same keys", ladK === optK, true);
+check("every strategy carries a settings schema",
+      S.strategies.every((r) => Array.isArray(r.settings_schema)), true);
+check("the ladder's schema is the engine's own fields",
+      lad.settings_schema.some((f) => f.key === "shares_per_lot"), true);
+
+section(4, "a brand new account reads 'nothing yet', never a row of zeroes");
+await scen("hubnew");
+const N = await get("/api/hub/portfolio");
+check("no ticker", N.counts.tickers, 0);
+check("no strategy is active", N.counts.strategies_active, 0);
+check("the ladder is still listed, as off",
+      (N.by_strategy[0] || {}).state, "off");
+check("open P/L is a DASH, not 0", N.pl.open.value, "null");
+check("open P/L says why", !!N.pl.open.reason, true);
+check("realised is a DASH, not 0", N.pl.realized.value, "null");
+check("drawdown is a DASH, not 0", N.drawdown.current.value, "null");
+check("the account value is real, because the account is funded",
+      N.value.value > 0, true);
+const NT = await get("/api/hub/tickers");
+check("the ticker table is empty rather than fabricated", NT.tickers.length, 0);
+const NS = await get("/api/hub/series?metric=value&tf=1M&form=candle");
+check("the equity series is empty", NS.count, 0);
+check("and says why", !!NS.reason, true);
+
+section(5, "a ticker with NO strategy is a legitimate row");
+await scen("hubwatch");
+const W = await get("/api/hub/tickers");
+const nvda = W.tickers.find((r) => r.symbol === "NVDA");
+check("NVDA is in the table", !!nvda, true);
+check("with no strategy on it", nvda.strategies.length, 0);
+check("from the registry alone", nvda.sources.join(","), "registry");
+check("and it still has a price", nvda.price.value > 0, true);
+check("and a bid", nvda.market.bid.value > 0, true);
+check("and a 52-week range", !!nvda.market.year_range, true);
+check("it holds nothing", nvda.position, "null");
+const zzz = W.tickers.find((r) => r.symbol === "ZZZQ");
+check("a symbol with no data at all is still a row", !!zzz, true);
+check("its price is a dash", zzz.price.value, "null");
+check("with a reason", !!zzz.price.reason, true);
+check("its spread is a dash and NOT 0", zzz.market.spread_pct.value, "null");
+check("its market block says why", !!zzz.market.why, true);
+
+section(6, "a ticker can carry TWO strategies");
+await scen("hubdouble");
+const D = await get("/api/hub/ticker/SPY");
+check("SPY has two strategy cards", D.strategies.length, 2);
+const kinds = D.strategies.map((c) => c.kind).sort().join(",");
+check("one shares, one options", kinds, "options,shares");
+check("each card has its own settings_ref",
+      D.strategies[0].settings_ref !== D.strategies[1].settings_ref, true);
+check("each card carries its own schema",
+      D.strategies.every((c) => Array.isArray(c.settings_schema)), true);
+
+section(7, "the unclaimed bucket is held, named, and not folded away");
+await scen("hubunclaimed");
+const U = await get("/api/hub/portfolio");
+check("it has positions in it", U.unclaimed.positions.value > 0, true);
+check("with rows a human can act on", U.unclaimed.rows.length > 0, true);
+check("each row names a symbol", U.unclaimed.rows.every((r) => !!r.symbol), true);
+check("and says how much is held vs claimed",
+      U.unclaimed.rows.every((r) => "held" in r && "claimed" in r), true);
+check("the bucket explains itself", !!U.unclaimed.why, true);
+/* hub normalises the asset class to "option" / "shares" on these rows -- it
+   is NOT Alpaca's "us_option", which is what the position dict carries. This
+   check was written against the wrong one first and caught it. */
+const occ = U.unclaimed.rows.find((r) => r.asset_class === "option");
+check("a loose option leg lands here too, keyed by contract", !!occ, true);
+check("and carries its underlying separately", occ && occ.underlying, "TSLA");
+
+section(8, "a ledger against a broker on OPPOSITE sides is loud");
+await scen("hubclash");
+const C = await get("/api/hub/portfolio");
+const w = (C.warnings || []).find((x) => x.code === "side_disagreement");
+check("the warning is raised", !!w, true);
+check("it names the symbol", /RAM/.test(w ? w.text : ""), true);
+check("and does not net the two away", /OPPOSITE SIDES/.test(w ? w.text : ""), true);
+
+section(9, "every series is OHLC, at every timeframe and every form");
+await scen("hub");
+for (const tf of ["1D", "1W", "1M", "3M", "6M", "1A", "All"]) {
+  const r = await get(`/api/hub/series?metric=value&tf=${tf}&form=candle`);
+  check(`${tf}: more than one candle`, r.count > 1, true);
+  check(`${tf}: every point is OHLC`,
+        r.points.every((c) => "o" in c && "h" in c && "l" in c && "c" in c), true);
+  check(`${tf}: high is the high`,
+        r.points.every((c) => c.h >= c.o && c.h >= c.c && c.h >= c.l), true);
+}
+for (const form of ["line", "bar", "candle"]) {
+  const r = await get(`/api/hub/series?metric=value&tf=1M&form=${form}`);
+  check(`${form} gets the same OHLC payload`, r.points[0].h !== undefined, true);
+  check(`${form} is echoed back`, r.form, form);
+}
+const vm = await get("/api/hub/series?metric=value&tf=1M");
+check("v is documented as a sample count, not volume",
+      /NOT traded volume/.test(vm.v_means), true);
+const dd = await get("/api/hub/series?metric=drawdown&tf=All");
+check("drawdown is always <= 0", dd.points.every((c) => c.c <= 0), true);
+check("and states the peak it measures against", !!dd.basis, true);
+
+section(10, "one sample per bucket is called out, not drawn as candles");
+await scen("hubthin");
+const TH = await get("/api/hub/series?metric=value&tf=1M&form=candle");
+check("every candle is a doji",
+      TH.points.every((c) => c.o === c.h && c.h === c.l && c.l === c.c), true);
+check("and the payload says line or bar is honest here",
+      /line or bar is the honest form/i.test(TH.reason || ""), true);
+
+section(11, "adding a ticker attaches NOTHING, and attaching never arms");
+await scen("hubnew");
+const add = await post("/api/hub/ticker", { symbol: "amd" });
+check("the add is accepted", add.status, 200);
+check("normalised to upper case", add.body.ticker.symbol, "AMD");
+check("with nothing attached", add.body.attached.length, 0);
+const after = await get("/api/hub/tickers");
+const amd = after.tickers.find((r) => r.symbol === "AMD");
+check("it is in the table", !!amd, true);
+check("carrying no strategy", amd.strategies.length, 0);
+const at = await post("/api/hub/ticker/AMD/strategy",
+                      { strategy: "ladder", action: "attach" });
+check("the attach is accepted", at.status, 200);
+check("and it did NOT arm", at.body.armed, false);
+check("and says so in words", /never arms/.test(at.body.note), true);
+const held = await del("/api/hub/ticker/AMD");
+check("the watchlist row cannot be removed while held", held.status, 409);
+check("and the refusal names the strategy", /ladder/.test(held.body.detail), true);
+await post("/api/hub/ticker/AMD/strategy", { strategy: "ladder", action: "detach" });
+const gone = await del("/api/hub/ticker/AMD");
+check("once detached it removes", gone.status, 200);
+
+section(12, "two accounts, one shape");
+await scen("hub");
+const A1 = await get("/api/a/PA3ILNUY5E4F/hub/portfolio");
+const A2 = await get("/api/a/PA7TESTACCT01/hub/portfolio");
+const top = (o) => Object.keys(o).sort().join(",");
+check("the same top-level keys", top(A1), top(A2));
+check("the same pl keys", top(A1.pl), top(A2.pl));
+check("the same drawdown keys", top(A1.drawdown), top(A2.drawdown));
+check("they are genuinely different accounts",
+      A1.account !== A2.account, true);
+check("and carry different money", A1.value.value !== A2.value.value, true);
+check("the unprefixed path is the DEFAULT account's alias",
+      (await get("/api/hub/portfolio")).account, "PA3ILNUY5E4F");
+
+section(13, "the stranded-view case");
+await scen("hubfail");
+const r502 = await fetch("/api/hub/portfolio");
+check("the read 502s", r502.status, 502);
+const w502 = await fetch("/api/hub/ticker", { method: "POST",
+  headers: { "content-type": "application/json" }, body: "{}" });
+check("the write 502s too", w502.status, 502);
+await scen("hub");
+check("and it heals", (await fetch("/api/hub/portfolio")).status, 200);
+
+lines.push(fails
+  ? `<h2 class="bad">${fails} CHECK(S) FAILED</h2>`
+  : `<h2 class="ok">ALL CHECKS PASSED</h2>`);
+document.getElementById("out").innerHTML = lines.join("");
+</script></body></html>"""
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--port", type=int, default=8765,
@@ -1954,7 +3554,9 @@ def main():
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     print(f"mock harness on http://127.0.0.1:{a.port}/  "
           f"(scenario: {a.scenario})")
-    print(f"browser checks   http://127.0.0.1:{a.port}/check")
+    print(f"browser checks   http://127.0.0.1:{a.port}/check   (options.js)")
+    print(f"                 http://127.0.0.1:{a.port}/hubcheck (hub fixtures)")
+    print(f"the whole SPA    http://127.0.0.1:{a.port}/shell")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -1,183 +1,763 @@
 /* ============================================================================
-   theme.css -- the skin. Loaded AFTER app.css, which keeps the structure.
+   theme.css -- THE DESIGN SYSTEM.
 
-   Indigo, not green. The mint accent was on every surface at once -- nav,
-   buttons, focus rings, pills, rising numbers -- and a saturated green held
-   that wide is tiring to sit in front of. Here violet carries the chrome and
-   blue answers it, while green is spent only where it means something: a
-   number that went up. Losses stay rose.
+   Loaded after app.css, which still owns structure. Everything here is either
+   a TOKEN or the material made from tokens. Nothing in this file knows what a
+   ladder is.
 
-   The surfaces are glass. Not a flat translucent panel: real glass takes the
-   colour of what is behind it, bends the light at its edge, and catches a
-   highlight along its top rim. Each of those is a separate effect below --
-   saturated backdrop blur for the tint, a bright inset hairline for the rim,
-   a soft outer shadow for the lift -- and together they read as one material.
-   `backdrop-filter` is doing the real work: where a browser lacks it the
-   @supports block falls back to an opaque panel rather than unreadable text.
+   The five decisions, and why:
+
+   1. NEAR-BLACK GROUND, not a coloured one. The old ground was deep indigo
+      and every surface on top of it was translucent glass, so a number's
+      contrast depended on what happened to be behind it. A trading screen is
+      read for eight hours; the ground is now #06070a and the surfaces are
+      SOLID, so a figure has the same contrast wherever it lands.
+
+   2. ONE SATURATED ACCENT, and it is indigo. It marks the thing you are on
+      and the thing you can press. --accent-2 is a TINT of the same hue, for
+      accent-coloured TEXT, because #6c5cff on near-black is 4:1 and a label
+      needs more than that. There is no second hue anywhere.
+
+   3. GREEN AND RED ARE NOT THE ACCENT and never decorate. They mean money
+      moved, and nothing else in this file is allowed to use them. That is
+      what lets a green figure be read at a glance instead of scanned for.
+
+   4. HIERARCHY COMES FROM TYPE AND SPACE. A real scale (--fs-*), three
+      weights, and a spacing scale that everything snaps to. Borders are a
+      last resort: a hairline separates, it does not box.
+
+   5. AN UNMEASURED NUMBER LOOKS DIFFERENT FROM A ZERO. `.unmeasured` is a
+      dashed-underline dash that carries its reason on hover, and `.thin-num`
+      is a real number with no sample behind it. This repo has shipped a
+      confident 0 for a number nobody computed more than once, and the styling
+      is here so the mistake is visible rather than invisible.
    ========================================================================= */
 
 :root {
-  /* Ground: deep indigo, lit from two corners. */
-  --bg:        #080611;
-  --bg-2:      #0d0a1d;
-  --haze-a:    rgba(124, 92, 255, 0.20);   /* violet, top left */
-  --haze-b:    rgba(56, 140, 255, 0.15);   /* blue, bottom right */
-  --haze-c:    rgba(168, 85, 247, 0.10);   /* a third, low and central */
+  color-scheme: dark;
 
-  /* Glass. The alpha is low because the blur, not the fill, is what makes it
-     read as a surface. */
-  --glass:     rgba(255, 255, 255, 0.045);
-  --glass-2:   rgba(255, 255, 255, 0.075);
-  --glass-3:   rgba(255, 255, 255, 0.11);
-  --surface:   var(--glass);
-  --surface-2: var(--glass-2);
-  --raised:    var(--glass-3);
-  --solid:     #12102a;
-  --hairline:  rgba(255, 255, 255, 0.09);
-  --hairline2: rgba(255, 255, 255, 0.16);
-  --rim:       rgba(255, 255, 255, 0.26);  /* the lit top edge */
+  /* ---------------------------------------------------------- the ground */
+  --bg:        #06070a;      /* the room */
+  --bg-2:      #0a0c11;      /* the rail and the bars that frame the room */
+  --bg-3:      #0e1017;      /* a well: inputs, sunken strips */
 
-  --text:      #eceaf8;
-  --muted:     #a6a2c4;
-  --faint:     #6f6a92;
+  /* A single very low-alpha wash so a full-screen dark page has somewhere for
+     the eye to rest. It is the accent hue, not a second colour. */
+  --haze-a:    rgba(108, 92, 255, 0.10);
+  --haze-b:    rgba(108, 92, 255, 0.05);
+  --haze-c:    rgba(255, 255, 255, 0.015);
 
-  /* Violet leads, blue answers. Neither is ever used for a P/L figure. */
-  --accent:     #7c5cff;
-  --accent-2:   #38a8ff;
-  --accent-dim: rgba(124, 92, 255, 0.16);
-  --accent-glow: rgba(124, 92, 255, 0.42);
-  --grad:      linear-gradient(135deg, #8b5cff, #5b8bff 55%, #38a8ff);
+  /* -------------------------------------------------------- the surfaces */
+  --surface:   #0f1219;      /* a panel sitting on the ground */
+  --surface-2: #141822;      /* a panel on a panel */
+  --surface-3: #1a1f2b;      /* hover, and the head of a table */
+  --raised:    var(--surface-3);
+  --solid:     var(--surface);
+  --glass:     var(--surface);       /* kept: older rules still name it */
+  --glass-2:   var(--surface-2);
+  --glass-3:   var(--surface-3);
 
-  /* Semantic. Softer than before: these are read, not stared at. */
-  --up:        #3ddc97;
-  --down:      #ff6b8a;
-  --warn:      #ffc061;
+  --hairline:  rgba(255, 255, 255, 0.070);
+  --hairline2: rgba(255, 255, 255, 0.135);
+  --rim:       rgba(255, 255, 255, 0.055);   /* the lit top edge of a panel */
 
-  --radius:      20px;
-  --radius-sm:   12px;
+  /* ------------------------------------------------------------ the type */
+  --text:      #e8eaf2;
+  --muted:     #9aa1b4;
+  --faint:     #6b7287;
+
+  --font: "Inter", ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+
+  /* A real scale. Every size on screen is one of these nine. */
+  --fs-micro: 10px;
+  --fs-xs:    11px;
+  --fs-sm:    12px;
+  --fs-md:    13px;
+  --fs-base:  13.5px;
+  --fs-lg:    15px;
+  --fs-xl:    18px;
+  --fs-2xl:   22px;
+  --fs-3xl:   28px;
+  --fs-4xl:   36px;
+
+  --w-reg: 450; --w-med: 540; --w-semi: 620; --w-bold: 700;
+  --lh-tight: 1.15; --lh: 1.55;
+  --track-tight: -0.02em;      /* display figures */
+  --track-caps:   0.085em;     /* the small uppercase labels */
+
+  /* --------------------------------------------------------- the accent */
+  --accent:      #6c5cff;                     /* fills, strokes, the state of "on" */
+  --accent-2:    #a79bff;                     /* accent-coloured TEXT (8:1 on ground) */
+  --accent-ink:  #ffffff;                     /* text ON the accent */
+  --accent-dim:  rgba(108, 92, 255, 0.14);
+  --accent-line: rgba(108, 92, 255, 0.34);
+  --accent-glow: rgba(108, 92, 255, 0.45);
+  --grad: linear-gradient(135deg, #7a68ff, #6c5cff 52%, #5646e6);
+
+  /* ------------------------------------------------------- the semantics
+     Reserved for money and for danger. Nothing decorative may use them. */
+  --up:       #24d17e;
+  --down:     #ff5470;
+  --warn:     #ffb02e;
+  --up-dim:   rgba(36, 209, 126, 0.13);
+  --down-dim: rgba(255, 84, 112, 0.13);
+  --warn-dim: rgba(255, 176, 46, 0.14);
+
+  /* --------------------------------------------------------- the spacing */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 28px; --s7: 40px;
+  --gutter: 22px;
+
+  /* ----------------------------------------------------------- the radii */
+  --r-xs: 6px; --r-sm: 9px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
+  --radius:      var(--r-lg);
+  --radius-sm:   var(--r-sm);
   --radius-pill: 999px;
 
-  --shadow:      0 1px 1px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
-  --shadow-lift: 0 1px 1px rgba(0,0,0,.5), 0 26px 60px -22px rgba(0,0,0,.92);
+  /* ------------------------------------------------------- the elevation
+     Four steps, and a page uses at most three of them. */
+  --e0: none;
+  --e1: 0 1px 2px rgba(0,0,0,.42);
+  --e2: 0 1px 2px rgba(0,0,0,.42), 0 10px 26px -14px rgba(0,0,0,.85);
+  --e3: 0 1px 2px rgba(0,0,0,.42), 0 28px 64px -22px rgba(0,0,0,.95);
+  --shadow:      var(--e2);
+  --shadow-lift: var(--e3);
+  --ring: 0 0 0 3px var(--accent-dim);
+
+  --rail-w: 262px;
+  --t-fast: .12s; --t: .18s;
 }
 
 :root[data-theme="light"] {
-  --bg: #f2f1fa; --bg-2: #fbfaff;
-  --haze-a: rgba(124, 92, 255, 0.18); --haze-b: rgba(56, 140, 255, 0.14);
-  --haze-c: rgba(168, 85, 247, 0.10);
-  --glass: rgba(255,255,255,.72); --glass-2: rgba(255,255,255,.85);
-  --glass-3: rgba(255,255,255,.94);
-  --solid: #ffffff;
-  --hairline: rgba(26, 18, 58, .10); --hairline2: rgba(26, 18, 58, .18);
-  --rim: rgba(255, 255, 255, .95);
-  --text: #17123a; --muted: #565080; --faint: #837da8;
-  --accent: #6242e8; --accent-2: #1b7fe0;
-  --accent-dim: rgba(98, 66, 232, .13); --accent-glow: rgba(98, 66, 232, .3);
-  --up: #12a06c; --down: #e04b6c; --warn: #b87407;
-  --shadow: 0 1px 1px rgba(26,18,58,.05), 0 10px 30px -16px rgba(26,18,58,.28);
-  --shadow-lift: 0 1px 1px rgba(26,18,58,.06), 0 26px 60px -24px rgba(26,18,58,.32);
+  color-scheme: light;
+  --bg:        #f3f4f8;
+  --bg-2:      #ffffff;
+  --bg-3:      #eef0f5;
+  --haze-a:    rgba(108, 92, 255, 0.09);
+  --haze-b:    rgba(108, 92, 255, 0.05);
+  --haze-c:    rgba(0, 0, 0, 0.012);
+
+  --surface:   #ffffff;
+  --surface-2: #f7f8fc;
+  --surface-3: #eef0f6;
+  --raised:    var(--surface-3);
+  --solid:     #ffffff;
+  --glass:     var(--surface);
+  --glass-2:   var(--surface-2);
+  --glass-3:   var(--surface-3);
+  --hairline:  rgba(16, 19, 28, 0.10);
+  --hairline2: rgba(16, 19, 28, 0.19);
+  --rim:       rgba(255, 255, 255, 0.9);
+
+  --text:  #10131c;
+  --muted: #4d5569;
+  --faint: #767f96;
+
+  --accent:      #5546e8;
+  --accent-2:    #4536d8;
+  --accent-ink:  #ffffff;
+  --accent-dim:  rgba(85, 70, 232, 0.11);
+  --accent-line: rgba(85, 70, 232, 0.30);
+  --accent-glow: rgba(85, 70, 232, 0.28);
+  --grad: linear-gradient(135deg, #6a59f0, #5546e8 52%, #4334cc);
+
+  --up:   #0c9d6b;
+  --down: #db2f4d;
+  --warn: #a96b00;
+  --up-dim:   rgba(12, 157, 107, 0.11);
+  --down-dim: rgba(219, 47, 77, 0.10);
+  --warn-dim: rgba(169, 107, 0, 0.12);
+
+  --e1: 0 1px 2px rgba(16,19,28,.06);
+  --e2: 0 1px 2px rgba(16,19,28,.06), 0 10px 26px -16px rgba(16,19,28,.30);
+  --e3: 0 1px 2px rgba(16,19,28,.07), 0 28px 64px -24px rgba(16,19,28,.34);
+  --shadow: var(--e2); --shadow-lift: var(--e3);
 }
 
-/* --------------------------------------------------------------- the room */
+/* ============================================================== the room */
+body { font-size: var(--fs-base); }
 body::before {
   background:
-    radial-gradient(1000px 680px at 8% -10%, var(--haze-a), transparent 60%),
-    radial-gradient(860px 620px at 96% 106%, var(--haze-b), transparent 58%),
-    radial-gradient(1100px 700px at 50% 46%, var(--haze-c), transparent 70%),
-    linear-gradient(170deg, var(--bg-2), var(--bg) 46%) !important;
+    radial-gradient(1100px 620px at 4% -8%,  var(--haze-a), transparent 62%),
+    radial-gradient(900px 560px at 100% 104%, var(--haze-b), transparent 58%),
+    radial-gradient(1400px 900px at 50% 40%, var(--haze-c), transparent 72%),
+    var(--bg) !important;
 }
 
-/* ------------------------------------------------------------- the material
-   One recipe, applied to everything that is a surface. The ::after rim is the
-   specular highlight; the inset shadow is the thickness of the glass. */
-.card,
-.stats > *,
-.rail,
-.modal,
-.toast {
-  background: var(--glass) !important;
+/* Numbers are the point of this dashboard. They never jitter and they are
+   the brightest thing on any surface. */
+.num, td.num, .stat-v, .kpi-v, .tile-v, .tick-px, .tick-chg, .tick-val {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+.up   { color: var(--up) !important; }
+.down { color: var(--down) !important; }
+.flat { color: var(--muted); }
+
+/* ======================================================== the material ===
+   One recipe for every surface: a solid fill, one hairline, one lit top rim,
+   one shadow. No blur -- glass made a figure's contrast depend on what was
+   behind it, which is the wrong trade on a screen that is read all day. */
+.card, .panel, .modal, .toast, .stats > .tile {
+  background: var(--surface) !important;
   border: 1px solid var(--hairline) !important;
-  -webkit-backdrop-filter: blur(26px) saturate(180%);
-  backdrop-filter: blur(26px) saturate(180%);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255,255,255,.09),
-    inset 0 -1px 0 0 rgba(0,0,0,.22),
-    var(--shadow) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: inset 0 1px 0 0 var(--rim), var(--e1) !important;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
 }
-.card, .stats > * { border-radius: var(--radius) !important; }
+.card, .panel { position: relative; overflow: hidden; }
+.card::after, .panel::after { content: none; }      /* the old rim pseudo-element */
+.card:hover, .panel:hover {
+  border-color: var(--hairline) !important;
+  box-shadow: inset 0 1px 0 0 var(--rim), var(--e2) !important;
+}
+.card { transition: box-shadow var(--t) ease; margin-bottom: var(--s5); }
+.card-t, .panel-t { font-size: var(--fs-md); font-weight: var(--w-semi);
+                    letter-spacing: -0.005em; }
 
-.card::after,
-.stats > *::after {
-  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
-  background: linear-gradient(90deg, transparent 8%, var(--rim) 50%, transparent 92%);
-  opacity: .75; pointer-events: none;
-}
-
-/* Where the browser cannot blur, glass would just be grey haze over text. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .card, .stats > *, .rail, .modal, .toast { background: var(--solid) !important; }
-}
-
-/* A card lifts slightly toward the pointer, the way a physical pane would. */
-.card { transition: box-shadow .2s ease, border-color .2s ease; }
-.card:hover {
-  border-color: var(--hairline2) !important;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255,255,255,.13),
-    inset 0 -1px 0 0 rgba(0,0,0,.22),
-    var(--shadow-lift) !important;
-}
-
-.rail {
-  border-radius: 0 !important;
-  border-right: 1px solid var(--hairline) !important;
-  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.025)) !important;
-}
-
-/* ------------------------------------------------------------------ accent */
-.nav-item.on {
-  background: linear-gradient(90deg, var(--accent-dim), rgba(124,92,255,.05)) !important;
-  box-shadow: inset 0 0 0 1px rgba(124,92,255,.3),
-              inset 0 1px 0 0 rgba(255,255,255,.07) !important;
-}
-.nav-item.on .ico { color: var(--accent-2); }
-.brand-dot { box-shadow: 0 0 0 3px rgba(124,92,255,.18), 0 0 14px var(--accent-glow); }
-
-.btn.pri, .btn.primary {
-  background: var(--grad) !important;
-  border-color: transparent !important;
-  color: #fff !important;
-  box-shadow: 0 2px 18px -4px var(--accent-glow),
-              inset 0 1px 0 0 rgba(255,255,255,.28) !important;
-}
-.btn { backdrop-filter: blur(10px); }
-.tab.on { background: var(--accent-dim); border-color: rgba(124,92,255,.32); }
-.seg-b.on { background: var(--accent-dim); color: var(--accent-2); }
-.bar-f { background: var(--grad); }
-.sw input:checked + i { background: rgba(124,92,255,.42); }
-.sw input:checked + i:before { background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
-input:focus, select:focus, textarea:focus {
-  border-color: rgba(124,92,255,.62) !important;
-  box-shadow: 0 0 0 3px rgba(124,92,255,.14) !important;
-}
-.log-s { color: var(--accent-2); }
-
-/* A hero panel: the one place the gradient is the surface, not an accent. */
-.card.hero {
-  background: var(--grad) !important;
-  border-color: transparent !important;
-  box-shadow: 0 18px 50px -18px var(--accent-glow),
-              inset 0 1px 0 0 rgba(255,255,255,.3) !important;
+/* the one place the accent is the surface rather than a mark on it */
+.card.hero, .panel.hero {
+  background: var(--grad) !important; border-color: transparent !important;
+  box-shadow: 0 18px 50px -20px var(--accent-glow),
+              inset 0 1px 0 0 rgba(255,255,255,.26) !important;
 }
 .card.hero .card-t, .card.hero .stat-k, .card.hero .stat-s,
-.card.hero .faint, .card.hero .muted { color: rgba(255,255,255,.82) !important; }
-.card.hero .stat-v, .card.hero .card-b { color: #fff; }
+.card.hero .faint, .card.hero .muted,
+.panel.hero .panel-t, .panel.hero .panel-sub, .panel.hero .tile-k {
+  color: rgba(255,255,255,.80) !important;
+}
+.card.hero .stat-v, .card.hero .card-b,
+.panel.hero .tile-v, .panel.hero .panel-b { color: #fff; }
 
-/* Numbers are the point of this dashboard: let them be the brightest thing. */
-.stat-v, .kpi-v { color: var(--text); }
-.up { color: var(--up) !important; }
-.down { color: var(--down) !important; }
+/* ========================================================== THE SHELL ====
+   The rail is a column of the product, the account, where you are, and what
+   you hold. In that order, because that is the order a trader asks. */
+/* SCOPED TO WIDE VIEWPORTS ON PURPOSE. Unconditional, this rule loaded after
+   app.css at equal specificity and beat app.css's own
+   @media (max-width:900px) { .app { grid-template-columns: 1fr } }, so at
+   400px the shell still computed a 244px rail and the dashboard rendered in
+   58% of the viewport with a strip of dead black beside it. */
+@media (min-width: 901px) {
+  .app { grid-template-columns: var(--rail-w) 1fr; }
+}
+.rail {
+  background: var(--bg-2) !important;
+  border-right: 1px solid var(--hairline) !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+/* ---- the brand, and the standing risk line under it --------------------- */
+.brand { padding: var(--s4) var(--s4) var(--s3); }
+.brand-n {
+  font-size: var(--fs-md); font-weight: var(--w-semi);
+  letter-spacing: -0.015em; display: flex; align-items: center; gap: var(--s2);
+}
+.brand-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--faint);
+  box-shadow: none; flex: none;
+}
+.brand-dot.live  { background: var(--down); box-shadow: 0 0 0 3px var(--down-dim); }
+.brand-dot.armed { background: var(--down); box-shadow: 0 0 0 3px var(--down-dim); }
+.brand-dot.run   { background: var(--up);   box-shadow: 0 0 0 3px var(--up-dim); }
+.brand-dot.off   { background: var(--faint); box-shadow: none; }
+/* the theme switch, injected by app.js and never moving */
+.brand-act { margin-left: auto; display: inline-flex; gap: 2px; }
+.icon-btn {
+  appearance: none; border: 1px solid transparent; background: transparent;
+  color: var(--faint); width: 26px; height: 26px; border-radius: var(--r-xs);
+  cursor: pointer; display: inline-flex; align-items: center;
+  justify-content: center; padding: 0; font-size: var(--fs-sm); line-height: 1;
+}
+.icon-btn:hover { background: var(--surface-3); color: var(--text); }
+.icon-btn svg { width: 14px; height: 14px; display: block; }
+
+/* THE STANDING RISK LINE. Paper or live, frozen or not. It is the one fact
+   that must never be more than one glance away, so it keeps its own row. */
+.brand-s {
+  margin-top: var(--s2); font-size: var(--fs-micro); font-weight: var(--w-semi);
+  letter-spacing: var(--track-caps); text-transform: uppercase;
+  color: var(--faint);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: var(--radius-pill);
+  background: var(--surface-2); border: 1px solid var(--hairline);
+}
+.brand-s.paper { color: var(--muted); }
+.brand-s.live  { color: var(--down); background: var(--down-dim);
+                 border-color: rgba(255,84,112,.32); }
+.brand-s.frozen{ color: var(--warn); background: var(--warn-dim);
+                 border-color: rgba(255,176,46,.32); }
+
+/* ---- the account switcher ---------------------------------------------- */
+.rail-top { padding: 0 var(--s3) var(--s3); position: relative; }
+.acct-sw {
+  appearance: none; width: 100%; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--r-md); padding: 9px 11px; color: var(--text);
+  font: inherit; display: flex; align-items: center; gap: var(--s2);
+  transition: border-color var(--t-fast) ease, background var(--t-fast) ease;
+}
+.acct-sw:hover { border-color: var(--hairline2); background: var(--surface-2); }
+.acct-sw[aria-expanded="true"] {
+  border-color: var(--accent-line); box-shadow: var(--ring);
+}
+.acct-av {
+  width: 26px; height: 26px; border-radius: 8px; flex: none;
+  display: grid; place-items: center; font-size: var(--fs-xs);
+  font-weight: var(--w-bold); letter-spacing: .02em;
+  background: var(--accent-dim); color: var(--accent-2);
+  border: 1px solid var(--accent-line);
+}
+.acct-tx { min-width: 0; flex: 1; }
+.acct-n {
+  font-size: var(--fs-md); font-weight: var(--w-semi); line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.acct-m {
+  font-size: var(--fs-xs); color: var(--faint); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.acct-eq { font-size: var(--fs-md); font-weight: var(--w-semi); flex: none; }
+.acct-cv { color: var(--faint); flex: none; font-size: 10px; margin-left: 2px; }
+
+.acct-pop {
+  position: absolute; left: var(--s3); right: var(--s3); top: calc(100% - 4px);
+  z-index: 60; background: var(--surface); border: 1px solid var(--hairline2);
+  border-radius: var(--r-md); box-shadow: var(--e3); padding: var(--s1);
+  max-height: 60vh; overflow: auto;
+}
+.acct-pop[hidden] { display: none; }
+.acct-row {
+  display: flex; align-items: center; gap: var(--s2); width: 100%;
+  padding: 8px 9px; border-radius: var(--r-sm); cursor: pointer;
+  color: var(--muted);
+}
+.acct-row:hover { background: var(--surface-3); color: var(--text); }
+.acct-row.on { background: var(--accent-dim); color: var(--text); }
+.acct-row .acct-n { font-size: var(--fs-md); color: var(--text); }
+.acct-row .acct-eq { font-size: var(--fs-sm); color: var(--muted); }
+.acct-pop .acct-add { color: var(--accent-2); font-weight: var(--w-med); }
+.acct-pop-f {
+  border-top: 1px solid var(--hairline); margin-top: var(--s1);
+  padding: var(--s2) var(--s3) var(--s1);
+  font-size: var(--fs-xs); color: var(--faint); line-height: 1.6;
+}
+
+/* ---- navigation --------------------------------------------------------- */
+.nav { padding: 0 var(--s3) var(--s3); }
+.nav-label {
+  display: flex; align-items: center; gap: var(--s2);
+  color: var(--faint); font-size: var(--fs-micro); font-weight: var(--w-semi);
+  letter-spacing: var(--track-caps); text-transform: uppercase;
+  padding: var(--s4) 9px var(--s2);
+}
+.nav-label .tail { margin-left: auto; font-size: var(--fs-micro); opacity: .8; }
+.nav-label .nav-add {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: var(--accent-2); font: inherit; font-size: var(--fs-sm);
+  padding: 0 2px; line-height: 1; margin-left: auto;
+}
+.nav-label .nav-add:hover { color: var(--accent); }
+.nav-label .tail + .nav-add { margin-left: var(--s1); }
+
+.nav-item {
+  border-radius: var(--r-sm); font-size: var(--fs-md); color: var(--muted);
+  padding: 7px 9px; margin-bottom: 1px; font-weight: var(--w-med);
+}
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.on {
+  background: var(--accent-dim) !important; color: var(--text);
+  font-weight: var(--w-semi);
+  box-shadow: inset 2px 0 0 0 var(--accent) !important;
+}
+.nav-item.on .ico { color: var(--accent-2); }
+.nav-item .ico { opacity: .85; }
+
+/* ---- a ticker row: price, change, what is held, which strategies -------
+   The old row said "0/100000 lots - 0 sh" for every ticker, which is ladder
+   vocabulary printed on an object that is no longer a ladder. Nothing on this
+   row names a strategy kind; the chips do, one per strategy actually on it. */
+.tick-item { display: block; padding: 8px 9px 7px; }
+.tick-top { display: flex; align-items: baseline; gap: var(--s2); }
+.tick-sym {
+  font-size: var(--fs-md); font-weight: var(--w-semi); letter-spacing: .01em;
+  color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tick-px { margin-left: auto; font-size: var(--fs-sm); color: var(--text); flex: none; }
+.tick-bot {
+  display: flex; align-items: center; gap: 5px; margin-top: 3px;
+  font-size: var(--fs-xs); color: var(--faint); min-width: 0;
+}
+.tick-chg { flex: none; font-weight: var(--w-med); }
+.tick-val { color: var(--muted); min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+.tick-sep { opacity: .5; flex: none; }
+.tick-chips { margin-left: auto; display: flex; gap: 3px; flex: none; }
+.tick-sub { color: var(--faint); font-size: var(--fs-xs); margin-top: 3px; }
+
+/* the small live dot only appears when something is actually transmitting */
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--faint); }
+.dot.run    { background: var(--up); }
+.dot.live   { background: var(--up); }
+.dot.armed  { background: var(--down); box-shadow: 0 0 0 3px var(--down-dim); }
+.dot.halt   { background: var(--warn); }
+.dot.frozen { background: var(--warn); }
+.dot.hollow { background: transparent; border: 1.5px solid var(--faint); }
+
+/* a ticker chip must never push the price off the row */
+.tick-chips .chip {
+  max-width: 96px; overflow: hidden; text-overflow: ellipsis;
+  display: inline-block; white-space: nowrap;
+}
+.tick-chips .chip + .chip { max-width: 34px; }
+
+/* ---- the search field ---------------------------------------------------
+   It looks like an input and is a BUTTON, on purpose: the rail repaints every
+   two seconds, and a real input in there would lose the caret mid-word. It
+   opens the command bar, which is a separate layer nothing repaints. */
+.rail-find {
+  appearance: none; width: 100%; margin: var(--s2) 0 0; cursor: pointer;
+  padding: 6px 9px; background: var(--bg-3); border: 1px solid var(--hairline);
+  border-radius: var(--r-sm); color: var(--faint);
+  font: inherit; font-size: var(--fs-sm); min-height: 0;
+  transition: border-color var(--t-fast) ease, color var(--t-fast) ease;
+}
+.rail-find:hover { border-color: var(--hairline2); color: var(--muted); }
+.rail-find .kbd { pointer-events: none; }
+
+.rail-foot {
+  border-top: 1px solid var(--hairline); color: var(--faint);
+  font-size: var(--fs-xs); padding: 10px var(--s4);
+  display: flex; align-items: center; gap: var(--s2);
+}
+.rail-foot .kbd { margin-left: auto; }
+.kbd {
+  font: inherit; font-size: 9.5px; font-weight: var(--w-semi);
+  padding: 2px 5px; border-radius: 5px; color: var(--faint);
+  background: var(--surface-2); border: 1px solid var(--hairline);
+}
+
+/* ============================================================ the header */
+.topbar {
+  padding: var(--s3) var(--gutter); gap: var(--s4);
+  background: var(--bg-2); border-bottom: 1px solid var(--hairline);
+}
+.title { font-size: var(--fs-xl); font-weight: var(--w-semi);
+         letter-spacing: var(--track-tight); }
+.subtitle { font-size: var(--fs-sm); color: var(--faint); margin-top: 1px; }
+.title-acct {
+  background: var(--accent-dim); color: var(--accent-2);
+  border: 1px solid var(--accent-line); font-size: var(--fs-xs);
+  font-weight: var(--w-semi); letter-spacing: .02em; padding: 1px 8px;
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: var(--radius-pill);
+  font-size: var(--fs-xs); font-weight: var(--w-semi);
+  letter-spacing: .03em; text-transform: lowercase;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--hairline);
+}
+.pill.up   { background: var(--up-dim);   color: var(--up) !important;
+             border-color: rgba(36,209,126,.30); }
+.pill.down { background: var(--down-dim); color: var(--down) !important;
+             border-color: rgba(255,84,112,.30); }
+.pill.warn { background: var(--warn-dim); color: var(--warn);
+             border-color: rgba(255,176,46,.30); }
+
+/* The KPI strip: the account's money, in the same place on every page. */
+.kpis { display: flex; gap: var(--s6); align-items: flex-start; }
+.kpis > * { min-width: 0; }
+.kpi-k {
+  color: var(--faint); font-size: var(--fs-micro); font-weight: var(--w-semi);
+  letter-spacing: var(--track-caps); text-transform: uppercase;
+  white-space: nowrap;
+}
+.kpi-v {
+  font-size: var(--fs-xl); font-weight: var(--w-semi); margin-top: 2px;
+  letter-spacing: var(--track-tight); line-height: 1.1;
+}
+.kpi-sub { font-size: var(--fs-xs); color: var(--faint); margin-top: 3px;
+           white-space: nowrap; }
+.kpi-spark { margin-top: 4px; height: 20px; color: var(--accent-2); }
+.kpi-spark .spark { width: 100%; height: 20px; }
+
+.tabs { padding: 0 var(--gutter); gap: var(--s5);
+        background: var(--bg-2); border-bottom: 1px solid var(--hairline); }
+.tab { font-size: var(--fs-md); font-weight: var(--w-med); padding: 10px 0 9px; }
+.tab.on { color: var(--text); border-bottom-color: var(--accent); }
+
+.page { padding: var(--gutter); max-width: 1560px; }
+
+/* ================================================== THE SHARED PRIMITIVES
+   The five pieces core.js publishes. Their look is defined once, here, so a
+   tile on Portfolio and a tile on a ticker page cannot drift apart. */
+
+/* ---- the metric tile ---------------------------------------------------- */
+.tile-grid {
+  display: grid; gap: var(--s3);
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  margin-bottom: var(--s4);
+}
+.tile-grid > * { min-width: 0; }
+.tile {
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--r-md); padding: var(--s3) var(--s3) 11px;
+  box-shadow: inset 0 1px 0 0 var(--rim);
+  min-width: 0; position: relative;
+}
+.tile-go { cursor: pointer; transition: border-color var(--t-fast) ease,
+                                        background var(--t-fast) ease; }
+.tile-go:hover { border-color: var(--hairline2); background: var(--surface-2); }
+.tile-k {
+  color: var(--faint); font-size: var(--fs-micro); font-weight: var(--w-semi);
+  letter-spacing: var(--track-caps); text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tile-v {
+  font-size: var(--fs-2xl); font-weight: var(--w-semi); margin-top: 5px;
+  letter-spacing: var(--track-tight); line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.tile.big .tile-v { font-size: var(--fs-3xl); }
+.tile-s { color: var(--faint); font-size: var(--fs-xs); margin-top: 4px; }
+.tile-spark { margin-top: var(--s2); height: 26px; color: var(--accent-2); }
+.tile-spark .spark { width: 100%; height: 26px; display: block; }
+/* a panel may hold tiles with no box of their own: space separates them */
+.panel .tile-grid.plain .tile,
+.tile-grid.plain .tile {
+  background: transparent; border: 0; box-shadow: none; padding: 0;
+}
+
+/* ---- the sparkline ------------------------------------------------------ */
+.spark { display: block; overflow: visible; }
+.spark-up   { color: var(--up); }
+.spark-down { color: var(--down); }
+.spark-flat { color: var(--muted); }
+/* fewer than two points is not a flat line at zero -- it is a claim nobody
+   can make, so it draws as a dotted rule that says why on hover */
+.spark-none {
+  display: inline-block; border-bottom: 1px dashed var(--hairline2);
+  opacity: .8;
+}
+
+/* ---- a number nobody measured ------------------------------------------ */
+.unmeasured {
+  color: var(--faint); border-bottom: 1px dashed var(--hairline2);
+  cursor: help; font-variant-numeric: tabular-nums;
+}
+/* a REAL number with no sample behind it: it prints, but not confidently */
+.thin-num { border-bottom: 1px dotted var(--hairline2); cursor: help; }
+
+/* ---- the section panel -------------------------------------------------- */
+.panel { margin-bottom: var(--s5); }
+.panel-h {
+  display: flex; align-items: flex-start; gap: var(--s3);
+  padding: var(--s3) var(--s4) 0;
+}
+.panel-tt { min-width: 0; }
+.panel-t { margin: 0; font-size: var(--fs-md); font-weight: var(--w-semi); }
+.panel-sub { color: var(--faint); font-size: var(--fs-xs); margin-top: 2px; }
+.panel-x { margin-left: auto; display: flex; align-items: center;
+           gap: var(--s2); flex: none; }
+.panel-b { padding: var(--s3) var(--s4) var(--s4); }
+.panel-b.flush { padding: var(--s3) 0 0; }
+.panel-h + .panel-b { padding-top: var(--s3); }
+
+/* ---- the data table ----------------------------------------------------- */
+.dt th { background: transparent; }
+.dt th, .dt td { text-align: left; }
+.dt th.dt-n, .dt td.dt-n { text-align: right; }
+.dt.dense td { padding: 7px 14px; font-size: var(--fs-sm); }
+.dt tbody tr:hover { background: var(--surface-2); }
+.dt .empty { font-style: normal; color: var(--faint); padding: 30px 18px; }
+
+/* ---- the segmented control (the same .seg app.css already draws) -------- */
+.seg {
+  border-radius: var(--radius-pill); overflow: hidden;
+  border: 1px solid var(--hairline); background: var(--bg-3); padding: 2px;
+  display: inline-flex; gap: 2px;
+}
+.seg-b {
+  border: 0 !important; border-radius: var(--radius-pill);
+  font-size: var(--fs-sm); font-weight: var(--w-med); padding: 5px 13px;
+  color: var(--faint); background: transparent;
+  transition: background var(--t-fast) ease, color var(--t-fast) ease;
+}
+.seg-b:hover { color: var(--text); }
+.seg-b.on {
+  background: var(--surface-3) !important; color: var(--text) !important;
+  font-weight: var(--w-semi); box-shadow: var(--e1);
+}
+.seg.sm .seg-b { padding: 4px 10px; font-size: var(--fs-xs); }
+
+/* ---- chips: the ONE state vocabulary ----------------------------------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: var(--r-xs);
+  font-size: var(--fs-micro); font-weight: var(--w-semi);
+  letter-spacing: .02em; line-height: 1.5; white-space: nowrap;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--hairline);
+}
+.chip.sm { padding: 1px 5px; font-size: 9.5px; }
+.chip-s { font-weight: var(--w-reg); opacity: .8; }
+/* armed is the only chip that gets the danger colour, because it is the only
+   one that means real orders leave this machine */
+.chip.st-armed { background: var(--down-dim); color: var(--down);
+                 border-color: rgba(255,84,112,.30); }
+.chip.st-live  { background: var(--up-dim); color: var(--up);
+                 border-color: rgba(36,209,126,.28); }
+.chip.st-halt  { background: var(--warn-dim); color: var(--warn);
+                 border-color: rgba(255,176,46,.30); }
+.chip.st-adopt { background: var(--accent-dim); color: var(--accent-2);
+                 border-color: var(--accent-line); }
+.chip.st-idle  { background: var(--surface-2); color: var(--muted); }
+.chip.st-off   { background: transparent; color: var(--faint);
+                 border-style: dashed; }
+.chip.ch-up   { background: var(--up-dim);   color: var(--up); }
+.chip.ch-down { background: var(--down-dim); color: var(--down); }
+.chip.ch-warn { background: var(--warn-dim); color: var(--warn); }
+.chip.ch-accent { background: var(--accent-dim); color: var(--accent-2);
+                  border-color: var(--accent-line); }
+.chip.ch-mute { background: transparent; color: var(--faint);
+                border-style: dashed; }
+
+/* ---- the empty state ---------------------------------------------------- */
+/* Nothing here YET has to look like a decision. A grid of zeroes looks like
+   a bug, and this repo has shipped that bug. */
+.blank { text-align: center; padding: var(--s7) var(--s4); color: var(--muted); }
+.blank-i { font-size: var(--fs-3xl); color: var(--faint); opacity: .55;
+           margin-bottom: var(--s3); line-height: 1; }
+.blank-t { font-size: var(--fs-lg); font-weight: var(--w-semi); color: var(--text); }
+.blank-b { font-size: var(--fs-md); color: var(--muted); margin: var(--s2) auto 0;
+           max-width: 46ch; line-height: 1.65; }
+.blank-a { margin-top: var(--s4); display: flex; gap: var(--s2);
+           justify-content: center; flex-wrap: wrap; }
+
+/* ================================================== the rest of the chrome */
+.btn {
+  border-radius: var(--r-sm); background: var(--surface-2);
+  border: 1px solid var(--hairline2); font-weight: var(--w-med);
+  font-size: var(--fs-md); backdrop-filter: none;
+  transition: background var(--t-fast) ease, border-color var(--t-fast) ease;
+}
+.btn:hover { background: var(--surface-3); }
+.btn.pri, .btn.primary {
+  background: var(--accent) !important; border-color: transparent !important;
+  color: var(--accent-ink) !important;
+  box-shadow: 0 1px 0 0 rgba(255,255,255,.18) inset,
+              0 6px 18px -8px var(--accent-glow) !important;
+}
+.btn.pri:hover, .btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { border-color: rgba(255,84,112,.42) !important;
+              background: var(--down-dim) !important; color: var(--down) !important; }
+.bar-f { background: var(--accent); }
+.sw input:checked + i { background: var(--accent-line); }
+.sw input:checked + i:before { background: var(--accent);
+                               box-shadow: 0 0 10px var(--accent-glow); }
+input, select, textarea {
+  background: var(--bg-3); border: 1px solid var(--hairline);
+  border-radius: var(--r-sm); color: var(--text);
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-line) !important; box-shadow: var(--ring) !important;
+  outline: none;
+}
+:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.log-s { color: var(--accent-2); }
+/* the notices carried three hard-coded reds and greens from the old palette;
+   they take the semantic tokens now, so a note and a number agree on what
+   "bad" looks like */
+.note { border-radius: var(--r-md); border-color: var(--hairline);
+        background: var(--surface-2); }
+.note.bad  { border-color: rgba(255,84,112,.36); background: var(--down-dim); }
+.note.warn { border-color: rgba(255,176,46,.36); background: var(--warn-dim); }
+.note.good { border-color: rgba(36,209,126,.32); background: var(--up-dim); }
+.note.info { border-color: var(--accent-line); background: var(--accent-dim); }
+.tip { color: var(--faint); font-size: var(--fs-sm); }
+.toast { border-left-width: 3px; }
+.lv-ORDER, .lv-TP { color: var(--accent-2); }
+th { background: transparent; }
+.veil { background: rgba(4,5,8,.72); }
+.modal { border-radius: var(--r-lg) !important; }
+.toast { border-radius: var(--r-md) !important; }
+::-webkit-scrollbar-thumb { border-color: var(--bg-2); }
+
+/* =========================================================== command bar
+   Ctrl/Cmd-K. A workstation is judged on how fast you can get somewhere, and
+   nine tickers in a sidebar is already too many to hunt through. */
+.cmdk {
+  position: fixed; inset: 0; z-index: 120; background: rgba(4,5,8,.66);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 12vh var(--s4) var(--s4);
+}
+.cmdk[hidden] { display: none; }
+.cmdk-box {
+  width: min(560px, 100%); background: var(--surface);
+  border: 1px solid var(--hairline2); border-radius: var(--r-lg);
+  box-shadow: var(--e3); overflow: hidden;
+}
+.cmdk-in {
+  width: 100%; border: 0 !important; background: transparent !important;
+  border-radius: 0 !important; padding: 15px var(--s4) !important;
+  font-size: var(--fs-lg) !important; color: var(--text);
+  border-bottom: 1px solid var(--hairline) !important;
+}
+.cmdk-in:focus { box-shadow: none !important; border-color: var(--hairline) !important; }
+.cmdk-list { max-height: 46vh; overflow: auto; padding: var(--s1); }
+.cmdk-row {
+  display: flex; align-items: center; gap: var(--s3); padding: 9px 11px;
+  border-radius: var(--r-sm); cursor: pointer; color: var(--muted);
+  font-size: var(--fs-md);
+}
+.cmdk-row.on { background: var(--accent-dim); color: var(--text); }
+.cmdk-row .cmdk-k { font-weight: var(--w-semi); color: var(--text); }
+.cmdk-row .cmdk-t { margin-left: auto; font-size: var(--fs-xs);
+                    color: var(--faint); }
+.cmdk-empty { padding: var(--s5); text-align: center; color: var(--faint);
+              font-size: var(--fs-md); }
+
+/* ============================================================= responsive */
+@media (max-width: 1280px) {
+  :root { --rail-w: 244px; }
+  .kpis { gap: var(--s5); }
+  .kpi-v { font-size: var(--fs-lg); }
+}
+@media (max-width: 900px) {
+  :root { --gutter: 16px; }
+  /* the drawer's own close button is absolute at the top right of .brand, so
+     the wordmark row has to stop short of it or the theme switch sits under
+     the X and neither can be pressed */
+  .brand { padding: var(--s3) 56px var(--s2) var(--s4); }
+  .rail-top { padding: 0 var(--s3) var(--s2); }
+  .acct-pop { position: fixed; left: var(--s3); right: auto;
+              width: min(300px, 82vw); top: auto; }
+  .nav-item { min-height: 40px; }
+  .tile-v { font-size: var(--fs-xl); }
+}
+@media (max-width: 480px) {
+  .topbar { padding: var(--s2) var(--s3) 10px; }
+  .title { font-size: var(--fs-lg); }
+  .kpis {
+    display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2) var(--s4);
+    padding-top: var(--s2); border-top: 1px solid var(--hairline);
+  }
+  .kpi-v { font-size: var(--fs-lg); }
+  .kpi-spark { display: none; }          /* 92 px of line says nothing here */
+  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
+  .tile { padding: 10px 11px 9px; }
+  .tile-v, .tile.big .tile-v { font-size: var(--fs-lg); }
+  .tile-spark { height: 20px; } .tile-spark .spark { height: 20px; }
+  .panel { border-radius: var(--r-md) !important; margin-bottom: var(--s3); }
+  .panel-h { padding: 11px var(--s3) 0; }
+  .panel-b { padding: var(--s3) var(--s3); }
+  .blank { padding: var(--s6) var(--s3); }
+  .cmdk { padding: 6vh var(--s3) var(--s3); }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .card { transition: none; }
+  .card, .btn, .tile-go, .acct-sw, .seg-b { transition: none !important; }
 }

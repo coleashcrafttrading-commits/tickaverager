@@ -1,74 +1,226 @@
 /* ============================================================================
-   Research -- everything that is not live money: build, test, rank.
+   Research -- everything that is not live money: test it, grade it, keep the
+   evidence.
 
-   Four tabs, four rooms:
-     Indicators  describe an indicator in English and put it on a chart
-     Builder     build a strategy document by clicking (was its own nav item)
-     Backtest    replay anything over real history (was also reachable at an
-                 orphan URL with no tab bar and no highlighted nav entry)
-     Bank        how much an idea may cost, and which of those costs paid off
-                 -- the risk profiles and the append-only bank of results.
-                 Both were tabs of the Risk page, which is about live money
-                 and should not also be a filing cabinet.
+   FIVE ROOMS, and the order is deliberate. The room this page exists for is
+   the one that opens:
+
+     Backtest     replay anything over real history -- ladder, strategy
+                  document or Python -- and read the result honestly
+     Options lab  the option structures, backtested and GRADED across two
+                  markets. Same product, same room, one click away: an option
+                  structure is a strategy like any other and burying its
+                  results under the Options tab made it look like a different
+                  kind of thing
+     Builder      build a strategy document by clicking
+     Indicators   describe an indicator in English and put it on a chart
+     Bank         which ideas were tested, what they cost, and what paid off
+                  -- the append-only risk bank and the profiles behind it
 
    Nothing here is reimplemented: each room is the module that already owned
    it, dispatched into, so there is exactly one strategy builder and one
-   backtester in the codebase. The "Strategy tester" room is gone -- it was
-   the backtester again with a worse report.
+   backtester in the codebase.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, stat, tableHTML,
-  money0, sgn, go, modelCredsHTML,
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, tableHTML,
+  sgn, go, modelCredsHTML,
 } from "../core.js";
-import { CATALOG, cols } from "../ind.js";
+import { CATALOG } from "../ind.js";
 import { ChartPanel } from "../chartpanel.js";
 import { BACKTEST, preset as btPreset } from "./backtest.js";
 import { BUILDER } from "./strategies.js";
+import { measured, MIN_TRADES_TO_RANK } from "../btread.js";
 
 const TABS = [
-  ["indicators", "Indicators"],
-  ["builder", "Builder"],
   ["backtest", "Backtest"],
+  ["options", "Options lab"],
+  ["builder", "Builder"],
+  ["indicators", "Indicators"],
   ["bank", "Bank"],
 ];
 
 const SUB = {
+  backtest: "replay any strategy over real history and read it honestly",
+  options: "option structures, backtested and graded across two markets",
+  builder: "a strategy is a document -- build it, validate it, backtest it",
   indicators: "describe an indicator in English and put it on the chart",
-  builder: "a strategy is a document — build it, validate it, backtest it",
-  backtest: "sweep parameters over real history",
-  bank: "risk profiles that have been tested, and what happened",
+  bank: "what has been tested, what it cost, and what paid off",
   profiles: "the numbers that decide how much one idea may cost",
 };
 
+const DASH = `<span class="faint">&mdash;</span>`;
+const n2 = (v, dp = 2) => (measured(v) ? Number(v).toFixed(dp) : DASH);
+const pl = (v, dp = 2) => (measured(v) ? sgn(v, dp) : DASH);
+const cnt = (v) => (measured(v) ? Number(v).toLocaleString() : DASH);
+
 VIEWS.research = {
   title: () => "Research",
-  sub: (ov, v) => SUB[v.tab || "indicators"] || SUB.indicators,
+  sub: (ov, v) => SUB[v.tab || "backtest"] || SUB.backtest,
   tabs: TABS,
   /* Profiles is a room inside Bank with a URL of its own, so the old
      #/a/<id>/risk/profiles bookmark lands exactly where it used to and the
      tab bar still shows where you are. */
-  activeTab: (v) => (v.tab === "profiles" ? "bank" : (v.tab || "indicators")),
+  activeTab: (v) => (v.tab === "profiles" ? "bank" : (v.tab || "backtest")),
 
   mount(v) {
-    const t = v.tab || "indicators";
+    ensureStyle();
+    const t = v.tab || "backtest";
     if (t === "builder") return BUILDER.mount(v);
-    if (t === "backtest") return BACKTEST.mount(v);
+    if (t === "options") return mountOptions();
+    if (t === "indicators") return mountIndicators();
     if (t === "bank" || t === "profiles") return mountBank(t === "profiles");
-    return mountBuilder();
+    return BACKTEST.mount(v);
   },
 
   paint(v) {
-    const t = v.tab || "indicators";
+    const t = v.tab || "backtest";
     if (t === "backtest" && BACKTEST.paint) return BACKTEST.paint(v);
   },
 };
 
+/* ================================================================ options lab
+   /api/optlab/sweep, which is the saved optbacktest/optsweep results and the
+   cross-market grade. Read-only, unscoped, and it places nothing.
+
+   THE THREE NUMBERS THAT MUST TRAVEL TOGETHER, because any one of them alone
+   reads as an edge and is not:
+
+     verdict     run at 0.5x, 1x and 2x the modelled spread. There are no
+                 historical option quotes at all -- /v1beta1/options/quotes is
+                 a 404 -- so the fill is MODELLED and the assumption is the
+                 whole result. A structure whose sign flips across that band
+                 is UNDECIDED, not an edge.
+     robustness  P/L at 2x spread over P/L at 1x. A row can be "positive at
+                 every spread" and keep $9 of $1,783 when the spread doubles.
+     fill rate   the 20-wide fly opened on 16-27% of sessions, and those were
+                 not a random fifth: the days it traded had a 1.22% median
+                 range against 0.83% on the days it skipped. Nobody prints a
+                 20-point-out 0DTE wing on a quiet day. */
+async function mountOptions() {
+  el("view").innerHTML = `<div class="faint" style="padding:20px">Loading the
+    graded sweeps...</div>`;
+  let d;
+  try { d = await GET("/api/optlab/sweep?top=25"); }
+  catch (e) {
+    el("view").innerHTML = `<div class="note bad"><b>Could not load the option
+      sweeps.</b> ${esc(e.message)}</div>`;
+    return;
+  }
+  if (!(d.sweeps || []).length) {
+    el("view").innerHTML = card("Nothing swept yet", `
+      <div class="empty" style="padding:26px">${esc(d.note
+        || "No sweep files on disk.")}</div>
+      <div class="tip">A sweep is produced by <code>optsweep.py</code> and
+      lands under <code>options/sweeps/</code> or
+      <code>research/options/</code>. This room reads those files; it never
+      runs a broker.</div>`);
+    return;
+  }
+
+  const g = d.grades || {};
+  const graded = d.graded || [];
+  const markets = graded.length ? Object.keys(graded[0].markets) : [];
+
+  el("view").innerHTML = `
+    ${card("Graded across every market swept", `
+      <div class="rs-grades">
+        ${["A", "B", "C", "D"].map((k) => `
+          <div class="rs-grade g${k}">
+            <div class="rs-gk">${k}</div>
+            <div class="rs-gv">${cnt(g[k] || 0)}</div>
+          </div>`).join("")}
+        <div class="rs-gnote">${esc(d.note || "")}${d.graded_from
+          ? ` Graded from ${esc((d.graded_from || []).join(", "))}.` : ""}</div>
+      </div>
+      ${d.cross_market ? "" : `<div class="note warn" style="margin-top:12px">
+        Only one market has a sweep on disk, so nothing here is cross-market.
+        A structure that works on one underlying over these months is a fact
+        about that underlying.</div>`}
+      <div id="rsGraded"></div>`, `<span class="faint">${cnt(d.graded_total)}
+        structures survived</span>`)}
+    ${(d.sweeps || []).map((s, i) => card(
+      `${esc(s.underlying || "?")} &middot; ${esc(s.file)}`, `
+      <div class="rs-swmeta">
+        ${cnt(s.sessions)} sessions &middot; ${cnt(s.skipped)} skipped &middot;
+        ${cnt(s.combinations)} combinations &middot;
+        <b>${cnt(s.survivors)}</b> with at least ${cnt(s.min_trades_to_rank)}
+        trades &middot; spread multiples ${esc((s.spread_mults || []).join(", "))}
+        &middot; ${n2(s.seconds, 0)}s
+      </div>
+      <div id="rsSw${i}"></div>`, "", { flush: false })).join("")}
+    ${card("What these numbers may claim", `<div class="tip" style="margin-top:0">
+      There is <b>no historical option quote data</b> anywhere -- the quotes
+      endpoint is a 404 -- so every fill above is <b>modelled</b>: a reference
+      price off the tape plus a half spread, measured from 2,415 live NBBO
+      quotes and bucketed by premium. Because that assumption is the whole
+      result at 0DTE, every structure is run at <b>0.5x, 1x and 2x</b> the
+      modelled spread, and one whose sign flips across that band is reported
+      <b>UNDECIDED</b> rather than as an edge.<br><br>
+      Read <b>fill rate</b> beside every row. A structure that opened on a
+      fifth of the sessions did not decline the rest at random -- it declined
+      the quiet ones.<br><br>
+      Ranked by <b>P/L per dollar of drawdown</b>, never by profit, and
+      anything under ${MIN_TRADES_TO_RANK} trades is excluded rather than
+      ranked. <b>57 of the 231 banked structures need options level 4</b> and
+      this account is level 3; those are refused by
+      <code>optbank.permitted()</code> and never graded.</div>`)}`;
+
+  el("rsGraded").innerHTML = tableHTML(
+    ["", "Structure", "Entry", "Parameters"].concat(
+      markets.flatMap((m) => [`${m} P/L`, `${m} per $DD`, `${m} fill`,
+                              `${m} robust`])),
+    graded.map((x) => `<tr>
+      <td><span class="rs-g g${esc(x.grade)}">${esc(x.grade)}</span></td>
+      <td style="text-align:left"><b>${esc(x.structure)}</b></td>
+      <td class="faint">${esc(x.entry)}</td>
+      <td class="mono rs-params">${esc(Object.entries(x.params || {})
+        .map(([k, v]) => `${k}=${v}`).join(" ")) || DASH}</td>
+      ${markets.flatMap((m) => {
+        const r = x.markets[m] || {};
+        return [
+          `<td class="num">${pl(r.total)}</td>`,
+          `<td class="num">${n2(r.pdd, 2)}</td>`,
+          `<td class="num faint">${measured(r.fill)
+            ? Number(r.fill).toFixed(0) + "%" : DASH}</td>`,
+          `<td class="num faint">${n2(r.robust, 2)}</td>`,
+        ];
+      }).join("")}
+    </tr>`),
+    "No structure survived on every market swept.");
+
+  (d.sweeps || []).forEach((s, i) => {
+    const host = el("rsSw" + i);
+    if (!host) return;
+    host.innerHTML = tableHTML(
+      ["Structure", "Entry", "Parameters", "Total P/L", "P/L per $DD",
+       "Trades", "Fill", "Win%", "Max DD", "Robust", "Verdict"],
+      (s.top || []).map((r) => `<tr>
+        <td style="text-align:left"><b>${esc(r.structure)}</b></td>
+        <td class="faint">${esc(r.entry)}</td>
+        <td class="mono rs-params">${esc(Object.entries(r.params || {})
+          .map(([k, v]) => `${k}=${v}`).join(" ")) || DASH}</td>
+        <td class="num">${pl(r.total_pl)}</td>
+        <td class="num"><b>${n2(r.pl_per_dd, 2)}</b></td>
+        <td class="num">${cnt(r.trades)}</td>
+        <td class="num faint">${measured(r.fill_rate)
+          ? Number(r.fill_rate).toFixed(0) + "%" : DASH}</td>
+        <td class="num faint">${n2(r.win_rate, 0)}</td>
+        <td class="num">${pl(r.max_drawdown)}</td>
+        <td class="num">${n2(r.robustness, 2)}</td>
+        <td style="text-align:left"><span class="pill ${
+          /^positive/.test(r.verdict || "") ? "up"
+          : /^negative/.test(r.verdict || "") ? "down" : "warn"}"
+          >${esc(r.verdict || "undecided")}</span></td>
+      </tr>`),
+      "Nothing in this sweep had enough trades to rank.");
+  });
+}
+
 /* ======================================================= profiles + bank
-   Both were tabs of the Risk page. A risk profile is written, tested and
-   ranked; it is never watched, and applying one is a deliberate act -- so
-   it belongs beside the backtester that produces the evidence, not beside
-   the live exposure numbers. */
+   A risk profile is written, tested and ranked; it is never watched, and
+   applying one is a deliberate act -- so it belongs beside the backtester
+   that produces the evidence, not beside the live exposure numbers. */
 let PROF = null;        // {profiles, fields, groups, defaults}
 let BANK = null;
 let editing = null;     // the profile open in the editor
@@ -83,69 +235,93 @@ const bankTabs = (onProfiles) => `
 
 async function mountBank(onProfiles) {
   el("view").innerHTML = `${bankTabs(onProfiles)}
-    <div class="faint">Loading…</div>`;
+    <div class="faint" style="padding:16px">Loading...</div>`;
   if (onProfiles) return mountProfiles();
   try { BANK = await GET("/api/risk/bank?limit=300"); }
   catch (e) {
     el("view").innerHTML = bankTabs(false) + `<div class="note bad">${esc(e.message)}</div>`;
     return;
   }
-  const n = BANK.stats.entries;
+  const entries = BANK.entries || [];
+  const board = BANK.leaderboard || [];
+  const n = (BANK.stats || {}).entries || 0;
+  /* The API's leaderboard drops everything under ten trades. Saying how many
+     it dropped is the difference between "three ideas have been tested" and
+     "three of nineteen were testable". */
+  const thin = entries.filter((r) =>
+    ((r.result || {}).total_trades || 0) < MIN_TRADES_TO_RANK).length;
+  const best = board.reduce((a, r) =>
+    Math.max(a, Math.abs(r.score || 0)), 0) || 1;
+
   el("view").innerHTML = bankTabs(false) + `
-    ${card("What worked", `<div id="rbBoard"></div>`,
+    ${card("What paid off", `<div id="rbBoard"></div>`,
       `<span class="faint">ranked by profit per dollar of drawdown</span>`,
       { flush: true })}
     ${card("Everything banked", `<div id="rbAll"></div>`,
-      `<span class="faint">${n} entr${n === 1 ? "y" : "ies"}</span>`, { flush: true })}
+      `<span class="faint">${n} entr${n === 1 ? "y" : "ies"}${thin
+        ? `, ${thin} too thin to rank` : ""}</span>`, { flush: true })}
     ${card("How this is ranked", `<div class="tip" style="margin-top:0">
-      Sorted by <b>total P/L ÷ max drawdown</b>, never by profit. Ranking risk
-      profiles by profit just selects for whichever one took the most risk,
-      which is the opposite of the question being asked.<br><br>
-      Anything with fewer than <b>10 trades</b> is excluded rather than ranked —
-      three lucky trades beat a hundred good ones on every ratio ever invented.
-      A profile whose drawdown was exactly zero shows <b>—</b> and sorts last:
-      real, but not comparable.<br><br>
+      Sorted by <b>total P/L divided by max drawdown</b>, never by profit.
+      Ranking risk profiles by profit just selects for whichever one took the
+      most risk, which is the opposite of the question being asked.<br><br>
+      Anything with fewer than <b>${MIN_TRADES_TO_RANK} trades</b> is excluded
+      rather than ranked -- three lucky trades beat a hundred good ones on
+      every ratio ever invented. A profile whose drawdown was exactly zero
+      shows <b>&mdash;</b> and sorts last: real, but not comparable.<br><br>
       The bank is <b>append-only</b> (<code>state/risk_bank.jsonl</code>). A
-      finding that can be edited after the fact is not evidence.</div>`)}`;
+      finding that can be edited after the fact is not evidence, which is also
+      why deleting a profile keeps every result that used it.</div>`)}`;
 
-  const board = BANK.leaderboard || [];
   el("rbBoard").innerHTML = tableHTML(
-    ["#", "Profile", "Strategy", "Symbol", "Total P/L", "Max DD", "P/L per $DD",
-     "Trades", "PF"],
+    ["#", "Profile", "Strategy", "Symbol", "P/L per $DD", "Total P/L",
+     "Realised", "Max DD", "Trades", "PF"],
     board.map((r, i) => {
       const res = r.result || {};
+      const w = r.score == null ? 0
+        : Math.max(2, Math.min(100, (Math.abs(r.score) / best) * 100));
       return `<tr>
         <td class="faint">${i + 1}</td>
         <td style="text-align:left"><b>${esc((r.profile || {}).name || "?")}</b></td>
         <td style="text-align:left" class="faint">${esc(r.strategy || "—")}</td>
         <td>${esc(r.symbol || "—")}</td>
-        <td class="num">${sgn(res.total_pl)}</td>
-        <td class="num">${sgn(res.max_drawdown)}</td>
-        <td class="num"><b>${r.score == null ? "—" : r.score.toFixed(2)}</b></td>
-        <td class="num">${res.total_trades ?? 0}</td>
-        <td class="num faint">${res.profit_factor == null ? "—"
-          : Number(res.profit_factor).toFixed(2)}</td>
+        <td class="num rs-scorecell">
+          ${r.score == null ? DASH
+            : `<b class="${r.score >= 0 ? "up" : "down"}">${
+               Number(r.score).toFixed(2)}</b>`}
+          <span class="rs-scorebar"><i style="width:${w}%;background:var(--${
+            (r.score || 0) >= 0 ? "up" : "down"})"></i></span>
+        </td>
+        <td class="num">${pl(res.total_pl)}</td>
+        <td class="num faint">${pl(res.net_profit)}</td>
+        <td class="num">${pl(res.max_drawdown)}</td>
+        <td class="num">${cnt(res.total_trades)}</td>
+        <td class="num faint">${n2(res.profit_factor, 2)}</td>
       </tr>`;
     }),
     "Nothing banked with enough trades to rank yet. Run a backtest and press "
-    + "“Bank this as a risk result”.");
+    + "“Bank it as evidence”.");
 
   el("rbAll").innerHTML = tableHTML(
-    ["When", "Who", "Profile", "Strategy", "Symbol", "Total P/L", "Max DD",
-     "Trades", "Params"],
-    (BANK.entries || []).map((r) => {
+    ["When", "Who", "Profile", "Strategy", "Symbol", "Total P/L", "Realised",
+     "Open", "Max DD", "Trades", "Params"],
+    entries.map((r) => {
       const res = r.result || {};
-      return `<tr>
-        <td class="faint">${String(r.ts).slice(5, 16).replace("T", " ")}</td>
+      const thinRow = (res.total_trades || 0) < MIN_TRADES_TO_RANK;
+      return `<tr class="${thinRow ? "rs-thin" : ""}">
+        <td class="faint">${esc(String(r.ts).slice(5, 16).replace("T", " "))}</td>
         <td class="faint">${esc(r.actor || "")}</td>
         <td style="text-align:left">${esc((r.profile || {}).name || "?")}</td>
         <td style="text-align:left" class="faint">${esc(r.strategy || "—")}</td>
         <td>${esc(r.symbol || "—")}</td>
-        <td class="num">${sgn(res.total_pl)}</td>
-        <td class="num">${sgn(res.max_drawdown)}</td>
-        <td class="num">${res.total_trades ?? 0}</td>
-        <td class="faint mono" style="text-align:left;font-size:11px">${
-          esc(Object.entries(r.params || {}).map(([k, v]) => `${k}=${v}`).join(" ")) || "—"}</td>
+        <td class="num">${pl(res.total_pl)}</td>
+        <td class="num faint">${pl(res.net_profit)}</td>
+        <td class="num faint">${pl(res.open_pl)}</td>
+        <td class="num">${pl(res.max_drawdown)}</td>
+        <td class="num">${cnt(res.total_trades)}${thinRow
+          ? `<div class="faint rs-tiny">not ranked</div>` : ""}</td>
+        <td class="faint mono rs-params">${
+          esc(Object.entries(r.params || {}).map(([k, v]) => `${k}=${v}`).join(" "))
+          || DASH}</td>
       </tr>`;
     }), "Nothing banked yet.");
 }
@@ -169,12 +345,13 @@ async function mountProfiles() {
               placeholder="made from the name"></label>
           </div>
           <label class="f"><span>Note</span><textarea id="rpNote" rows="2"
-            placeholder="what this profile is for, and what you expect it to do"></textarea></label>
+            placeholder="what this profile is for, and what you expect it to do"
+            ></textarea></label>
           <div id="rpFields"></div>
           <div class="row-btns" style="margin-top:14px">
             <button class="btn primary sm" id="rpSave">Save profile</button>
             <button class="btn sm" id="rpTest">Backtest it</button>
-            <button class="btn sm" id="rpApply">Apply to a ticker…</button>
+            <button class="btn sm" id="rpApply">Apply to a ticker...</button>
           </div>
           <div class="tip"><b>Applying does not arm anything.</b> It writes the
             settings onto a ticker; an armed ticker keeps trading with the new
@@ -191,7 +368,8 @@ async function mountProfiles() {
             other.<br><br>
             The <b>Live ladder</b> preset is what RAM and MSTX run today. It is
             here as the baseline every other profile has to beat, not as a
-            recommendation — it has <b>no stop loss</b> and no portfolio cap.</div>`)}
+            recommendation -- it has <b>no stop loss</b> and no portfolio
+            cap.</div>`)}
       </div>
     </div>`;
 
@@ -206,14 +384,14 @@ function renderProfileList() {
   const host = el("rpList");
   if (!host) return;
   host.innerHTML = PROF.profiles.map((p) => `
-    <div style="padding:10px 18px;border-bottom:1px solid var(--hairline)">
-      <div style="display:flex;gap:8px;align-items:center">
-        <b style="flex:1">${esc(p.name)}</b>
+    <div class="rs-prow">
+      <div class="rs-phead">
+        <b>${esc(p.name)}</b>
         ${p.preset ? `<span class="pill">preset</span>` : ""}
         <button class="btn sm" data-open="${esc(p.slug)}">Open</button>
-        ${p.preset ? "" : `<button class="btn sm" data-del="${esc(p.slug)}">×</button>`}
+        ${p.preset ? "" : `<button class="btn sm" data-del="${esc(p.slug)}">&times;</button>`}
       </div>
-      <div class="faint" style="font-size:11.5px;margin-top:4px">${esc(p.note || "")}</div>
+      <div class="faint rs-tiny">${esc(p.note || "")}</div>
     </div>`).join("");
   host.querySelectorAll("[data-open]").forEach((b) => {
     b.onclick = () => {
@@ -226,7 +404,7 @@ function renderProfileList() {
   host.querySelectorAll("[data-del]").forEach((b) => {
     b.onclick = () => act(async () => {
       if (!(await ask({ title: `Delete ${b.dataset.del}?`,
-        body: "Banked results that used it are kept — the bank is append-only.",
+        body: "Banked results that used it are kept -- the bank is append-only.",
         ok: "Delete", danger: true }))) return;
       await DEL("/api/risk/profiles/" + encodeURIComponent(b.dataset.del));
       PROF = await GET("/api/risk/profiles");
@@ -287,9 +465,6 @@ const RUN_KEYS = ["size_mode", "shares_per_lot", "lot_dollars", "risk_dollars",
                   "atr_stop_mult", "max_shares", "take_profit", "max_lots",
                   "daily_loss_limit"];
 
-/* "Backtest it" used to call readForm() and then navigate, carrying nothing
-   at all -- the backtester opened in ladder mode on whatever symbol was
-   first, with none of the profile's numbers. It hands them over now. */
 async function testProfile() {
   const e = readForm();
   const sweep = {};
@@ -301,20 +476,21 @@ async function testProfile() {
     toast("This profile sets none of the values a ladder run uses.", "err");
     return;
   }
+  const first = ((S.ov && S.ov.tickers) || [])[0];
   btPreset({
     mode: "ladder", sweep, label: e.name || e.slug || "risk profile",
-    symbol: ((S.ov && S.ov.tickers) || [])[0]?.symbol || "",
+    symbol: first ? first.symbol : "",
     from: `the risk profile "${e.name || e.slug || "unnamed"}"`,
     note: "Its ladder settings are in the sweep box as single values, so the "
         + "run uses them instead of the ticker's own. Pick a symbol and a "
-        + "window, then Run backtest.",
+        + "window, then Run.",
   });
   go({ kind: "research", tab: "backtest" });
 }
 
 async function applyProfile() {
   const e = readForm();
-  const syms = (S.ov?.tickers || []).map((t) => t.symbol);
+  const syms = ((S.ov && S.ov.tickers) || []).map((t) => t.symbol);
   if (!syms.length) { toast("No tickers in the fleet.", "err"); return; }
   const sym = prompt(`Apply "${e.name || "this profile"}" to which ticker?\n\n`
                      + syms.join(", "), syms[0]);
@@ -336,18 +512,18 @@ async function applyProfile() {
       change. Resting take-profits are re-priced if the target moved.</p>
       ${dropped.length ? `<p><b class="down">These are NOT applied:</b>
         <code>${esc(dropped.join(", "))}</code>. A ticker has no setting for
-        them — the ladder has no stop loss and no per-ticker portfolio caps —
+        them -- the ladder has no stop loss and no per-ticker portfolio caps --
         so they stay part of the profile for backtesting only.</p>` : ""}`,
     ok: "Apply" }))) return;
   await POST(`/api/ticker/${encodeURIComponent(S2)}/config`, patch);
   toast(`Applied to <b>${esc(S2)}</b>.`, "ok", 8000);
 }
 
-/* ------------------------------------------------------------- the builder */
+/* ========================================================= the indicator lab */
 let custom = [];
 let ready = null;
 let last = null;
-let bpanel = null;          // the builder's own chart
+let bpanel = null;          // the lab's own chart
 
 const EXAMPLES = [
   "An EMA of the typical price, but the period shortens when volatility rises",
@@ -357,14 +533,14 @@ const EXAMPLES = [
   "The slope of a 50-bar linear regression, normalised by its standard error",
 ];
 
-async function mountBuilder() {
+async function mountIndicators() {
   el("view").innerHTML = `
     <div class="grid main">
       <div>
         ${card("Describe it", `
           <div id="aiReady"></div>
           <label class="f"><span>What should it do?</span>
-            <textarea id="aiDesc" rows="4" placeholder="Plain English. Be specific about the maths where it matters — an ambiguous description gets an arbitrary reading of it."></textarea></label>
+            <textarea id="aiDesc" rows="4" placeholder="Plain English. Be specific about the maths where it matters -- an ambiguous description gets an arbitrary reading of it."></textarea></label>
           <div class="hint">Try one of these:</div>
           <div class="row-btns" id="aiEx" style="margin-bottom:12px"></div>
           <div class="row-btns">
@@ -386,7 +562,7 @@ async function mountBuilder() {
           <div class="tip" style="margin-top:0">
             You get <b>two</b> things from one description. The
             <b>JavaScript</b> runs on this dashboard's own chart, so you can see
-            it immediately — that is the point. The <b>Pine Script</b> is a
+            it immediately -- that is the point. The <b>Pine Script</b> is a
             convenience for taking the same idea to TradingView; nothing here
             executes it, so it is untested and labelled as such.<br><br>
             Generated indicators are checked against real bars before they are
@@ -397,7 +573,7 @@ async function mountBuilder() {
     </div>`;
 
   el("aiEx").innerHTML = EXAMPLES.map((e, i) =>
-    `<button class="btn sm" data-ex="${i}">${esc(e.slice(0, 34))}…</button>`).join("");
+    `<button class="btn sm" data-ex="${i}">${esc(e.slice(0, 34))}...</button>`).join("");
   el("aiEx").querySelectorAll("[data-ex]").forEach((b) => {
     b.onclick = () => { el("aiDesc").value = EXAMPLES[+b.dataset.ex]; };
   });
@@ -426,14 +602,14 @@ async function refresh() {
   renderList();
 }
 
-/* The builder and the scheduled agents use the SAME credential and used to
-   explain it two different ways on two pages. One explainer, in core.js. */
+/* The lab and the scheduled agents use the SAME credential and used to explain
+   it two different ways on two pages. One explainer, in core.js. */
 function renderReady() {
   const h = el("aiReady");
   if (!h) return;
   h.innerHTML = modelCredsHTML(ready)
     + (ready && ready.ready ? "" : `<div class="tip">Everything else on this
-        tab works meanwhile — saved indicators still draw.</div>`);
+        tab works meanwhile -- saved indicators still draw.</div>`);
 }
 
 async function build() {
@@ -441,13 +617,13 @@ async function build() {
   if (!desc) { toast("Describe the indicator first.", "err"); return; }
   const b = el("aiGo");
   b.disabled = true;
-  el("aiStatus").textContent = "asking… this takes up to a minute";
+  el("aiStatus").textContent = "asking... this takes up to a minute";
   try {
     const r = await POST("/api/indicators/ai", { description: desc });
     if (!r.ok) {
       el("aiOut").innerHTML = `<div class="note bad"><b>${esc(r.error || "failed")}</b>
         ${r.fix ? `<div class="tip">${esc(r.fix)}</div>` : ""}
-        ${r.raw ? `<pre class="mono" style="white-space:pre-wrap;font-size:11px">${esc(String(r.raw).slice(0, 900))}</pre>` : ""}</div>`;
+        ${r.raw ? `<pre class="mono rs-raw">${esc(String(r.raw).slice(0, 900))}</pre>` : ""}</div>`;
       return;
     }
     last = r.indicator;
@@ -471,7 +647,8 @@ function renderResult(ind) {
     <div class="note ${check.ok ? "good" : "bad"}">
       <b>${check.ok ? "Runs on real bars." : "Rejected."}</b> ${esc(check.msg)}</div>
     <div class="row-btns" style="margin:10px 0">
-      <button class="btn sm primary" id="aiPlot"${check.ok ? "" : " disabled"}>Put it on the chart</button>
+      <button class="btn sm primary" id="aiPlot"${check.ok ? "" : " disabled"}
+        >Put it on the chart</button>
       <button class="btn sm" id="aiPine">Copy Pine Script</button>
     </div>
     <div class="f2">
@@ -483,9 +660,9 @@ function renderResult(ind) {
         ? "in its own pane below the price" : "over the price candles"}</p></div>
     </div>
     <h4>JavaScript (this is what runs here)</h4>
-    <pre class="mono" style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto">${esc(ind.js)}</pre>
+    <pre class="mono rs-raw">${esc(ind.js)}</pre>
     <h4>Pine Script <span class="pill warn">untested here</span></h4>
-    <pre class="mono" style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow:auto">${esc(ind.pine || "not provided")}</pre>`;
+    <pre class="mono rs-raw">${esc(ind.pine || "not provided")}</pre>`;
 
   el("aiPine").onclick = () => {
     navigator.clipboard.writeText(ind.pine || "").then(
@@ -515,7 +692,8 @@ export function verify(ind) {
     px = Math.max(1, px + Math.sin(i / 7) * 0.6 + (i % 11 - 5) * 0.05);
     bars.o.push(o); bars.c.push(px);
     bars.h.push(Math.max(o, px) + 0.2); bars.l.push(Math.min(o, px) - 0.2);
-    bars.v.push(1000 + i); bars.day.push("2026-01-" + String(1 + (i / 60 | 0)).padStart(2, "0"));
+    bars.v.push(1000 + i);
+    bars.day.push("2026-01-" + String(1 + (i / 60 | 0)).padStart(2, "0"));
   }
   let fn;
   try { fn = new Function("b", "p", ind.js); }
@@ -573,7 +751,7 @@ export function verify(ind) {
               + `${Math.max(...formed)} of ${n} bars formed, and no look-ahead.` };
 }
 
-/* Put it on the builder's own chart, so you see the thing you just described
+/* Put it on the lab's own chart, so you see the thing you just described
    rather than reading its source and hoping. */
 function plot(ind) {
   install(ind);
@@ -623,10 +801,10 @@ function renderList() {
   h.innerHTML = tableHTML(["Indicator", "Draws", ""],
     custom.map((c) => `<tr>
       <td style="text-align:left"><b>${esc(c.name)}</b><br>
-        <span class="faint" style="font-size:11px">${esc((c.note || "").slice(0, 64))}</span></td>
+        <span class="faint rs-tiny">${esc((c.note || "").slice(0, 64))}</span></td>
       <td class="faint">${c.panel ? "own pane" : "on price"}</td>
       <td><button class="btn sm" data-use="${esc(c.key)}">Show</button>
-          <button class="btn sm" data-del="${esc(c.key)}">×</button></td>
+          <button class="btn sm" data-del="${esc(c.key)}">&times;</button></td>
     </tr>`), "None yet. Describe one on the left.");
 
   h.querySelectorAll("[data-use]").forEach((b) => {
@@ -642,4 +820,54 @@ function renderList() {
       await refresh();
     });
   });
+}
+
+/* ===================================================================== css
+   Same rule as the Backtest room: app.css belongs to another agent, so this
+   file carries its own style element in theme tokens only. */
+const CSS = `
+.rs-grades { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rs-grade { display: flex; flex-direction: column; align-items: center;
+            justify-content: center; width: 74px; padding: 10px 0;
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.rs-gk { font-size: 11px; letter-spacing: .1em; color: var(--faint); }
+.rs-gv { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rs-grade.gA { border-color: var(--up); }
+.rs-grade.gA .rs-gk { color: var(--up); }
+.rs-grade.gD { opacity: .6; }
+.rs-gnote { flex: 1 1 220px; font-size: 11.5px; color: var(--faint);
+            line-height: 1.5; }
+.rs-g { display: inline-block; min-width: 20px; padding: 1px 6px;
+        border-radius: 6px; font-weight: 700; font-size: 11.5px;
+        border: 1px solid var(--hairline); }
+.rs-g.gA { color: var(--up); border-color: var(--up); }
+.rs-g.gB { color: var(--accent-2); border-color: var(--accent-2); }
+.rs-g.gC { color: var(--warn); border-color: var(--warn); }
+.rs-g.gD { color: var(--faint); }
+.rs-swmeta { font-size: 11.5px; color: var(--faint); margin-bottom: 10px;
+             line-height: 1.6; }
+.rs-params { text-align: left !important; font-size: 10.5px; max-width: 200px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-scorecell { min-width: 96px; }
+.rs-scorebar { display: block; height: 3px; border-radius: 2px;
+               background: var(--hairline); margin-top: 4px; }
+.rs-scorebar i { display: block; height: 3px; border-radius: 2px; }
+.rs-thin td { opacity: .62; }
+.rs-tiny { font-size: 11px; }
+.rs-prow { padding: 10px 18px; border-bottom: 1px solid var(--hairline); }
+.rs-phead { display: flex; gap: 8px; align-items: center; }
+.rs-phead b { flex: 1; }
+.rs-raw { white-space: pre-wrap; font-size: 11px; max-height: 220px;
+          overflow: auto; }
+@media (max-width: 720px) {
+  .rs-grade { width: 60px; }
+}
+`;
+
+function ensureStyle() {
+  if (document.getElementById("rsCss")) return;
+  const s = document.createElement("style");
+  s.id = "rsCss";
+  s.textContent = CSS;
+  document.head.appendChild(s);
 }

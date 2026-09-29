@@ -1,11 +1,20 @@
 /* ============================================================================
-   Portfolio -> History -- TOTAL P/L, and the hole that "booked" hides.
+   Trading hub -> History -- TOTAL P/L, and the hole that "booked" hides.
 
-   This is Portfolio's History tab, a sibling of Live and Orders, and it is
-   deliberately a different SCOPE from the account strip above it. Everything
-   here comes from the append-only trade journal: the lots these ladders
-   opened and closed. The account's own all-time P/L is shown beside it,
-   labelled, rather than left for someone to assume they are the same number.
+   READ THE SCOPE STRIP AT THE TOP OF THIS TAB BEFORE ANY NUMBER ON IT.
+   `state/journal.jsonl` is written by the SHARE LADDER and by nothing else,
+   so every figure below belongs to ONE strategy and not to the account. That
+   used to be implicit, and the tab was called Performance, which invited
+   exactly the reading the hub rewrite exists to end: the ladder's results
+   standing in for the whole account. A strip from /api/hub/portfolio now sits
+   above the headline showing every strategy's booked and open side by side,
+   so the journal's figure is seen as the share it is before it is read as a
+   total.
+
+   This is the Hub's History tab, a sibling of Hub, Strategies and Positions,
+   and it is deliberately a different SCOPE from the account strip above it.
+   The account's own all-time P/L is shown beside it, labelled, rather than
+   left for someone to assume they are the same number.
 
    It used to lead with what the ladders had BOOKED. That was the bug. A
    ladder with no stop loss never closes a loser, so realized alone climbs in
@@ -28,12 +37,14 @@
 import {
   S, GET, POST, DEL, act, toast, el, esc, card, stat, tableHTML,
   money, money0, sgn, pct, px, qty, dur,
+  mv, mnum, measured, mreason, stateChip,
 } from "../core.js";
 
 let perf = null;
 let reports = [];
 let scope = { symbol: "", days: 7 };
 let forAcct = "";       // the journal, reports and symbol filter are per account
+let loadErr = "";       // the last GET /api/performance failure, kept on screen
 
 /* ----------------------------------------------------- the missing vocabulary
    Contract §4.2. Each of these puts the REASON where the number would have
@@ -63,6 +74,7 @@ const WINDOW = { 1: "today", 7: "last 7 days", 30: "last 30 days", 0: "all time"
 export function mountHistory() {
   if (forAcct !== S.account) {
     perf = null; reports = []; scope = { symbol: "", days: 7 };
+    loadErr = "";
     forAcct = S.account;
   }
   /* The scope picker sits ABOVE the grid rather than inside a card: on a
@@ -70,6 +82,9 @@ export function mountHistory() {
      control that changes the headline must not end up below it. */
   el("view").innerHTML = `
     <div id="pfNotes"></div>
+    ${card("Whose history this is", `<div id="pfScopeStrip"></div>`,
+      `<a class="btn sm" href="#" data-go="overview"
+          data-tab="strategies">All strategies →</a>`)}
     <div class="pf-scope">
       <select id="pfSym" aria-label="Ticker"></select>
       <select id="pfDays" aria-label="Window">
@@ -146,7 +161,49 @@ export function mountHistory() {
   loadReports();
 }
 
+/* ---------------------------------------------------------- the scope strip
+   EVERY STRATEGY'S BOOKED AND OPEN, SIDE BY SIDE, with the one this tab is
+   about marked. It exists because the tab below it reads a log that only the
+   share ladder writes: without this, "booked +$2,974" on a page headed
+   History is read as the account's, and it is one strategy's.
+
+   Booked and open are never added here. They are different measurements over
+   different windows -- booked is that strategy's own log since the log began,
+   open is Alpaca's mark right now -- and a ladder with no stop loss books
+   only winners, so booked alone is the documented lie in this repo. */
+function paintScopeStrip() {
+  const host = el("pfScopeStrip");
+  if (!host) return;
+  const h = (S.hub && S.hub.account === S.account) ? S.hub : null;
+  const P = h && h.portfolio;
+  if (!P) {
+    host.innerHTML = `<div class="faint" style="font-size:12px">${h && h.err
+      ? "The strategy list is not answering, so this tab cannot say which "
+        + "share of the account it is showing."
+      : "Reading the other strategies…"}</div>`;
+    return;
+  }
+  const rows = P.by_strategy || [];
+  host.innerHTML = `<div class="pf-scoped">${rows.map((r) => `
+      <div class="pf-sc${r.kind === "shares" ? " on" : ""}">
+        <div class="pf-sc-h">${esc(r.label)} ${stateChip(r.state, { sm: true })}</div>
+        <div class="pf-sc-n">
+          <span><i>booked</i>${mnum(r.realized_pl, { signed: true, dp: 0 })}</span>
+          <span><i>open</i>${mnum(r.open_pl, { signed: true, dp: 0 })}</span>
+        </div>
+      </div>`).join("")
+    || `<div class="faint" style="font-size:12px">No strategy on this account.</div>`}
+    </div>
+    <div class="tip">Everything below this line is the <b>share ladder's</b>
+    trade journal — the only log the ladder writes and the only one it reads.
+    An options play books to its own ledger and shows on the card above; the
+    two are never added. <b>Booked</b> and <b>open</b> stand side by side in
+    every pair here because booked on its own climbs in a straight line for
+    any strategy that does not close its losers.</div>`;
+}
+
 export function paintHistory() {
+  paintScopeStrip();
   const sel = el("pfSym");
   if (sel && !sel.options.length && S.ov) {
     sel.innerHTML = `<option value="">All tickers</option>`
@@ -160,7 +217,16 @@ async function load() {
   try {
     perf = await GET(`/api/performance?symbol=${encodeURIComponent(scope.symbol)}`
                    + `&days=${scope.days}`);
-  } catch (e) { toast(esc(e.message), "err"); return; }
+    loadErr = "";
+  } catch (e) {
+    /* A toast that has faded leaves a page of empty cards, which reads as
+       "there is no history" rather than "the request failed". The failure
+       stays on the page until it is fixed. */
+    loadErr = e.message || String(e);
+    toast(esc(loadErr), "err");
+    if (el("pfNotes")) el("pfNotes").innerHTML = banners({});
+    return;
+  }
   render();
 }
 
@@ -199,6 +265,12 @@ function renderReports() {
    raised at the top of the tab, because every figure below them is affected
    and a reader who scrolls past would otherwise never know. */
 function banners(st) {
+  if (loadErr) {
+    return `<div class="note bad"><b>The trade journal could not be read:</b>
+      ${esc(loadErr)}<br><span class="faint">Every card below is therefore
+      empty or stale. It is NOT a history with nothing in it. The bots are
+      unaffected — this is display code.</span></div>`;
+  }
   if (st.marked !== true) {
     return `<div class="note warn"><b>No live prices in this snapshot.</b>
       Nothing that is still open can be valued, so <b>total P/L is not
@@ -241,7 +313,7 @@ function render() {
   const win = `${WINDOW[scope.days] || scope.days + " days"} · `
     + (scope.symbol ? esc(scope.symbol) : "all tickers");
   el("pfHero").innerHTML = `
-    <div class="hero-k">Total P/L — these ladders</div>
+    <div class="hero-k">Total P/L — the share ladder only</div>
     <div class="hero-v num">${st.total_pl == null
       ? `<span class="pf-none pf-none-lg">${NEED_MARK}</span>` : sgn(st.total_pl)}</div>
     <div class="hero-x">${st.total_pl == null

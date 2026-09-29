@@ -63,6 +63,20 @@ export const DEFAULTS = {
   candleStyle: "candles",     // candles | bars | line
   logScale: false,
   height: 420,
+  /* What the y axis IS. "price" is a share price and formats as it always
+     has. The others exist because the same engine now draws the account's
+     own series -- value in dollars, drawdown as a fraction -- and an axis
+     that prints "-0.07" where it means "-7%" is a wrong number, not a
+     terse one. The hub sends this in `unit`; PCT IS A FRACTION there
+     (0.0123 = 1.23%), the same convention optperf.py uses. */
+  unit: "price",              // price | usd | pct | ratio | count | qty
+  /* What an empty plot says. The default is about a price window; a caller
+     drawing an account series replaces it with the REASON the server gave,
+     because "no bars for this range" and "the journal holds nothing before
+     12 Sep" are different facts and only one of them is actionable. It is
+     never a flat line at zero: this repo has shipped a zero that meant "not
+     measured" more than once, and an equity chart is the worst place for it. */
+  emptyText: "No bars for this range",
 };
 
 /* ---------------------------------------------------------------- layers
@@ -102,6 +116,13 @@ export function palette() {
     grid: css("--hairline", "#232b36"), text: css("--faint", "#64707f"),
     accent: css("--accent", "#4c8dff"), surface: css("--surface", "#161b22"),
     warn: css("--warn", "#e8a33d"), ink: css("--text", "#e8edf4"),
+    /* An OPAQUE backing for anything drawn over the candles. --surface is
+       `--glass`, which since the theme became glass is
+       rgba(255,255,255,0.045) -- 4.5% white. Every order-line label was
+       being drawn on that, i.e. on nothing, and the text sat directly on
+       whatever candle was behind it. Canvas has no backdrop-filter, so a
+       glass token cannot do this job; --solid is the one that can. */
+    solid: css("--solid", "#12102a"),
   };
 }
 
@@ -153,6 +174,82 @@ export function toHex(color) {
   return "";
 }
 
+/* ------------------------------------------------------------ bar width
+   THE ZOOM GAP, and why it happened.
+
+   Spacing between bars is `plotW / view-span` and scales with zoom, exactly
+   as it should. The body drawn inside that slot used to be
+   `min(16, spacing * 0.68)` -- a FIXED PIXEL CEILING. Below ~23 px of
+   spacing the 0.68 won and the chart looked right; above it the 16 froze and
+   every further zoom step widened the SLOT while the body stayed put, so the
+   gap between candles grew without limit. At 12 bars across a 1100 px plot
+   the slot is 91 px and the body was still 16: 75 px of empty space between
+   two candles. That is the "large gaps when i zoom in", and it is a drawing
+   constant, not a data problem -- the x mapping is by bar INDEX, so a
+   weekend or an untraded minute already costs no horizontal space at all.
+
+   The rule now: the GAP is the constant, not the body. It is a fraction of
+   the slot while the slot is narrow, and stops growing at MAX_GAP, so a
+   zoomed-in candle fills its slot the way every charting package draws it.
+   Sub-pixel slots collapse to a 1 px hairline instead of vanishing.
+
+   ONE EXPRESSION, DELIBERATELY. The first version of this had a `w <= 2`
+   branch that returned the whole slot, and at exactly 2 px the body went
+   2.0 -> 1.1 as the chart zoomed IN: a discontinuity of a pixel, invisible
+   in a screenshot and visible as a flicker while panning. The clamp at the
+   end already covers the sub-pixel case, so the branch was never needed. */
+export const MAX_GAP = 6;        // px of air between two bodies, at any zoom
+export const GAP_FRAC = 0.22;    // of the slot, while that is under ~27 px
+
+export function bodyWidth(slot) {
+  const w = Number(slot);
+  if (!isFinite(w) || w <= 0) return 1;
+  const gap = Math.min(MAX_GAP, Math.max(1, w * GAP_FRAC));
+  // 1 px floor: below about half a pixel per bar the bodies touch, which is
+  // what a fully zoomed-out chart should look like. A bar never disappears.
+  return Math.max(1, w - gap);
+}
+
+/* Axis ticks on round numbers (1 / 2 / 2.5 / 5 x 10^n) instead of five even
+   slices of whatever lo..hi happens to be. "768.43, 771.06, 773.69" is three
+   numbers a reader has to subtract; "770, 772, 774" is a scale. Returns the
+   tick values inside [lo, hi] and the decimals they should be printed to. */
+export function niceTicks(lo, hi, want = 6) {
+  if (!(isFinite(lo) && isFinite(hi)) || hi <= lo) return { vals: [], dp: 2 };
+  const raw = (hi - lo) / Math.max(1, want);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  /* 1 / 2 / 5 / 10 and the breakpoints ROUNDED UP, not down. Snapping at
+     n <= 1 / 2 / 5 looks right and is not: SPY over $6.65 with want=6 gives
+     n = 1.108, which rounds to a step of 2 and puts THREE labels on an axis
+     that asked for six. Rounding at 1.5 / 3 / 7 gives the step of 1 the
+     range obviously wants. 2.5 is not on the ladder on purpose -- it is the
+     only multiplier whose decimals do not follow from its magnitude, and
+     one axis printing "772.5" beside "770" is the ragged column this
+     function exists to remove. */
+  const step = (n <= 1.5 ? 1 : n <= 3 ? 2 : n <= 7 ? 5 : 10) * mag;
+  // decimals that express the step exactly: step 1 -> "770", step 0.02 ->
+  // "0.04", step 500 -> "41500". Mixed precision down one column reads as
+  // noise, so every label on an axis is printed to the same dp.
+  const dp = Math.max(0, Math.min(6, Math.ceil(-Math.log10(step))));
+  const vals = [];
+  // guard the loop rather than trusting float accumulation to terminate
+  for (let v = Math.ceil(lo / step) * step, i = 0; v <= hi && i < 64; v += step, i++) {
+    vals.push(Number(v.toFixed(8)));
+  }
+  return { vals, dp };
+}
+
+/* the same colour at a given opacity, as a string a gradient stop takes.
+   Canvas gradients cannot carry globalAlpha, so the alpha has to be in the
+   colour itself; a non-hex colour falls back to the accent's usual blue
+   rather than producing "undefined" and painting nothing. */
+export function withAlpha(color, a) {
+  const h = toHex(color) || "#4c8dff";
+  const n = Math.max(0, Math.min(255, Math.round(a * 255)));
+  return h + n.toString(16).padStart(2, "0");
+}
+
 /* dark or light text on a filled tag of this colour */
 function inkOn(color) {
   const h = toHex(color);
@@ -161,6 +258,9 @@ function inkOn(color) {
         b = parseInt(h.slice(5, 7), 16);
   return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#0e1116" : "#fff";
 }
+
+/* bar array -> parsed times. See Chart._times. */
+const TIMES = new WeakMap();
 
 export class Chart {
   constructor(host, opts = {}) {
@@ -348,7 +448,12 @@ export class Chart {
       lo -= pad; hi += pad;
     }
 
-    const volH = this.opt.showVolume ? 56 : 0;
+    // A fixed 56 px pane eats a fifth of a 260 px chart and a thirteenth
+    // of a 760 px one, so the price squashes exactly where the operator
+    // asked for MORE room. 18% of the height, held between 34 and 96 px.
+    const volH = this.opt.showVolume
+      ? Math.max(34, Math.min(96, Math.round((h - this.padB - this.padT) * 0.18)))
+      : 0;
     const plotH = h - this.padB - volH - this.padT;
     const plotW = w - this.padR;
     const span = Math.max(1e-9, hi - lo);
@@ -373,6 +478,14 @@ export class Chart {
   draw() {
     const w = this.host.clientWidth || 600;
     const h = this._effHeight();
+    // The price gutter is a share of the width, not a desktop constant.
+    // 70 px of a 1,206 px chart is 6%; 70 px of the 326 px a chart gets on a
+    // 400 px phone is 21%, and measured at that width the candles were
+    // squeezed into two thirds of the box with an empty band beside them.
+    // Assigned here rather than in the constructor because the width is not
+    // known until a draw, and every hit test (_zone, _hoverAt, _tip) reads
+    // this.padR, so they stay in step with whatever was last drawn.
+    this.padR = Math.max(44, Math.min(70, Math.round(w * 0.16)));
     const dpr = DPR();
     if (this.cv.width !== w * dpr) this.cv.width = w * dpr;
     if (this.cv.height !== h * dpr) this.cv.height = h * dpr;
@@ -391,7 +504,18 @@ export class Chart {
     const S = this._scales(w, h);
     if (!S) {
       g.fillStyle = C.text; g.font = "13px system-ui"; g.textAlign = "center";
-      g.fillText("No bars for this range", w / 2, h / 2);
+      // wrapped by hand: a reason can be a sentence, and canvas will not
+      const words = String(this.opt.emptyText || "").split(/\s+/);
+      const lines = [];
+      let cur = "";
+      for (const word of words) {
+        const next = cur ? cur + " " + word : word;
+        if (g.measureText(next).width > w - 40 && cur) { lines.push(cur); cur = word; }
+        else cur = next;
+      }
+      if (cur) lines.push(cur);
+      const top = h / 2 - ((lines.length - 1) * 8);
+      lines.forEach((ln, i) => g.fillText(ln, w / 2, top + i * 16));
       return;
     }
     this._S = S;
@@ -411,9 +535,9 @@ export class Chart {
     /* ---- grid + price axis ---- */
     g.font = "10.5px ui-monospace, monospace";
     g.textBaseline = "middle";
-    const ticks = Math.max(3, Math.min(9, Math.round(plotH / 46)));
-    for (let i = 0; i <= ticks; i++) {
-      const p = lo + (hi - lo) * (i / ticks);
+    const want = Math.max(3, Math.min(9, Math.round(plotH / 46)));
+    const T = niceTicks(lo, hi, want);
+    for (const p of T.vals) {
       const y = S.y(p);
       if (this.opt.showGrid) {
         g.strokeStyle = C.grid; g.lineWidth = 1;
@@ -421,7 +545,7 @@ export class Chart {
         g.lineTo(plotW, Math.round(y) + 0.5); g.stroke();
       }
       g.fillStyle = C.text; g.textAlign = "left";
-      g.fillText(p.toFixed(2), plotW + 9, y);
+      g.fillText(this._fmt(p, T.dp), plotW + 9, y);
     }
     // axis affordance + lock state
     g.strokeStyle = C.grid; g.beginPath();
@@ -439,7 +563,9 @@ export class Chart {
     // a blank volume colour means "the candle's own colour, per bar"
     const vs = L("volume");
     if (volH && vs.on) {
-      const bw = Math.max(1, S.bw * 0.62);
+      // the SAME body width the candles use: a volume bar wider or
+      // narrower than the candle above it reads as a second, wrong grid
+      const bw = bodyWidth(S.bw);
       g.globalAlpha = vs.alpha;
       for (let i = 0; i < seg.length; i++) {
         const b = seg[i];
@@ -468,7 +594,7 @@ export class Chart {
         if (m.label) {
           g.font = "9.5px system-ui"; g.textAlign = "right";
           const tw = g.measureText(m.label).width + 10;
-          g.fillStyle = C.surface;
+          g.fillStyle = C.solid;
           g.fillRect(plotW - tw - 3, y - 8, tw, 16);
           g.strokeStyle = s.color; g.lineWidth = 1;
           g.strokeRect(plotW - tw - 3.5, y - 8.5, tw, 16);
@@ -486,14 +612,40 @@ export class Chart {
 
     /* ---- price ---- */
     const style = this.opt.candleStyle;
-    const bw = Math.max(1, Math.min(16, S.bw * 0.68));
+    const bw = bodyWidth(S.bw);
     if (style === "line") {
-      g.strokeStyle = C.accent; g.lineWidth = 1.6; g.beginPath();
+      /* LINE AND BAR READ THE CLOSE, CANDLE READS ALL FOUR. That is the
+         whole of the form switch, and it is why every series the hub serves
+         arrives as OHLC even when it is an equity curve: a one-number
+         series is a four-number one whose o/h/l/c agree, so line, bar and
+         candle are all renderable from the same payload and none of them
+         has to invent a value it was not given.
+
+         The line is tinted by its own direction (first close to last) and
+         carries a fade down to the floor. A flat accent-coloured line on a
+         near-black ground is the one thing every reference screenshot does
+         NOT do -- they all let the series say up or down by itself. */
+      const first = seg[0].c, lastC = seg[seg.length - 1].c;
+      const dir = lastC >= first ? cu : cd;
+      const floor = this.padT + plotH;
+      const grad = g.createLinearGradient(0, this.padT, 0, floor);
+      grad.addColorStop(0, withAlpha(dir.color, 0.22));
+      grad.addColorStop(1, withAlpha(dir.color, 0));
+      g.beginPath();
       for (let i = 0; i < seg.length; i++) {
         const x = S.x(i), y = S.y(seg[i].c);
         i ? g.lineTo(x, y) : g.moveTo(x, y);
       }
-      g.stroke();
+      // the fill is the same path closed down to the floor; stroke first
+      // from a saved copy so the fill never paints over the line
+      g.save();
+      g.lineWidth = 1.8; g.lineJoin = "round"; g.lineCap = "round";
+      g.strokeStyle = dir.color; g.globalAlpha = dir.alpha; g.stroke();
+      g.restore();
+      g.lineTo(S.x(seg.length - 1), floor);
+      g.lineTo(S.x(0), floor);
+      g.closePath();
+      g.fillStyle = grad; g.fill();
     } else {
       for (let i = 0; i < seg.length; i++) {
         const b = seg[i];
@@ -516,8 +668,11 @@ export class Chart {
           const yo = S.y(b.o), yc = S.y(b.c);
           const top = Math.min(yo, yc);
           const bh = Math.max(1, Math.abs(yc - yo));
-          if (bw <= 2) g.fillRect(x - 0.5, top, 1.5, bh);
-          else g.fillRect(x - bw / 2, top, bw, bh);
+          // snapped to whole pixels: an unsnapped body is drawn with a
+          // half-transparent edge on each side and a row of candles then
+          // shimmers different widths as it pans
+          const l = Math.round(x - bw / 2);
+          g.fillRect(l, top, Math.max(1, Math.round(x + bw / 2) - l), bh);
         }
       }
       g.globalAlpha = 1;
@@ -633,16 +788,48 @@ export class Chart {
     }
 
     /* ---- time axis ---- */
+    // Labels sit on BOUNDARIES -- the first bar of a day, or of an hour --
+    // not on every Nth bar. Evenly-spaced-by-index labels slide with the pan
+    // and print times nobody asked about ("10:37"), and on a multi-day window
+    // they land mid-session so two "9/24"s can appear with a day between
+    // them. A boundary label is the same label wherever the window moves to,
+    // which is what makes a time axis readable while dragging.
+    // This loop runs over EVERY VISIBLE BAR and draw() runs on every
+    // mousemove, so it is on the crosshair's hot path: at 8,000 bars
+    // visible, a `new Date(bar.t)` per bar cost 2.1 ms a frame all by
+    // itself, measured. Times are therefore parsed ONCE per bar array
+    // (_times, cached on the array itself) and the day and hour buckets
+    // come out of integer arithmetic on that, with no Date in the loop.
     g.fillStyle = C.text; g.font = "10.5px system-ui"; g.textAlign = "center";
-    const every = Math.max(1, Math.floor(seg.length / 8));   // label density
-    const multiDay = seg.length > 1 &&
-      String(seg[0].t).slice(0, 10) !== String(seg[seg.length - 1].t).slice(0, 10);
-    for (let i = 0; i < seg.length; i += every) {
-      const d = new Date(seg[i].t);
-      const lbl = (multiDay && seg.length > 300)
-        ? `${d.getMonth() + 1}/${d.getDate()}`
-        : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-      g.fillText(lbl, S.x(i), h - 8);
+    const ms = this._times();
+    const base0 = Math.max(0, Math.floor(this.view[0]));
+    const t0 = ms[base0], t1 = ms[base0 + seg.length - 1];
+    const spanMs = seg.length > 1 && isFinite(t0) && isFinite(t1) ? t1 - t0 : 0;
+    // a series whose bars are a day or more apart has no clock worth showing
+    this._daily = seg.length > 1 && (spanMs / (seg.length - 1)) >= 20 * 3600000;
+    const byDay = spanMs > 3 * 86400000;      // over ~3 days: date labels
+    // Local-day and local-hour buckets without constructing a Date: shift by
+    // the zone offset and divide. The offset is read ONCE, off the first
+    // visible bar. Across a DST change the far end of the window is an hour
+    // out, which can move one label to the neighbouring bar and can never
+    // change a number -- the same approximation nyDayStart() in
+    // chartpanel.js already documents.
+    const zone = isFinite(t0) ? new Date(t0).getTimezoneOffset() * 60000 : 0;
+    const unit = byDay ? 86400000 : 3600000;
+    const bucket = (i) => {
+      const t = ms[base0 + i];
+      return isFinite(t) ? Math.floor((t - zone) / unit) : NaN;
+    };
+    let lastX = -1e9, prev = bucket(0);
+    for (let i = 0; i < seg.length; i++) {
+      const b = bucket(i);
+      const boundary = i === 0 || (b === b && b !== prev);
+      prev = b;
+      if (!boundary) continue;
+      const x = S.x(i);
+      if (x - lastX < 62 || x < 16 || x > plotW - 16) continue;
+      lastX = x;
+      g.fillText(this._timeLabel(seg[i].t, byDay ? "date" : "time"), x, h - 8);
     }
     g.strokeStyle = C.grid; g.beginPath();
     g.restore();                       // end of the clipped plot region
@@ -656,7 +843,7 @@ export class Chart {
       g.fillStyle = inkOn(ls.color); g.textAlign = "left";
       g.textBaseline = "middle";
       g.font = "10.5px ui-monospace, monospace";
-      g.fillText(lastP.toFixed(2), plotW + 9, lastY);
+      g.fillText(this._fmt(lastP), plotW + 9, lastY);
       g.globalAlpha = 1;
     }
 
@@ -677,9 +864,23 @@ export class Chart {
         g.fillRect(plotW + 1, this._mouseY - 8, this.padR - 1, 16);
         g.fillStyle = "#fff"; g.textAlign = "left";
         g.font = "10.5px ui-monospace, monospace";
-        g.fillText(p.toFixed(2), plotW + 9, this._mouseY);
+        g.fillText(this._fmt(p), plotW + 9, this._mouseY);
       }
       g.setLineDash([]);
+      // The TIME under the crosshair. Without it the vertical hair points at
+      // a column of pixels and the operator counts axis labels to find out
+      // which minute it is -- the axis is labelled every ~8th bar, so the
+      // answer was never actually on screen.
+      const tl = this._timeLabel(b.t, "full");
+      if (tl) {
+        g.font = "10.5px system-ui"; g.textAlign = "center";
+        const tw = g.measureText(tl).width + 12;
+        const tx = Math.max(tw / 2, Math.min(plotW - tw / 2, x));
+        g.fillStyle = C.accent;
+        g.fillRect(tx - tw / 2, h - this.padB + 2, tw, 15);
+        g.fillStyle = "#fff"; g.textBaseline = "middle";
+        g.fillText(tl, tx, h - this.padB + 9.5);
+      }
       // the fills on this candle, if any, go to the readout and the tooltip
       const marks = this.trades.length ? this.trades.filter((t) => t.t === b.t) : [];
       this._readout(b, marks, x);
@@ -705,16 +906,27 @@ export class Chart {
     const d = new Date(b.t);
     const chg = b.o ? ((b.c - b.o) / b.o) * 100 : 0;
     const cls = b.c >= b.o ? "up" : "down";
-    const n = (v) => v.toFixed(v < 10 ? 4 : 2);
+    const price = this.opt.unit === "price";
+    const n = (v) => price ? v.toFixed(v < 10 ? 4 : 2) : this._fmt(v, 4);
+    // A bucket with one sample in it has o == h == l == c. Printing four
+    // identical numbers beside four different letters claims a range that
+    // was never measured -- the hub says so in `reason` and the readout
+    // must not contradict it. One value, once.
+    const flat = b.o === b.h && b.h === b.l && b.l === b.c;
     dest.innerHTML =
-      `<span class="ro-t">${d.toLocaleString([], {
-        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>` +
-      `<span class="ro-k">O</span><span class="ro-v">${n(b.o)}</span>` +
-      `<span class="ro-k">H</span><span class="ro-v">${n(b.h)}</span>` +
-      `<span class="ro-k">L</span><span class="ro-v">${n(b.l)}</span>` +
-      `<span class="ro-k">C</span><span class="ro-v ${cls}">${n(b.c)}</span>` +
-      `<span class="${cls}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</span>` +
-      (b.v ? `<span class="ro-k">V</span><span class="ro-v">${
+      `<span class="ro-t">${d.toLocaleString([], this._daily
+        ? { month: "short", day: "numeric" }
+        : { month: "short", day: "numeric",
+            hour: "2-digit", minute: "2-digit" })}</span>` +
+      (flat
+        ? `<span class="ro-k">${price ? "C" : "value"}</span>` +
+          `<span class="ro-v">${n(b.c)}</span>`
+        : `<span class="ro-k">O</span><span class="ro-v">${n(b.o)}</span>` +
+          `<span class="ro-k">H</span><span class="ro-v">${n(b.h)}</span>` +
+          `<span class="ro-k">L</span><span class="ro-v">${n(b.l)}</span>` +
+          `<span class="ro-k">C</span><span class="ro-v ${cls}">${n(b.c)}</span>` +
+          `<span class="${cls}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</span>`) +
+      (b.v && price ? `<span class="ro-k">V</span><span class="ro-v">${
         b.v.toLocaleString()}</span>` : "") +
       (b.live ? `<span class="ro-k">live</span>` : "") +
       (marks.length ? `<span class="ro-k">·</span><span class="ro-v">${
@@ -768,6 +980,58 @@ export class Chart {
   }
 
   /* ----------------------------------------------------------- helpers */
+  /* An axis or readout number in this chart's unit. `dp` comes from
+     niceTicks so every label on one axis carries the same decimals --
+     mixed precision down a column reads as noise. */
+  _fmt(v, dp = 2) {
+    const n = Number(v);
+    if (!isFinite(n)) return "—";
+    switch (this.opt.unit) {
+      case "usd": {
+        const a = Math.abs(n), sg = n < 0 ? "-" : "";
+        if (a >= 1e6) return sg + "$" + (a / 1e6).toFixed(2) + "M";
+        if (a >= 1e4) return sg + "$" + (a / 1e3).toFixed(1) + "k";
+        return sg + "$" + a.toFixed(a < 100 ? 2 : 0);
+      }
+      // a FRACTION on the wire: multiply once, here, and nowhere else
+      case "pct":   return (n * 100).toFixed(Math.max(0, dp - 2)) + "%";
+      case "ratio": return n.toFixed(Math.max(2, dp));
+      case "count":
+      case "qty":   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      default:      return n.toFixed(dp);
+    }
+  }
+
+  /* One time format for the axis and the crosshair.
+       "date"  9/24          an axis label on a multi-day window
+       "time"  10:37         an axis label inside one session
+       "full"  9/24 10:37    the crosshair, which is being asked "when"
+     Local time throughout: the bars carry UTC and the operator reads a wall
+     clock. A daily series has no meaningful clock, so "full" drops it. */
+  _timeLabel(t, mode) {
+    const d = new Date(t);
+    if (isNaN(d)) return "";
+    const date = `${d.getMonth() + 1}/${d.getDate()}`;
+    const hm = `${String(d.getHours()).padStart(2, "0")}:${
+      String(d.getMinutes()).padStart(2, "0")}`;
+    if (mode === "date") return date;
+    if (mode === "time") return hm;
+    return this._daily ? date : `${date} ${hm}`;
+  }
+
+  /* Every bar's timestamp as epoch ms, parsed once. Keyed on the bar ARRAY
+     (setData replaces it wholesale, so the entry can never go stale) and
+     held in a WeakMap so a chart that is thrown away takes its cache with
+     it. An unparseable stamp lands as NaN and every reader tests for it. */
+  _times() {
+    let c = TIMES.get(this.bars);
+    if (c) return c;
+    c = new Float64Array(this.bars.length);
+    for (let i = 0; i < this.bars.length; i++) c[i] = Date.parse(this.bars[i].t);
+    TIMES.set(this.bars, c);
+    return c;
+  }
+
   _zone(px, py) {
     const r = this.cv.getBoundingClientRect();
     if (px - r.left > r.width - this.padR) return "price";

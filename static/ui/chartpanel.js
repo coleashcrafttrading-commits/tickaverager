@@ -32,6 +32,18 @@ import { el, esc, GET } from "./core.js";
 const TFS = [
   ["1Min", 2], ["5Min", 7], ["15Min", 20], ["1Hour", 60], ["1Day", 400],
 ];
+/* Line, bar or candle -- for THIS chart and, through serieschart.js, for
+   every other graph on the dashboard. Chart draws all three off the same
+   OHLC array: line and bar read the close, candle reads all four, so the
+   switch never refetches and never needs a second payload. The stored
+   setting is still called `candleStyle`, and renaming it would silently
+   reset the choice of everyone who already has one in localStorage. */
+export const FORMS = [
+  ["candles", "Candle", "Open, high, low and close"],
+  ["bars",    "Bar",    "Open and close ticks on the high-low range"],
+  ["line",    "Line",   "The close only"],
+];
+
 const PALETTE = ["#4c8dff", "#e8a33d", "#b07cff", "#3ddbd9", "#f2839a", "#8bd450"];
 
 function load(key, fallback) {
@@ -303,6 +315,10 @@ export class ChartPanel {
       <div class="chart-bar" style="margin-bottom:10px">
         ${TFS.map(([t]) => `<button class="btn sm tfb" data-tf="${t}">${t}</button>`).join("")}
         <span style="width:10px"></span>
+        <div class="seg" data-forms>${FORMS.map(([f, label, tip]) =>
+          `<button type="button" class="seg-b fmb" data-form="${f}"
+             title="${tip}">${label}</button>`).join("")}</div>
+        <span style="width:10px"></span>
         <button class="btn sm" data-act="fit" title="Reset zoom and autoscale">Fit</button>
         <button class="btn sm" data-act="ind">Indicators</button>
         <button class="btn sm" data-act="sty"
@@ -361,6 +377,10 @@ export class ChartPanel {
         this.load();
       };
     });
+    this.$bar.querySelectorAll(".fmb").forEach((b) => {
+      b.onclick = () => this.setForm(b.dataset.form);
+    });
+    this._syncForms();
     this.$bar.querySelector('[data-act="fit"]').onclick = () => this.chart.resetView();
     this.$bar.querySelector('[data-act="ind"]').onclick = () => this._toggle("ind");
     this.$bar.querySelector('[data-act="sty"]').onclick = () => this._toggle("sty");
@@ -371,6 +391,25 @@ export class ChartPanel {
     document.addEventListener("keydown", this._onKey);
     this._syncTfs();
     this._paintPill();
+  }
+
+  /* The form switch lives on the TOOLBAR now, not three clicks into the
+     gear popover, because it is a thing an operator changes while looking at
+     the chart rather than a thing they set up once. The copy inside Chart
+     settings still works and the two stay in step -- both come through here,
+     and here is the only place `opts.candleStyle` is written. */
+  setForm(form) {
+    if (!FORMS.some((f) => f[0] === form) || form === this.opts.candleStyle) return;
+    this.opts.candleStyle = form;
+    this.chart.set("candleStyle", form);
+    this._syncForms();
+    this._persist();
+    if (this._pop === "cfg") this._settingsPanel();
+  }
+
+  _syncForms() {
+    this.$bar.querySelectorAll(".fmb").forEach((b) =>
+      b.classList.toggle("on", b.dataset.form === this.opts.candleStyle));
   }
 
   _syncTfs() {
@@ -413,9 +452,9 @@ export class ChartPanel {
                   background:var(--raised)">
         <div style="margin-bottom:12px">
           <span class="faint" style="font-size:12px;margin-right:10px">Style</span>
-          ${["candles", "bars", "line"].map((s) =>
-            `<button class="btn sm sty ${o.candleStyle === s ? "on" : ""}"
-              data-sty="${s}">${s}</button>`).join(" ")}
+          ${FORMS.map(([f, label, tip]) =>
+            `<button class="btn sm sty ${o.candleStyle === f ? "on" : ""}"
+              data-sty="${f}" title="${tip}">${label}</button>`).join(" ")}
         </div>
         <div style="margin-bottom:12px">${cb("showVolume", "Volume")}
           ${cb("showGrid", "Grid")}
@@ -428,11 +467,7 @@ export class ChartPanel {
         </div>
       </div>`;
     this.$pop.querySelectorAll(".sty").forEach((b) => {
-      b.onclick = () => {
-        this.opts.candleStyle = b.dataset.sty;
-        this.chart.set("candleStyle", b.dataset.sty);
-        this._persist(); this._settingsPanel();
-      };
+      b.onclick = () => this.setForm(b.dataset.sty);
     });
     this.$pop.querySelectorAll("[data-opt]").forEach((n) => {
       n.onchange = () => {

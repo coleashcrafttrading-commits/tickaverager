@@ -463,8 +463,13 @@ export const MOVED = {
   "portfolio":         { kind: "overview", tab: "" },        // the home page
   // Agents is a Settings tab
   "agents":            { kind: "settings", tab: "agents" },
-  // the strategy builder is a Research tab
-  "strategies":        { kind: "research", tab: "builder" },
+  /* NOT "strategies" any more. That row used to send #/strategies to the
+     research BUILDER, and readHash() tests MOVED before VIEWS -- so once
+     VIEWS.strategies shipped (the catalogue where the ladder finally appears
+     as ONE CARD beside the options plays) the page could never open. It was
+     the single reason the ladder still looked dominant: the one room that
+     demotes it was unreachable. The builder keeps its own route below. */
+  "strategy-builder":  { kind: "research", tab: "builder" },
   // the two orphan routes: registered, routable, and in no nav at all
   "backtest":          { kind: "research", tab: "backtest" },
   "tester":            { kind: "research", tab: "backtest" },
@@ -520,3 +525,326 @@ export function toggleTheme() {
   document.documentElement.setAttribute("data-theme", cur);
   try { localStorage.setItem("ta-theme", cur); } catch (e) { /* private mode */ }
 }
+
+/* ============================================================================
+   ==========================  THE SHARED PRIMITIVES  ========================
+
+   Every view in this dashboard is built from the pieces below. They exist so
+   that a tile on Portfolio and a tile on a ticker page are the SAME object --
+   one change of mind lands everywhere instead of on whichever page was edited
+   last. Nothing here knows what a ladder is; they all take the hub's metric
+   envelope, which is strategy-neutral by construction.
+
+   THE ONE RULE THEY ENFORCE: a number nobody measured renders as a dash that
+   carries its reason, never as 0. `money()` and `sgn()` above coerce null to
+   0 -- they are the OLD formatters and they stay that way because views still
+   pass raw floats to them. Anything coming out of /api/hub/* is an envelope
+   and must go through `mnum` / `mfmt`, which cannot print a confident zero.
+
+   THE ENVELOPE, as hub.py ships it:
+       {value, n, unit, reason, thin, as_of}
+       unit in usd | pct | ratio | count | qty | days | seconds
+       pct is a FRACTION: 0.0123 means +1.23%.
+       value === null  -> nobody measured it; `reason` says why.
+       thin === true   -> there IS a number but n === 0, so its reason still
+                          has to be readable. It renders with a dotted rule
+                          under it and the reason on hover.
+
+   THE PIECES (all return HTML strings; none of them touch the DOM):
+
+     mv(m) measured(m) mreason(m) isThin(m) isMetric(x) munit(m) mAsOf(m)
+     mfmt(m, opts)      plain text, an em dash when unmeasured
+     mnum(m, opts)      HTML, toned, with the reason on hover
+     unmeasured(why)    the dash on its own
+     pctf(fraction)     hub's pct unit; core's older pct() takes PERCENT POINTS
+     toneOf(n)          "up" | "down" | "flat"
+
+     sparkline(data, opts)      inline SVG, no library
+     tile(o)                    a metric tile, with an optional sparkline
+     tileGrid(tiles, opts)      the responsive grid tiles live in
+     panel(title, body, opts)   a section card
+     dataTable(o)               a table with per-column alignment and an
+                                honest empty row
+     segmented(o) / wireSegmented(root, fn)   the line|bar|candle control
+     emptyState(o)              "nothing yet", on purpose, not broken
+     stateChip(state, opts)     ONE strategy-state vocabulary, defined once
+     chip(text, tone, title)
+
+   Signatures are documented at each definition. None of the pre-existing
+   helpers (el, esc, card, stat, tableHTML, money, sgn, pct, qty, GET, POST,
+   api, VIEWS, go, sig) changed.
+   ========================================================================= */
+
+/* ------------------------------------------------------------ the envelope */
+export const isMetric = (x) =>
+  !!x && typeof x === "object" && !Array.isArray(x) && "value" in x && "unit" in x;
+
+/* the number inside, or null. A bare number passed in is returned as-is, so a
+   view can hand these helpers either an envelope or a plain float. */
+export const mv = (m) => {
+  if (isMetric(m)) return m.value === undefined ? null : m.value;
+  return m === undefined ? null : m;
+};
+export const measured = (m) => {
+  const v = mv(m);
+  return v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v));
+};
+export const mreason = (m) => (isMetric(m) ? (m.reason || "") : "");
+export const isThin = (m) => !!(isMetric(m) && m.thin);
+export const munit = (m) => (isMetric(m) ? (m.unit || "") : "");
+export const mAsOf = (m) => (isMetric(m) ? (m.as_of || null) : null);
+
+export const toneOf = (n) => (Number(n) > 0 ? "up" : Number(n) < 0 ? "down" : "flat");
+
+/* One formatter per unit. `dp` overrides the decimal places everywhere. */
+const UNIT_FMT = {
+  usd:     (v, o) => money(v, o.dp === undefined ? 2 : o.dp),
+  pct:     (v, o) => (v * 100).toFixed(o.dp === undefined ? 2 : o.dp) + "%",
+  ratio:   (v, o) => Number(v).toFixed(o.dp === undefined ? 2 : o.dp) + "×",
+  count:   (v)    => Number(v).toLocaleString(),
+  qty:     (v)    => qty(v),
+  days:    (v, o) => Number(v).toFixed(o.dp === undefined ? 1 : o.dp) + "d",
+  seconds: (v)    => dur(v),
+};
+
+/* mfmt(m, {unit, dp, signed, dash}) -> plain text, an em dash when unmeasured */
+export function mfmt(m, opts = {}) {
+  if (!measured(m)) return opts.dash || "—";
+  const v = Number(mv(m));
+  const f = UNIT_FMT[opts.unit || munit(m) || "usd"] || ((x) => String(x));
+  const s = f(v, opts);
+  return (opts.signed && v > 0) ? "+" + s : s;
+}
+
+/* mnum(m, {unit, dp, signed, tone, title, dash, reason}) -> HTML.
+   `signed` (or tone:"auto") colours by sign -- the ONLY place colour means
+   anything. A thin number keeps its reason on hover instead of losing it. */
+export function mnum(m, opts = {}) {
+  if (!measured(m)) return unmeasured(opts.reason || mreason(m), opts);
+  const v = Number(mv(m));
+  const cls = ["num"];
+  if (opts.signed || opts.tone === "auto") cls.push(toneOf(v));
+  else if (opts.tone) cls.push(opts.tone);
+  if (isThin(m)) cls.push("thin-num");
+  const why = isThin(m)
+    ? (mreason(m) || "there is a number here but no sample behind it")
+    : (opts.title || "");
+  return `<span class="${cls.join(" ")}"${why ? ` title="${esc(why)}"` : ""}>${
+    esc(mfmt(m, opts))}</span>`;
+}
+
+/* The dash, and why it is a dash. Never a zero. */
+export function unmeasured(reason = "", opts = {}) {
+  const why = reason || "nobody measured this";
+  return `<span class="unmeasured" title="${esc(why)}">${esc(opts.dash || "—")}</span>`;
+}
+
+/* hub's `pct` unit is a FRACTION. core's older pct() takes percent points and
+   is left alone, because a dozen views already call it that way. */
+export function pctf(f, dp = 2) {
+  if (f === null || f === undefined || Number.isNaN(Number(f))) {
+    return unmeasured("no previous close to compare against");
+  }
+  const v = Number(f) * 100;
+  return `<span class="num ${toneOf(v)}">${v > 0 ? "+" : ""}${v.toFixed(dp)}%</span>`;
+}
+
+/* --------------------------------------------------------------- sparkline */
+let SPARK_N = 0;
+/* sparkline(data, {w, h, tone, fill, why}) -> inline SVG.
+   `data` is an array of numbers, or of {c} / {value} objects, so an OHLC
+   series from /api/hub/series can be passed straight in and reads its close.
+   Fewer than two usable points is NOT a flat line at zero: it is a dotted
+   placeholder carrying `why`, because a drawn line would be a claim. */
+export function sparkline(data, opts = {}) {
+  const w = opts.w || 92, h = opts.h || 26, pad = 2;
+  const ys = (data || [])
+    .map((p) => (p && typeof p === "object")
+      ? Number(p.c !== undefined ? p.c : p.value)
+      : Number(p))
+    .filter((n) => n !== null && n !== undefined && !Number.isNaN(n));
+  if (ys.length < 2) {
+    return `<span class="spark spark-none" style="width:${w}px;height:${h}px"
+      title="${esc(opts.why || "not enough history to draw a line")}"></span>`;
+  }
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  const span = (hi - lo) || 1;
+  const n = ys.length;
+  const X = (i) => pad + (i * (w - pad * 2)) / (n - 1);
+  const Y = (v) => h - pad - ((v - lo) / span) * (h - pad * 2);
+  const d = ys.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ");
+  const tone = (opts.tone && opts.tone !== "auto") ? opts.tone : toneOf(ys[n - 1] - ys[0]);
+  const gid = "spk" + (++SPARK_N);
+  const area = `${d} L${X(n - 1).toFixed(1)} ${h} L${X(0).toFixed(1)} ${h} Z`;
+  return `<svg class="spark spark-${tone}" viewBox="0 0 ${w} ${h}" width="${w}"
+    height="${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="currentColor" stop-opacity=".30"/>
+      <stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>
+    ${opts.fill === false ? "" : `<path d="${area}" fill="url(#${gid})" stroke="none"/>`}
+    <path d="${d}" fill="none" stroke="currentColor" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+/* -------------------------------------------------------------- the tile */
+/* tile({label, metric|value, html, sub, spark, sparkTone, sparkWhy, signed,
+         dp, unit, tone, big, cls, id, go, sym, tab, hint})
+   -> one metric tile. `metric` is an envelope; `value` a plain number with
+   `unit`; `html` bypasses both when a view has already composed the figure.
+   `go`/`sym`/`tab` make the whole tile a router link (app.js delegates every
+   [data-go] click), which is how a KPI becomes a way in rather than a label. */
+export function tile(o = {}) {
+  const m = o.metric !== undefined ? o.metric : o.value;
+  const body = o.html !== undefined ? o.html : mnum(m, {
+    signed: o.signed, dp: o.dp, unit: o.unit, tone: o.tone, dash: o.dash,
+  });
+  const spark = o.spark
+    ? sparkline(o.spark, { tone: o.sparkTone, w: o.sparkW, h: o.sparkH, why: o.sparkWhy })
+    : "";
+  const nav = o.go ? ` data-go="${esc(o.go)}"${o.sym ? ` data-sym="${esc(o.sym)}"` : ""}${
+    o.tab ? ` data-tab="${esc(o.tab)}"` : ""}` : "";
+  const hint = o.hint || (o.html === undefined && !measured(m) ? mreason(m) : "");
+  return `<div class="tile${o.big ? " big" : ""}${o.go ? " tile-go" : ""}${
+    o.cls ? " " + o.cls : ""}"${o.id ? ` id="${esc(o.id)}"` : ""}${nav}${
+    hint ? ` title="${esc(hint)}"` : ""}>
+    <div class="tile-k">${o.label || ""}</div>
+    <div class="tile-v">${body}</div>
+    ${o.sub ? `<div class="tile-s">${o.sub}</div>` : ""}
+    ${spark ? `<div class="tile-spark">${spark}</div>` : ""}
+  </div>`;
+}
+
+/* tileGrid(tiles, {cols, cls}) -- `cols` is the MAXIMUM across; the grid
+   falls to fewer on its own as the page narrows, down to two on a phone. */
+export const tileGrid = (tiles, opts = {}) =>
+  `<div class="tile-grid${opts.cls ? " " + opts.cls : ""}"${
+    opts.cols ? ` style="--tile-cols:${opts.cols}"` : ""}>${
+    Array.isArray(tiles) ? tiles.join("") : tiles}</div>`;
+
+/* ------------------------------------------------------------- the panel */
+/* panel(title, body, {sub, actions, flush, cls, id}) -- the section card.
+   `card()` above is the OLD one and is unchanged; views migrate at their own
+   pace. A panel differs in having a sub-line under its title and a proper
+   header slot, which is where a segmented control belongs. */
+export function panel(title, body, opts = {}) {
+  const head = (title || opts.sub || opts.actions)
+    ? `<header class="panel-h">
+         <div class="panel-tt">
+           ${title ? `<h2 class="panel-t">${title}</h2>` : ""}
+           ${opts.sub ? `<div class="panel-sub">${opts.sub}</div>` : ""}
+         </div>
+         ${opts.actions ? `<div class="panel-x">${opts.actions}</div>` : ""}
+       </header>`
+    : "";
+  return `<section class="panel${opts.cls ? " " + opts.cls : ""}"${
+    opts.id ? ` id="${esc(opts.id)}"` : ""}>${head}
+    <div class="panel-b${opts.flush ? " flush" : ""}">${body}</div></section>`;
+}
+
+/* -------------------------------------------------------------- the table */
+/* dataTable({cols, rows, empty, dense, id, cls})
+     cols  ["Symbol", {label:"Value", num:true, title:"...", w:"90px"}]
+     rows  either arrays of cell HTML (aligned by the column spec) or whole
+           "<tr>...</tr>" strings for a row that needs its own attributes.
+   An empty table says what would be there, not "Nothing here." */
+export function dataTable(o = {}) {
+  const cols = (o.cols || []).map((c) => (typeof c === "string" ? { label: c } : c));
+  const heads = cols.map((c) =>
+    `<th${c.num ? ` class="dt-n"` : (c.cls ? ` class="${c.cls}"` : "")}${
+      c.title ? ` title="${esc(c.title)}"` : ""}${
+      c.w ? ` style="width:${c.w}"` : ""}>${c.label === undefined ? "" : c.label}</th>`).join("");
+  const rows = o.rows || [];
+  const body = rows.length
+    ? rows.map((r) => Array.isArray(r)
+        ? `<tr>${r.map((cell, i) =>
+            `<td${cols[i] && cols[i].num ? ` class="dt-n num"` : ""}>${cell}</td>`).join("")}</tr>`
+        : r).join("")
+    : `<tr><td colspan="${cols.length || 1}" class="empty">${
+        o.empty || "Nothing to show yet."}</td></tr>`;
+  return `<div class="tw dt${o.dense ? " dense" : ""}${o.cls ? " " + o.cls : ""}"${
+    o.id ? ` id="${esc(o.id)}"` : ""}><table>
+    <thead><tr>${heads}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* --------------------------------------------------- the segmented control */
+/* segmented({options, value, id, name, size, label})
+     options  ["line", ["candle", "Candle", "tooltip"]]
+   Markup is the SAME .seg/.seg-b the backtester already styles, so this is a
+   constructor for an existing control rather than a second one. `size` may be
+   "sm". Pair with wireSegmented(rootOrId, (value, button) => ...). */
+export function segmented(o = {}) {
+  const opts = (o.options || []).map((x) => (Array.isArray(x) ? x : [x, x]));
+  return `<div class="seg${o.size ? " " + o.size : ""}"${o.id ? ` id="${esc(o.id)}"` : ""}${
+    o.name ? ` data-seg="${esc(o.name)}"` : ""} role="tablist"${
+    o.label ? ` aria-label="${esc(o.label)}"` : ""}>${
+    opts.map(([v, l, t]) => `<button type="button" class="seg-b${
+      String(v) === String(o.value) ? " on" : ""}" data-v="${esc(v)}" role="tab"
+      aria-selected="${String(v) === String(o.value) ? "true" : "false"}"${
+      t ? ` title="${esc(t)}"` : ""}>${l === undefined ? esc(v) : l}</button>`).join("")}</div>`;
+}
+export function wireSegmented(root, onPick) {
+  const r = typeof root === "string" ? el(root) : root;
+  if (!r) return;
+  r.querySelectorAll(".seg-b").forEach((b) => {
+    b.onclick = () => {
+      if (b.classList.contains("on")) return;
+      r.querySelectorAll(".seg-b").forEach((x) => {
+        x.classList.toggle("on", x === b);
+        x.setAttribute("aria-selected", x === b ? "true" : "false");
+      });
+      if (onPick) onPick(b.dataset.v, b);
+    };
+  });
+}
+
+/* ------------------------------------------------------- the empty state */
+/* emptyState({title, body, action, icon, cls}) -- an account with nothing in
+   it must look DELIBERATE. A grid of zeroes looks like a bug, and this repo
+   has shipped that bug before. */
+export function emptyState(o = {}) {
+  return `<div class="blank${o.cls ? " " + o.cls : ""}">
+    ${o.icon ? `<div class="blank-i" aria-hidden="true">${o.icon}</div>` : ""}
+    <div class="blank-t">${o.title || "Nothing here yet"}</div>
+    ${o.body ? `<div class="blank-b">${o.body}</div>` : ""}
+    ${o.action ? `<div class="blank-a">${o.action}</div>` : ""}</div>`;
+}
+
+/* ------------------------------------------------- the state vocabulary ---
+   ONE set of words for what a strategy is doing, defined here and nowhere
+   else. This is the fix for "armed": the shell used to mean "a ladder engine
+   is armed" and the options tab "the playbook may open", and both words were
+   on screen at once meaning different things. These are hub.py's own state
+   words and the shell never invents a seventh. */
+export const STATE_WORDS = {
+  armed:   { tone: "armed",  label: "armed",
+             why: "Transmits REAL orders at the broker." },
+  live:    { tone: "live",   label: "live",
+             why: "Switched on and deciding. The ladder says this while it is "
+                + "still in dry run; an options play says it once it is "
+                + "assigned and enabled." },
+  idle:    { tone: "idle",   label: "idle",
+             why: "Attached to this ticker but not deciding right now." },
+  halted:  { tone: "halt",   label: "halted",
+             why: "It stopped itself on a problem and wants a human." },
+  adopted: { tone: "adopt",  label: "adopted",
+             why: "Positions are open here that this strategy did not place." },
+  off:     { tone: "off",    label: "off",
+             why: "Attached to nothing." },
+  error:   { tone: "halt",   label: "error",
+             why: "This strategy could not be read." },
+};
+/* stateChip(state, {sub, title, sm}) -> the pill. An unknown word renders as
+   itself rather than being swallowed, so a new strategy kind is visible on
+   day one instead of silently reading "off". */
+export function stateChip(state, o = {}) {
+  const k = String(state || "off").toLowerCase();
+  const d = STATE_WORDS[k] || { tone: "idle", label: k, why: "" };
+  return `<span class="chip st-${d.tone}${o.sm ? " sm" : ""}" title="${
+    esc(o.title || d.why)}">${esc(d.label)}${
+    o.sub ? `<b class="chip-s">${esc(o.sub)}</b>` : ""}</span>`;
+}
+/* chip(text, tone, title) -- the generic one. tone: "" | up | down | warn |
+   accent | mute. */
+export const chip = (text, tone = "", title = "") =>
+  `<span class="chip${tone ? " ch-" + tone : ""}"${
+    title ? ` title="${esc(title)}"` : ""}>${text}</span>`;

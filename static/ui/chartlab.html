@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chart lab</title>
+<!--
+  chartlab.html -- the charting harness. Open it and look at the charts.
+
+  It exists because the only other way to SEE chart.js draw is the live
+  dashboard, and a desktop copy of that against this account is the "two
+  servers" case the operating rules forbid outright. This page imports the
+  real modules, feeds them fixtures, and reaches no network of any kind: no
+  Alpaca client, no app.py, no broker keys, nothing under /api.
+
+      cd static && python -m http.server 8765      # NOT port 8010
+      open http://127.0.0.1:8765/ui/chartlab.html
+
+  Serve `static/` and not the repo root -- the repo root has .env in it.
+
+  The bars are real SPY 1-minute prints, pasted in as literals, so what is on
+  screen is a real session's shape with its real overnight breaks. Everything
+  else is a fixture chosen to be a FAILING input: an empty series, a series
+  whose buckets hold one sample each, a drawdown in fractions.
+-->
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--text);
+         font: 13px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .lab { max-width: 1240px; margin: 0 auto; display: flex;
+         flex-direction: column; gap: 22px; }
+  .box { border: 1px solid var(--hairline); border-radius: var(--radius);
+         background: var(--surface); padding: 16px; }
+  .box > h2 { font-size: 12px; text-transform: uppercase;
+              letter-spacing: .08em; color: var(--faint);
+              margin: 0 0 12px; font-weight: 600; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+         margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="lab">
+  <div>
+    <h1>Chart lab</h1>
+    <div class="faint" id="env"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn sm" id="theme">Toggle theme</button>
+      <button class="btn sm" id="zoom">Zoom to 12 bars</button>
+      <button class="btn sm" id="fit">Fit</button>
+      <span class="faint" id="probe"></span>
+    </div>
+  </div>
+
+  <div class="box"><h2>1 &middot; price, real SPY 1-minute bars</h2>
+    <div id="price"></div></div>
+
+  <div class="box"><h2>2 &middot; account value &mdash; line, bar or candle</h2>
+    <div id="value"></div></div>
+
+  <div class="box"><h2>3 &middot; drawdown, unit = pct (a FRACTION on the wire)</h2>
+    <div id="dd"></div></div>
+
+  <div class="box"><h2>4 &middot; one sample per bucket &mdash; the doji case</h2>
+    <div id="doji"></div></div>
+
+  <div class="box"><h2>5 &middot; an empty series &mdash; must read as its reason,
+    never a flat line at zero</h2>
+    <div id="empty"></div></div>
+
+  <div class="box"><h2>6 &middot; the full ChartPanel toolbar &mdash; the ticker
+    page's chart. No network: the bars are handed to it directly.</h2>
+    <div id="panel"></div></div>
+</div>
+
+<script type="module">
+import { Chart } from "./chart.js";
+import { SeriesChart } from "./serieschart.js";
+import { ChartPanel } from "./chartpanel.js";
+import { initTheme, toggleTheme } from "./core.js";
+import BARS from "./chartlab-bars.js";
+
+initTheme();
+document.getElementById("env").textContent =
+  BARS.length + " real SPY 1-minute bars · no network is reached by this page";
+
+/* ---- 1. the price chart, the thing the zoom-gap bug was about ---- */
+const price = new Chart(document.getElementById("price"), { height: 380 });
+price.setData(BARS);
+
+document.getElementById("theme").onclick = () => { toggleTheme(); price.draw(); };
+document.getElementById("zoom").onclick = () => {
+  price.userMoved = true;
+  price.view = [BARS.length - 12, BARS.length];
+  price.priceRange = null; price.autoScale = true;
+  price.draw();
+  probe();
+};
+document.getElementById("fit").onclick = () => { price.resetView(); probe(); };
+
+/* The measurement the fix is about, read off the chart rather than asserted:
+   the slot each bar gets and the body actually drawn inside it. */
+function probe() {
+  const S = price._S;
+  if (!S) return;
+  const span = price.view[1] - price.view[0];
+  const body = price.constructor.name && S.bw;
+  import("./chart.js").then((m) => {
+    const w = m.bodyWidth(S.bw);
+    document.getElementById("probe").textContent =
+      `${span.toFixed(0)} bars visible · slot ${S.bw.toFixed(1)}px · `
+      + `body ${w.toFixed(1)}px · gap ${(S.bw - w).toFixed(1)}px`;
+  });
+}
+setTimeout(probe, 60);
+
+/* ---- 6. the real ChartPanel, toolbar and all ---------------------------
+   Constructed and then FED, never loaded: ChartPanel.load() would call
+   /api/bars, and this page reaches no network. Everything the toolbar does
+   -- the timeframe row, the line/bar/candle switch, Fit, Indicators, Style
+   and the gear -- is the real code. */
+const panel = new ChartPanel(document.getElementById("panel"),
+  { key: "lab", symbol: "SPY" });
+panel.bars = BARS;
+panel.chart.setData(BARS, { keepView: false });
+
+/* ---- 2..5: the hub's series shape, as fixtures ---- */
+const t = (i) => new Date(Date.UTC(2026, 7, 1) + i * 86400000).toISOString()
+  .replace(/\.\d{3}Z$/, "Z");
+
+/* an equity curve with a real intraday range in each daily bucket */
+const value = [];
+let v = 41000;
+for (let i = 0; i < 120; i++) {
+  const o = v;
+  v += Math.sin(i / 7) * 180 + (i % 11 - 5) * 40 + 9;
+  const h = Math.max(o, v) + 90 + (i % 5) * 20;
+  const l = Math.min(o, v) - 70 - (i % 3) * 25;
+  value.push({ t: t(i), o, h, l, c: v, v: 390 });
+}
+
+new SeriesChart(document.getElementById("value"),
+  { key: "lab:value", metric: "value", height: 300 }).setSeries({
+    ok: true, metric: "value", tf: "6M", form: "line", unit: "usd",
+    points: value, count: value.length, bucket_seconds: 86400,
+    source: "journal + equity samples",
+    basis: "buckets are one trading day; the open is the first sample in it",
+    v_means: "v is the number of samples in the bucket, not traded volume",
+  });
+
+new SeriesChart(document.getElementById("dd"),
+  { key: "lab:dd", metric: "drawdown", height: 240 }).setSeries({
+    ok: true, metric: "drawdown", tf: "6M", form: "line", unit: "pct",
+    points: value.map((p, i) => {
+      const peak = Math.max(...value.slice(0, i + 1).map((q) => q.c));
+      const f = (x) => (x - peak) / peak;
+      return { t: p.t, o: f(p.o), h: f(p.h), l: f(p.l), c: f(p.c), v: p.v };
+    }),
+    basis: "measured against the all-time peak, which is the honest window",
+  });
+
+new SeriesChart(document.getElementById("doji"),
+  { key: "lab:doji", metric: "exposure", height: 220 }).setSeries({
+    ok: true, metric: "exposure", tf: "All", form: "candle", unit: "usd",
+    points: [0, 1, 2, 3, 4, 5, 6].map((i) => {
+      const c = 8200 + i * 640;
+      return { t: t(i * 7), o: c, h: c, l: c, c, v: 1 };
+    }),
+    basis: "the journal and the options ledger only; a hand-placed position "
+         + "has no history here",
+    reason: "one sample per bucket in this window",
+  });
+
+new SeriesChart(document.getElementById("empty"),
+  { key: "lab:empty", metric: "pl", height: 200 }).setSeries({
+    ok: true, metric: "pl", tf: "1D", form: "line", unit: "usd",
+    points: [], count: 0,
+    reason: "no equity samples before 12 Sep 2026, so this window is empty",
+  });
+</script>
+</body>
+</html>

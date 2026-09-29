@@ -84,6 +84,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request   # noqa: E40
 from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 
 import accounts                                           # noqa: E402
+import hub                                                # noqa: E402
 import journal                                            # noqa: E402
 import scheduler                                          # noqa: E402
 from broker import AlpacaError                            # noqa: E402
@@ -2923,6 +2924,127 @@ def optlab_perf(f: Fleet = Depends(cur)):
     payload["state"] = state
     payload["caps"] = caps
     return payload
+
+
+# =================================================================== the hub
+# The strategy-agnostic model. `hub.py` holds every calculation; these routes
+# take the snapshots (the broker client lives here, never there) and hand them
+# over. Read-only except the two POSTs, and neither of those places an order:
+# adding a ticker writes one row to state/tickers.json, and attaching a
+# strategy delegates to that subsystem's own audited entry point.
+#
+# NOTHING UNDER /api/hub MAY PLACE AN ORDER. The same rule /api/optlab lives
+# under, for the same reason: a namespace the dashboard polls is not a place to
+# put a write nobody is looking for.
+def _hub_ctx(f: Fleet, *, options: bool = True) -> "hub.Ctx":
+    """One read context per request.
+
+    `option_positions=None` means NOBODY LOOKED, and hub renders that as a
+    caveat rather than as "the account holds no options" -- so the failure of
+    the positions call can never read as an empty options book.
+    """
+    return hub.Ctx(f, option_positions=(_perf_positions(f) if options else None))
+
+
+@app.get("/api/a/{acct}/hub/portfolio")
+@app.get("/api/hub/portfolio")
+def hub_portfolio(f: Fleet = Depends(cur)):
+    """The account across every strategy, plus what no strategy owns."""
+    return hub.portfolio(_hub_ctx(f))
+
+
+@app.get("/api/a/{acct}/hub/series")
+@app.get("/api/hub/series")
+def hub_series(metric: str = "value", tf: str = "1D", form: str = "line",
+               f: Fleet = Depends(cur)):
+    """OHLC for one metric, so any series can be drawn as line, bar or candle."""
+    try:
+        return hub.series(_hub_ctx(f, options=False), metric, tf, form)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/a/{acct}/hub/tickers")
+@app.get("/api/hub/tickers")
+def hub_tickers(f: Fleet = Depends(cur)):
+    """Every ticker the account cares about, with or without a strategy."""
+    ctx = _hub_ctx(f)
+    return {"ok": True, "account": ctx.account_id, "as_of": ctx.now,
+            "tickers": hub.tickers(ctx), "warnings": ctx.warnings}
+
+
+@app.get("/api/a/{acct}/hub/strategies")
+@app.get("/api/hub/strategies")
+def hub_strategies(f: Fleet = Depends(cur)):
+    """Every strategy as a peer row, with the schema its settings pane needs."""
+    ctx = _hub_ctx(f)
+    return {"ok": True, "account": ctx.account_id, "as_of": ctx.now,
+            "strategies": hub.strategies(ctx), "warnings": ctx.warnings}
+
+
+@app.post("/api/a/{acct}/hub/ticker")
+@app.post("/api/hub/ticker")
+def hub_add_ticker(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Add a ticker with NO strategy attached.
+
+    This is the owner's complaint, fixed: it writes one row to the registry. No
+    Engine is built, config.json is not touched and nothing is ordered.
+    """
+    sym = str(body.get("symbol") or "").strip().upper()
+    try:
+        return hub.add_ticker(_hub_ctx(f, options=False), sym,
+                              by=str(body.get("by") or "dashboard"),
+                              note=str(body.get("note") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/a/{acct}/hub/ticker/{sym}")
+@app.get("/api/hub/ticker/{sym}")
+def hub_ticker(sym: str, f: Fleet = Depends(cur)):
+    """One ticker: its row, its per-strategy detail and its own history."""
+    try:
+        return hub.ticker(_hub_ctx(f), sym)
+    except KeyError:
+        raise HTTPException(404, f"{sym.upper()} is not a ticker on this account.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/a/{acct}/hub/ticker/{sym}")
+@app.delete("/api/hub/ticker/{sym}")
+def hub_remove_ticker(sym: str, f: Fleet = Depends(cur)):
+    """Drop a ticker from the watchlist. Refused while a strategy holds it."""
+    try:
+        return hub.remove_ticker(_hub_ctx(f, options=False), sym)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/a/{acct}/hub/ticker/{sym}/strategy")
+@app.post("/api/hub/ticker/{sym}/strategy")
+def hub_ticker_strategy(sym: str, body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Attach, detach or configure one strategy on one ticker.
+
+    ATTACHING NEVER ARMS. A ladder arrives stopped and in dry run; a play is
+    assigned and the arm file is not touched. Arming stays where it is, behind
+    its own control, because the owner looking at a proposal before it can be
+    sent is the whole point of the two being separate.
+    """
+    settings = body.get("settings")
+    if settings is not None and not isinstance(settings, dict):
+        raise HTTPException(400, "settings must be an object.")
+    try:
+        return hub.set_strategy(
+            _hub_ctx(f, options=False), sym,
+            str(body.get("strategy") or ""),
+            action=str(body.get("action") or "attach"),
+            settings=settings, by=str(body.get("by") or "dashboard"),
+            force=bool(body.get("force")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.on_event("startup")

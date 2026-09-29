@@ -1,34 +1,874 @@
 /* ============================================================================
-   Research -> Builder -- build a strategy by clicking, not by writing JSON.
+   Strategies -- the CATALOGUE, and the builder that makes new ones.
 
-   This was its own rail entry. It is a research tool: it produces a document
-   that the backtester runs and the engine can be pointed at, and it touches
-   no live money, so it belongs beside the backtester rather than in a slot
-   of its own two clicks away from it. "Backtest it" now hands the saved slug
-   to the Backtest tab instead of jumping to an empty ladder run.
+   Two things live in this file and they are two different jobs:
 
-   A strategy is a document, and the document is the single source of truth: the
-   builder edits it, the JSON pane shows it, the backtester runs it and the
+   1. THE CATALOGUE (VIEWS.strategies, the page). Every strategy on this
+      account as a peer row off /api/hub/strategies -- the DCA ladder, the
+      index put credit spread, the hourly swing, and whatever is appended to
+      hub.PROVIDERS next. What it does in one sentence, which tickers it runs
+      on, its state in ONE vocabulary, its measured results, and its settings.
+      Attaching a strategy to a ticker and detaching it are one control here.
+
+      This is the shape the owner asked for: "I want the ladder strategy to
+      just be a strategy like how options or other strategies are." Nothing in
+      the catalogue spells `ladder` except the one constant that says what the
+      ladder IS, so demoting it was a change of structure and not of wording.
+
+   2. THE BUILDER and the STRATEGY BANK (the BUILDER export, below). Build a
+      strategy document by clicking rather than by writing JSON, and the shared
+      shelf it is saved to. views/research.js hosts it as a tab and this page
+      hosts it as its second tab -- one module, two doors, no second copy.
+
+   A strategy is a document, and the document is the single source of truth:
+   the builder edits it, the JSON pane shows it, the backtester runs it and the
    engine trades it. There is no second representation to drift out of sync.
 
    Rules are a tree. A group (all / any / none) holds conditions and other
    groups, which is exactly the shape strategy.py evaluates, so what you see is
    literally what runs.
-
-   Beside it, in the rail, is the STRATEGY BANK: one shelf holding both kinds
-   of strategy -- the documents built here by clicking, and the coded ones
-   Claude writes, which used to land in a folder the dashboard never showed.
-   The bank is next to the builder rather than on a page of its own because
-   the three things you do with a strategy -- look at it, turn its numbers,
-   change its shape -- are one train of thought, and walking between rooms in
-   the middle of it is how people end up tuning the wrong strategy.
    ========================================================================= */
 "use strict";
 import {
-  S, GET, POST, act, ask, toast, el, esc, card, tableHTML, go, dur,
+  S, VIEWS, GET, POST, act, ask, toast, el, esc, card, tableHTML, go, dur,
 } from "../core.js";
 import { preset as btPreset } from "./backtest.js";
+/* The catalogue renders hub's metric envelope and hub's settings schemas
+   through the SAME form library the ladder's own settings go through, so an
+   options play and a ladder rung are edited by one set of controls. */
+import {
+  ensureFieldStyles, metricTile, metricValue, schemaFormHTML, schemaPatch,
+  fmtSchemaVal, impactBadge, moneyKeys, applyVisibility, applySearch,
+  readValues, GOVERNORS,
+} from "../fields.js";
 
+/* ==========================================================================
+   THE CATALOGUE -- every strategy there is, the ladder among them.
+
+   This is the structural change the owner asked for, rendered. Until now the
+   dashboard had a ladder with an options tab bolted beside it: a ticker WAS a
+   ladder config, "armed" meant two different things on two pages, and there
+   was no screen on which the ladder was one entry rather than the subject.
+
+   /api/hub/strategies returns one row per strategy from hub.PROVIDERS, and
+   this page renders that list without knowing what is in it. The ladder is
+   the first row only because the list is sorted by value; a fourth kind
+   appended to hub.PROVIDERS appears here with no edit to this file. That is
+   the test of whether the ladder has actually been demoted: nothing below
+   spells `ladder` except the one place that says what the ladder IS.
+
+   Every number comes through fields.js's metric renderer, so a figure nobody
+   measured is a dash with its reason and never a zero.
+   ========================================================================== */
+
+/* One sentence per strategy, from CLAUDE.md rather than from imagination.
+
+   hub.py gives an id, a label and a kind, and deliberately gives no prose --
+   it is a calculation module. So the sentences live here, keyed by id, and an
+   id with no sentence SAYS it has none. Writing a plausible description from
+   the id would be the worst outcome: a strategy nobody documented would read
+   exactly like one somebody did. */
+const BLURB = {
+  ladder:
+    "Buys a rung every time price moves a set distance against the last fill, "
+    + "and rests that lot's own take-profit at Alpaca from the moment it opens. "
+    + "There is no stop loss on an unarmed lot.",
+  "index-put-credit-spread":
+    "Sells the ~0.20 delta put about a month out and buys the put two listed "
+    + "strikes below, ten contracts, one entry per session between 10:30 and "
+    + "15:30 ET. Exits at +50% / -25% of the position.",
+  "swing-atm-hourly":
+    "Buys the at-the-money call when the 1-hour bar closes above BOTH the 9 EMA "
+    + "and session VWAP, the put when it closes below both. One contract, about "
+    + "a month out, no time-of-day filter. Exits at +50% / -25%.",
+};
+const blurbOf = (id) => BLURB[id] || "";
+
+/* The one vocabulary. `state` used to be two words that disagreed on screen --
+   "armed" meant `not dry_run` in the shell and `PLAYS_ARMED` in the options
+   tab. hub.py now hands one word out of one list, and this is where it is
+   turned into something to look at. */
+const STATE = {
+  live:    { t: "live",    cls: "st-live",
+             why: "This strategy is running and may transmit orders." },
+  armed:   { t: "armed",   cls: "st-live",
+             why: "Armed. The next signal transmits a real order." },
+  idle:    { t: "idle",    cls: "st-idle",
+             why: "Attached to a ticker but switched off. It opens nothing." },
+  off:     { t: "off",     cls: "st-off",
+             why: "Nothing is attached and nothing is held." },
+  halted:  { t: "halted",  cls: "st-bad",
+             why: "Stopped by a guard rather than by a person. Read `why`." },
+  stopped: { t: "stopped", cls: "st-off",
+             why: "Not running, so it decides nothing. Any lot it holds keeps "
+                + "its take-profit resting at Alpaca regardless." },
+  dry:     { t: "dry run", cls: "st-idle",
+             why: "Running and deciding, with every order suppressed. It "
+                + "transmits nothing." },
+  adopted: { t: "adopted", cls: "st-warn",
+             why: "It holds a position the ledger did not open. Monitored and "
+                + "closed before expiry, never closed for profit or loss -- "
+                + "those thresholds were never set for it." },
+  error:   { t: "error",   cls: "st-bad",
+             why: "This strategy could not be read." },
+};
+const stateOf = (s) => STATE[String(s || "off")]
+  || { t: String(s), cls: "st-warn",
+       why: "A state this page has not met. Shown as the server spelled it." };
+
+const KIND = { shares: "shares", options: "options" };
+
+let CAT_ROWS = [];        // /api/hub/strategies -> strategies[]
+let CAT_TICKERS = [];     // /api/hub/tickers -> tickers[]
+let CAT_WARN = [];
+let CAT_AT = 0;           // epoch ms of the last successful load
+let CAT_ERR = "";
+let CAT_Q = "";           // the catalogue's own search box
+let catBusy = false;
+
+/* `/api/hub/strategies` and `/api/hub/tickers` both go through
+   app._perf_positions(), which is on the 200/min TRADING budget and cached for
+   20 s. The ladders need that budget to place orders, so the page refuses to
+   poll faster than the cache can answer differently. */
+const CAT_MIN_MS = 20000;
+
+async function loadCatalogue(force = false) {
+  if (catBusy) return;
+  if (!force && CAT_AT && Date.now() - CAT_AT < CAT_MIN_MS) return;
+  catBusy = true;
+  try {
+    /* /portfolio is read as well as /strategies, and only for its WARNINGS.
+
+       `ctx.warnings` is filled by hub.portfolio() and by nothing else, so the
+       `side_disagreement` case -- the ledger says long and the broker says
+       short -- is invisible on /strategies and /tickers. Measured against the
+       `hubclash` scenario: both answered 200 with `warnings: []` while the
+       account was in exactly that state. A page about strategies that cannot
+       say "this strategy's ledger disagrees with Alpaca" is the wrong page to
+       leave that on.
+
+       All three are on the 20 s cached trading budget together, which is why
+       they go out as one batch behind one CAT_MIN_MS gate. */
+    const [s, t, pf] = await Promise.all([
+      GET("/api/hub/strategies"),
+      GET("/api/hub/tickers"),
+      GET("/api/hub/portfolio").catch((e) => ({ warnings: [] })),
+    ]);
+    CAT_ROWS = s.strategies || [];
+    CAT_TICKERS = t.tickers || [];
+    const seen = new Set();
+    CAT_WARN = (pf.warnings || []).concat(s.warnings || [], t.warnings || [])
+      .filter((w) => {
+        const key = (w && w.code) + "|" + (w && w.text);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    CAT_ERR = "";
+    CAT_AT = Date.now();
+  } catch (e) {
+    CAT_ERR = e.message;
+  } finally {
+    catBusy = false;
+  }
+  renderCatalogue();
+}
+
+VIEWS.strategies = {
+  title: () => "Strategies",
+  sub: (ov, v) => ((v.tab || "catalogue") === "builder"
+    ? "build a strategy document by clicking, and the shared bank it is saved to"
+    : "every strategy on this account, the ladder among them"),
+  tabs: [["catalogue", "Catalogue"], ["builder", "Builder"]],
+
+  mount(v) {
+    if ((v.tab || "catalogue") === "builder") return BUILDER.mount(v);
+    ensureFieldStyles();
+    ensureCatStyles();
+    CAT_ERR = "";
+    CAT_AT = 0;
+    el("view").innerHTML = `
+      <div id="catHead"></div>
+      <div id="catBody"><div class="faint">Reading the strategies…</div></div>`;
+    loadCatalogue(true);
+  },
+
+  paint(v) {
+    if ((v.tab || "catalogue") === "builder") return;
+    /* Never repaint over a sheet that is open or a box being typed in. The
+       poll is 2 s by default and the settings panes here are live money. */
+    if (sheet || S.touched) return;
+    loadCatalogue(false);
+  },
+};
+
+/* ------------------------------------------------------------- the header */
+function catHeadHTML() {
+  const rows = CAT_ROWS;
+  const live = rows.filter((r) => ["live", "armed"].includes(r.state)).length;
+  const syms = new Set();
+  for (const r of rows) for (const t of (r.tickers || [])) syms.add(t);
+  /* SUMS of metrics, and a sum is only honest while every part of it has a
+     number. One strategy that could not price itself makes the total a
+     partial, and it says so rather than quietly reporting the rest. */
+  const sum = (key) => {
+    let total = 0, have = 0, missing = [];
+    for (const r of rows) {
+      const v = metricValue(r[key]);
+      if (v === null) { missing.push(r.label || r.id); continue; }
+      total += v; have += 1;
+    }
+    if (!have) {
+      return { value: null, n: 0, unit: "usd",
+               reason: rows.length ? "no strategy priced this" : "no strategy yet" };
+    }
+    return { value: total, n: have, unit: "usd",
+             reason: missing.length
+               ? "partial: " + missing.join(", ") + " could not price this"
+               : null,
+             thin: missing.length > 0 };
+  };
+
+  const warn = CAT_WARN.length
+    ? `<div class="note warn cat-warn">${CAT_WARN.map((w) =>
+        `<div><b>${esc(w.code || "warning")}</b> — ${esc(w.text || "")}</div>`
+      ).join("")}</div>`
+    : "";
+
+  return card("This account's strategies", `
+    <div class="mrow">
+      ${metricTile("Strategies", { value: rows.length, n: rows.length, unit: "count" })}
+      ${metricTile("Live or armed", { value: live, n: rows.length, unit: "count" })}
+      ${metricTile("Tickers covered", { value: syms.size, n: syms.size, unit: "count" })}
+      ${metricTile("Value held", sum("value"))}
+      ${metricTile("Open P/L", sum("open_pl"), { signed: true })}
+      ${metricTile("Realised", sum("realized_pl"), { signed: true })}
+      ${metricTile("At risk", sum("at_risk"))}
+    </div>
+    ${warn}
+    <div class="tip" style="margin-bottom:0">Every row below is a peer. The
+      ladder is one of them, listed by how much of the account it holds and by
+      nothing else — a strategy appended to <code>hub.PROVIDERS</code> appears
+      here with no change to this page. <b>Open P/L and Realised are not added
+      together anywhere</b>: they come from three different origins and
+      reconciling them on screen would invent a number nobody measured.</div>`,
+    `<input id="catQ" class="cat-q" placeholder="Search strategies and tickers"
+       value="${esc(CAT_Q)}" spellcheck="false" autocomplete="off">
+     <button class="btn sm" id="catRefresh">Refresh</button>`);
+}
+
+/* -------------------------------------------------------------- the cards */
+function matchRow(r, q) {
+  const terms = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const hay = [r.id, r.label, r.kind, r.state, blurbOf(r.id)]
+    .concat(r.tickers || []).join(" ").toLowerCase();
+  return terms.every((w) => hay.indexOf(w) >= 0);
+}
+
+function renderCatalogue() {
+  const head = el("catHead");
+  const body = el("catBody");
+  if (!head || !body) return;
+  /* A FAILED READ MUST NOT LEAVE THE TOTALS ON SCREEN.
+
+     The first version kept the last good CAT_ROWS and only swapped the card
+     list for the error, so a 502 left "Value held $23,148.00" sitting above
+     the words "could not read the strategies" -- a number from a read that no
+     longer answers, presented as this account's position. Measured against the
+     `hubfail` scenario. On an error the header IS the error, and it says how
+     old the last good read was so the figures can be gone without the page
+     pretending nothing was ever there. */
+  if (CAT_ERR) {
+    head.innerHTML = card("This account's strategies", `
+      <div class="note bad" style="margin:0"><b>Could not read the
+        strategies.</b> ${esc(CAT_ERR)}<br>
+        ${CAT_AT
+          ? `The figures that were here came from a read
+             <b>${Math.round((Date.now() - CAT_AT) / 1000)}s</b> ago and are not
+             shown, because a total nobody can refresh is not a total.`
+          : `Nothing has been read yet.`}
+        <br>No strategy is listed below rather than listing them stale — a
+        strategy list that is quietly out of date is worse than none.</div>`,
+      `<button class="btn sm" id="catRefresh">Try again</button>`);
+    const rb0 = el("catRefresh");
+    if (rb0) rb0.onclick = () => act(() => loadCatalogue(true));
+    renderCards();
+    return;
+  }
+  head.innerHTML = catHeadHTML();
+  const q = el("catQ");
+  if (q) {
+    q.oninput = () => { CAT_Q = q.value; renderCards(); };
+    /* the header is rebuilt on every load, so the cursor has to be put back
+       or typing a filter loses a character every poll */
+    if (document.activeElement === q) q.setSelectionRange(q.value.length, q.value.length);
+  }
+  const rb = el("catRefresh");
+  if (rb) rb.onclick = () => act(() => loadCatalogue(true));
+  renderCards();
+}
+
+function renderCards() {
+  const body = el("catBody");
+  if (!body) return;
+  /* the header already carries the error and the age of the last good read;
+     printing the same sentence twice is not twice as honest */
+  if (CAT_ERR) { body.innerHTML = ""; return; }
+  if (!CAT_ROWS.length) {
+    body.innerHTML = `<div class="faint">Reading the strategies…</div>`;
+    return;
+  }
+  const rows = CAT_ROWS.filter((r) => matchRow(r, CAT_Q));
+  if (!rows.length) {
+    body.innerHTML = `<div class="note">Nothing matches
+      “${esc(CAT_Q)}”. ${CAT_ROWS.length} strateg${CAT_ROWS.length === 1
+        ? "y is" : "ies are"} registered.</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="cat-grid">${rows.map(cardHTML).join("")}</div>`;
+  wireCards(body);
+}
+
+function cardHTML(r) {
+  const st = stateOf(r.state);
+  const blurb = blurbOf(r.id);
+  const syms = r.tickers || [];
+  const nset = (r.settings_schema || []).length;
+  return `<section class="cat-card" data-sid="${esc(r.id)}">
+    <header class="cat-h">
+      <div class="cat-h-t">
+        <span class="cat-name">${esc(r.label || r.id)}</span>
+        <span class="pill${r.kind === "options" ? "" : " acc"}"
+          >${esc(KIND[r.kind] || r.kind || "—")}</span>
+        <span class="st ${st.cls}" title="${esc(st.why)}">${esc(st.t)}</span>
+      </div>
+      <div class="cat-id mono">${esc(r.id)}</div>
+    </header>
+
+    <p class="cat-blurb${blurb ? "" : " none"}">${blurb
+      ? esc(blurb)
+      : "No description. This strategy is registered in <code>hub.PROVIDERS</code> "
+        + "and nothing in the dashboard says what it does."}</p>
+
+    ${r.why ? `<div class="note warn cat-why">${esc(r.why)}</div>` : ""}
+
+    <div class="mrow tight">
+      ${metricTile("Value", r.value)}
+      ${metricTile("Open P/L", r.open_pl, { signed: true })}
+      ${metricTile("Realised", r.realized_pl, { signed: true })}
+      ${metricTile("At risk", r.at_risk)}
+      ${metricTile("Positions", r.positions)}
+      ${metricTile("Share of strategies", shareOfStrategies(r))}
+    </div>
+
+    <div class="cat-sec">
+      <div class="cat-sec-h">Runs on
+        <span class="faint">${syms.length || "no"} ticker${
+          syms.length === 1 ? "" : "s"}</span></div>
+      <div class="chips">
+        ${syms.map((s) => `<button class="chip" data-open="${esc(r.id)}"
+            data-sym="${esc(s)}" title="Settings and detach for ${esc(s)}"
+            >${esc(s)}<span class="chip-x">⋯</span></button>`).join("")
+          || `<span class="faint">Nothing is attached. It holds no position and
+              opens nothing.</span>`}
+        <button class="chip add" data-attach="${esc(r.id)}">+ attach a ticker</button>
+      </div>
+    </div>
+
+    <footer class="cat-f">
+      <span class="faint">${nset
+        ? `${nset} setting${nset === 1 ? "" : "s"}, per ticker`
+        : "no settings this page may change"}</span>
+      <span style="flex:1"></span>
+      ${r.kind === "options"
+        ? `<button class="btn sm" data-goto="options">Options desk</button>` : ""}
+    </footer>
+  </section>`;
+}
+
+function wireCards(root) {
+  root.querySelectorAll("[data-open]").forEach((b) => {
+    b.onclick = () => openAttached(b.dataset.open, b.dataset.sym);
+  });
+  root.querySelectorAll("[data-attach]").forEach((b) => {
+    b.onclick = () => attachFlow(b.dataset.attach);
+  });
+  root.querySelectorAll("[data-goto]").forEach((b) => {
+    b.onclick = () => go({ kind: b.dataset.goto });
+  });
+}
+
+const rowById = (id) => CAT_ROWS.find((r) => r.id === id) || null;
+
+/* hub fills `share_of_value` in portfolio() and NOT in strategies() -- on this
+   route every row carries "not aggregated yet", which is true and useless.
+   So the share is computed here against a denominator this page can actually
+   see, and the label and the reason both say which denominator that is. It is
+   NOT share of account value: cash, and anything no strategy claims, are not
+   in it. That number is the Portfolio page's and it stays there. */
+function shareOfStrategies(r) {
+  const mine = metricValue(r.value);
+  let whole = 0, have = 0, blind = 0;
+  for (const x of CAT_ROWS) {
+    const v = metricValue(x.value);
+    if (v === null) { blind += 1; continue; }
+    whole += v; have += 1;
+  }
+  if (mine === null || !whole) {
+    return { value: null, n: 0, unit: "pct",
+             reason: mine === null
+               ? "this strategy holds nothing the broker confirms"
+               : "no strategy on this account holds anything to be a share of" };
+  }
+  return {
+    value: mine / whole, n: have, unit: "pct", thin: blind > 0,
+    reason: "of what the " + have + " priced strateg"
+      + (have === 1 ? "y holds" : "ies hold")
+      + (blind ? ", with " + blind + " that could not price itself left out"
+               : "")
+      + ". Cash and anything no strategy claims are not in the denominator -- "
+      + "share of account value is on Portfolio.",
+  };
+}
+
+/* ------------------------------------------------------------- attaching */
+/* One control for every kind, because that is the whole point of hub's seam:
+   the same POST attaches a ladder and assigns an options play. What differs is
+   only what the confirmation has to warn about, and that comes off the row. */
+async function attachFlow(sid) {
+  const r = rowById(sid);
+  if (!r) return;
+  const already = new Set(r.tickers || []);
+  const choices = CAT_TICKERS.map((t) => t.symbol).filter((s) => !already.has(s));
+  const sym = await askSymbol(r, choices);
+  if (!sym) return;
+  const ok = await ask({
+    title: `Attach ${esc(r.label || r.id)} to ${esc(sym)}?`,
+    ok: "Attach",
+    body: `<b>${esc(r.label || r.id)}</b> starts deciding for <b>${esc(sym)}</b>
+      on its own settings.<br><br>
+      <b>Attaching never arms.</b> ${r.kind === "shares"
+        ? `The ladder is created <b>stopped and in dry run</b>. Nothing opens
+           until you start it and arm it from the ticker page.`
+        : `The play is assigned but <code>state/options/PLAYS_ARMED</code> is not
+           touched, and the arm gates opening and nothing else.`}<br><br>
+      Detaching is on the same chip and it sends no order either — the server
+      refuses a detach while the strategy still holds something, and says so.`,
+  });
+  if (!ok) return;
+  await act(async () => {
+    const res = await POST(`/api/hub/ticker/${encodeURIComponent(sym)}/strategy`,
+                           { strategy: sid, action: "attach", by: "dashboard" });
+    toast(res.already
+      ? `${esc(sym)} already had <b>${esc(r.label || r.id)}</b> on it.`
+      : `<b>${esc(r.label || r.id)}</b> attached to <b>${esc(sym)}</b>. `
+        + `Nothing is armed.`, "ok", 8000);
+    await loadCatalogue(true);
+  });
+}
+
+/* A datalist rather than a select: the watchlist is a suggestion, not a
+   restriction -- a ticker the account does not hold yet is a legitimate
+   thing to attach a strategy to, and hub validates the symbol anyway. */
+function askSymbol(r, choices) {
+  return new Promise((resolve) => {
+    const v = document.createElement("div");
+    v.className = "veil";
+    v.innerHTML = `<div class="modal">
+      <h3>Attach ${esc(r.label || r.id)}</h3>
+      <div class="body">
+        <label class="f"><span>Ticker</span>
+          <input id="atSym" list="atList" autocomplete="off" spellcheck="false"
+                 placeholder="SPY" maxlength="12"></label>
+        <datalist id="atList">${choices.map((s) =>
+          `<option value="${esc(s)}">`).join("")}</datalist>
+        <div class="tip" style="margin-top:8px">${choices.length
+          ? `${choices.length} ticker${choices.length === 1 ? "" : "s"} on this
+             account do not have it yet. A symbol that is not on the list is
+             allowed — the server validates it.`
+          : `Every ticker on this account already has it. A new symbol is
+             allowed; the server validates it.`}</div>
+      </div>
+      <div class="acts">
+        <button class="btn" id="atNo">Cancel</button>
+        <button class="btn primary" id="atYes">Continue</button>
+      </div></div>`;
+    document.body.appendChild(v);
+    const i = v.querySelector("#atSym");
+    const done = (val) => { v.remove(); document.removeEventListener("keydown", k); resolve(val); };
+    function k(e) { if (e.key === "Escape") done(""); }
+    i.focus();
+    i.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go2(); } };
+    const go2 = () => done((i.value || "").trim().toUpperCase());
+    v.querySelector("#atYes").onclick = go2;
+    v.querySelector("#atNo").onclick = () => done("");
+    v.addEventListener("click", (e) => { if (e.target === v) done(""); });
+    document.addEventListener("keydown", k);
+  });
+}
+
+/* ------------------------------------------- one ticker on one strategy */
+let ATT = null;           // { sid, sym, card, schema, values, err }
+let attQ = "";
+
+async function openAttached(sid, sym) {
+  const r = rowById(sid);
+  paintSheet({ title: `${sym} · ${r ? (r.label || r.id) : sid}`,
+               body: `<div class="bk-faint">Reading ${esc(sym)}…</div>` });
+  ATT = null; attQ = "";
+  let d;
+  try { d = await GET(`/api/hub/ticker/${encodeURIComponent(sym)}`); }
+  catch (e) { sheetError("", sym, e.message); return; }
+  const cardRow = (d.strategies || []).find((c) => c.id === sid) || null;
+  const schema = cardRow ? (cardRow.settings_schema || []) : [];
+
+  /* Where the CURRENT values come from, per kind, and why they differ:
+
+     a play's assignment carries `settings` (the play's parameters with this
+     ticker's overrides already applied), so hub has them;
+     the ladder's settings are the ENGINE'S config and hub deliberately does not
+     copy them into the strategy card -- so they are read from the ticker's own
+     route, which is the audited one the ticker page already uses. Rendering
+     the schema's defaults instead would show numbers this ladder is not
+     running, which on `take_profit` is a live order price. */
+  let values = cardRow && cardRow.settings ? { ...cardRow.settings } : {};
+  let valueErr = "";
+  if (sid === "ladder" && cardRow) {
+    try {
+      const t = await GET(`/api/ticker/${encodeURIComponent(sym)}`);
+      values = { ...(t.config || {}) };
+    } catch (e) {
+      values = {};
+      valueErr = e.message;
+    }
+  }
+  ATT = { sid, sym, card: cardRow, schema, values, valueErr,
+          label: r ? (r.label || r.id) : sid, kind: r ? r.kind : "" };
+  renderAttached();
+}
+
+/* The strategy ROW's state comes out of hub's one vocabulary. The per-ticker
+   CARD's does not: `LadderStrategy.for_ticker` passes the engine's own summary
+   word straight through, so a ladder card says "running" where the row says
+   "live" -- the same two-words-for-one-idea the hub was built to end, one
+   level down. Rather than render the engine's word beside hub's, the pill is
+   derived from the card's explicit booleans, which are unambiguous.
+
+   Reported upstream; when hub normalises `for_ticker`'s state this collapses
+   to stateOf(c.state) and nothing else here changes. */
+function attState(a) {
+  const c = a.card;
+  if (!c) return stateOf("off");
+  if (a.kind !== "shares") return stateOf(c.state);
+  if (c.halted) return stateOf("halted");
+  if (!c.running) return stateOf("stopped");
+  return stateOf(c.armed ? "armed" : "dry");
+}
+
+function renderAttached() {
+  const a = ATT;
+  if (!a) return;
+  const c = a.card;
+  const st = attState(a);
+  const canEdit = !!c && a.schema.length && !a.valueErr;
+
+  const facts = c ? attFactsHTML(a) : "";
+  const body = `
+    ${c ? "" : `<div class="note warn"><b>Not attached.</b> ${esc(a.label)} does
+      not run on ${esc(a.sym)}.</div>`}
+    ${a.valueErr ? `<div class="note bad"><b>The live settings could not be
+      read.</b> ${esc(a.valueErr)}<br>The form is not shown rather than shown
+      filled with defaults this ladder is not running.</div>` : ""}
+    ${facts}
+    ${canEdit ? `
+      <div class="att-q">
+        <input id="attQ" class="cat-q" placeholder="Search these settings"
+               value="${esc(attQ)}" spellcheck="false" autocomplete="off">
+        <span class="faint" id="attQn"></span>
+      </div>
+      <form id="attForm" class="att-form">${
+        schemaFormHTML(a.schema, a.values, { query: attQ })}</form>
+      <div class="tip" id="attInert"></div>
+      <div class="tip">These are <b>${esc(a.sym)}</b>'s settings for this
+        strategy only. ${a.sid === "ladder"
+          ? `The ladder has many more than these — the full set, grouped, with
+             everything inert for the modes it is in hidden, is on the ticker's
+             own Settings tab.`
+          : `They are stored as overrides on the assignment: a value left
+             untouched keeps following the play's own default.`}</div>`
+      : c && !a.schema.length
+        ? `<div class="note">This strategy declares no settings that may be
+            changed from here.</div>` : ""}`;
+
+  paintSheet({
+    title: `${a.sym} · ${a.label}`,
+    sub: `<span class="st ${st.cls}">${esc(st.t)}</span>
+          <span class="faint">${esc(st.why)}</span>`,
+    body,
+    foot: `${canEdit
+        ? `<button class="btn primary" id="attSave">Save settings</button>` : ""}
+      ${a.sid === "ladder"
+        ? `<button class="btn" id="attTicker">Open ${esc(a.sym)}</button>` : ""}
+      ${c ? `<button class="btn danger" id="attDetach">Detach</button>` : ""}
+      <span style="flex:1"></span>
+      <button class="btn" data-bkclose>Close</button>`,
+  });
+  wireFoot();
+  if (el("attTicker")) {
+    el("attTicker").onclick = () => { closeSheet(); go({ kind: "ticker", sym: a.sym }); };
+  }
+  if (el("attDetach")) el("attDetach").onclick = () => detachFlow(a);
+  if (el("attSave")) el("attSave").onclick = () => saveAttached(a);
+  const q = el("attQ");
+  if (q) {
+    /* HIDE, never re-render.
+
+       The first version rebuilt the form on every keystroke from the values it
+       could read back out of it -- and a field the filter had just hidden was
+       not in the form to read, so typing a filter silently reverted every edit
+       above it. Measured here: `add_mode` was changed to points, "resting" was
+       typed, and the save diff came back carrying only `take_profit`. On a
+       ladder that is an edit you believe you made and did not.
+
+       applySearch toggles a class and touches neither `hidden` nor `disabled`,
+       so it composes with applyVisibility and nothing leaves the DOM. */
+    q.oninput = () => { attQ = q.value; attSearch(a); };
+  }
+  const f = el("attForm");
+  if (f) {
+    /* Changing a mode re-evaluates which of the OTHER settings mean anything,
+       exactly as the ticker's own Settings tab does -- one function, one
+       answer, so this pane cannot offer a field the ladder is not reading. */
+    f.addEventListener("change", (e) => {
+      if (e.target && GOVERNORS.includes(e.target.name)) attVisibility(a);
+    });
+  }
+  attVisibility(a);
+  attSearch(a);
+}
+
+function attSearch(a) {
+  const f = el("attForm");
+  if (!f) return;
+  applySearch(f, attQ);
+  countAtt(a);
+}
+
+/* Hidden, never greyed, and DISABLED so the patch carries only what is live --
+   applyVisibility's own rule, applied to this pane because it renders the same
+   `.fld[data-k]` markup. The line underneath says how many are being held back
+   and where the rest of them live, because a field that vanishes with no
+   explanation reads as a field that does not exist. */
+function attVisibility(a) {
+  const f = el("attForm");
+  const note = el("attInert");
+  if (!f) return;
+  if (a.sid !== "ladder") { if (note) note.textContent = ""; return; }
+  applyVisibility(f, readValues(f));
+  const hidden = [...f.querySelectorAll(".fld[data-k]")]
+    .filter((n) => n.hidden && !n.classList.contains("q-out")).length;
+  if (!note) return;
+  note.innerHTML = hidden
+    ? `<b>${hidden}</b> of these are inert for the modes this ladder is in and
+       are hidden rather than greyed — a greyed field still has to be read
+       before it can be ignored. They are not sent when you save.`
+    : "";
+}
+
+/* The count is of what MATCHES, which is not the same as what is on screen: a
+   setting that is inert for the modes this ladder is in stays hidden whether
+   or not it matches, and saying "4 of 16" while showing three would be a
+   third number nobody can reconcile. Both are stated. */
+function countAtt(a) {
+  const n = el("attQn");
+  const f = el("attForm");
+  if (!n || !f) return;
+  if (!attQ) { n.textContent = ""; return; }
+  const rows = [...f.querySelectorAll(".fld[data-k]")];
+  const match = rows.filter((x) => !x.classList.contains("q-out"));
+  const visible = match.filter((x) => !x.hidden).length;
+  n.textContent = `${match.length} of ${rows.length} match`
+    + (visible === match.length ? "" : `, ${visible} of them live right now`);
+}
+
+function attFactsHTML(a) {
+  const c = a.card;
+  const kv = [];
+  const add = (k, v) => { if (v !== undefined && v !== null && v !== "") kv.push([k, v]); };
+  if (a.kind === "shares") {
+    add("Lots", `${c.lots == null ? "—" : c.lots}/${c.max_lots == null ? "—" : c.max_lots}`);
+    add("Shares", c.shares);
+    add("Average", c.avg_price == null ? null : "$" + Number(c.avg_price).toFixed(2));
+    add("Take-profit", c.take_profit == null ? null : "$" + Number(c.take_profit).toFixed(2));
+    add("Preset", c.preset);
+    add("Running", c.running ? "yes" : "no");
+    add("Armed", c.armed ? "YES — orders transmit" : "no — dry run");
+    if (c.in_sync === false) {
+      kv.push(["Ledger vs Alpaca", "DISAGREE — Alpaca is the truth"]);
+    }
+    if (c.block_reason) kv.push(["Blocked", c.block_reason]);
+  } else {
+    add("Open", c.open);
+    add("Closed", c.closed);
+    add("Enabled", c.enabled ? "yes" : "no");
+    if (c.open_pl === null && c.open_pl_reason) kv.push(["Open P/L", "— " + c.open_pl_reason]);
+    else add("Open P/L", c.open_pl == null ? null : "$" + Number(c.open_pl).toFixed(2));
+    const ov = Object.keys(c.overrides || {});
+    add("Overrides", ov.length ? ov.join(", ") : "none — it runs the play's own numbers");
+  }
+  if (!kv.length) return "";
+  return `<div class="att-kv">${kv.map(([k, v]) =>
+    `<div><span class="faint">${esc(k)}</span><b>${esc(String(v))}</b></div>`
+  ).join("")}</div>`;
+}
+
+async function saveAttached(a) {
+  const f = el("attForm");
+  if (!f) return;
+  const patch = schemaPatch(f, a.schema);
+  /* Only what MOVED. Sending the whole pane back would rewrite every value on
+     every save, and on a ladder that means re-pricing resting take-profits
+     nobody asked to touch. */
+  const changed = {};
+  for (const [k, v] of Object.entries(patch)) {
+    const was = a.values[k];
+    if (was === undefined || String(was) !== String(v)) changed[k] = v;
+  }
+  const keys = Object.keys(changed);
+  if (!keys.length) { toast("Nothing changed.", ""); return; }
+  const risky = moneyKeys(keys);
+  const b = el("attSave");
+  const ok = await ask({
+    title: `Save ${keys.length} setting${keys.length === 1 ? "" : "s"} on ${esc(a.sym)}?`,
+    ok: "Save", danger: risky.length > 0,
+    requireWord: risky.length ? "SAVE" : "",
+    body: `<div class="att-diff">${keys.map((k) =>
+      `<div><code>${esc(k)}</code>
+        <span class="faint">${esc(fmtSchemaVal(a.values[k]))}</span> →
+        <b>${esc(fmtSchemaVal(changed[k]))}</b>${
+        moneyKeys([k]).length ? ` ${impactBadge(k)}` : ""}</div>`).join("")}</div>
+      ${risky.length
+        ? `<br><b class="down">${risky.length} of these can move money.</b>
+           ${a.sid === "ladder"
+             ? `A change to <code>take_profit</code> re-prices every take-profit
+                this ladder has resting at Alpaca, immediately.`
+             : `The next cycle sizes and prices against the new numbers.`}`
+        : `<br>None of these sends an order by itself.`}`,
+  });
+  if (!ok) return;
+  if (b) { b.disabled = true; b.textContent = "Saving…"; }
+  try {
+    await POST(`/api/hub/ticker/${encodeURIComponent(a.sym)}/strategy`,
+               { strategy: a.sid, action: "configure", settings: changed,
+                 by: "dashboard" });
+    toast(`Saved ${keys.length} setting${keys.length === 1 ? "" : "s"} on `
+        + `<b>${esc(a.sym)}</b>.`, "ok");
+    closeSheet();
+    await loadCatalogue(true);
+  } catch (e) {
+    /* the server's own words: it is the only thing that knows why, and the
+       edits stay on screen so nothing has to be retyped */
+    const host = el("bkBody");
+    if (host) {
+      host.insertAdjacentHTML("afterbegin",
+        `<div class="note bad"><b>Not saved.</b> ${esc(e.message)}</div>`);
+      host.scrollTop = 0;
+    }
+    if (b) { b.disabled = false; b.textContent = "Save settings"; }
+  }
+}
+
+async function detachFlow(a) {
+  const holding = a.kind === "shares" && Number(a.card && a.card.lots) > 0;
+  const ok = await ask({
+    title: `Detach ${esc(a.label)} from ${esc(a.sym)}?`,
+    danger: true, ok: "Detach", requireWord: holding ? "DETACH" : "",
+    body: `${esc(a.label)} stops deciding for <b>${esc(a.sym)}</b>.<br><br>
+      <b>Nothing is sold and nothing is cancelled by this.</b> ${a.kind === "shares"
+        ? `The lots ledger is kept. The server <b>refuses</b> while the ladder
+           still holds lots or has orders resting — flatten first, or it will
+           tell you exactly what is in the way.`
+        : `Open structures stay open and keep their resting exits; they simply
+           stop being this play's to manage, which means they are adopted:
+           monitored and closed before expiry, never for profit or loss.`}
+      ${holding ? `<br><br><b class="down">${esc(a.sym)} is holding
+        ${esc(String(a.card.lots))} lot(s) right now.</b>` : ""}`,
+  });
+  if (!ok) return;
+  try {
+    await POST(`/api/hub/ticker/${encodeURIComponent(a.sym)}/strategy`,
+               { strategy: a.sid, action: "detach", by: "dashboard" });
+    toast(`<b>${esc(a.label)}</b> detached from <b>${esc(a.sym)}</b>.`, "ok");
+    closeSheet();
+    await loadCatalogue(true);
+  } catch (e) {
+    await ask({ title: "Not detached", ok: "OK", body: esc(e.message) });
+  }
+}
+
+/* --------------------------------------------------------------- styles */
+/* Injected rather than added to app.css for the same reason fields.js injects
+   its own: app.css is the shell agent's file. Tokens only. */
+function ensureCatStyles() {
+  if (document.getElementById("catCSS")) return;
+  const s = document.createElement("style");
+  s.id = "catCSS";
+  s.textContent = [
+    ".cat-q{width:210px;max-width:46vw;font-size:12px;padding:6px 10px}",
+    ".mrow{display:grid;gap:18px 22px;",
+    "grid-template-columns:repeat(auto-fit,minmax(132px,1fr));margin:2px 0 14px}",
+    ".mrow.tight{gap:14px 18px;margin:12px 0}",
+    ".mrow.tight .mtile-v{font-size:16px}",
+    ".cat-warn{margin:0 0 12px}",
+    ".cat-grid{display:grid;gap:16px;",
+    "grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}",
+    ".cat-card{background:var(--surface);border:1px solid var(--hairline);",
+    "border-radius:var(--radius);padding:18px 20px 14px;display:flex;",
+    "flex-direction:column;min-width:0}",
+    ".cat-h{display:flex;flex-direction:column;gap:2px}",
+    ".cat-h-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
+    ".cat-name{font-size:16.5px;font-weight:650;letter-spacing:-.015em}",
+    ".cat-id{font-size:11px;color:var(--faint)}",
+    ".st{font-size:10px;letter-spacing:.07em;text-transform:uppercase;",
+    "font-weight:700;padding:2px 8px;border-radius:var(--radius-pill);",
+    "border:1px solid currentColor;cursor:help;white-space:nowrap}",
+    ".st-live{color:var(--up)}.st-idle{color:var(--muted)}",
+    ".st-off{color:var(--faint)}.st-warn{color:var(--warn)}",
+    ".st-bad{color:var(--down)}",
+    ".cat-blurb{font-size:12.5px;line-height:1.6;color:var(--muted);margin:10px 0 0}",
+    ".cat-blurb.none{color:var(--faint);font-style:italic}",
+    ".cat-why{margin:10px 0 0}",
+    ".cat-sec{margin-top:6px;padding-top:12px;border-top:1px solid var(--hairline)}",
+    ".cat-sec-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;",
+    "color:var(--faint);font-weight:650;margin-bottom:9px}",
+    ".chips{display:flex;flex-wrap:wrap;gap:7px;align-items:center}",
+    ".chip{font:inherit;font-size:12px;font-weight:600;padding:5px 11px;",
+    "border-radius:var(--radius-pill);border:1px solid var(--hairline2);",
+    "background:var(--surface-2);color:var(--text);cursor:pointer;",
+    "display:inline-flex;gap:6px;align-items:center}",
+    ".chip:hover{border-color:var(--accent);color:var(--accent)}",
+    ".chip-x{color:var(--faint);font-size:11px}",
+    ".chip.add{border-style:dashed;color:var(--accent);background:transparent}",
+    ".cat-f{display:flex;align-items:center;gap:10px;margin-top:14px;",
+    "padding-top:11px;border-top:1px solid var(--hairline);font-size:11.5px}",
+    ".att-kv{display:grid;gap:8px 18px;",
+    "grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}",
+    ".att-kv>div{display:flex;flex-direction:column;gap:1px;font-size:12.5px}",
+    ".att-kv .faint{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}",
+    ".att-q{display:flex;gap:10px;align-items:center;margin:4px 0 12px}",
+    ".att-form{display:flex;flex-direction:column;gap:14px}",
+    ".att-diff{display:flex;flex-direction:column;gap:6px;font-size:12.5px}",
+    ".att-diff code{color:var(--accent)}",
+    "@media (max-width:560px){.cat-grid{grid-template-columns:1fr}",
+    ".cat-q{width:100%}.cat-card{padding:15px 15px 12px}}",
+  ].join("");
+  document.head.appendChild(s);
+}
+
+
+
+/* =========================================================== the builder */
 let CAT = {};              // indicator catalogue from the server
 let LIST = [];             // saved strategies
 let spec = null;           // the document being edited
