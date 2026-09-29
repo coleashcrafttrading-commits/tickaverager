@@ -190,8 +190,10 @@ function notes() {
   if (t.uncovered) {
     if (t.uncovered <= (t.offbook || 0) + 1e-6) {
       /* fractional DAY exits inside their retry timer, or dust: the engine
-         re-places these itself, so it is a note and not an alarm */
-      out.push(`<div class="note info"><b>Fractional exit off the book:</b>
+         re-places these itself, so it is the amber one and not the red one.
+         It is NOT an `info` note -- shares with no resting sell is the owner's
+         own keep-list case, and this strip now carries nothing but warnings. */
+      out.push(`<div class="note warn"><b>Fractional exit off the book:</b>
         ${qty(t.offbook)} sh — re-placed at the next eligible session or retry
         (a fractional lot rests a DAY order).</div>`);
     } else {
@@ -810,7 +812,7 @@ function paintTickers() {
   host.innerHTML = `<div class="tw dt hub-tt"><table>
       <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
     <div class="tip" style="padding:0 var(--s4) var(--s4)"><b>Ladder
-      booked</b> is the share ladder's own journal, and nothing else writes to
+      realised</b> is the share ladder's own journal, and nothing else writes to
       it — a ticker whose only strategy is an options play shows a dash there
       and carries its realised P/L on that play's card instead. The two are
       never added: different logs, different windows.</div>`;

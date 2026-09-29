@@ -754,7 +754,11 @@ def stats(rows: list[dict], marks: dict | None = None,
     # ---- the open side, marked ----
     inv = inventory if inventory is not None else open_inventory(rows)
     marks = marks or {}
-    marked = bool(marks)
+    # An EMPTY book is valued at zero and needs no mark to say so. Without
+    # this, a genuinely flat account fell into the "cannot be valued" branch
+    # -- marks are built from the inventory's own symbols, so no lots means
+    # no marks -- and the tile printed a dash where the honest answer is 0.
+    marked = bool(marks) or not inv
     unmarked = sorted({x["symbol"] for x in inv if x["symbol"] not in marks})
     unreal = None
     mval = None
@@ -1051,6 +1055,102 @@ def open_inventory(rows: list[dict]) -> list[dict]:
             "cost": round(left * float(r.get("entry_price") or 0), 2),
         })
     return sorted(out, key=lambda x: x["opened"])
+
+
+def reconcile_inventory(inv: list[dict], held: dict[str, float], *,
+                        known: bool = True) -> tuple[list[dict], dict]:
+    """The journal's open lots, cut down to what Alpaca actually holds.
+
+    GROUND TRUTH #1 IS THE BROKER, AND THIS IS WHERE THAT RULE IS ENFORCED FOR
+    HISTORY. `open_inventory` replays the journal: every `open` row with no
+    matching `close`. That is the right answer only while every exit is
+    journalled, and exits leave by routes the journal never sees -- a manual
+    flatten in Alpaca's own UI, a liquidation run outside the fleet, a basket
+    close whose fills landed after the process died. On 28 Sep 2026 the replay
+    claimed 494 lots and $133,775.18 of cost across RAM/SOXL/SPY/MSTX while
+    `state/lots_*.json` held 0 lots and Alpaca held 0 shares: 11,459 `open`
+    rows against 10,956 `close` rows, and the 503-row gap was rendered as
+    +$922.52 of live unrealised profit on a book that did not exist.
+
+    So the journal is believed about WHAT HAPPENED and the broker is believed
+    about WHAT IS HELD, which is exactly the order CLAUDE.md sets out. Where
+    they disagree the disagreement is returned, never smoothed: the caller is
+    expected to put it on the screen.
+
+    `held` is {SYMBOL: shares} from Alpaca. `known` is whether that read
+    actually succeeded -- on a failed read this returns the inventory
+    UNCHANGED with `checked: False`, because "the broker did not answer" and
+    "the account is flat" are opposite facts and collapsing them into an empty
+    book is the same class of lie in the other direction.
+
+    Partial backing is resolved oldest-first. When the broker holds fewer
+    shares than the journal claims we know how many shares are real but not
+    which lots they came from; FIFO is the assumption and `assumed_fifo` says
+    so on any symbol where it had to be made.
+    """
+    if not known:
+        return list(inv), {"checked": False, "ok": True, "symbols": [],
+                           "dropped_lots": 0, "dropped_shares": 0.0,
+                           "dropped_cost": 0.0,
+                           "why": "the broker could not be read, so these lots "
+                                  "are the journal's own count and nothing has "
+                                  "confirmed them"}
+
+    want: dict[str, float] = {}
+    for x in inv:
+        sym = str(x.get("symbol") or "")
+        want[sym] = round(want.get(sym, 0.0) + qty(x.get("shares")), QTY_DP)
+
+    kept: list[dict] = []
+    left = {s: float(held.get(s) or 0.0) for s in want}
+    broken: list[dict] = []
+    d_lots = d_shares = d_cost = 0.0
+
+    for x in sorted(inv, key=lambda r: str(r.get("opened") or "")):
+        sym = str(x.get("symbol") or "")
+        sh = qty(x.get("shares"))
+        room = left.get(sym, 0.0)
+        if room <= QTY_EPS:
+            d_lots += 1
+            d_shares += sh
+            d_cost += float(x.get("cost") or 0.0)
+            continue
+        if room + QTY_EPS >= sh:
+            left[sym] = round(room - sh, QTY_DP)
+            kept.append(x)
+            continue
+        # the boundary lot: only part of it is backed by real shares
+        px = float(x.get("entry_price") or 0.0)
+        y = dict(x)
+        y["shares"] = qnum(round(room, QTY_DP))
+        y["cost"] = round(room * px, 2)
+        y["partly_unreconciled"] = True
+        kept.append(y)
+        d_shares += round(sh - room, QTY_DP)
+        d_cost += round((sh - room) * px, 2)
+        left[sym] = 0.0
+
+    for sym, j in sorted(want.items()):
+        b = float(held.get(sym) or 0.0)
+        if abs(b - j) > QTY_EPS:
+            broken.append({"symbol": sym, "journal_shares": qnum(j),
+                           "broker_shares": qnum(b),
+                           "assumed_fifo": bool(0 < b < j)})
+
+    return kept, {
+        "checked": True,
+        "ok": not broken,
+        "symbols": broken,
+        "dropped_lots": int(d_lots),
+        "dropped_shares": qnum(round(d_shares, QTY_DP)),
+        "dropped_cost": round(d_cost, 2),
+        "why": "" if not broken else (
+            "%d lot%s in the journal %s no longer backed by shares at the "
+            "broker. They left the book without a close row, so their result "
+            "is in the account's P/L but cannot be attributed to a ladder."
+            % (int(d_lots), "" if d_lots == 1 else "s",
+               "is" if d_lots == 1 else "are")),
+    }
 
 
 def _age_days(ts: Any) -> float:

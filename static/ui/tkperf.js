@@ -261,7 +261,7 @@ export function contributions(parts) {
   return { rows: rows, gross: r2(gross), net: r2(net), measured: measured,
            missing: missing,
            why: gross ? null
-             : (measured ? "every strategy here has booked exactly $0.00, so "
+             : (measured ? "every strategy here has realised exactly $0.00, so "
                          + "there is nothing to divide"
                          : "no strategy on this ticker reports a realised "
                          + "figure, so there is nothing to divide") };

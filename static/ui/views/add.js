@@ -54,7 +54,7 @@ VIEWS.add = {
             <div id="aRes" style="margin-top:12px"></div>`)}
           ${panel("What adding actually does", `
             <div class="tip" style="margin-top:0">
-              It writes <b>one row</b> to ${esc(acctLabel())}'s ticker list.
+              It writes <b>one row</b> to ${esc(acctLabel())}'s watchlist.
               No engine is built, no settings file is touched, and
               <b>no order is placed</b>.<br><br>
               The ticker then carries its own market data, its own chart and its
@@ -197,13 +197,16 @@ async function pick(sym) {
              · step ${esc(String(r.min_trade_increment || "—"))}</dd>` : ""}
       </dl>
       ${st.known === null ? `<div class="note warn" style="margin-top:14px">
-        This account's ticker list could not be read, so “already here” is
+        This account's watchlist could not be read, so “already here” is
         unknown. Adding an existing symbol is harmless — it rewrites the same
         row.</div>` : ""}
-      ${here ? `<div class="note info" style="margin-top:14px">${esc(r.symbol)} is
-        already on ${esc(acctLabel())} —
+      ${here ? `<div class="tip" id="aHere" style="margin-top:14px">Already on
+        ${esc(acctLabel())}, so there is nothing to add —
         <a href="${hashFor({ kind: "ticker", sym: r.symbol, tab: "strategies" })}">open
-        its strategies</a>.</div>` : ""}`;
+        ${esc(r.symbol)}'s strategies</a>.</div>` : ""}`;
+    /* This is the only reason the Add button disappears, so the sentence sits
+       where the button was as a hint on the control, not as a banner at the
+       top of the page. */
     el("aGo").style.display = here ? "none" : "";
   } catch (e) {
     el("aPick").innerHTML = `<div class="note bad" style="margin:0">${esc(e.message)}</div>`;
@@ -218,7 +221,7 @@ async function addIt() {
   const s = (st.strategies || []).find((x) => x.id === sid);
   if (!await ask({
     title: `Add ${r.symbol} to ${esc(acctLabel())}?`, ok: "Add ticker",
-    body: `One row on the ticker list. <b>No engine is built and no order is
+    body: `One row on the watchlist. <b>No engine is built and no order is
       placed.</b><br><br>${s
         ? `<b>${esc(s.label)}</b> is then attached to it — stopped, unarmed, on
            its own defaults. You size it on ${esc(r.symbol)}'s own page.`

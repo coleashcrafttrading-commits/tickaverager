@@ -178,7 +178,7 @@ const TABS = [
 ];
 
 const SUB = {
-  perf: "what these plays have actually done -- booked, open, and the mix behind it",
+  perf: "what these plays have actually done -- realised, open, and the mix behind it",
   chain: "Alpaca's quotes; the IV and the greeks are solved here",
   strategies: "every structure on the shelf, and what this account may send",
   backtest: "what survived a second market and a doubled spread",
@@ -1632,17 +1632,21 @@ function ovWarn(d) {
     `<div class="note warn">${esc(w.message || w.code || "")}</div>`).join("");
 }
 
-/* The empty account. A fresh ledger must read as "nothing yet", never as a
-   broken page and never as a row of zeroes that look like flat performance. */
-function ovEmpty(d) {
-  if (((d.counts || {}).positions || 0) > 0) return "";
-  return `<div class="note info"><b>No play has opened yet.</b>
-    Every averaged figure on this page is measured from the play ledger, and
-    the ledger is empty, so there is nothing to average. The capital card is
-    still real — it is the room this account has before anything uses it.</div>`;
-}
+/* The empty account used to get a banner here saying "No play has opened
+   yet". It restated the page: every averaged figure already prints a dash
+   carrying its own reason (ovWhy), so the sentence added nothing a reader
+   could act on. The state strip above still says ARMED/DISARMED/FROZEN, and
+   the per-metric reasons still say why each dash is a dash. */
 
-const SEV = { critical: "bad", warn: "warn", info: "info" };
+/* NO `info` CLASS HERE. The class is COMPOSED at runtime from a severity the
+   server sends, which is why the purge's source grep could not see it and why
+   this one survived: `optperf.py` marks every adopted position `info`, so the
+   Options room painted a blue informational strip -- "AAPL adopted -- adopted
+   from the broker: guarded and marked, never closed for profit or loss" --
+   on exactly the page the owner said to clear. An `info` row still belongs in
+   this card (it IS a row somebody may want to act on) but it is a plain line,
+   not a coloured banner. Only `warn` and `critical` get a colour. */
+const SEV = { critical: "bad", warn: "warn", info: "" };
 
 /* The rows somebody has to act on. This card is FIRST because the two states
    it exists for -- open with no resting exit, open with no mark -- are exactly
@@ -1711,14 +1715,14 @@ function ovPL(d) {
   const est = mv(p.realized_estimated);
   return card("Profit and loss", `
     <div class="pl-stats">
-      ${stat("Total P/L", pfv(p.total, pnl), pfs(p.total, "booked plus open"))}
+      ${stat("Total P/L", pfv(p.total, pnl), pfs(p.total, "realised plus open"))}
       ${stat("Realized", pfv(p.realized, pnl), pfn(p.realized, "closed trade"))}
       ${stat("Open", pfv(p.open, pnl), pfn(p.open, "priced position"))}
       ${stat("Positions", n0(c.positions),
              `${n0(c.open)} open · ${n0(c.closed)} closed`)}
     </div>
     ${est ? `<div class="note warn"><b>${pnl(est)} of the realized figure is
-      ESTIMATED</b> from the last mark before the close rather than booked from
+      ESTIMATED</b> from the last mark before the close rather than realised from
       a closing fill. It is a number, not money.</div>` : ""}
     <div class="tip">Realized alone is what flatters a book with a take-profit
       and a stop: the winners close and the losers stay open. Total is the
@@ -1890,7 +1894,7 @@ function mountPerf(moved) {
                   "ov-assign", "ov-hold", "ov-plays", "ov-tickers"];
 
   const paint = (d) => {
-    put("ov-head", ovState(d) + ovDead(d) + ovWarn(d) + ovEmpty(d));
+    put("ov-head", ovState(d) + ovDead(d) + ovWarn(d));
     if (d.ok === false) {
       put("ov-attn", ovDeadCounts(d));
       for (const id of BLOCKS) put(id, "");

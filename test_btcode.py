@@ -13,6 +13,18 @@ No network, no broker, no state files touched.
 """
 from __future__ import annotations
 
+# NEVER WRITE LIVE STATE FROM A TEST. Both variables are set BEFORE the first
+# repo import, because the modules they steer read them at import time and
+# compute module constants from them (journal.py's path, agentctl.py's
+# AUDIT_PATH). Setting them later is too late and looks like it worked.
+import os as _os, tempfile as _tempfile
+_scratch = _os.path.join(_tempfile.gettempdir(), "tickaverager_test_state")
+_os.environ.setdefault("TICKAVERAGER_STATE", _scratch)
+_os.environ.setdefault("TICKAVERAGER_JOURNAL",
+                       _os.path.join(_scratch, "journal.jsonl"))
+_os.makedirs(_scratch, exist_ok=True)
+
+
 import sys
 
 import btcode

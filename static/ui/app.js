@@ -44,6 +44,7 @@ import {
    backtester and the risk bank are tabs of Research, each imported by the
    page that now hosts it. core.js's MOVED map redirects their old URLs. */
 import "./views/overview.js";
+import "./views/returns.js";
 import "./views/ticker.js";
 import "./views/research.js";
 import "./views/scanner.js";
@@ -333,6 +334,7 @@ function paintRail() {
 
   if (S.account || ov) {
     html += item("overview", "Portfolio", "▦")
+      + item("returns", "Returns", "◱")
       + item("strategies", "Strategies", "◇")
       + item("options", "Options", "◈")
       + item("risk", "Risk", "◎")
@@ -387,6 +389,7 @@ function paintRail() {
           }">data error</span><span class="kbd">Ctrl K</span>`
       : `<span class="${age > 20 ? "warn" : "up"}">●</span>
          <span>${age == null ? "—" : age + "s"} · ${esc(ov.session)}</span>
+         ${buildChip(ov)}
          <span class="kbd">Ctrl K</span>`;
   } else if (!S.pollFails) {
     foot.innerHTML = `<span class="faint">—</span><span class="kbd">Ctrl K</span>`;
@@ -902,6 +905,31 @@ function render(force) {
   }
 }
 window.__render = render;
+
+/* WHICH COMMIT IS ON SCREEN. The owner reported seeing no changes after a
+   deploy that had landed, and neither of us could tell from the page whether
+   the browser was holding old modules or the server was serving old code.
+   Every asset sends `no-store`, so the server was never the problem -- but
+   "trust me, it deployed" is not something a person can check. This is: the
+   running commit and how long ago it was built, in the rail, on every page.
+   If it does not match what was just deployed, the browser is stale and a
+   hard reload fixes it. If it does, the change is live and the disagreement
+   is about something else. */
+function buildChip(ov) {
+  const b = (ov && ov.build) || null;
+  if (!b || !b.commit) return "";
+  let age = "";
+  if (b.committed_at) {
+    const mins = Math.max(0, Math.round(
+      (Date.now() - new Date(b.committed_at).getTime()) / 60000));
+    age = mins < 60 ? `${mins}m ago`
+        : mins < 1440 ? `${Math.round(mins / 60)}h ago`
+        : `${Math.round(mins / 1440)}d ago`;
+  }
+  return `<span class="build" title="running commit ${esc(b.commit)}${
+    age ? ", built " + age : ""}. If this is not the commit you just deployed, "
+    + "your browser is holding old code -- hard reload.">${esc(b.commit)}</span>`;
+}
 
 /* ------------------------------------------------------------------ poll */
 function reconnecting() {

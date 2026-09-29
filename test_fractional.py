@@ -1063,8 +1063,18 @@ def s21_ui_wiring() -> None:
     ticker = (ui / "views" / "ticker.js").read_text(encoding="utf-8")
     overview = (ui / "views" / "overview.js").read_text(encoding="utf-8")
     check("ticker.js renders the DAY exit pill", "DAY exit" in ticker, True)
+    # This used to read `"note info" in ticker`, which pinned the CLASS rather
+    # than the behaviour -- and `note info` was purged from the product when
+    # the owner asked for "only issues or warnings posted". The behaviour it
+    # was protecting is unchanged and is what is asserted now: an off-book
+    # fractional exit is the AMBER note, never the red "no resting sell" alarm,
+    # because the engine re-places it. Both files, both spellings of the field.
+    off = r'class="note (\w+)"><b>Fractional exit off the book'
+    tone = lambda body: (re.search(off, body).group(1)
+                         if re.search(off, body) else None)
     check("ticker.js / overview.js downgrade the banner on off-book exits",
-          ("offbook_shares" in ticker and "note info" in ticker, "t.offbook" in overview), (True, True))
+          ("offbook_shares" in ticker and tone(ticker),
+           "t.offbook" in overview and tone(overview)), ("warn", "warn"))
     check("no raw ${l.shares} / ${t.shares} / ${o.remaining} left in the views",
           [n for n in ("views/ticker.js", "views/overview.js", "views/performance.js", "app.js")
            if re.search(r"\$\{(l|t|x|r)\.shares\}|\$\{o\.remaining\}|\$\{A\.qty\}", (ui / n).read_text(encoding="utf-8"))], [])

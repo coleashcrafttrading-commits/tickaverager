@@ -80,9 +80,16 @@ export function vfmt(v, o) {
   const n = num(v);
   if (n === null) return "";
   if (o.compact && (o.unit || "usd") === "usd" && Math.abs(n) >= 1000) {
-    const k = n / 1000;
-    return (n > 0 && o.signed ? "+" : "") + "$"
-      + (Math.abs(k) >= 100 ? Math.round(k) : k.toFixed(1)) + "k";
+    /* THE SIGN GOES OUTSIDE THE DOLLAR SIGN. This built the string as
+       "$" + (n / 1000), so a negative compact figure came out "$-5.5k" while
+       every other money label in the repo reads "-$5,512.97" -- core.js's
+       money() has always put the minus first. Two spellings of a loss on one
+       page is how a reader stops trusting both. Caught on the returns bridge,
+       where the residual is the one term most likely to be negative; it hits
+       the area, vbars and heatmap axes the same way. */
+    const k = Math.abs(n) / 1000;
+    return (n < 0 ? "-" : (o.signed ? "+" : "")) + "$"
+      + (k >= 100 ? Math.round(k) : k.toFixed(1)) + "k";
   }
   return mfmt(n, { unit: o.unit || "usd", dp: o.dp, signed: o.signed });
 }

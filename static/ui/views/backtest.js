@@ -114,8 +114,10 @@ function applyPending() {
     setTimeout(set, 300);              // the list may still be loading
   }
   if (p.from) {
-    el("btResult").innerHTML = `<div class="note info"><b>Loaded from
-      ${esc(p.from)}.</b> ${esc(p.note
+    /* The EMPTY STATE of the result panel, not a banner over the page: the
+       panel is what is blank, so the sentence belongs inside it. */
+    el("btResult").innerHTML = `<div class="empty">Loaded from
+      ${esc(p.from)}. ${esc(p.note
         || "Nothing has run yet -- check the numbers and press Run.")}</div>`;
   }
 }
@@ -422,7 +424,7 @@ async function showPine() {
   try {
     const r = await GET("/api/pine/" + m[1]);
     box.innerHTML = `
-      <div class="note info">
+      <div class="note">
         <b>${esc(r.name)}</b> as Pine Script
         <div class="tip">Paste into TradingView &rarr; Pine Editor &rarr; Add to
           chart. Set the chart to <b>${esc(r.timeframe)}</b>; the study only
@@ -781,7 +783,7 @@ function feedChart() {
   }
   chart.setSeries({
     values: c.equity || [], stamps: c.t || [], trades: detail.trades || [],
-    note: "Realised P/L is booked on the bar a trade exits; anything open is "
+    note: "Realised P/L lands on the bar a trade exits; anything open is "
         + "marked to market on every bar in between, which is why the dips are "
         + "here at all.",
     empty: "No equity curve was returned for this run.",

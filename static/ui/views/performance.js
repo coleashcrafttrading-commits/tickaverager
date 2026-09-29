@@ -271,12 +271,31 @@ function banners(st) {
       empty or stale. It is NOT a history with nothing in it. The bots are
       unaffected — this is display code.</span></div>`;
   }
+  const rc = (perf && perf.reconciliation) || {};
+  if (rc.checked === false) {
+    return `<div class="note warn"><b>The broker could not be read, so the open
+      side is unconfirmed.</b> ${esc(rc.why || "")} Alpaca decides what is still
+      held; until it answers, the open lots below are the journal's own count.</div>`;
+  }
+  if (rc.ok === false) {
+    return `<div class="note warn"><b>The journal and the broker disagree about
+      what is still open.</b> ${esc(rc.why || "")}
+      ${(rc.symbols || []).map(s => `<br><span class="faint">${esc(s.symbol)}:
+        journal ${s.journal_shares} share${s.journal_shares === 1 ? "" : "s"},
+        Alpaca ${s.broker_shares}${s.assumed_fifo
+          ? " — which lots survived is unknown, so the oldest are assumed to have gone first"
+          : ""}</span>`).join("")}
+      <br><span class="faint">Only what Alpaca holds is counted below${
+        rc.dropped_cost ? `, so ${money0(rc.dropped_cost)} of cost has left this
+        tab. Those lots were sold; a ladder journal records take-profits and
+        cannot record an exit it never saw, so what they lost is in the
+        account's P/L and not in the figure above` : ""}.</span></div>`;
+  }
   if (st.marked !== true) {
     return `<div class="note warn"><b>No live prices in this snapshot.</b>
-      Nothing that is still open can be valued, so <b>total P/L is not
-      available</b> for this window and every open-side figure below says so
-      instead of showing 0. What is booked is the closed side only — it cannot
-      tell you how deep the ${st.open_lots || 0} open
+      Nothing still open can be valued, so <b>P/L is not available</b> for this
+      window and every open-side figure below says so instead of showing 0. The
+      closed side alone cannot tell you how deep the ${st.open_lots || 0} open
       lot${st.open_lots === 1 ? " is" : "s are"}.</div>`;
   }
   const un = st.unmarked_symbols || [];
@@ -284,7 +303,7 @@ function banners(st) {
     return `<div class="note warn"><b>Open P/L covers only part of the book.</b>
       No live price for <b>${un.map(esc).join(", ")}</b> — lots in
       ${un.length === 1 ? "that ticker are" : "those tickers are"} left out of
-      <b>Still open</b> and therefore out of total P/L. The real total is
+      the open side and therefore out of P/L. The real total is
       whatever ${un.length === 1 ? "that lot" : "those lots"} are worth, better
       or worse.</div>`;
   }
@@ -307,27 +326,42 @@ function render() {
   el("pfNotes").innerHTML = banners(st);
 
   /* ---------------------------------------------------------------- the hero
-     One figure, the way the Live tab's hero carries the account: total P/L,
-     with booked and still-open as its two halves underneath. Booked is a
-     component here, not the headline -- that is the whole point of the tab. */
+     ONE NUMBER: P/L. There used to be a "Booked" half here, and the owner
+     asked for the word to go -- "please remove booked and start calculating
+     pure p/l". It was not only vocabulary. Booked counted CLOSED lots over the
+     selected window while the open half was valued over ALL TIME, so the two
+     halves were measured over different spans and their sum was a quantity
+     with no meaning: on 28 Sep 2026 the tab read +$4,357.94 while the account
+     was up $3,055.43, and $922.52 of the difference was "still open" on a book
+     Alpaca said was empty.
+
+     Now both halves are the same window and the open side is whatever the
+     BROKER still holds, so the headline is the ladder's P/L over that window
+     and the closed/open split below it is a breakdown of that one figure
+     rather than two numbers that happen to be adjacent. */
   const win = `${WINDOW[scope.days] || scope.days + " days"} · `
     + (scope.symbol ? esc(scope.symbol) : "all tickers");
+  const flat = !openLots;
   el("pfHero").innerHTML = `
-    <div class="hero-k">Total P/L — the share ladder only</div>
+    <div class="hero-k">P/L — the share ladder only</div>
     <div class="hero-v num">${st.total_pl == null
       ? `<span class="pf-none pf-none-lg">${NEED_MARK}</span>` : sgn(st.total_pl)}</div>
     <div class="hero-x">${st.total_pl == null
-      ? `booked + open, and the open half cannot be valued · ${win}`
-      : `booked + what the open lots are worth now · ${win}`}</div>
+      ? `the open lots cannot be valued, so this cannot be totalled · ${win}`
+      : flat
+        ? `every lot is closed, so this is realised in full · ${win}`
+        : `realised, plus what the open lots are worth right now · ${win}`}</div>
     <div class="hero-row">
-      <div><span class="hero-lk">Booked</span>
+      <div><span class="hero-lk">Closed</span>
         <span class="hero-lv num">${sgn(st.realized)}</span>
         <span class="hero-lx">${closes} lot${closes === 1 ? "" : "s"} closed</span></div>
-      <div><span class="hero-lk">Still open</span>
-        <span class="hero-lv num">${mk(st.unrealized)}</span>
-        <span class="hero-lx">${openLots} lot${openLots === 1 ? "" : "s"} ·
-          ${money0(openCost)} at cost${perf.oldest_days
-            ? ` · oldest ${perf.oldest_days.toFixed(1)}d` : ""}</span></div>
+      <div><span class="hero-lk">Open</span>
+        <span class="hero-lv num">${flat ? sgn(0) : mk(st.unrealized)}</span>
+        <span class="hero-lx">${flat
+          ? `nothing is open — Alpaca holds no shares`
+          : `${openLots} lot${openLots === 1 ? "" : "s"} ·
+             ${money0(openCost)} at cost${perf.oldest_days
+               ? ` · oldest ${perf.oldest_days.toFixed(1)}d` : ""}`}</span></div>
     </div>`;
 
   /* ------------------------------------------------------------- the metrics

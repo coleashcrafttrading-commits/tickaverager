@@ -214,6 +214,17 @@ def main():
           js('vfmt(0.2237, {unit:"pct", dp:1})'), "22.4%")
     check("compact money for a tight cell",
           js('vfmt(1234.5, {unit:"usd", compact:true, signed:true})'), "+$1.2k")
+    # THE SIGN GOES OUTSIDE THE DOLLAR SIGN. This printed "$-5.5k" while
+    # core.js's money() printed "-$5,512.97" for the same loss, so one page
+    # spelled a loss two ways. Found on the returns bridge, where the residual
+    # is the term most likely to be negative.
+    check("a compact LOSS reads -$5.5k, never $-5.5k",
+          js('vfmt(-5512.97, {unit:"usd", compact:true, signed:true})'),
+          "-$5.5k")
+    check("... and without `signed` too",
+          js('vfmt(-5512.97, {unit:"usd", compact:true})'), "-$5.5k")
+    check("a compact loss over $100k still reads sign-first",
+          js('vfmt(-250400.0, {unit:"usd", compact:true})'), "-$250k")
     check("num() refuses Infinity", js("num(1/0)"), None)
     check("num() keeps a real zero", js("num(0)"), 0)
 

@@ -44,6 +44,24 @@ from qty import qstr
 
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = ROOT / "state"
+
+# TICKAVERAGER_STATE MOVES THE WHOLE DIRECTORY, exactly as it does in
+# optexec.py, and for the same reason. `state/audit.jsonl` is the audited
+# record of what was done to a live account; a row fabricated by a test is
+# indistinguishable from one a human or an agent really caused.
+#
+# Without this hook the env var was INEFFECTIVE for this file -- it was read
+# only by optexec -- and three suites appended to the live log on every run:
+# test_btcode.py, test_chart.py and test_mockharness.py, two rows each, via
+# assistant.py's refusal audit through `Path(agentctl.AUDIT_PATH)`. Measured
+# on 29 Sep 2026 by md5'ing state/ before and after all 76 suites: audit.jsonl
+# was the one file that changed. It is a module CONSTANT computed at import,
+# so a suite cannot fix it by setting the variable late; the hook has to live
+# here, beside the constant it redirects.
+if os.environ.get("TICKAVERAGER_STATE"):
+    STATE_DIR = Path(os.environ["TICKAVERAGER_STATE"])
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
 AUDIT_PATH = STATE_DIR / "audit.jsonl"
 FREEZE_PATH = STATE_DIR / "FROZEN"
 

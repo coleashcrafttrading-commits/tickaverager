@@ -49,7 +49,7 @@ import { preset as btPreset } from "./backtest.js";
 import {
   ensureFieldStyles, metricTile, metricValue, schemaFieldHTML, schemaFormHTML,
   schemaPatch, fmtSchemaVal, impactBadge, moneyKeys, applyVisibility,
-  applySearch, readValues, GOVERNORS, fieldByKey,
+  applySearch, readValues, GOVERNORS, fieldByKey, FIELD_GROUPS,
 } from "../fields.js";
 
 /* One sentence per HUB strategy, from CLAUDE.md rather than from imagination.
@@ -902,15 +902,18 @@ async function ladderForm(entry) {
       <div class="att-q" style="margin-top:14px">
         <input id="nlQ" class="cat-q" placeholder="Search these settings"
                spellcheck="false" autocomplete="off">
-        <span class="faint">${schema.length} setting${
+        <span class="faint" id="nlQn">${schema.length} setting${
           schema.length === 1 ? "" : "s"}, the engine's own keys</span>
       </div>
-      <form id="nlForm" class="att-form">${bankFormHTML(schema, values, "")}</form>
+      <form id="nlForm" class="att-form nl-form">${
+        ladderFormHTML(schema, values)}</form>
       <div class="tip">Saving writes a PERSONAL entry to the bank. It is not
         attached to anything and nothing is armed — it becomes a card you can
         put on tickers like any other.</div>
     </div>
     <div class="acts">
+      <span class="nlg-foot" id="nlFoot"></span>
+      <span style="flex:1"></span>
       <button class="btn" id="nlNo">Cancel</button>
       <button class="btn primary" id="nlYes">${
         editing ? "Save changes" : "Save to the bank"}</button>
@@ -921,8 +924,28 @@ async function ladderForm(entry) {
   document.addEventListener("keydown", k);
   v.addEventListener("click", (e) => { if (e.target === v) close(); });
   v.querySelector("#nlNo").onclick = close;
+  const form = v.querySelector("#nlForm");
+  const search = wireLadderGroups(form);
   const q = v.querySelector("#nlQ");
-  q.oninput = () => applySearch(v.querySelector("#nlForm"), q.value);
+  const qn = v.querySelector("#nlQn");
+  q.oninput = () => {
+    const hit = search(q.value.trim());
+    if (!qn) return;
+    qn.textContent = q.value.trim()
+      ? `${hit.shown} of ${schema.length} shown`
+      : `${schema.length} setting${schema.length === 1 ? "" : "s"}, the `
+        + `engine's own keys`;
+  };
+  /* The pinned line beside Save. It is the count of settings this form would
+     write, not a promise about what the server will do with them: the POST
+     below sends the WHOLE settings object, so the number is `schema.length`
+     and saying anything cleverer here would be a second, wrong, story about
+     the same request. */
+  const foot = v.querySelector("#nlFoot");
+  if (foot) {
+    foot.textContent = `${schema.length} setting${
+      schema.length === 1 ? "" : "s"} written, collapsed groups included`;
+  }
   v.querySelector("#nlName").focus();
 
   v.querySelector("#nlYes").onclick = async () => {
@@ -1073,6 +1096,149 @@ function bankFormHTML(schema, values, query) {
 }
 
 const bankFormPatch = (form, schema) => schemaPatch(form, normSchema(schema));
+
+/* ===================================================== the builder's SHAPE
+   WHY THIS IS NOT ONE LIST OF 28 BOXES.
+
+   Measured at 1280x900 before this existed: the ladder builder rendered its
+   28 settings as 28 identical rows, 3,284px of form. Capping the modal and
+   giving `.body` the scroll (app.css) makes the Save button reachable, but it
+   does not make a 4.6-screen wall of identical rows a form anybody can hold
+   in their head -- scrolling a wall is not reading it.
+
+   So the SAME grouping the ladder's own Settings tab uses, `FIELD_GROUPS`
+   from fields.js, is used here. Not a second list typed into this file: a
+   key added to the engine appears in one group in both places or in neither,
+   which is the whole reason that constant is exported.
+
+   Two rules that are deliberate:
+
+     * a group is CLOSED, not removed. Every field stays in the form's DOM,
+       so `bankFormPatch` -- which reads `form.querySelectorAll("[name]")` --
+       collects a collapsed group exactly as it collects an open one. Hiding a
+       field by unmounting it would silently drop a setting from the saved
+       document, which is the bug schemaPatch's own comment warns about.
+     * which groups start OPEN is not a guess: a group opens when something
+       inside it differs from the schema's own default. Editing an entry
+       therefore opens on what was changed, and a new one opens on wherever
+       the ladder it was seeded from already departs from the shipped default.
+       If nothing differs, the first group opens so the form is never a row of
+       shut doors.
+
+   A key the schema declares and FIELD_GROUPS does not know lands in "Other"
+   with that said on its face, rather than vanishing. */
+function ladderGroups(schema, values) {
+  const rows = normSchema(schema).filter((r) => r && r.key);
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  const used = new Set();
+  const out = [];
+  for (const g of FIELD_GROUPS) {
+    const mine = g.keys.filter((k) => byKey.has(k));
+    if (!mine.length) continue;
+    for (const k of mine) used.add(k);
+    out.push({ id: g.id, title: g.title, icon: g.icon, lead: g.lead,
+               rows: mine.map((k) => byKey.get(k)) });
+  }
+  const rest = rows.filter((r) => !used.has(r.key));
+  if (rest.length) {
+    out.push({ id: "other", title: "Other", icon: "?",
+               lead: "Keys this strategy declares that the dashboard has no "
+                   + "group for. They are shown exactly as the server spells "
+                   + "them.",
+               rows: rest });
+  }
+  /* changed-from-default, per group. Compared as TEXT for the same reason
+     diffFromDefaults does it on the ticker page: a form gives back "10" where
+     the schema's default is 10, and `10 !== "10"` would call every untouched
+     number a change. */
+  for (const g of out) {
+    g.changed = g.rows.filter((r) => {
+      const v = (values || {})[r.key];
+      if (v === undefined || r.default === undefined) return false;
+      return String(v) !== String(r.default);
+    }).length;
+  }
+  return out;
+}
+
+function ladderFormHTML(schema, values) {
+  const groups = ladderGroups(schema, values);
+  const anyChanged = groups.some((g) => g.changed);
+  const n = groups.reduce((a, g) => a + g.rows.length, 0);
+  const diff = groups.reduce((a, g) => a + g.changed, 0);
+  const head = `<div class="nlg-top">
+    <span><b>${n}</b> setting${n === 1 ? "" : "s"} in
+      <b>${groups.length}</b> group${groups.length === 1 ? "" : "s"}</span>
+    <span class="nlg-dot">·</span>
+    <span>${diff
+      ? `<b class="nlg-hot">${diff}</b> differ${
+          diff === 1 ? "s" : ""} from the shipped default`
+      : `none differs from the shipped default`}</span>
+    <span style="flex:1"></span>
+    <button type="button" class="nlg-all" data-nlg-all="1">Expand all</button>
+    <button type="button" class="nlg-all" data-nlg-all="0">Collapse all</button>
+  </div>`;
+  return head + groups.map((g, i) => {
+    const open = anyChanged ? !!g.changed : i === 0;
+    return `<section class="nlg${open ? " on" : ""}" data-nlg="${esc(g.id)}">
+      <button type="button" class="nlg-h" aria-expanded="${open}">
+        <span class="nlg-i" aria-hidden="true">${esc(g.icon || "")}</span>
+        <span class="nlg-t">${esc(g.title)}</span>
+        <span class="nlg-n">${g.rows.length}</span>
+        ${g.changed ? `<span class="nlg-ch">${g.changed} changed</span>` : ""}
+        <span class="nlg-lead">${esc(g.lead || "")}</span>
+        <span class="nlg-c" aria-hidden="true">▾</span>
+      </button>
+      <div class="nlg-b">${g.rows.map((r) =>
+        bankFormHTML([r], values, "")).join("")}</div>
+    </section>`;
+  }).join("");
+}
+
+/* The search box over a grouped form. `applySearch` marks each `.fld` q-out;
+   a group whose fields are ALL q-out would otherwise sit there as an open
+   header over nothing, and a match inside a CLOSED group would be invisible
+   -- which is worse than no search at all, because it reads as "no such
+   setting". So: a group with a hit is forced open and counted, a group with
+   none is hidden whole, and clearing the box puts every group back exactly
+   as it was rather than leaving the form wherever the last query left it. */
+function wireLadderGroups(form) {
+  const secs = [...form.querySelectorAll(".nlg")];
+  const wasOpen = new Map(secs.map((s) => [s, s.classList.contains("on")]));
+  const setOpen = (s, on) => {
+    s.classList.toggle("on", on);
+    const h = s.querySelector(".nlg-h");
+    if (h) h.setAttribute("aria-expanded", String(on));
+  };
+  form.addEventListener("click", (e) => {
+    const all = e.target.closest("[data-nlg-all]");
+    if (all) {
+      const on = all.dataset.nlgAll === "1";
+      for (const s of secs) { setOpen(s, on); wasOpen.set(s, on); }
+      return;
+    }
+    const h = e.target.closest(".nlg-h");
+    if (!h) return;
+    const s = h.closest(".nlg");
+    const on = !s.classList.contains("on");
+    setOpen(s, on);
+    wasOpen.set(s, on);
+  });
+  return function search(q) {
+    const hits = applySearch(form, q);
+    for (const s of secs) {
+      if (!q) {
+        s.classList.remove("q-none");
+        setOpen(s, wasOpen.get(s));
+        continue;
+      }
+      const shown = s.querySelectorAll(".fld:not(.q-out)").length;
+      s.classList.toggle("q-none", shown === 0);
+      if (shown) setOpen(s, true);
+    }
+    return hits;
+  };
+}
 
 /* ============================== one ticker on one strategy ============== */
 let ATT = null;           // { eid, sid, sym, card, schema, values, err }
@@ -1518,6 +1684,43 @@ function ensureCatStyles() {
     ".nw-opt span{display:block;font-size:11.5px;color:var(--muted);",
     "line-height:1.55;margin-top:3px}",
     ".modal.wide{max-width:760px;width:94vw}",
+    /* the grouped ladder builder (see ladderFormHTML). The header is STICKY
+       inside `.modal > .body`, which is the scrollport app.css gives every
+       modal -- so whichever group you are inside keeps saying which one it
+       is instead of scrolling away above you. */
+    ".nl-form{gap:10px}",
+    ".nlg-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;",
+    "font-size:11.5px;color:var(--muted);padding-bottom:2px}",
+    ".nlg-hot{color:var(--accent)}",
+    ".nlg-dot{opacity:.5}",
+    ".nlg-all{background:none;border:0;padding:2px 4px;font:inherit;",
+    "color:var(--accent);cursor:pointer;border-radius:var(--r-xs)}",
+    ".nlg-all:hover{background:var(--surface-2)}",
+    ".nlg{border:1px solid var(--hairline);border-radius:var(--r-md);",
+    "background:var(--surface-2);overflow:hidden}",
+    ".nlg.q-none{display:none}",
+    ".nlg-h{display:flex;align-items:center;gap:9px;width:100%;text-align:left;",
+    "padding:11px 13px;background:var(--surface-2);border:0;cursor:pointer;",
+    "font:inherit;color:var(--text);position:sticky;top:0;z-index:2;",
+    "border-bottom:1px solid transparent;transition:background .14s ease}",
+    ".nlg.on .nlg-h{border-bottom-color:var(--hairline)}",
+    ".nlg-h:hover{background:var(--surface)}",
+    ".nlg-i{width:17px;text-align:center;color:var(--accent);flex:none}",
+    ".nlg-t{font-weight:640;font-size:13px;flex:none}",
+    ".nlg-n{font-size:10.5px;color:var(--muted);background:var(--surface);",
+    "border-radius:var(--r-pill,999px);padding:1px 7px;flex:none}",
+    ".nlg-ch{font-size:10.5px;color:var(--accent);flex:none}",
+    ".nlg-lead{font-size:11px;color:var(--faint);flex:1 1 0;min-width:0;",
+    "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".nlg-c{flex:none;color:var(--faint);transition:transform .16s ease}",
+    ".nlg.on .nlg-c{transform:rotate(180deg)}",
+    ".nlg-b{display:none;padding:13px;gap:13px}",
+    ".nlg.on .nlg-b{display:grid;",
+    "grid-template-columns:repeat(auto-fit,minmax(248px,1fr))}",
+    ".nlg-foot{font-size:11px;color:var(--faint);align-self:center}",
+    "@media (max-width:560px){.nlg-lead{display:none}",
+    ".nlg.on .nlg-b{grid-template-columns:minmax(0,1fr)}}",
+    "@media (prefers-reduced-motion:reduce){.nlg-c,.nlg-h{transition:none}}",
     /* the attachment sheet */
     ".att-kv{display:grid;gap:8px 18px;",
     "grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}",

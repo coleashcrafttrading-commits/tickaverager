@@ -71,6 +71,11 @@ not re-declared, because two shapes for one idea is how a UI ends up with two
 renderers. `unit: "pct"` is a FRACTION (0.5 means 50%).
 
     account_pl(ctx)     -> the headline, today, and the funding it netted
+    returns(ctx)        -> THE RETURNS ROOM: the decomposition that sums to
+                           the headline, the detailed per-holding table with a
+                           cash-flow IRR, the liquidated section and the
+                           contributors. It re-derives nothing -- every term is
+                           reconcile()'s or per_ticker()'s.
     metrics(rows, equity_series=...) -> the NinjaTrader/TradingView set
     per_ticker(rows)    -> [the same shape, one per symbol]
     portfolio(rows, equity_series) -> the same shape for the whole account
@@ -436,10 +441,23 @@ def account_pl(ctx: Ctx) -> dict:
 
 # ============================================================== trade rows
 def _row(symbol: str, realized: float, *, opened_at=None, closed_at=None,
-         qty=None, kind: str = "", strategy: str = "", risk=None) -> dict:
+         qty=None, kind: str = "", strategy: str = "", risk=None,
+         cost=None) -> dict:
+    """One closed trade, normalised.
+
+    `cost` is the capital the lot PUT UP at entry, and it is None wherever that
+    is not honestly knowable -- a short lot receives cash at open against
+    collateral no log here records, and a credit structure's capital is its max
+    loss rather than its premium. It exists so the returns room can build a
+    real dated cash flow (out at open, back at close) instead of annualising
+    (end/start)^(1/years), which cannot see when the money went in. Everything
+    that was already on this row is unchanged: `cost` is additive and every
+    older consumer ignores it.
+    """
     return {"symbol": str(symbol or "").upper(), "realized": float(realized),
             "opened_at": opened_at, "closed_at": closed_at, "qty": _num(qty),
-            "kind": kind, "strategy": strategy, "risk": _num(risk)}
+            "kind": kind, "strategy": strategy, "risk": _num(risk),
+            "cost": _num(cost)}
 
 
 def rows_from_journal(journal_rows: Optional[list]) -> list:
@@ -474,8 +492,24 @@ def rows_from_journal(journal_rows: Optional[list]) -> list:
             qty=r.get("shares"), kind="shares", strategy="ladder",
             # The ladder has no stop, so no lot has a stated risk. None, not
             # zero -- an R-multiple against a zero risk is a divide by nothing.
-            risk=None))
+            risk=None,
+            # LONG LOTS ONLY. A short lot RECEIVES cash at open and posts
+            # collateral the journal never records, so its capital is not
+            # `shares * entry_price` and pretending it is would invert the
+            # cash-flow stream an IRR is solved over. None, and the returns
+            # room names how many rows it dropped for this reason.
+            cost=_entry_cost(r)))
     return out
+
+
+def _entry_cost(r: dict) -> Optional[float]:
+    """shares * entry_price on a LONG lot; None on a short one or a gap."""
+    if str(r.get("side") or "long").lower().startswith("short"):
+        return None
+    sh, px = _num(r.get("shares")), _num(r.get("entry_price"))
+    if sh is None or px is None or sh <= 0 or px <= 0:
+        return None
+    return round(sh * px, 2)
 
 
 def rows_from_option_positions(positions: Optional[list]) -> list:
@@ -503,7 +537,15 @@ def rows_from_option_positions(positions: Optional[list]) -> list:
             closed_at=_iso_ts(getattr(p, "closed_at", None)),
             qty=ct, kind="options",
             strategy=str(getattr(p, "play", "") or "options"),
-            risk=_num(getattr(p, "risk", None))))
+            risk=_num(getattr(p, "risk", None)),
+            # A DEBIT structure's capital IS what it cost, so `entry_net`
+            # (negative for a debit) is it. A CREDIT structure was PAID at
+            # open: its capital is the max loss held as margin, which is
+            # `risk` when the ledger states one and is otherwise unknown --
+            # the premium is emphatically not it, and using the premium would
+            # report a 200% return on a spread that risked ten times as much.
+            cost=(round(abs(en) * 100.0 * ct, 2) if en < 0
+                  else _num(getattr(p, "risk", None)))))
     return out
 
 
@@ -1243,8 +1285,17 @@ def reconcile(ctx: Ctx, rows: Optional[list] = None) -> dict:
     residual = (round(eq - explained, 2)
                 if (eq is not None and explained is not None) else None)
 
+    # THE SAME GUARD `account_pl` AND `hub.pl` ALREADY CARRY, and the third
+    # place that needed it. `fund["value"]` is 0.0 both when nothing was ever
+    # deposited and when the activity log simply has no funding rows in it --
+    # which is every Alpaca PAPER account, since the opening balance is never
+    # written as a JNLC or a CSD. Subtracting zero then calls the entire
+    # balance profit: measured on PA3YVTECEQFE, equity $100,000, funding rows
+    # 0, and `returns()` published +$100,000.00 all-time on an account that had
+    # never placed a trade. A cost basis nobody recorded is UNKNOWN, not zero.
     account_all_time = (round(eq - fund["value"], 2)
-                        if (eq is not None and fund["value"] is not None)
+                        if (eq is not None and fund["value"] is not None
+                            and (fund["n"] or not eq))
                         else None)
 
     unknown: list = []
@@ -1359,6 +1410,762 @@ def reconcile(ctx: Ctx, rows: Optional[list] = None) -> dict:
     }
 
 
+# ============================================================= the returns room
+# The Simply Wall St shape, on this account's arithmetic.
+#
+# THE BREAKDOWN IS THE POINT. Their page decomposes a total that MUST add up --
+# unrealized + realized + dividends + currency = total -- and realised is never
+# a headline there, it is one bar in a sum. That is the answer to the owner's
+# complaint: "booked makes the account look like it is making money when it
+# isnt". The number still exists; it is one term of an identity whose left side
+# is the account.
+#
+# Ours is `reconcile()`'s walk rearranged, and it sums BY CONSTRUCTION rather
+# than by luck:
+#
+#     explained = funding + realised + open + fees + income
+#     residual  = equity - explained                      (reconcile's own line)
+# so  realised + open + fees + income + residual
+#               = explained - funding + equity - explained
+#               = equity - funding
+#               = account_pl(). THE HEADLINE.
+#
+# Nothing here recomputes a component. Every term is lifted off `reconcile()`
+# and every per-ticker money figure off `per_ticker()`, because two arithmetics
+# for one number is how a dashboard comes to disagree with itself -- which is
+# the defect perf.py was written to end.
+
+#: An IRR needs two dated flows a day apart at the very least. Below that the
+#: annualisation is the whole answer: +0.4% over four hours compounds to a
+#: number with twelve digits in it, which is a statement about the clock.
+IRR_MIN_SPAN_DAYS = 1.0
+
+#: The same 90-day rule `ratios()` applies to annual_return, and for the same
+#: reason -- under it the figure is an extrapolation, so it is flagged `thin`
+#: with the span named rather than quietly stated.
+IRR_SHORT_SPAN_DAYS = 90.0
+
+#: The bracket the solver searches, as annual rates. The floor is NOT -1: at
+#: -0.9999 the discount factor of a flow ten years out is 10**40 and one a
+#: century out overflows the float, so the search would crash on arithmetic
+#: rather than answer. A true IRR below -99%/yr is therefore reported as
+#: undefined WITH THAT SENTENCE, never rounded up to -99%.
+IRR_FLOOR = -0.99
+IRR_CEIL = 1.0e6
+
+#: ABOVE THIS THE RATE IS ARITHMETIC, NOT INFORMATION, and it is refused with
+#: the computed figure stated in the reason rather than printed in a column.
+#: Measured on this account's own fixture: RAM's 68 closed lots are held about
+#: three days each and recycle the same dollars, so their pooled cash flows
+#: solve to +72,740% a year. That number is correct and it is not a rate of
+#: return on anything -- it is a three-day turn compounded 120 times. A table
+#: cell reading "+72,740.4%" makes a working page look broken, and a reader who
+#: believes it is worse off than one who reads the sentence.
+IRR_REPORT_MAX = 10.0
+
+IRR_BASIS = (
+    "A money-weighted IRR over the ACTUAL dated cash flows -- money out when a "
+    "lot opened, money back when it closed -- solved for the annual rate that "
+    "discounts them to zero. It is NOT (end/start)^(1/years): that formula "
+    "cannot see WHEN the money went in, so it scores a position funded "
+    "yesterday the same as one funded a year ago. A stream with no sign change "
+    "has no such rate and is a dash with that reason, exactly as `ratios()` "
+    "refuses an annualised return on a curve that crosses zero.")
+
+#: NO WORKED EXAMPLE IN HERE. This string used to read "so 68 closed RAM lots
+#: add 68 entry costs", which was typed, not measured: on the owner's own
+#: account the Liquidated table 500px above it said RAM had closed 56. Two
+#: counts of one thing on one screen, and the prose one was the invention. The
+#: rule is stated in general and the COUNTS come from the payload.
+def _wins_only_clause(rows: list) -> str:
+    """The one sentence about WHY realised is only a term, told from the data.
+
+    Counted from the closed trades in front of it, never asserted. The
+    unconditional version of this string claimed "on this account it is
+    wins-only ... a losing lot is never closed and never books" on a book with
+    64 closed trades, 23 winners and 41 losers -- printed directly beneath the
+    table that listed the 41.
+    """
+    if not rows:
+        return ""
+    losers = len([r for r in rows if (r.get("realized") or 0) < 0])
+    if not losers:
+        return (" On this book nothing has ever closed at a loss: the ladder "
+                "has no stop, so a losing lot is simply never closed and never "
+                "books, and a realised figure that only ever rises is what "
+                "that looks like.")
+    return (" %d of the %d closed trades booked a loss, so realised here is a "
+            "net figure and not a run of winners." % (losers, len(rows)))
+
+
+DEPLOYED_BASIS = (
+    "Capital deployed: what an OPEN position cost at the broker, plus the "
+    "entry cost of every lot that has since closed. READ THE SECOND HALF "
+    "CAREFULLY -- a DCA ladder recycles the same dollars, so a ticker's closed "
+    "lots each add their own entry cost and the figure is TURNOVER, not money "
+    "the account ever had at risk at one time. A return measured against it is "
+    "a return per dollar traded. The account's own return on capital is the "
+    "headline, which is measured against net funding.")
+
+
+def _npv(rate: float, flows: list, t0: float) -> Optional[float]:
+    """Present value of dated flows at `rate` a year, or None on overflow.
+
+    None rather than an exception: at the floor of the bracket the discount
+    factors are astronomical and a long stream genuinely overflows a float.
+    The caller reads that as "no answer in this direction" and says so.
+    """
+    total = 0.0
+    for t, a in flows:
+        yrs = (t - t0) / (365.0 * 86400.0)
+        try:
+            total += a / ((1.0 + rate) ** yrs)
+        except (OverflowError, ZeroDivisionError, ValueError):
+            return None
+        if total != total or math.isinf(total):
+            return None
+    return total
+
+
+def irr(flows: Optional[list], *, as_of: Optional[float] = None) -> dict:
+    """The annualised money-weighted return of [(epoch_seconds, amount)].
+
+    `amount` is signed FROM THE ACCOUNT HOLDER'S SIDE: negative is cash
+    committed, positive is cash coming back. A stream that never changes sign
+    is money that only ever went one way, and there is no rate that nets it to
+    zero -- that is a dash with the reason, never a 0.0.
+    """
+    fl = sorted((float(t), float(a)) for t, a in (flows or [])
+                if t is not None and a is not None)
+    n = len(fl)
+    if n < 2:
+        return dash(n, "pct", "an IRR needs at least two dated cash flows and "
+                              "this has %d" % n, as_of=as_of)
+    span = (fl[-1][0] - fl[0][0]) / 86400.0
+    if span < IRR_MIN_SPAN_DAYS:
+        return dash(n, "pct",
+                    "every cash flow lands inside %.1f day(s); annualising "
+                    "that is a statement about the clock rather than about "
+                    "the trade" % span, as_of=as_of)
+    if not (any(a > 0 for _, a in fl) and any(a < 0 for _, a in fl)):
+        return dash(n, "pct",
+                    "every cash flow points the same way, so there is no rate "
+                    "at which they net to zero -- an IRR needs money out AND "
+                    "money back", as_of=as_of)
+
+    t0 = fl[0][0]
+    lo, hi = IRR_FLOOR, 1.0
+    f_lo = _npv(lo, fl, t0)
+    f_hi = _npv(hi, fl, t0)
+    while (f_lo is not None and f_hi is not None and f_lo * f_hi > 0
+           and hi < IRR_CEIL):
+        hi *= 4.0
+        f_hi = _npv(hi, fl, t0)
+    if f_lo is None or f_hi is None or f_lo * f_hi > 0:
+        # WHICH WAY it ran off the end is the useful half of this sentence.
+        # Present value FALLS as the rate rises, so a value still positive at
+        # the ceiling means the root is above it (a few days' turn compounded)
+        # and one already negative at the floor means it is below (capital
+        # destroyed faster than -99% a year). "Undefined" alone would send a
+        # reader looking for a bug instead of at the holding period.
+        high = f_hi is not None and f_hi > 0
+        return dash(n, "pct",
+                    "these %d cash flows have no annual rate between %s and "
+                    "%s that nets them to zero: the rate runs off the %s end. "
+                    "%s" % (n, _pct_words(IRR_FLOOR), _pct_words(IRR_CEIL),
+                            "high" if high else "low",
+                            "Over %.0f day(s) that is a short hold compounded, "
+                            "not a yearly return." % span if high else
+                            "Capital was lost faster than -99% a year, which "
+                            "no annualised figure describes."),
+                    as_of=as_of)
+    # Bisection, not Newton: it cannot diverge, and a P/L page that hangs or
+    # returns a wild root because a derivative went flat is worse than one
+    # that takes 200 cheap iterations.
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        f_mid = _npv(mid, fl, t0)
+        if f_mid is None:
+            break
+        if f_lo * f_mid <= 0:
+            hi, f_hi = mid, f_mid
+        else:
+            lo, f_lo = mid, f_mid
+    r = round((lo + hi) / 2.0, 6)
+    r = 0.0 if r == 0 else r               # never print "-0.0%"
+    if abs(r) > IRR_REPORT_MAX:
+        return dash(n, "pct",
+                    "these %d cash flows solve to %s a year over %.0f day(s). "
+                    "That is arithmetically right and it is not a rate of "
+                    "return on anything: short holds recycling the same "
+                    "dollars compound a few days' turn a hundred times over. "
+                    "Read the dollars and the return on capital beside it "
+                    "instead." % (n, _pct_words(r), span), as_of=as_of)
+    short = span < IRR_SHORT_SPAN_DAYS
+    return metric(r, n, "pct",
+                  reason=("annualised from only %.0f day(s) of cash flows. "
+                          "That is an extrapolation, not a measured yearly "
+                          "return." % span) if short else None,
+                  thin=short, as_of=as_of)
+
+
+def _pct_words(frac: float) -> str:
+    """A fraction as text for a SENTENCE, never for a column. `pct` is a
+    fraction everywhere in this file, so the x100 happens once, here."""
+    v = frac * 100.0
+    # format(), not %: the % operator has no thousands separator, and a rate
+    # printed as +7274039% is unreadable exactly where it matters most.
+    return format(v, "+,.0f") + "%" if abs(v) >= 100 else "%+.1f%%" % v
+
+
+def _closed_flows(rows: list) -> tuple:
+    """(flows, counted, skipped, why) -- the dated cash flows of closed lots.
+
+    A row contributes TWO flows: its entry cost out, and that cost plus its
+    realised back. `cost` is set by the adapters only where it is genuinely
+    known AND the direction is genuinely a purchase; a SHORT lot receives cash
+    at open against collateral this module never sees, so it carries no cost
+    and is named here rather than guessed at.
+    """
+    flows, used, skipped = [], 0, 0
+    for r in rows:
+        cost = _num(r.get("cost"))
+        o, c = r.get("opened_at"), r.get("closed_at")
+        if not cost or o is None or c is None or c < o:
+            skipped += 1
+            continue
+        flows.append((float(o), -abs(cost)))
+        flows.append((float(c), abs(cost) + r["realized"]))
+        used += 1
+    why = None
+    if skipped:
+        why = ("%d of %d closed trade(s) carry no entry cost, no usable "
+               "timestamps, or are short lots whose collateral this page "
+               "cannot see, and are not in it" % (skipped, used + skipped))
+    return flows, used, skipped, why
+
+
+def _open_by_symbol(positions: Optional[list]) -> dict:
+    """{underlying: the open book on it}, from Alpaca's position list.
+
+    COST BASIS IS PREFERRED FROM THE BROKER and derived only as
+    `market_value - unrealized_pl`, which is Alpaca's own identity rather than
+    a model of one. `derived` says which happened, because a derived basis
+    inherits whatever is wrong with the mark.
+
+    SHARES AND PRICE DO NOT ADD ACROSS AN OPTION SPREAD. Two short 625 puts and
+    two long 620 puts are not "four SPY shares" and they have no one price, so
+    a symbol carrying more than one position reports both as unmeasurable with
+    that sentence, while value, cost and unrealised -- which genuinely do add
+    -- are summed.
+    """
+    out: dict = {}
+    for p in (positions or []):
+        sym = _underlying(p.get("symbol"))
+        if not sym:
+            continue
+        b = out.setdefault(sym, {
+            "n": 0, "value": 0.0, "cost": 0.0, "unrealized": 0.0,
+            "qty": 0.0, "price": None, "kinds": set(), "derived": False,
+            "cost_known": True, "value_known": True})
+        mv = _num(p.get("market_value"))
+        up = _num(p.get("unrealized_pl"))
+        cb = _num(p.get("cost_basis"))
+        if cb is None and mv is not None and up is not None:
+            cb, b["derived"] = mv - up, True
+        b["n"] += 1
+        b["kinds"].add("options" if str(p.get("asset_class") or "").endswith(
+            "option") else "shares")
+        if mv is None:
+            b["value_known"] = False
+        else:
+            b["value"] += mv
+        if cb is None:
+            b["cost_known"] = False
+        else:
+            b["cost"] += cb
+        if up is not None:
+            b["unrealized"] += up
+        b["qty"] += _signed_qty(p)
+        b["price"] = _num(p.get("current_price")) if b["n"] == 1 else None
+    return out
+
+
+def _signed_qty(pos: dict) -> float:
+    """Quantity, negative when short. hub.signed_qty's rule, not a second one.
+
+    Imported lazily and with a fallback because perf.py is run in harnesses
+    that have no fleet at all; the rule itself (option `qty` is UNSIGNED and
+    the direction lives in `side`) is stated in hub.py and must not be
+    re-invented here with a different answer.
+    """
+    try:
+        from hub import signed_qty
+        return signed_qty(pos)
+    except Exception:                      # pragma: no cover -- no hub
+        q = _num(pos.get("qty")) or 0.0
+        side = str(pos.get("side") or "").lower()
+        if side.startswith(("short", "sell")):
+            return -abs(q)
+        return abs(q) if side.startswith(("long", "buy")) else q
+
+
+def _holding_row(sym: str, tk: Optional[dict], book: Optional[dict],
+                 rows: list, as_of: float, book_read: bool = False) -> dict:
+    """One line of the detailed returns table.
+
+    `realized`, `unrealized` and `total` are LIFTED off `per_ticker()` -- they
+    are that function's `net_pl`, `open_pl` and `total_pl` and this file does
+    not compute them a second time. What is added here is the part a metric
+    block has no place for: the position's size, its price, its value, the
+    capital it took, its return on that capital, and its IRR.
+    """
+    n_pos = int(book["n"]) if book else 0
+    multi_why = ("%d positions of different strikes are open on %s; they do "
+                 "not add to one share count or to one price" % (n_pos, sym))
+    flat_why = "nothing is open on %s" % sym
+    unread = "the broker's position book was not read"
+
+    # NOTHING OPEN IS A MEASUREMENT; NOBODY LOOKED IS NOT. `per_ticker` already
+    # draws that line -- it reports open_pl as 0.00 on a flat ticker when
+    # `book_read` says the list was read -- and value and cost basis have to
+    # draw it the same way or one row of the table contradicts the next. The
+    # first version had this wrong: a fully liquidated ticker reported "the
+    # broker's position book was not read" beside an open P/L of $0.00 from
+    # the same snapshot.
+    if book and book["value_known"]:
+        value = metric(_r2(book["value"]), n_pos, "usd", as_of=as_of)
+    elif book:
+        value = dash(n_pos, "usd",
+                     "a position on %s carries no market value" % sym,
+                     as_of=as_of)
+    else:
+        value = (metric(0.0, 0, "usd", as_of=as_of) if book_read
+                 else dash(0, "usd", unread, as_of=as_of))
+    if book and book["cost_known"]:
+        open_cost = metric(_r2(book["cost"]), n_pos, "usd",
+                           reason=("derived as market value less unrealised, "
+                                   "which is Alpaca's own identity but "
+                                   "inherits whatever is wrong with the mark")
+                           if book["derived"] else None,
+                           thin=book["derived"], as_of=as_of)
+    elif book:
+        open_cost = dash(n_pos, "usd",
+                         "a position on %s carries no cost basis" % sym,
+                         as_of=as_of)
+    else:
+        open_cost = (metric(0.0, 0, "usd", as_of=as_of) if book_read
+                     else dash(0, "usd", unread, as_of=as_of))
+
+    if not book:
+        shares = dash(0, "qty", flat_why if book_read else unread, as_of=as_of)
+        price = dash(0, "usd", flat_why if book_read else unread, as_of=as_of)
+    elif n_pos > 1:
+        shares = dash(n_pos, "qty", multi_why, as_of=as_of)
+        price = dash(n_pos, "usd", multi_why, as_of=as_of)
+    else:
+        shares = metric(book["qty"], 1, "qty", as_of=as_of)
+        price = metric(_r2(book["price"]), 1, "usd",
+                       reason=(None if book["price"] is not None else
+                               "%s carries no current price" % sym),
+                       as_of=as_of)
+
+    mine = [r for r in rows if r["symbol"] == sym]
+    entry_cost = sum(abs(_num(r.get("cost")) or 0.0) for r in mine)
+    no_cost = len([r for r in mine if not _num(r.get("cost"))])
+    deployed_v = abs(open_cost["value"] or 0.0) + entry_cost
+    dep_why = None
+    if no_cost:
+        dep_why = ("%d of %d closed lot(s) on %s carry no entry cost and are "
+                   "not in this" % (no_cost, len(mine), sym))
+    deployed = metric(_r2(deployed_v), len(mine) + n_pos, "usd",
+                      reason=dep_why, thin=bool(no_cost), as_of=as_of)
+
+    unreal = (tk or {}).get("open_pl") or dash(0, "usd", flat_why)
+    total = (tk or {}).get("total_pl") or dash(0, "usd", flat_why)
+    if (total["value"] is None and unreal["value"] is not None
+            and not int(((tk or {}).get("trades") or {}).get("value") or 0)):
+        # `per_ticker` refuses total_pl at ZERO closed trades, because realised
+        # and open would then be "half a number". On a symbol nothing has ever
+        # closed on, though, the total gain IS the open mark -- and two of this
+        # account's six open contracts are exactly that, so leaving the column
+        # blank would blank the rows the owner most wants to read. Stated, not
+        # computed a second way, and flagged with what the claim rests on:
+        # these logs began after the account did, so anything closed before
+        # them is in the reconciliation's residual and not here.
+        total = metric(unreal["value"], unreal["n"], "usd", thin=True,
+                       reason="no CLOSED trade on %s is in any log this page "
+                              "reads, so its total gain is its open mark and "
+                              "nothing else. Anything it closed before those "
+                              "logs began is in the reconciliation's residual."
+                              % sym, as_of=as_of)
+    tv = total["value"]
+    if tv is None or not deployed_v:
+        ret = dash(deployed["n"], "pct",
+                   (total.get("reason") or "the total gain is not measurable")
+                   if tv is None else
+                   ("no capital this page can see was ever deployed on %s, so "
+                    "there is nothing to express a return against" % sym),
+                   as_of=as_of)
+    else:
+        ret = metric(round(tv / deployed_v, 6), deployed["n"], "pct",
+                     reason=dep_why or DEPLOYED_BASIS, thin=True, as_of=as_of)
+
+    flows, used, _sk, flow_why = _closed_flows(mine)
+    row_irr = irr(flows, as_of=as_of)
+    if row_irr["value"] is None and flow_why and not used:
+        row_irr = dash(0, "pct", flow_why, as_of=as_of)
+    elif row_irr["value"] is not None and (book or flow_why):
+        # AN OPEN POSITION IS NOT IN THIS and the row has to say so. Its entry
+        # DATE is in no snapshot this page reads -- Alpaca's position object
+        # has no opened_at -- so a terminal inflow could only be dated by
+        # guessing, and a guessed date is an invented rate of return.
+        extra = []
+        if book:
+            extra.append("closed lots only: %d position(s) are still open on "
+                         "%s and Alpaca's position book carries no entry date "
+                         "to put them in a cash-flow stream" % (n_pos, sym))
+        if flow_why:
+            extra.append(flow_why)
+        if row_irr["reason"]:
+            extra.append(row_irr["reason"])
+        row_irr = metric(row_irr["value"], row_irr["n"], "pct", thin=True,
+                         reason=". ".join(extra), as_of=as_of)
+
+    kinds = sorted(book["kinds"]) if book else []
+    return {
+        "symbol": sym,
+        "status": "open" if n_pos else "liquidated",
+        "kind": ("mixed" if len(kinds) > 1 else (kinds[0] if kinds else
+                 ("options" if any(r["kind"] == "options" for r in mine)
+                  else "shares"))),
+        "open_positions": n_pos,
+        "trades": int(((tk or {}).get("trades") or {}).get("value") or 0),
+        "wins": int(((tk or {}).get("wins") or {}).get("value") or 0),
+        "losses": int(((tk or {}).get("losses") or {}).get("value") or 0),
+        "shares": shares,
+        "price": price,
+        "value": value,
+        "cost_basis": open_cost,
+        "deployed": deployed,
+        "unrealized": unreal,
+        "realized": (tk or {}).get("net_pl") or
+                    dash(0, "usd", "no closed trade on %s" % sym),
+        "total": total,
+        "return_pct": ret,
+        "irr": row_irr,
+        "last_trade_at": (tk or {}).get("last_trade_at"),
+    }
+
+
+def _contrib(label: str, value: Optional[dict], base: Optional[float],
+             n: int, as_of: float) -> dict:
+    """One contributor: the dollars, and the percent they are a return ON."""
+    v = (value or {}).get("value")
+    if v is None or not base:
+        pct = dash(n, "pct",
+                   (value or {}).get("reason") or
+                   ("no capital this page can see stands behind %s, so there "
+                    "is nothing to express a return against" % label),
+                   as_of=as_of)
+    else:
+        pct = metric(round(v / abs(base), 6), n, "pct",
+                     reason=DEPLOYED_BASIS, thin=True, as_of=as_of)
+    return {"label": label, "value": value, "pct": pct, "n": n}
+
+
+def contributors(holdings: list, rows: list, *, as_of: float) -> dict:
+    """Highest and lowest, per ticker and per strategy, in dollars AND percent.
+
+    THE STRATEGY SIDE IS REALISED ONLY, and that is a limit of the broker's
+    data rather than a choice: a position at Alpaca does not record which
+    strategy opened it, so splitting open P/L between the ladder and the option
+    plays would be attribution by guesswork. Stated on the object rather than
+    left to be assumed.
+    """
+    ranked = [h for h in holdings if h["total"]["value"] is not None]
+    ranked.sort(key=lambda h: -h["total"]["value"])
+    unranked = [h["symbol"] for h in holdings if h["total"]["value"] is None]
+
+    def tick(h):
+        return _contrib(h["symbol"], h["total"], h["deployed"]["value"],
+                        h["trades"] + h["open_positions"], as_of)
+
+    by_strat: dict = {}
+    for r in rows:
+        key = str(r.get("strategy") or "unattributed")
+        b = by_strat.setdefault(key, {"pl": 0.0, "n": 0, "cost": 0.0,
+                                      "nocost": 0})
+        b["pl"] += r["realized"]
+        b["n"] += 1
+        c = _num(r.get("cost"))
+        if not c:
+            b["nocost"] += 1
+        else:
+            b["cost"] += abs(c)
+    strat = []
+    for key, b in by_strat.items():
+        row = _contrib(key, metric(_r2(b["pl"]), b["n"], "usd", as_of=as_of),
+                       b["cost"] or None, b["n"], as_of)
+        row["realized_only"] = True
+        row["trades"] = b["n"]
+        if b["nocost"]:
+            row["why"] = ("%d of %d closed lot(s) carry no entry cost, so the "
+                          "percent is measured over the rest"
+                          % (b["nocost"], b["n"]))
+        strat.append(row)
+    strat.sort(key=lambda r: -(r["value"]["value"] or 0.0))
+
+    return {
+        "highest": [tick(h) for h in ranked[:5]],
+        "lowest": [tick(h) for h in reversed(ranked[-5:])] if ranked else [],
+        "unranked": unranked,
+        "by_strategy": strat,
+        "why": ("Ranked on TOTAL gain -- realised plus what the open lots are "
+                "worth right now -- because ranking on realised alone puts a "
+                "ticker that is holding an underwater bag at the top of the "
+                "list. The per-strategy rows are realised only: a position at "
+                "the broker does not record which strategy opened it."),
+        "as_of": as_of,
+    }
+
+
+def returns(ctx: Ctx, *, rows: Optional[list] = None,
+            by_ticker: Optional[list] = None,
+            recon: Optional[dict] = None) -> dict:
+    """THE RETURNS ROOM: a decomposition that sums, and what is inside it.
+
+    Nothing below is re-derived. The breakdown's five terms are `reconcile()`'s
+    own steps and its residual; every per-ticker money figure is
+    `per_ticker()`'s. What this function adds is the arrangement -- the sum,
+    the liquidated section, the contributors and the IRR.
+    """
+    as_of = ctx.now
+    rows = list(rows if rows is not None else ctx.trade_rows())
+    recon = recon if recon is not None else reconcile(ctx, rows)
+    book = _open_by_symbol(ctx.broker_positions)
+    if by_ticker is None:
+        by_ticker = per_ticker(
+            rows, now=as_of,
+            open_pl_by_symbol={k: _r2(v["unrealized"])
+                               for k, v in book.items()},
+            open_positions_by_symbol={k: v["n"] for k, v in book.items()},
+            book_read=ctx.broker_positions is not None)
+    tk_by_sym = {t["symbol"]: t for t in by_ticker}
+
+    # ------------------------------------------------------- the breakdown
+    step = {s["key"]: s for s in recon["steps"]}
+    total_v = recon["the_three_numbers"]["account_all_time"]["value"]
+    resid = recon["residual"]
+    # A DASH WITH NO REASON IS THE BUG THIS REPO HAS SHIPPED BEFORE.
+    # `reconcile()`'s steps carry a `why` only where they have something
+    # unusual to say -- an empty journal and an unread activity list both leave
+    # it None -- so every term that can go missing gets its own sentence here
+    # rather than reaching the page as a bare em dash.
+    absent = {
+        "realized": "no closed trade is in any log this page reads, so there "
+                    "is nothing booked to put in this term",
+        "open": "the broker's position book was not read, so what is held is "
+                "unknown -- which is not the same as holding nothing",
+        "fees": "Alpaca's activity history has not been read, so the fees the "
+                "account paid are unknown",
+        "income": "Alpaca's activity history has not been read, so any "
+                  "dividend or interest the account received is unknown",
+    }
+    out_parts = []
+    for key, label in (("realized", "Realised by the strategies' logs"),
+                       ("open", "Open, at the broker's marks"),
+                       ("fees", "Fees the account paid"),
+                       ("income", "Dividends and interest")):
+        s = step[key]
+        why_ = s["why"] or (absent[key] if s["value"] is None else None)
+        out_parts.append({
+            "key": key, "label": label,
+            "value": metric(s["value"], s["n"], "usd", reason=why_,
+                            thin=bool(s["why"] and s["value"] is not None),
+                            as_of=as_of),
+            "source": s["source"], "why": why_})
+    out_parts.append({
+        "key": "unexplained", "label": "Unexplained (the residual)",
+        "value": metric(resid["value"], resid["n"], "usd",
+                        reason=resid["reason"], as_of=as_of),
+        "source": "equity less the four terms above",
+        "why": ("What the walk could not account for. It is published rather "
+                "than spread across the other bars, because an input being "
+                "wrong or incomplete is a fact about the account and hiding "
+                "it would make the sum a lie." if resid["value"] else None)})
+
+    vals = [p["value"]["value"] for p in out_parts]
+    complete = all(v is not None for v in vals) and total_v is not None
+    summed = round(sum(v for v in vals if v is not None), 2)
+    # The sum is an IDENTITY, not a coincidence -- see the header of this
+    # section. It is still checked, because an identity that stops holding is
+    # the loudest possible signal that a step changed meaning underneath it.
+    missing = [p["label"] for p in out_parts if p["value"]["value"] is None]
+    breakdown = {
+        "total": metric(total_v, len([v for v in vals if v is not None]),
+                        "usd",
+                        reason=(None if total_v is not None else
+                                "the account's equity or its net funding has "
+                                "not been read, so there is no total to "
+                                "decompose"), as_of=as_of),
+        "parts": out_parts,
+        "sum": metric(summed if complete else None, len(out_parts), "usd",
+                      reason=(None if complete else
+                              "%s cannot be measured, so the parts cannot be "
+                              "summed" % ", ".join(missing)), as_of=as_of),
+        "balanced": (None if not complete
+                     else bool(abs(summed - total_v) <= 0.01)),
+        "complete": complete,
+        "missing": missing,
+        # THE WINS-ONLY CLAUSE IS A CLAIM ABOUT THE DATA, so it is now made
+        # only where the data supports it. It used to be unconditional prose:
+        # on a book with 64 closed trades, 23 winners and 41 losers, the page
+        # printed "on this account it is wins-only ... a losing lot is never
+        # closed and never books" directly beneath a table listing the 41.
+        "why": ("Every one of these is a TERM, not a headline. They sum to the "
+                "account's whole profit and loss -- equity less net funding -- "
+                "by construction: the residual is defined as equity minus the "
+                "other four plus funding, so either the identity holds or a "
+                "step has changed meaning. Realised sits in here as one bar, "
+                "never as the answer."
+                + _wins_only_clause(rows)),
+        "as_of": as_of,
+    }
+
+    # -------------------------------------------------- the detailed table
+    syms = sorted(set(tk_by_sym) | set(book))
+    read = ctx.broker_positions is not None
+    holdings = [_holding_row(s, tk_by_sym.get(s), book.get(s), rows, as_of,
+                             book_read=read) for s in syms]
+    # Unmeasured rows sink rather than sorting as zero, the same rule viz.js's
+    # hbar applies: a row nobody could value is not a row that made nothing.
+    holdings.sort(key=lambda h: -(h["total"]["value"]
+                                  if h["total"]["value"] is not None
+                                  else -1e18))
+    open_rows = [h for h in holdings if h["status"] == "open"]
+    closed_rows = [h for h in holdings if h["status"] == "liquidated"]
+
+    # ----------------------------------------------------------- the total
+    tot_val = sum((h["value"]["value"] or 0.0) for h in holdings)
+    tot_cost = sum((h["cost_basis"]["value"] or 0.0) for h in holdings)
+    tot_dep = sum((h["deployed"]["value"] or 0.0) for h in holdings)
+    tot_unmeasured = len([h for h in holdings
+                          if h["value"]["value"] is None
+                          or h["cost_basis"]["value"] is None])
+    # THE SAME ENVELOPES THE BRIDGE DRAWS, not second copies built from the
+    # same steps. Built twice they drifted immediately: the bridge's realised
+    # term carried the "no closed trade is in any log" sentence and the TOTAL
+    # row's carried nothing, so a fresh account printed a bare em dash in the
+    # Realised column -- a dash with no reason, which is the bug this file has
+    # shipped more than once and the owner has caught.
+    part = {p["key"]: p["value"] for p in out_parts}
+    realized_m = part["realized"]
+    unreal_m = part["open"]
+    rv, uv = realized_m["value"], unreal_m["value"]
+    both = rv is not None and uv is not None
+    gains_m = metric(_r2(rv + uv) if both else None,
+                     step["realized"]["n"] + step["open"]["n"], "usd",
+                     reason=(None if both else
+                             "realised and open cannot both be measured here, "
+                             "so their sum would be half a number: "
+                             + ("; ".join(
+                                 m["reason"] for m in (realized_m, unreal_m)
+                                 if m["value"] is None and m["reason"]))),
+                     as_of=as_of)
+
+    # THE ACCOUNT'S OWN IRR, and this is the one with nothing missing from it:
+    # every deposit and withdrawal is DATED on the activities API and the
+    # terminal value is today's equity. No position needs an entry date for it.
+    fund_flows = []
+    for fr in (account_pl(ctx)["funding_rows"] or []):
+        t = _iso_ts(str(fr.get("date") or "") + "T00:00:00Z")
+        amt = _num(fr.get("amount"))
+        if t is None or amt is None:
+            continue
+        # SIGN FLIP, and it is the whole calculation. Alpaca's `net_amount` is
+        # + for cash arriving IN THE ACCOUNT; an IRR is measured from the
+        # OWNER's side, where that same deposit is money leaving his pocket.
+        # Getting this backwards returns the negative of the answer.
+        fund_flows.append((t, -amt))
+    eq = ctx.equity()
+    if eq is not None and fund_flows:
+        fund_flows.append((as_of, eq))
+    acct_irr = (irr(fund_flows, as_of=as_of) if fund_flows else
+                dash(0, "pct",
+                     "no dated deposit or withdrawal was read, so there is no "
+                     "cash-flow stream to solve a rate over", as_of=as_of))
+
+    totals = {
+        "value": metric(_r2(tot_val), len(holdings), "usd",
+                        reason=("%d holding(s) carry no market value or no "
+                                "cost basis and are not in this"
+                                % tot_unmeasured) if tot_unmeasured else None,
+                        thin=bool(tot_unmeasured), as_of=as_of),
+        "cost_basis": metric(_r2(tot_cost), len(open_rows), "usd",
+                             as_of=as_of),
+        "deployed": metric(_r2(tot_dep), len(holdings), "usd",
+                           reason=DEPLOYED_BASIS, thin=True, as_of=as_of),
+        "unrealized": unreal_m,
+        "realized": realized_m,
+        "total": gains_m,
+        "return_pct": (metric(round(gains_m["value"] / tot_dep, 6),
+                              len(holdings), "pct", reason=DEPLOYED_BASIS,
+                              thin=True, as_of=as_of)
+                       if (gains_m["value"] is not None and tot_dep)
+                       else dash(len(holdings), "pct",
+                                 "no capital this page can see stands behind "
+                                 "these rows", as_of=as_of)),
+        "irr": acct_irr,
+        "account_pl": breakdown["total"],
+        "why": ("The TOTAL row's gains are the ACCOUNT's own realised and open "
+                "figures, not the sum of the rows above them -- the rows are "
+                "per underlying, and anything the broker holds that no row "
+                "claims would otherwise vanish out of the total. The "
+                "annualised figure is the account's money-weighted IRR over "
+                "its deposits and withdrawals, which is the one IRR on this "
+                "page with nothing missing from it."),
+    }
+
+    # ------------------------------------------------- liquidated holdings
+    # THE EMPTY LOSER LIST IS THE FINDING. A closed loser would sit in this
+    # section beside the closed winners; on this account there has never been
+    # one, and that is not a good result -- it is what a ladder with no stop
+    # loss looks like. The count is published so the section can SAY it rather
+    # than reading as a tidy table of wins.
+    closed_losers = len([r for r in rows if r["realized"] < 0])
+    liquidated = {
+        "rows": closed_rows,
+        "n": len(closed_rows),
+        "closed_trades": len(rows),
+        "closed_winners": len([r for r in rows if r["realized"] > 0]),
+        "closed_losers": closed_losers,
+        "no_loser_ever": bool(rows and not closed_losers),
+        "why": (WINS_ONLY_CAVEAT if (rows and not closed_losers) else
+                ("this section is where a position that was fully closed keeps "
+                 "its realised contribution, so a closed loser sits in the "
+                 "same table as a closed winner" if rows else
+                 "nothing has been closed on this account yet")),
+        "as_of": as_of,
+    }
+
+    return {
+        "as_of": as_of,
+        "account": ctx.account_id,
+        "label": ctx.label,
+        "breakdown": breakdown,
+        "holdings": holdings,
+        "open": open_rows,
+        "liquidated": liquidated,
+        "totals": totals,
+        "contributors": contributors(holdings, rows, as_of=as_of),
+        "irr_basis": IRR_BASIS,
+        "deployed_basis": DEPLOYED_BASIS,
+        "counts": {"holdings": len(holdings), "open": len(open_rows),
+                   "liquidated": len(closed_rows), "closed_trades": len(rows)},
+    }
+
+
 # =================================================================== the report
 def report(ctx: Ctx) -> dict:
     """Everything above in one payload, so a page is one request.
@@ -1391,20 +2198,27 @@ def report(ctx: Ctx) -> dict:
 
     acct = account_pl(ctx)
     fund = net_funding(ctx.activities)
+    recon = reconcile(ctx, rows)
+    by_tick = per_ticker(rows, now=ctx.now,
+                         open_pl_by_symbol=opl_by_sym,
+                         open_positions_by_symbol=opn_by_sym,
+                         book_read=ctx.broker_positions is not None)
     return {
         "ok": True,
         "as_of": ctx.now,
         "account": ctx.account_id,
         "label": ctx.label,
         "headline": acct,
-        "reconciliation": reconcile(ctx, rows),
+        "reconciliation": recon,
+        # The returns room is handed the walk and the per-ticker blocks that
+        # were just computed rather than recomputing either. Two arithmetics
+        # for one number is the defect this file exists to end, and doing it
+        # inside this file would be the worst place of all to do it.
+        "returns": returns(ctx, rows=rows, by_ticker=by_tick, recon=recon),
         "portfolio": portfolio(rows, ctx.equity_points, now=ctx.now,
                                open_pl=open_pl, open_positions=open_n,
                                created_at=born),
-        "by_ticker": per_ticker(rows, now=ctx.now,
-                                open_pl_by_symbol=opl_by_sym,
-                                open_positions_by_symbol=opn_by_sym,
-                                book_read=ctx.broker_positions is not None),
+        "by_ticker": by_tick,
         "daily": daily(rows, ctx.equity_points, funding_rows=fund["rows"],
                        created_at=born, now=ctx.now),
         "daily_basis": DAILY_BASIS,

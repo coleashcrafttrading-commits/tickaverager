@@ -557,13 +557,15 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_chart
   test_engine_strategy
   test_entry_rule test_fractional test_greeks test_indicators test_latency
+  test_ledgertruth test_notes test_motion
   test_optapi test_optbacktest test_optbank test_optbook test_optcal
   test_optdata test_optengine test_optexec test_optgates test_optgrade
   test_options test_options_api test_optquotes test_optrest
   test_optrun
   test_optstructures test_optsym test_optview test_optvol test_presets
   test_tickerview
-  test_reconcile test_refresh_trend test_report test_research test_reverse
+  test_reconcile test_refresh_trend test_report test_research test_returns
+  test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
   test_optplays test_touch_adds test_trail test_trend test_trend_v2
   test_unwind`,

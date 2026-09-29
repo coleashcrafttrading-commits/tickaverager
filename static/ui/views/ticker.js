@@ -95,6 +95,11 @@ const H = {
      this symbol, which names the STORE each attachment came from. */
   bank: {}, bankKind: "ladder", bankQ: "", bankPick: "", bankBusy: false,
   att: null, attWhy: "",
+
+  /* THE LAST DETACH, so it can be put back. See `rememberDetach`. It is a
+     record of what was on screen a moment ago, never a cache anything else
+     reads: one slot, cleared when the page leaves this symbol. */
+  undo: null,
 };
 let panelC = null;       // the price chart
 let series = null;       // the record curve
@@ -364,8 +369,13 @@ function warningsFor(sym) {
   return out;
 }
 
+/* The rail's list is hub._symbol_union(): the watchlist file PLUS every
+   symbol a strategy touches PLUS every symbol the broker holds. So "on the
+   ticker list" can only ever mean the union -- these chips say which of the
+   three put it there, and `registry` is spelled "watchlist" everywhere so the
+   file and the union never share one word again. */
 const SOURCE_WHY = {
-  registry: "added to this account's ticker list",
+  registry: "on the watchlist -- somebody added it by hand",
   strategy: "a strategy is attached to it",
   broker: "Alpaca is holding a position in it",
 };
@@ -383,14 +393,12 @@ function headNotes() {
     b.push(`<div class="note ${loud ? "bad" : "warn"}"><b>${esc(w.code || "warning")}</b>
       — ${esc(w.text || "")}</div>`);
   }
-  const d = H.d;
-  if (d && !d.registered && (d.sources || []).indexOf("registry") < 0) {
-    b.push(`<div class="note info">${esc(d.symbol)} is not on this account's
-      ticker list — it is here because ${
-        (d.sources || []).indexOf("strategy") >= 0
-          ? "a strategy is attached to it"
-          : "Alpaca is holding a position in it"}.</div>`);
-  }
+  /* There WAS a note here claiming the symbol "is not on this account's
+     ticker list". It was false: it tested hub's `registered` (the watchlist
+     FILE) while the rail lists hub._symbol_union(), so NVDA -- held at the
+     broker, on the rail -- was told it was not on the list it was sitting in.
+     The honest version of that fact is the source chips in the header, which
+     name registry/strategy/broker with SOURCE_WHY on hover. No banner. */
   return b.join("");
 }
 
@@ -680,9 +688,13 @@ function paintOverview() {
           realised P/L, no win rate and no drawdown. These are absent, not zero.`,
       });
     } else {
-      ovr.innerHTML = `<div class="note ${H.perfWhy ? "bad" : "info"}">${
-        esc(H.perfWhy || "reading this ticker's block out of the account's "
-          + "performance report…")}</div>`;
+      /* Two states, and only one of them is a banner: a REASON the block is
+         missing is a problem and stays red, while "still loading" is the
+         panel telling you to wait and is a faint line, not a strip. */
+      ovr.innerHTML = H.perfWhy
+        ? `<div class="note bad">${esc(H.perfWhy)}</div>`
+        : `<div class="faint">Reading this ticker's block out of the account's
+           performance report…</div>`;
     }
   }
 
@@ -949,6 +961,7 @@ function mountStrategies(sym) {
       { sub: "each attached strategy, by the size of what it booked" })}
 
     ${panel("Attach a strategy", `
+      <div id="tkUndo"></div>
       <div class="tkv-bankbar">
         ${segmented({ options: BANK_KINDS, value: H.bankKind, id: "tkBankKind",
                       size: "sm", label: "Kind of strategy" })}
@@ -962,13 +975,22 @@ function mountStrategies(sym) {
         <button class="btn primary" id="tkAttach">Attach to ${esc(sym)}</button>
       </div>
       <div class="hint" id="tkPickDesc"></div>
+      <div class="tip"><b>${esc(sym)} may carry as many strategies as you
+        like</b>, of any kind, at the same time — they run side by side, each
+        with its own state, its own settings and its own P/L, and the card list
+        above is all of them. Attach one, then come straight back and attach
+        the next; the dropdown stays where you left it. <b>The ladder is the
+        one exception</b>: a ticker has exactly one engine config, so a second
+        ladder-shaped entry replaces the first rather than joining it, and the
+        confirmation names what it is about to replace.</div>
       <div class="tip"><b>Attaching never arms.</b> A ladder arrives stopped and
         in dry run; an options play is assigned and the arm file is not touched.
         Nothing transmits until you arm it from its own control.</div>`,
-      { actions: `<span class="faint" id="tkBankCount"></span>` })}
+      { sub: "several at once is the normal case, not an edge case",
+        actions: `<span class="faint" id="tkBankCount"></span>` })}
 
     ${panel("Remove from this account", `<div class="tip" style="margin-top:0">
-      ${esc(sym)} leaves this account's ticker list. It is refused while a
+      ${esc(sym)} leaves this account's watchlist. It is refused while a
       strategy is still attached, and <b>nothing at Alpaca is cancelled or
       sold</b>. A symbol Alpaca still holds a position in keeps appearing
       anyway, because hiding a live position is the one thing this page must
@@ -1203,6 +1225,7 @@ function paintStrategies() {
   }
 
   fillBankPick();
+  paintUndo();
 }
 
 /* The settings pane for one attached strategy, built from its own
@@ -1318,6 +1341,117 @@ async function attachPicked(sym) {
                      loadBank(H.bankKind, H.bankQ)]);
 }
 
+/* ================================================ detaching is REVERSIBLE */
+/* Detach is a red button behind a typed confirmation, and what it removes is
+   a row that took a kind filter, a search and a dropdown to find. Until this
+   existed the only way back was to remember the name, re-find it in a bank of
+   259 and re-type every override -- so "detach and see" was not something
+   anybody would risk, and a detach of the wrong row was a small disaster.
+
+   The undo is a REAL re-attach through the same audited call -- POST
+   /api/bank/attach with the entry id and the settings captured off
+   /api/bank/attached BEFORE the detach -- not a rollback and not a second way
+   to start a strategy. So it restores exactly what that attachment row could
+   see, and the line on screen says which that is, including when the answer
+   is "the entry, and none of its values". That is the LADDER's case: its real
+   config lives behind its own route and never appears on the attachment row,
+   so putting a ladder preset back puts the PRESET back, not the numbers that
+   were edited on top of it. An undo that claimed more than it restores would
+   be worse than no undo at all.
+
+   A row with no bank id cannot be re-attached from here and gets no button --
+   it gets the reason instead. `bank.attached` emits id "" for a ladder on
+   settings nobody named ("Custom ladder settings"), and there is no entry to
+   attach for that by construction. */
+function rememberDetach(sym, bankId, name, settings, why) {
+  const keys = Object.keys(settings || {});
+  H.undo = { sym, id: bankId || "", name: name || bankId || "",
+             settings: keys.length ? settings : null, n: keys.length,
+             why: why || "", busy: false };
+}
+
+/* The bank id for a strategy hub owns, which is the mapping `coveredIds` uses
+   in the other direction. One function rather than two spellings of the same
+   rule, because the two drifting apart is how a row comes to be listed twice
+   under two names. */
+function bankIdOfCard(c) {
+  if (!c) return "";
+  if (c.id !== "ladder") return "play:" + c.id;
+  return c.preset && c.preset !== "custom" ? "preset:" + c.preset : "";
+}
+
+const attRowFor = (id) => (H.att || []).find((a) => a.id === id) || null;
+
+function paintUndo() {
+  const box = el("tkUndo");
+  if (!box) return;
+  const u = H.undo;
+  if (!u || u.sym !== H.sym) { box.innerHTML = ""; return; }
+  /* It is back. However it got back -- this button, the dropdown above it, or
+     the CLI on the other machine -- an offer to restore something that is
+     already attached is an offer to do nothing.
+
+     THE SLOT IS NOT CLEARED HERE, and that is the whole bug this comment
+     exists for. `bankDetach` fires loadHub, loadAttached and loadBank
+     concurrently and every one of them repaints when it lands; loadHub lands
+     first, so the first paint after a detach still sees the PRE-detach `H.att`
+     and this test is true. Nulling H.undo on that paint threw the record away
+     microseconds after it was written, and the undo never appeared once --
+     measured in a browser, 18 paints, `H.undo` null at every one. Rendering
+     nothing while the row is present is idempotent; destroying the record is
+     not. */
+  if (u.id && (attRowFor(u.id) || coveredIds().has(u.id))) {
+    box.innerHTML = ""; return;
+  }
+  if (!u.id) {
+    box.innerHTML = `<div class="note warn" style="margin:0 0 14px">
+      <b>${esc(u.name)}</b> was detached from ${esc(u.sym)}. It cannot be put
+      back from here — ${esc(u.why || "it has no entry in the bank to attach")}.
+      </div>`;
+    return;
+  }
+  box.innerHTML = `<div class="note warn" style="margin:0 0 14px">
+    <b>${esc(u.name)}</b> was just detached from ${esc(u.sym)}.
+    ${u.n
+      ? `Putting it back restores the entry and the
+         <b>${u.n}</b> value${u.n === 1 ? "" : "s"} its attachment carried
+         (${esc(Object.keys(u.settings).join(", "))}).`
+      : `Putting it back restores the entry at the strategy's own defaults —
+         that row carried no values, so there are none to restore.`}
+    <span class="row-btns" style="margin-top:10px;display:flex;gap:9px">
+      <button class="btn sm" type="button" id="tkUndoGo"${
+        u.busy ? " disabled" : ""}>${u.busy
+          ? "Putting it back…" : `Put ${esc(u.name)} back on ${esc(u.sym)}`}</button>
+      <button class="btn sm" type="button" id="tkUndoNo">Dismiss</button>
+    </span></div>`;
+  const go2 = el("tkUndoGo");
+  if (go2) go2.onclick = () => act(() => undoDetach());
+  const no = el("tkUndoNo");
+  if (no) no.onclick = () => { H.undo = null; paintUndo(); };
+}
+
+async function undoDetach() {
+  const u = H.undo;
+  if (!u || !u.id || u.busy) return;
+  u.busy = true;
+  paintUndo();
+  try {
+    const body = { symbol: u.sym, id: u.id, by: "dashboard" };
+    if (u.settings) body.settings = u.settings;
+    const out = await POST("/api/bank/attach", body);
+    H.undo = null;
+    toast(`<b>${esc(u.name)}</b> is back on ${esc(u.sym)} — not armed.${
+      out && out.replaced ? ` Replaced ${esc(out.replaced)}.` : ""}`, "ok");
+    H.bank = {};
+    await Promise.all([loadHub(u.sym), loadAttached(u.sym),
+                       loadBank(H.bankKind, H.bankQ)]);
+  } catch (e) {
+    u.busy = false;
+    paintUndo();
+    throw e;             // `act` shows it; the slot stays so it can be retried
+  }
+}
+
 /* Detaching a bank entry hub has no card for. It is a separate button from
    the hub one on purpose: they write different stores, and a single button
    that guessed which would be the place a wrong guess is invisible. */
@@ -1329,11 +1463,19 @@ async function bankDetach(sym, id) {
     body: `${esc(row.name)} is removed from ${esc(sym)} in
       <span class="mono">${esc(row.source || "the bank's own store")}</span>.
       <b>Nothing at Alpaca is cancelled or sold</b> and ${sym} stays on the
-      ticker list.`,
+      watchlist.<br><br><b>This is reversible.</b> An undo appears under
+      <i>Attach a strategy</i> and puts it back${
+        Object.keys(row.settings || {}).length
+          ? ` with the ${Object.keys(row.settings).length} value${
+              Object.keys(row.settings).length === 1 ? "" : "s"} this
+             attachment carries`
+          : ` at the strategy's own defaults`}.`,
   })) return;
   await POST("/api/bank/attach",
              { symbol: sym, id, action: "detach", by: "dashboard" });
-  toast(`${esc(row.name)} detached from ${sym}.`, "ok");
+  // captured from the row that was on screen, BEFORE loadAttached drops it
+  rememberDetach(sym, id, row.name, row.settings, "");
+  toast(`${esc(row.name)} detached from ${sym} — it can be put back.`, "ok");
   H.bank = {};
   await Promise.all([loadHub(sym), loadAttached(sym),
                      loadBank(H.bankKind, H.bankQ)]);
@@ -1341,12 +1483,33 @@ async function bankDetach(sym, id) {
 
 async function detach(sym, id) {
   const c = attachedStrats(H.d).find((x) => x.id === id) || { label: id };
+  /* Read the bank id and the attachment's values BEFORE the call: after it,
+     `loadAttached` has dropped the row and there is nothing left to capture.
+     A ladder that is on no named preset has no entry to re-attach, which is a
+     real answer and is carried through to the undo slot as the reason. */
+  const bankId = bankIdOfCard(c);
+  const row = bankId ? attRowFor(bankId) : null;
+  const vals = row ? row.settings : null;
+  const noWay = bankId ? ""
+    : (c.id === "ladder"
+        ? "this ladder is on settings nobody named, so the bank has no entry "
+          + "for it — its numbers are on the Ladder tab"
+        : "hub runs it and the bank has no entry with its id");
   if (!await ask({
     title: `Detach ${esc(c.label)} from ${sym}?`, danger: true, ok: "Detach",
     requireWord: "DETACH",
     body: `${esc(c.label)} stops running on ${sym}. <b>Nothing at Alpaca is
       cancelled or sold</b> — an open position and the orders resting against it
-      are left exactly as they are. ${sym} stays on the ticker list.`,
+      are left exactly as they are. ${sym} stays on the watchlist.<br><br>${
+      bankId
+        ? `<b>This is reversible.</b> An undo appears under <i>Attach a
+           strategy</i> and re-attaches <span class="mono">${esc(bankId)}</span>${
+             Object.keys(vals || {}).length
+               ? ` with the ${Object.keys(vals).length} value${
+                   Object.keys(vals).length === 1 ? "" : "s"} its attachment
+                  carries`
+               : ` at the strategy's own defaults`}.`
+        : `<b>This one cannot be undone from this page</b> — ${esc(noWay)}.`}`,
   })) return;
   try {
     await POST(`/api/hub/ticker/${encodeURIComponent(sym)}/strategy`,
@@ -1360,7 +1523,9 @@ async function detach(sym, id) {
   }
   H.cfgOpen = "";
   H.cfgDirty = false;
-  toast(`${esc(c.label)} detached from ${sym}.`, "ok");
+  rememberDetach(sym, bankId, c.label, vals, noWay);
+  toast(`${esc(c.label)} detached from ${sym}${
+    bankId ? " — it can be put back" : ""}.`, "ok");
   // the bank's own list and every row's `tickers` have just changed too, and
   // the attached COUNT on this tab is the sum of both lists
   H.bank = {};
@@ -1502,9 +1667,10 @@ function paintHistory() {
   el("tkRecCav").innerHTML = P ? recCaveats(P)
     : (H.perfNone
         ? ""                                  // the empty state below says it
-        : `<div class="note ${H.perfWhy ? "bad" : "info"}">${esc(H.perfWhy
-            || "reading this ticker's block out of the account's performance "
-             + "report…")}</div>`);
+        : (H.perfWhy
+            ? `<div class="note bad">${esc(H.perfWhy)}</div>`
+            : `<div class="faint">Reading this ticker's block out of the
+               account's performance report…</div>`));
 
   if (P && !isEmptyBlock(P)) {
     el("tkRec").innerHTML = recHead(P, M);
@@ -1781,7 +1947,7 @@ function mountLadder(sym) {
         <button class="btn sm danger" id="bFlatten">Flatten</button>
       </div>`,
       { sub: `one strategy on ${esc(sym)} — these controls touch nothing else`,
-        actions: presetHTML() })}
+        actions: ladderStratHTML() })}
 
     <div class="grid main">
       <div>
@@ -1810,7 +1976,7 @@ function mountLadder(sym) {
     </form>`;
 
   wireLadderControls(sym);
-  wirePreset(sym);
+  wireLadderStrat();
   wireLadderForm(sym);
   el("poReload").onclick = () => loadOrders(sym);
   loadOrders(sym);
@@ -1927,7 +2093,7 @@ function wireLadderForm(sym) {
 function paintLadder() {
   const s = S.ticker;
   if (!s || !el("tkStats")) return;
-  syncPreset();
+  paintLadderStrat();
   const A = s.alpaca, c = s.config;
 
   el("tkLadNotes").innerHTML = ladderNotes(s);
@@ -2074,7 +2240,10 @@ function ladderNotes(s) {
     Auto-correction handles this within 25 seconds.</div>`);
   if (s.reconcile && s.reconcile.uncovered > 0) {
     if (s.reconcile.uncovered <= (s.offbook_shares || 0) + 1e-6) {
-      b.push(`<div class="note info"><b>Fractional exit off the book:</b> ${qty(s.offbook_shares)} sh —
+      /* Still a warning, not a note: these shares have no resting sell right
+         now. The sentence says the engine re-places them, which is why it is
+         not the red one -- but an uncovered exit never renders as chatter. */
+      b.push(`<div class="note warn"><b>Fractional exit off the book:</b> ${qty(s.offbook_shares)} sh —
         re-placed by the engine at the next eligible session or retry (fractional lots rest DAY orders).</div>`);
     } else {
       b.push(`<div class="note bad"><b>${qty(s.reconcile.uncovered)} shares have no resting
@@ -2082,14 +2251,11 @@ function ladderNotes(s) {
     }
   }
   for (const a of (s.attention || [])) b.push(`<div class="note warn">${esc(a)}</div>`);
-  if (s.running && !s.halted && s.block_reason) {
-    b.push(`<div class="note info">Not looking for entries:
-      <b>${esc(s.block_reason)}</b>.</div>`);
-  }
-  if (s.running && !s.halted && s.add_trigger === "touch" && s.lot_count
-      && !(s.resting_adds || []).length && s.adds_hold) {
-    b.push(`<div class="note info">Not resting adds: <b>${esc(s.adds_hold)}</b>.</div>`);
-  }
+  /* "Not looking for entries" and "Not resting adds" used to be banners here.
+     Both were already on screen a scroll below -- block_reason is the sub of
+     the Bias tile, adds_hold is the empty line of the resting-adds table --
+     so the banner restated a number the page already published. Deleted, not
+     relocated: the knowledge never left. */
   if (s.reconciles_this_hour) {
     b.push(`<div class="note warn">Position auto-corrected
       <b>${s.reconciles_this_hour}×</b> in the last hour. It keeps trading and keeps
@@ -2104,63 +2270,82 @@ function ladderNotes(s) {
   return b.join("");
 }
 
-/* ------------------------------------------------------ the preset picker */
-let PRESETS = [];          // from /api/presets, shared across accounts
+/* -------------------------------------- which strategy this ladder is on */
+/* THE SECOND LIST, REMOVED.
 
-function presetHTML() {
-  return `<span class="tk-strat">
-      <select id="tkPreset" class="strat-sel" aria-label="Ladder preset">
-        <option>Loading…</option></select>
-      <button class="btn sm" type="button" id="tkApply">Apply</button>
-    </span>`;
+   This corner of the Ladder tab used to be a <select> fed by GET /api/presets
+   -- three coded presets -- with an Apply button beside it. The Strategies tab
+   of the SAME page carries a dropdown over the one bank's 259 entries. Two
+   lists of strategies on one ticker, and the small one was the stale one: a
+   ladder saved to the bank from the Strategies page never appeared in it, an
+   entry attached from the bank left it reading "Custom (edited by hand)", and
+   applying from it wrote the engine config behind the bank's back. Nothing
+   anywhere reconciled the two.
+
+   What replaces it is a STATEMENT, not a second control: which bank entry the
+   engine's config currently matches, taken from the ladder's own
+   `config.preset` (the engine's answer, not a guess made here) with the human
+   NAME looked up in the same `/api/bank/entries` the Strategies tab reads --
+   one list, one cache, one id space. Changing it happens in exactly one place
+   and the button says where.
+
+   THE DASH RULE APPLIES TO THE NAME. `config.preset` is measured; the display
+   name is not, until the bank answers. So an unanswered bank shows the slug as
+   the server spells it plus the reason the name is missing, and never a
+   plausible-looking label invented here. */
+function ladderStratHTML() {
+  return `<span class="tk-strat" id="tkLadStrat"></span>`;
 }
 
-function fillPreset() {
-  const sel = el("tkPreset");
-  if (!sel) return;
-  const cur = (S.ticker && S.ticker.config && S.ticker.config.preset) || "custom";
-  const opts = PRESETS.map((p) =>
-    `<option value="${esc(p.id)}"${p.id === cur ? " selected" : ""}>${esc(p.label)}</option>`);
-  opts.push(`<option value="custom"${cur === "custom" || !PRESETS.some((p) => p.id === cur)
-    ? " selected" : ""}>Custom (edited by hand)</option>`);
-  sel.innerHTML = opts.join("");
+/* The ladder page of the bank, out of the cache `loadBank` fills. Three
+   answers, kept apart on purpose: not fetched yet, fetched and broken, and
+   fetched fine but no row carries this id -- they read identically as "no
+   name" and mean three different things to whoever has to fix it. */
+function bankLadderRow(id) {
+  const hit = H.bank[bankKey("ladder", "")];
+  if (!hit) return { pending: true };
+  if (hit.err) return { err: hit.err };
+  return { row: (hit.rows || []).find((r) => r.id === id) || null };
 }
 
-function wirePreset(sym) {
-  const sel = el("tkPreset");
-  if (!sel) return;
-  if (PRESETS.length) fillPreset();
-  else {
-    GET("/api/presets").then((r) => { PRESETS = r.presets || []; fillPreset(); })
-      .catch((e) => { sel.innerHTML = `<option>presets unavailable</option>`;
-                      toast(esc(e.message), "err"); });
+function paintLadderStrat() {
+  const box = el("tkLadStrat");
+  if (!box) return;
+  const c = S.ticker && S.ticker.config;
+  const slug = (c && c.preset) || "";
+  const btn = `<button class="btn sm" type="button" id="tkStratGo"
+    >Change on the Strategies tab</button>`;
+  if (!slug || slug === "custom") {
+    box.innerHTML = `<span class="faint">Ladder strategy</span>
+      <b>custom</b>
+      <span class="faint">edited by hand — it matches no entry in the bank</span>
+      ${btn}`;
+  } else {
+    const q = bankLadderRow("preset:" + slug);
+    const name = q.row
+      ? `<b>${esc(q.row.name)}</b>`
+      : `<b class="mono">${esc(slug)}</b>`;
+    const why = q.row ? ""
+      : q.pending
+        ? `<span class="faint">— reading the bank for its name</span>`
+        : q.err
+          ? `<span class="warn">— name unread: ${esc(q.err)}</span>`
+          : `<span class="warn">— no bank entry has the id
+             <span class="mono">preset:${esc(slug)}</span></span>`;
+    box.innerHTML = `<span class="faint">Ladder strategy</span>
+      ${name} ${why} ${btn}`;
   }
-  el("tkApply").onclick = () => act(async () => {
-    const id = sel.value;
-    const p = PRESETS.find((x) => x.id === id);
-    if (!p) { toast("Pick a named preset to apply.", "err"); return; }
-    const s = S.ticker, cur = (s && s.config && s.config.preset) || "custom";
-    if (!await ask({
-      title: `Put ${sym}'s ladder on "${esc(p.label)}"?`, ok: "Apply preset",
-      body: `<b>${esc(p.description)}</b><br><br>This overwrites the LADDER's settings on
-        ${sym} in <b>${esc(acctLabel())}</b> (currently: ${esc(cur)}). Open lots keep
-        their exits; a changed take-profit re-prices resting sells. Arming is
-        unchanged and <b>no other strategy on ${sym} is touched</b>.`,
-    })) return;
-    await POST(`/api/ticker/${sym}/preset`, { id });
-    S.touched = false;                 // the server's config is now the truth
-    toast(`${sym}'s ladder is now on ${esc(p.label)}.`, "ok");
-    mountLadder(sym);                  // re-render the widgets against the new config
-  });
+  const b = el("tkStratGo");
+  if (b) {
+    b.onclick = () => go({ kind: "ticker", sym: H.sym, tab: "strategies" });
+  }
 }
 
-function syncPreset() {
-  const sel = el("tkPreset");
-  if (!sel || !PRESETS.length || document.activeElement === sel) return;
-  if (!S.ticker || !S.ticker.config) return;
-  const cur = S.ticker.config.preset || "custom";
-  const want = PRESETS.some((p) => p.id === cur) ? cur : "custom";
-  if (sel.value !== want) sel.value = want;
+function wireLadderStrat() {
+  paintLadderStrat();
+  // the SAME cached page the Strategies tab uses; `loadBank` repaints when it
+  // lands, and repaint() on this tab is paintLadder(), which paints this span
+  loadBank("ladder", "");
 }
 
 /* ---------------------------------------------------------- order history */
@@ -2243,6 +2428,9 @@ VIEWS.ticker = {
       // but which tickers an entry is on is, so `att` goes too.
       H.perf = null; H.perfWhy = ""; H.perfNone = false; H.perfAt = 0;
       H.att = null; H.attWhy = ""; H.bankPick = "";
+      // the undo slot names ONE symbol on ONE account. Carrying it across
+      // would offer to put SPY's play back on a page showing RAM.
+      H.undo = null;
     }
     if (v.tab === "strategies") mountStrategies(v.sym);
     else if (v.tab === "options") mountOptions(v.sym);

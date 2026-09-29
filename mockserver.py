@@ -101,6 +101,19 @@ run over five account shapes. The first one is the owner's own account:
                dash saying so, never equity less base_value, which is the
                window-shaped number that started all of this
 
+THE RETURNS ROOM's two shapes are in mockreturns.py, over the same real
+`perf.py`. They exist because no scenario above can express either one:
+
+  perfreturns    the breakdown that SUMS TO ITS TOTAL -- all five of perf's
+                 reconciliation steps non-zero (funding, realised, open marks,
+                 fees and, for the first time in this harness, DIVIDENDS) and
+                 a residual of 0.00. Plus liquidated holdings that are both
+                 winners and losers, contributors at both ends, and an
+                 annualised return that is undefined four different ways
+  perfnofunding  THE SECOND ACCOUNT. $100,000, never traded, and an activity
+                 log that was READ and is EMPTY -- not unread. That is the
+                 branch that reported the whole balance as profit
+
 THE ONE BANK (mockbank.py, over the real `bank.py`, with its four stores
 copied to a scratch tree so a Save in the browser cannot edit the repo):
 
@@ -163,6 +176,9 @@ SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
              # the P/L page: perf.py run over five account shapes (mockperf.py)
              "perfwins", "perfloss", "perfcross", "perfnew", "perfthin",
              "perfnofeed",
+             # the returns room, and the account that never traded
+             # (mockreturns.py)
+             "perfreturns", "perfnofunding",
              # the one bank, and the ticker that carries three strategies
              "banktriple", "bankfail",
              # the page assistant (mockai.py -- a PROPOSED contract)
@@ -1617,6 +1633,7 @@ import optplays as _optplays                   # noqa: E402
 # this one: they are handed the facts and hand back the payload, so there is no
 # import cycle and each can be exercised from a test without a server.
 import mockperf as _mockperf                   # noqa: E402
+import mockreturns as _mockreturns             # noqa: E402
 import mockbank as _mockbank                   # noqa: E402
 import mockai as _mockai                       # noqa: E402
 import mockticker as _mockticker               # noqa: E402
@@ -2215,6 +2232,11 @@ def _journal_rows(profile="rich"):
     """
     if profile == "empty":
         return []
+    if profile == "returns":
+        # Written out row by row rather than generated: what matters in that
+        # book is the SIGN AND ORDER per ticker, and a generator would hide
+        # which one crosses zero. See mockreturns.BOOK.
+        return _mockreturns.journal_rows()
     if profile in _PERF_BOOKS:
         return _perf_journal(profile)
     now = time.time()
@@ -2527,6 +2549,14 @@ def _hub_profile(scen, acct):
 
     if scen in _mockperf.PROFILES:
         return _perf_hub_profile(scen)
+
+    # The returns scenarios build their own hub profile from their own perf
+    # spec, for the reason _perf_hub_profile exists: one account, one set of
+    # facts, whichever route is asked. `_MockEngine` is handed over rather
+    # than imported there, because mockreturns is imported by THIS file.
+    if scen in _mockreturns.PROFILES:
+        return _mockreturns.hub_profile(scen, _mockreturns.profile(scen),
+                                        _MockEngine)
 
     if scen == "hubnew":
         # Nothing. Not zero -- NOTHING. Every number on this page must come
@@ -2851,7 +2881,7 @@ def _perf_spec(scen, acct):
     /api/hub/portfolio answer about ONE account. Serving two would reproduce
     the owner's complaint inside the tool built to end it.
     """
-    spec = _mockperf.profile(scen)
+    spec = _mockperf.profile(scen) or _mockreturns.profile(scen)
     if spec is not None:
         return spec
     prof = _hub_profile(scen, acct)
@@ -2875,28 +2905,22 @@ def _perf_journal_rows(scen, acct):
         return []
 
 
-#: The one defect this harness found in perf.py, named so a 500 is readable.
-#: Delete this the day the guard lands -- a blame string for a bug that has
-#: been fixed is worse than no blame string, because it sends the next reader
-#: to a line that is now correct.
-PERF_KNOWN_DEFECT = (
-    "perf.py crashed: %s. THIS IS perf.py's BUG, NOT THE HARNESS'S and not "
-    "yours. perf.ratios() computes `ann = (end / start) ** (365 / span_days)` "
-    "at perf.py:676 and guards only `start > 0`. A cumulative curve that "
-    "starts ABOVE zero and ends BELOW it raises a negative number to a "
-    "fractional power, which Python evaluates as a COMPLEX number, and "
-    "round() refuses it at perf.py:689. Every per-ticker block uses the "
-    "realised curve, so one ticker that wins first and ends underwater 500s "
-    "the whole P/L page. It cannot fire on the live account today because "
-    "that journal is wins-only; it fires the day a stop loss lands. "
-    "Reproduced with eight ordinary closed lots. The guard is `start > 0 and "
-    "end > 0`. Scenario `perfloss` is the same account WITHOUT this shape and "
-    "renders in full.")
-
-
+#: THE COMPLEX-CALMAR BLAME STRING USED TO LIVE HERE AND IT HAS BEEN DELETED.
+#:
+#: It named perf.ratios() for raising a complex number on a realised curve
+#: that opens above zero and closes below it, and it told the reader the guard
+#: was only `start > 0`. That guard is now `start <= 0 or end <= 0`
+#: (perf.py:707) and the case returns a dash carrying its reason instead. The
+#: string's own comment said to delete it the day the fix landed, because a
+#: blame string for a bug that has been fixed is worse than no blame string --
+#: it sends the next reader to a line that is now correct.
+#:
+#: The shape is still covered, twice, and by fixtures rather than by prose:
+#: `perfcross` is the book that used to 500, and `perfreturns`'s SPY opens at
+#: +240.10 and closes at -270.65. Both render. Neither asserts a crash.
 def _perf_blame(exc):
-    if isinstance(exc, TypeError) and "complex" in str(exc):
-        return PERF_KNOWN_DEFECT % exc
+    """What a 500 out of perf.py says. No bug is named here on purpose: a
+    named bug that has since been fixed costs more than an unnamed one."""
     return "perf.py raised %s: %s" % (exc.__class__.__name__, exc)
 
 
@@ -3610,6 +3634,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(_perf_call(_mockperf.account, scen, acct))
                 if p.endswith("/perf/reconcile"):
                     return self._json(_perf_call(_mockperf.reconcile, scen,
+                                                 acct))
+                if p.endswith("/perf/returns"):
+                    return self._json(_perf_call(_mockperf.returns, scen,
                                                  acct))
                 if p.endswith("/perf/daily"):
                     return self._json(_perf_call(_mockperf.daily, scen, acct))

@@ -43,6 +43,11 @@
      stop the shell from booting: the panel is a convenience, the rail is
      not. Both import core.js, so they share one S. -->
 <script type="module" src="/ui/assistant.js"></script>
+<!-- The movement layer. A THIRD module, and last, for the same reason the
+     assistant is a second one: it decorates what the other two render and a
+     failure in it must not stop either. It imports nothing and is imported by
+     nothing, so load order past "after the shell exists" does not matter. -->
+<script type="module" src="/ui/motion.js"></script>
 <script>
 /* A module that fails to parse leaves a blank page, which looks exactly like
    the bot being broken. Say so instead, and say it loudly. */

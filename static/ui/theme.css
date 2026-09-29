@@ -765,3 +765,184 @@ th { background: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .card, .btn, .tile-go, .acct-sw, .seg-b { transition: none !important; }
 }
+
+/* The running commit, in the rail. Quiet by design -- it is not information
+   you need until the moment you are asking "did that deploy land", and then
+   it is the only thing you need. */
+.build { font-family: var(--mono, ui-monospace, monospace); font-size: 10px;
+         color: var(--faint); letter-spacing: .04em; opacity: .8;
+         padding: 1px 5px; border: 1px solid var(--hairline);
+         border-radius: var(--radius-pill); }
+
+/* ==========================================================================
+   MOTION, and the material that only exists because things move.
+
+   Everything below is either a transition on a state that used to SNAP, the
+   entrance motion.js arms once per route, or a placeholder for a pane that
+   has not been told anything yet. Three rules hold for all of it:
+
+     * ONE CURVE. --ease, everywhere. Mixed easings are how a screen ends up
+       feeling assembled out of parts, which is the complaint.
+     * SHORT. 120ms for a hover, 180-220ms for a change worth noticing.
+       Anything longer is a screen you are waiting for rather than using.
+     * OFF UNDER prefers-reduced-motion, at the bottom of this file, in ONE
+       block that names every moving thing here. motion.js reads the same
+       query in JS, so the numbers stop easing as well as the boxes.
+   ====================================================================== */
+:root {
+  --ease:   cubic-bezier(.22, .61, .36, 1);   /* ease-out, the only curve */
+  --t-in:   .2s;                              /* a block arriving */
+  --mo-rise: 7px;                             /* how far it rises */
+}
+
+/* ---- the entrance ------------------------------------------------------
+   motion.js adds .mo-in with --mo-i set to the block's index, ONCE per
+   route, and takes it off when it has played. The delay is what makes a
+   page read as a page arriving rather than eight things blinking at once. */
+@keyframes mo-rise {
+  from { opacity: 0; transform: translateY(var(--mo-rise)); }
+  to   { opacity: 1; transform: none; }
+}
+.mo-in {
+  animation: mo-rise var(--t-in) var(--ease) both;
+  animation-delay: calc(var(--mo-i, 0) * 26ms);
+  /* a canvas inside a transforming parent is resampled for the frames it
+     moves; promoting the layer keeps that off the main thread, and it is
+     released again the moment the class comes off.
+     THE TRAP this buys its way past: a transform makes the element the
+     containing block for any position:fixed descendant, so a popover opened
+     INSIDE one of these blocks while the class is on would be placed against
+     the block rather than the viewport. motion.js takes the class off after
+     roughly half a second, and nothing here is clickable before it has
+     arrived -- but a component that opens a fixed layer on mount must not be
+     given this class. */
+  will-change: opacity, transform;
+}
+
+/* ---- states that used to snap ------------------------------------------
+   Every one of these was an instant swap of a background or a colour. None
+   of them is slower now; they are the same change with a ramp, which is the
+   difference between a screen reacting and a screen redrawing. */
+.nav-item, .tick-item, .chip, .pill, .tab, .cmdk-row, .acct-row,
+.dt tbody tr, .icon-btn, .rail-find, .btn, .tile-go, .acct-sw, .seg-b, .card {
+  transition: background-color var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease),
+              box-shadow var(--t) var(--ease),
+              transform var(--t-fast) var(--ease);
+}
+/* A tile you can open lifts by ONE pixel. More than that and a grid of them
+   ripples as the pointer crosses it. */
+.tile-go:hover { transform: translateY(-1px); }
+.tile-go:active { transform: none; }
+.btn:active, .icon-btn:active { transform: translateY(1px); }
+
+/* The tab underline grows from the middle instead of appearing. The tab
+   keeps its own transparent bottom border for layout, so nothing shifts. */
+.tabs .tab { position: relative; }
+.tabs .tab::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: var(--accent); border-radius: 2px 2px 0 0;
+  transform: scaleX(0); transform-origin: 50% 50%;
+  transition: transform var(--t) var(--ease);
+}
+.tabs .tab.on::after { transform: scaleX(1); }
+.tabs .tab.on { border-bottom-color: transparent !important; }
+
+/* A toast arrives on the same curve as everything else. */
+.toast { animation: mo-rise var(--t-in) var(--ease) both; }
+
+/* ---- the modal, now that it scrolls ------------------------------------
+   app.css caps the dialog at the viewport and gives .body the scroll. Two
+   things have to say so or a capped dialog just looks cut off: a hairline
+   under the pinned action row, and a shadow at each end of the scrollport
+   that is THERE ONLY WHEN THERE IS MORE. That is what the
+   background-attachment pairing below buys: the two local layers scroll with
+   the content and cover the two scroll shadows when you reach an end, so
+   neither shadow needs a scroll listener to know it should be hidden. */
+.modal > .acts {
+  border-top: 1px solid var(--hairline);
+  margin-top: var(--s3); padding-top: var(--s3);
+}
+.modal > .body {
+  background:
+    linear-gradient(var(--surface) 34%, rgba(0,0,0,0))
+      top    / 100% 26px no-repeat local,
+    linear-gradient(rgba(0,0,0,0), var(--surface) 66%)
+      bottom / 100% 26px no-repeat local,
+    radial-gradient(farthest-side at 50% 0,
+      rgba(0,0,0,.38), rgba(0,0,0,0)) top    / 100% 11px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%,
+      rgba(0,0,0,.38), rgba(0,0,0,0)) bottom / 100% 11px no-repeat scroll;
+}
+
+/* ---- the placeholder ---------------------------------------------------
+   A pane that is waiting draws the SHAPE of what is coming, at the size it
+   will be, so the real content replaces it without moving anything. A blank
+   pane followed by a full one is the jump; this is the fix for the jump, not
+   decoration. It is aria-hidden in the markup: a screen reader should be
+   told nothing rather than told about six grey bars. */
+.skel {
+  background:
+    linear-gradient(90deg, var(--surface-2) 8%, var(--surface-3) 22%,
+                    var(--surface-2) 36%);
+  background-size: 280% 100%;
+  animation: mo-skel 1.25s linear infinite;
+  border-radius: var(--r-xs);
+  height: 12px;
+}
+@keyframes mo-skel {
+  from { background-position: 140% 50%; }
+  to   { background-position: -40% 50%; }
+}
+.skel-wrap { animation: mo-fade .18s var(--ease) both; }
+@keyframes mo-fade { from { opacity: 0; } to { opacity: 1; } }
+/* each bar is the size of the real thing it stands in for, so the swap is
+   silent: a tile's label, its figure, its sub-line */
+.skel-k { width: 42%; height: 9px; }
+.skel-v { width: 66%; height: 22px; margin-top: 8px; border-radius: var(--r-sm); }
+.skel-s { width: 52%; height: 9px; margin-top: 8px; }
+.skel-t { width: 180px; height: 13px; }
+.skel-row { height: 15px; margin-bottom: 10px; }
+.skel-row:nth-child(2n) { width: 82%; }
+.skel-row:nth-child(3n) { width: 91%; }
+.skel-panel .panel-b .skel-row:last-child { margin-bottom: 0; }
+
+/* ---- rhythm: digits that stack must line up ----------------------------
+   tabular figures were on the headline numbers only, so a column of them in
+   a table still danced a pixel per row as the values changed. Anywhere a
+   number sits above another number now gets them. */
+.dt td, .dt th.dt-n, .log, .log-t, .chart-tt, .kpi-sub, .tile-s,
+.hb-v, .hb-s, .acct-eq, .tick-sub, .num, code, .mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- hierarchy: the figure wins, the label whispers --------------------
+   The caption and the headline were 10px and 22px but the SAME weight step
+   apart, so a tile read as two lines of text rather than a number with a
+   name. The label loses a little colour and the figure takes the top weight;
+   nothing changes size, so no layout moves. */
+.tile-k, .kpi-k, .stat-k { color: var(--faint); opacity: .92; }
+.tile-v, .kpi-v, .hb-v { font-weight: var(--w-bold); }
+.card-t, .panel-t { font-size: var(--fs-lg); letter-spacing: -0.012em; }
+
+/* ==========================================================================
+   prefers-reduced-motion: OFF. One block, naming everything above, because
+   a moving thing added later and not listed here is a bug that only shows up
+   on the machine of the person who needed it not to move.
+   ====================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .nav-item, .tick-item, .chip, .pill, .tab, .tab::after, .cmdk-row,
+  .acct-row, .dt tbody tr, .icon-btn, .rail-find, .btn, .tile-go, .acct-sw,
+  .seg-b, .card, .panel, .tile {
+    transition: none !important;
+  }
+  .mo-in, .toast, .skel, .skel-wrap {
+    animation: none !important;
+    opacity: 1 !important; transform: none !important;
+  }
+  .tile-go:hover, .btn:active, .icon-btn:active { transform: none !important; }
+  .tabs .tab.on::after { transform: scaleX(1) !important; }
+  /* the placeholder still has to be VISIBLE, it just does not shimmer */
+  .skel { background: var(--surface-2); }
+}

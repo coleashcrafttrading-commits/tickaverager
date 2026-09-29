@@ -274,6 +274,13 @@ def reconcile(spec: dict, **kw) -> dict:
             **r["reconciliation"]}
 
 
+def returns(spec: dict, **kw) -> dict:
+    """The Returns room, in app.py's envelope. perf.returns() computes it."""
+    r = report(spec, **kw)
+    return {"ok": True, "cache_age_s": r["cache_age_s"], "stale": r["stale"],
+            **r["returns"]}
+
+
 def daily(spec: dict, **kw) -> dict:
     r = report(spec, **kw)
     return {"ok": True, "cache_age_s": r["cache_age_s"], "stale": r["stale"],

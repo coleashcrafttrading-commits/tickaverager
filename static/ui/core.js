@@ -364,10 +364,16 @@ export function modelCredsHTML(r, { test = false, id = "mcTest" } = {}) {
   r = r || {};
   const how = r.auth || r.how || "";
   if (r.ready) {
-    return `<div class="note good" style="margin-top:0"><b>Connected to a model.</b>
-      Authenticating with ${esc(AUTH_NAME[how] || how || "the Claude Code CLI")}.
-      ${test ? `<button class="btn sm" id="${id}" style="margin-left:8px">Test it</button>
-        <span id="${id}Out" class="faint"></span>` : ""}</div>`;
+    /* A working credential is not news. This used to be a full green banner
+       congratulating the reader on a healthy state; it is now one faint line
+       carrying the Test button, and nothing at all on the page that does not
+       offer that button. The FAILING branch below is unchanged -- that one is
+       a real problem and still shouts. */
+    if (!test) return "";
+    return `<div class="tip" style="margin:0 0 10px">Model:
+      ${esc(AUTH_NAME[how] || how || "the Claude Code CLI")}.
+      <button class="btn sm" id="${id}" style="margin-left:8px">Test it</button>
+      <span id="${id}Out" class="faint"></span></div>`;
   }
   return `<div class="note warn" style="margin-top:0">
     <b>This dashboard cannot reach a model yet.</b> ${esc(r.problem || "")}

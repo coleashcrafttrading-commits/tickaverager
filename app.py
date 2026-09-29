@@ -205,7 +205,44 @@ def _start_fleet(acc) -> Fleet:
 def health():
     """Unscoped, for deploy scripts and the rail: every account at a glance."""
     return {"ok": True, "accounts": _summaries(), "default": accounts.DEFAULT_ID,
-            "frozen": frozen()}
+            "frozen": frozen(), "build": build_stamp()}
+
+
+_BUILD: dict = {}
+
+
+def build_stamp() -> dict:
+    """WHICH COMMIT IS ACTUALLY SERVING THIS PAGE.
+
+    The owner reported seeing no changes after a deploy that had in fact
+    landed, and there was no way for either of us to tell from the screen
+    whether the browser was on new code or old. Every asset already sends
+    `no-store`, so the server was not the problem -- but "the server is fine"
+    is not an answer a person can check. This is: the running commit, when it
+    was made, and when this process started, rendered in the rail. If the
+    stamp on screen is not the commit that was just deployed, the browser is
+    holding old modules; if it IS, the change is live and the disagreement is
+    about something else.
+
+    Read once per process. It describes the code that is running, and that
+    cannot change without a restart.
+    """
+    if _BUILD:
+        return _BUILD
+    import subprocess
+    sha = when = ""
+    try:
+        out = subprocess.run(
+            ["git", "log", "-1", "--format=%h|%cI"],
+            cwd=str(Path(__file__).resolve().parent),
+            capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and "|" in out.stdout:
+            sha, when = out.stdout.strip().split("|", 1)
+    except Exception:
+        pass
+    _BUILD.update({"commit": sha, "committed_at": when,
+                   "started_at": datetime.now(timezone.utc).isoformat()})
+    return _BUILD
 
 
 @app.get("/api/presets")
@@ -339,7 +376,9 @@ def _engine(f: Fleet, sym: str):
 @app.get("/api/overview")
 def overview(f: Fleet = Depends(cur)):
     ov = f.overview()
-    return {**ov, "frozen": frozen(f.state_dir),
+    # The build stamp rides the poll the rail already makes, so knowing which
+    # commit is on screen costs no extra request. See build_stamp().
+    return {**ov, "frozen": frozen(f.state_dir), "build": build_stamp(),
             "account": {**(ov.get("account") or {}), **f.account_info()},
             "accounts": _summaries()}
 
@@ -658,6 +697,23 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
     inv = journal.open_inventory(base)
     rows = journal.filter_rows(base, days=days or None)
 
+    # THE BROKER DECIDES WHAT IS STILL OPEN. `open_inventory` is a replay of
+    # the journal and it over-counts by exactly the exits that were never
+    # journalled -- a manual flatten, a liquidation outside the fleet, fills
+    # that landed after the process died. Read live and reconcile, and keep
+    # "the read failed" strictly apart from "the account is flat": the first
+    # must leave the count alone, the second must zero it.
+    held, held_known = {}, False
+    if f.broker:
+        try:
+            held = {str(p.get("symbol")): float(p.get("qty") or 0)
+                    for p in (f.broker.positions() or [])
+                    if len(str(p.get("symbol") or "")) < 15}   # equities only
+            held_known = True
+        except Exception as e:
+            LOG.warning("performance reconcile: %s", e)
+    inv, reconciliation = journal.reconcile_inventory(inv, held, known=held_known)
+
     # The open book is what the booked figure hides, so it is valued here at
     # the same marks the engines trade on. A symbol the fleet no longer holds
     # has no mark; stats() lists those rather than pretending they are flat.
@@ -709,6 +765,7 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
         "equity": equity,
         "equity_base": equity_base,
         "inventory": inv,
+        "reconciliation": reconciliation,
         "inventory_cost": round(sum(x["cost"] for x in inv), 2),
         "oldest_days": max([x["age_days"] for x in inv], default=0),
         "recent": [r for r in rows if r.get("event") in ("open", "close", "partial")][-60:][::-1],
@@ -3473,6 +3530,22 @@ def perf_metrics(symbol: str = "", f: Fleet = Depends(cur)):
     return {"ok": True, "scope": "ticker", "symbol": sym,
             "cache_age_s": r.get("cache_age_s"), "stale": r.get("stale"),
             "metrics": row}
+
+
+@app.get("/api/a/{acct}/perf/returns")
+@app.get("/api/perf/returns")
+def perf_returns(f: Fleet = Depends(cur)):
+    """THE RETURNS ROOM: the decomposition that sums to the account's P/L.
+
+    Realised, open, fees, income and the residual, as five TERMS of one
+    identity rather than five headlines -- plus the per-holding table with its
+    cash-flow IRR, the liquidated section and the contributors. It is a slice
+    of the same cached report every other /api/perf route serves, so it costs
+    no extra read of the journal or of Alpaca.
+    """
+    r = _perf_report(f)
+    return {"ok": True, "cache_age_s": r.get("cache_age_s"),
+            "stale": r.get("stale"), **r["returns"]}
 
 
 @app.get("/api/a/{acct}/perf/daily")
