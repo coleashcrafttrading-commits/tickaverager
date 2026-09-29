@@ -228,7 +228,7 @@ class Ctx:
     """
 
     def __init__(self, fleet: Any, *, option_positions: Optional[list] = None,
-                 now: Optional[float] = None) -> None:
+                 now: Optional[float] = None, fills: Optional[list] = None) -> None:
         self.fleet = fleet
         self.now = float(now if now is not None else time.time())
         self.account_id = str(getattr(fleet, "account_id", "") or "default")
@@ -236,6 +236,10 @@ class Ctx:
         self.state_dir = Path(getattr(fleet, "state_dir", None) or ".")
         self.account: dict = dict(getattr(fleet, "account", None) or {})
         self.snap_at = _num(getattr(fleet, "snap_at", None))
+        #: Alpaca's own FILL tape, injected by the route (app._fill_tape). The
+        #: record that has every exit, which is what `pl.realized` asks.
+        #: None means nobody read it, and the strategy logs answer instead.
+        self.fills = fills
         #: Every broker position, both asset classes, exactly as Alpaca sent it.
         self.positions: dict = dict(getattr(fleet, "positions", None) or {})
         #: The option book. None (not []) means NOBODY LOOKED -- an empty list
@@ -1124,14 +1128,36 @@ def portfolio(ctx: Ctx) -> dict:
         if u is not None:
             open_pl += u
             open_n += 1
+    # REALISED IS AN ACCOUNT FACT, so it is taken from Alpaca's fill tape where
+    # there is one, exactly as perf.reconcile takes it. Summing the strategy
+    # logs published +$8,882.86 on this account -- wins-only, because a ladder
+    # with no stop closes winners and the exits that took the losses were never
+    # its own -- against +$3,367.53 of equity trading Alpaca actually did. The
+    # strategies keep their own realised on their own cards, where it is a
+    # statement about a strategy and not about the account.
     realized, realized_n, realized_why = 0.0, 0, None
     measured = False
-    for s in strategies_:
-        v, n, _why = s.realized()
-        if v is not None:
-            realized += v
-            realized_n += n
-            measured = True
+    fills = getattr(ctx, "fills", None)
+    if fills:
+        import perf as _perf
+        eq = _perf.realized_from_fills(fills)
+        opt = 0.0
+        for s in strategies_:
+            if str(getattr(s, "kind", "")) == "options":
+                v, _n, _w = s.realized()
+                if v is not None:
+                    opt += v
+        realized = round(eq["total"] + opt, 2)
+        realized_n = eq["fills"]
+        realized_why = None
+        measured = True
+    else:
+        for s in strategies_:
+            v, n, _why = s.realized()
+            if v is not None:
+                realized += v
+                realized_n += n
+                measured = True
     if not measured:
         realized, realized_why = None, ("no strategy has booked a closed trade "
                                         "in its own log yet")
@@ -1261,9 +1287,11 @@ def portfolio(ctx: Ctx) -> dict:
             "basis": {
                 "open": "Alpaca's own unrealised P/L on every position held, "
                         "both asset classes.",
-                "realized": "booked by the strategies' OWN logs (the journal "
-                            "and the options ledger), since those logs began. "
-                            "It is a strategy statistic, not an account one.",
+                "realized": "every closed trade Alpaca filled, on a running "
+                            "average cost, plus the options ledger for the "
+                            "short legs an average-cost walk cannot book. Not "
+                            "the strategy logs: those record only what a "
+                            "strategy closed itself.",
                 "total": "the ACCOUNT since inception: Alpaca equity less "
                          "Alpaca's base value. It includes hand-placed trades "
                          "and anything that happened before these logs, so it "

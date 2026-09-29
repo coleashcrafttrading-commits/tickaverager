@@ -2597,7 +2597,7 @@ def returns(ctx: Ctx, *, rows: Optional[list] = None,
                   "dividend or interest the account received is unknown",
     }
     out_parts = []
-    for key, label in (("realized", "Realised by the strategies' logs"),
+    for key, label in (("realized", "Realised on closed trades"),
                        ("open", "Open, at the broker's marks"),
                        ("fees", "Fees the account paid"),
                        ("income", "Dividends and interest")):

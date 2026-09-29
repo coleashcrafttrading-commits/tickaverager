@@ -3299,7 +3299,8 @@ def _hub_ctx(f: Fleet, *, options: bool = True) -> "hub.Ctx":
     caveat rather than as "the account holds no options" -- so the failure of
     the positions call can never read as an empty options book.
     """
-    return hub.Ctx(f, option_positions=(_perf_positions(f) if options else None))
+    return hub.Ctx(f, option_positions=(_perf_positions(f) if options else None),
+                   fills=_fill_tape(f))
 
 
 @app.get("/api/a/{acct}/hub/portfolio")
