@@ -3430,56 +3430,101 @@ _PERF_FEED_TTL = 300.0                 # activities and equity history
 # the dashboard a load generator. The tape is APPEND-ONLY, so it is read in
 # full exactly once and afterwards paged newest-first only until a fill we
 # already hold appears. Steady state is one page.
-_FILLS: dict = {}                      # account -> {rows, ids, at}
+_FILLS: dict = {}                      # account -> {rows, ids, at, fail_at}
 _FILLS_LOCK = threading.RLock()
 _FILLS_TTL = 120.0
+_FILLS_BACKOFF = 300.0                 # after a refusal, leave Alpaca alone
+_FILLS_PAGE_PAUSE = 0.25               # between pages of the FIRST full read
+
+
+def _fill_path(f: Fleet) -> Path:
+    return Path(getattr(f, "state_dir", None) or "state") / "fill_tape.jsonl"
 
 
 def _fill_tape(f: Fleet) -> list:
-    """Every FILL activity for this account, extended incrementally."""
+    """Every FILL activity for this account: read once, then only extended.
+
+    ON DISK, because the first read is 276 pages and Alpaca rate-limits it --
+    measured, HTTP 429 on /account/activities/FILL, and worse, a failed read
+    left nothing cached so EVERY request retried it. On a box whose other
+    process is placing orders on the same key that is not merely wasteful.
+
+    So the tape is a file. It is built once with a pause between pages, saved,
+    and afterwards extended newest-first only until a fill we already hold
+    appears -- one page in steady state. A refusal backs off instead of
+    retrying, and always returns whatever is already held rather than a
+    misleading empty list.
+    """
     key = f.account_id
     now = time.time()
     with _FILLS_LOCK:
         hit = _FILLS.get(key)
         if hit and now - hit["at"] < _FILLS_TTL:
             return hit["rows"]
+        if hit and hit.get("fail_at") and now - hit["fail_at"] < _FILLS_BACKOFF:
+            return hit["rows"]
     b = getattr(f, "broker", None)
     if b is None:
         return []
-    have = (_FILLS.get(key) or {}).get("ids") or set()
+
+    # what we already have, from memory or from the file
+    hit = _FILLS.get(key) or {}
+    rows: list = hit.get("rows") or []
+    if not rows:
+        fp = _fill_path(f)
+        if fp.exists():
+            try:
+                rows = [json.loads(ln) for ln in
+                        fp.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            except Exception as e:
+                LOG.warning("fill tape file: %r", e)
+                rows = []
+    have = {str(r.get("id") or "") for r in rows}
+
+    fresh: list = []
     try:
-        if not have:
-            rows = b.activities("FILL", max_pages=2000) or []
-        else:
-            # newest-first until the tape overlaps what we already hold
-            fresh: list = []
-            token = ""
-            for _ in range(2000):
-                p_: dict = {"page_size": 100, "direction": "desc"}
-                if token:
-                    p_["page_token"] = token
-                page = b._trade("GET", "/account/activities/FILL",
-                                params=p_) or []
-                if not page:
+        token = ""
+        for i in range(2000):
+            p_: dict = {"page_size": 100, "direction": "desc"}
+            if token:
+                p_["page_token"] = token
+            page = b._trade("GET", "/account/activities/FILL", params=p_) or []
+            if not page:
+                break
+            stop = False
+            for r in page:
+                if str(r.get("id") or "") in have:
+                    stop = True
                     break
-                stop = False
-                for r in page:
-                    if str(r.get("id") or "") in have:
-                        stop = True
-                        break
-                    fresh.append(r)
-                if stop or len(page) < 100:
-                    break
-                token = page[-1].get("id", "")
-                if not token:
-                    break
-            rows = (_FILLS.get(key) or {}).get("rows", []) + fresh
+                fresh.append(r)
+            if stop or len(page) < 100:
+                break
+            token = page[-1].get("id", "")
+            if not token:
+                break
+            if not have:                       # only the first full build
+                time.sleep(_FILLS_PAGE_PAUSE)
     except Exception as e:
         LOG.warning("fill tape: %r", e)
-        return (_FILLS.get(key) or {}).get("rows", [])
+        with _FILLS_LOCK:
+            _FILLS[key] = {"rows": rows, "at": hit.get("at", 0.0),
+                           "ids": have, "fail_at": time.time()}
+        return rows
+
+    if fresh:
+        rows = rows + fresh
+        try:
+            fp = _fill_path(f)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            with fp.open("a", encoding="utf-8") as fh:
+                for r in fresh:
+                    fh.write(json.dumps(r, default=str) + chr(10))
+        except Exception as e:
+            LOG.warning("fill tape save: %r", e)
     with _FILLS_LOCK:
         _FILLS[key] = {"rows": rows, "at": time.time(),
-                       "ids": {str(r.get("id") or "") for r in rows}}
+                       "ids": {str(r.get("id") or "") for r in rows},
+                       "fail_at": 0.0}
     return rows
 
 
