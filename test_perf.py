@@ -542,6 +542,34 @@ def main() -> int:
     check("perf builds no broker", hasattr(perf, "Alpaca"), False)
 
     print()
+
+    print("\n18. AN ACCOUNT WITH NO DEPOSIT RECORD HAS NO COST BASIS")
+    # Measured on the real second account, PA3YVTECEQFE: equity $100,000 and
+    # ZERO funding rows, because an Alpaca paper account opens with a balance
+    # that is never written as a JNLC or a CSD. Subtracting zero reported the
+    # whole balance as profit -- the dashboard claimed +$100,000 all-time on
+    # an account that had never placed a trade. "We looked and found none" is
+    # not "nothing was deposited".
+    nofund = perf.Ctx(account={"equity": "100000", "last_equity": "100000"},
+                      activities=[], journal_rows=[], option_positions=[],
+                      broker_positions=[])
+    ap = perf.account_pl(nofund)
+    check("all-time is a DASH, not the whole balance",
+          ap["all_time"]["value"], None)
+    check("...and it says the cost basis is unknown",
+          "unknown" in (ap["all_time"]["reason"] or "").lower(), True)
+    check("...the percent goes with it", ap["all_time_pct"]["value"], None)
+    check("...but equity is still reported, because that IS known",
+          ap["equity"]["value"], 100000.0)
+    # and the ordinary case still works
+    funded = perf.Ctx(account={"equity": "53055.43", "last_equity": "53166.00"},
+                      activities=[{"activity_type": "JNLC",
+                                   "net_amount": "50000", "date": "2026-08-21",
+                                   "id": "f1"}],
+                      journal_rows=[], option_positions=[],
+                      broker_positions=[])
+    check("a funded account still reports equity less funding",
+          perf.account_pl(funded)["all_time"]["value"], 3055.43)
     print("\n17. A LOSING TICKER DOES NOT CRASH THE PAGE")
     # The reproduction, verbatim from the adversarial pass: eight perfectly
     # ordinary closed lots whose cumulative realised curve opens +120 and

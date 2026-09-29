@@ -355,6 +355,24 @@ def account_pl(ctx: Ctx) -> dict:
     elif fv is None:
         all_time = dash(0, "usd", fund["why"], as_of=as_of)
         all_time_pct = dash(0, "pct", fund["why"], as_of=as_of)
+    elif not fund["n"] and eq:
+        # NO FUNDING RECORD AT ALL, on an account that holds money. "We looked
+        # and found none" is NOT "nothing was deposited" -- an Alpaca paper
+        # account opens with a balance that is never written as a JNLC or a
+        # CSD, so its activity log is genuinely empty while its equity is not.
+        #
+        # Subtracting zero then reports the WHOLE BALANCE as profit. Measured
+        # on PA3YVTECEQFE: equity $100,000, funding rows 0, and the page said
+        # the account was up +$100,000 all-time having never placed a trade.
+        # That is the exact class of lie this rewrite exists to remove, so the
+        # cost basis is unknown and the figure is a dash that says why.
+        why = ("this account has no deposit or transfer in Alpaca's activity "
+               "log, so what was put into it is unknown. An all-time P/L needs "
+               "a cost basis, and equity minus nothing would report the whole "
+               "balance as profit. A paper account opened with a starting "
+               "balance shows exactly this.")
+        all_time = dash(0, "usd", why, as_of=as_of)
+        all_time_pct = dash(0, "pct", why, as_of=as_of)
     else:
         v = round(eq - fv, 2)
         # `thin` carries the securities-transfer caveat: the value exists and

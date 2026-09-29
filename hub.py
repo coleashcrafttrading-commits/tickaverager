@@ -1150,13 +1150,20 @@ def portfolio(ctx: Ctx) -> dict:
     # the complaint that started this work. Funding does not move when the
     # window does.
     total_pl, total_pl_why = None, None
-    _fund = ctx.net_funding()
+    _fund, _fund_n = ctx.net_funding()
     if eq is None:
         total_pl_why = "Alpaca's account snapshot has not been read"
     elif _fund is None:
         total_pl_why = ("the account's funding could not be read from Alpaca's "
                         "activities, so all-time P/L is unknown rather than "
                         "guessed from a chart window")
+    elif not _fund_n and eq:
+        # See perf.account_pl: an empty activity log on a funded account means
+        # the cost basis is UNKNOWN, not zero. Subtracting zero reported the
+        # whole $100,000 balance of a never-traded account as profit.
+        total_pl_why = ("this account has no deposit in Alpaca's activity log, "
+                        "so what was put into it is unknown -- equity minus "
+                        "nothing would report the entire balance as profit")
     else:
         total_pl = eq - _fund
     base = None
@@ -1292,7 +1299,7 @@ _FUNDING_CACHE: dict = {}
 _FUNDING_TTL = 300.0
 
 
-def _net_funding(ctx: "Ctx") -> Optional[float]:
+def _net_funding(ctx: "Ctx") -> tuple:
     """Net cash the OWNER put in, from Alpaca's own activity log.
 
     THE COST BASIS IS FUNDING, NEVER portfolio_history's base_value. base_value
@@ -1308,7 +1315,7 @@ def _net_funding(ctx: "Ctx") -> Optional[float]:
     """
     b = getattr(ctx.fleet, "broker", None)
     if b is None:
-        return None
+        return (None, 0)
     key = str(getattr(ctx.fleet, "account_id", "default"))
     hit = _FUNDING_CACHE.get(key)
     if hit and (ctx.now - hit[0]) < _FUNDING_TTL:
@@ -1323,9 +1330,10 @@ def _net_funding(ctx: "Ctx") -> Optional[float]:
                 # One unsupported activity type is a 422 on some accounts and
                 # must not blank the whole cost basis.
                 continue
-        val = _perf.net_funding(acts).get("value")
+        _nf = _perf.net_funding(acts)
+        val = (_nf.get("value"), _nf.get("n") or 0)
     except Exception:
-        return None
+        return (None, 0)
     _FUNDING_CACHE[key] = (ctx.now, val)
     return val
 
