@@ -606,7 +606,7 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_reconcile test_refresh_trend test_report test_research test_returns
   test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
-  test_optplays test_touch_adds test_trail test_trend test_trend_v2
+  test_optplays test_rooms test_touch_adds test_trail test_trend test_trend_v2
   test_unwind`,
   each printing `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a
   scratch file. Two people build in this repo at once, so this list is the

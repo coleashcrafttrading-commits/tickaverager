@@ -49,7 +49,7 @@ import {
    dashboard, not two. What riskmath.js adds is the arithmetic underneath them
    and the one control viz.js has no shape for: a LIMIT, which can be off, and
    off is not zero. */
-import { donut, hbar, area, vizEmpty, dotscale, ratiobar } from "../viz.js";
+import { donut, area, vizEmpty, dotscale, ratiobar } from "../viz.js";
 import {
   concentration, drawdown, capRow, binding, ensureCapStyles,
 } from "../riskmath.js";
@@ -91,7 +91,6 @@ VIEWS.risk = {
       <div class="grid main">
         <div>
           <div id="rkSplit"></div>
-          <div id="rkConc"></div>
           <div id="rkDraw"></div>
         </div>
         <div>
@@ -170,7 +169,6 @@ function render() {
   renderNotes();
   renderHero();
   renderSplit();
-  renderConcentration();
   renderDrawdown();
   renderCaps();
   renderAssignment();
@@ -322,6 +320,34 @@ function renderSplit() {
   const rows = splitBy === "ticker" ? byTicker : byStrategy;
   const err = splitBy === "ticker" ? stranded("risk", "Ladder exposure")
                                    : stranded("strat", "The strategy list");
+  /* ROUND 6: THE CONCENTRATION PANEL IS FOLDED IN HERE.
+     The ring above and the ranked bars in that panel were THE SAME NUMBERS --
+     each ladder's cost basis -- drawn one above the other, each with its own
+     paragraph. The ring already ranks them and already prints each one's
+     dollars and share, so the bars were a third rendering of a split the eye
+     had just read.
+
+     What the bars had and the ring does not is the ANSWER to "how
+     concentrated", and that is one mark: the biggest name's share on a
+     0-100% track with the top three ticked. Only over the TICKER split --
+     concentration() measures the ladders' cost basis and has nothing to say
+     about the strategy ring's market values. */
+  const c = concentration(rows.map((r) => ({ label: r.label, value: r.value })));
+  const conc = (splitBy === "ticker" && c.ok)
+    ? `<div class="rk-conc">${dotscale({
+        value: c.top1, min: 0, max: 1, unit: "pct", dp: 1,
+        lo: "biggest name 0%", hi: "100%",
+        tone: c.top1 > 0.5 ? "down" : "flat",
+        marks: [{ at: c.top3, label: "top three" }],
+        aria: "share of the ladders' book held in the single biggest name, "
+            + "with the top three marked",
+      })}<span class="rk-conc-w" title="${esc("The biggest position is "
+        + (c.top1 * 100).toFixed(1) + "% of what the ladders hold and the top "
+        + "three are " + (c.top3 * 100).toFixed(1) + "%. Spread evenly, the "
+        + "book would be " + c.words + "."
+        + (c.why ? " Left out of the split: " + c.why + "." : ""))
+      }">${esc(c.words)}</span></div>`
+    : "";
   /* The ring is viz.js's, and it REFUSES a negative share rather than drawing
      |value| -- which is why EXPOSURE is what is split here and P/L is a signed
      figure in the tables underneath. */
@@ -338,7 +364,7 @@ function renderSplit() {
       empty: splitBy === "ticker"
         ? "No ladder holds anything" : "No strategy holds anything",
     })}
-`;
+    ${conc}`;
 
   host.innerHTML = panel("Where the money is", body, {
     titleHint: "Two different quantities, never summed and never on one ring. "
@@ -355,48 +381,6 @@ function renderSplit() {
     }),
   });
   wireSegmented("rkSplitSeg", (v) => { splitBy = v; renderSplit(); });
-}
-
-/* ------------------------------------------------------- concentration */
-function renderConcentration() {
-  const host = el("rkConc");
-  if (!host) return;
-  const T = ladders();
-  const items = T.map((t) => ({ label: t.symbol, key: t.symbol,
-                                value: t.cost_basis }));
-  const c = concentration(items);
-  const err = stranded("risk", "Ladder exposure");
-  const body = err || `
-    ${hbar({
-      rows: T.map((t) => ({
-        label: t.symbol, value: t.cost_basis,
-        sub: `${t.lots_open}/${t.max_lots} lots`,
-        title: `${t.symbol}: ${money0(t.cost_basis)} cost basis, open P/L `
-             + `${money0(t.unrealized)}`,
-      })),
-      unit: "usd", dp: 0, limit: 12, signed: false,
-      empty: "No ladder holds anything",
-      why: "there is nothing held, so there is nothing to concentrate",
-    })}
-    ${c.ok ? `<div class="rk-conc">${dotscale({
-      value: c.top1, min: 0, max: 1, unit: "pct", dp: 1,
-      lo: "one name 0%", hi: "100%",
-      tone: c.top1 > 0.5 ? "down" : "flat",
-      marks: [{ at: c.top3, label: "top three" }],
-      aria: "share of the ladders' book held in the single biggest name, with "
-          + "the top three marked",
-    })}<span class="rk-conc-w" title="${esc("The biggest position is "
-      + (c.top1 * 100).toFixed(1) + "% of what the ladders hold and the top "
-      + "three are " + (c.top3 * 100).toFixed(1) + "%. Spread that evenly and "
-      + "the book would be " + c.words + "."
-      + (c.why ? " Left out of the split: " + c.why + "." : ""))}">${
-      esc(c.words)}</span></div>` : ""}`;
-  host.innerHTML = panel("Concentration", body, {
-    titleHint: c.ok
-      ? `${c.n} ladder${c.n === 1 ? "" : "s"} holding something. The dot is the `
-        + `single biggest name's share of the book; the tick is the top three.`
-      : "nothing is held, so there is nothing to concentrate",
-  });
 }
 
 /* ----------------------------------------------------------- drawdown */
@@ -627,7 +611,7 @@ function renderAssignment() {
           `<b>${esc(r.symbol)}</b>${r.adopted
             ? ` ${chip("adopted", "warn", "this position was not opened by a play")}`
             : ""}`,
-          `<span class="mono" style="font-size:11px">${esc(r.occ || "")}</span>
+          `<span class="mono" style="font-size:var(--fs-xs)">${esc(r.occ || "")}</span>
            ${r.right ? chip(esc(r.right), "mute") : ""}`,
           Number.isNaN(r.strike) ? unmeasured("no strike on this leg")
                                  : px(r.strike),

@@ -1004,9 +1004,16 @@ tr.on > td { background: var(--accent-dim); }
   font-size: var(--fs-micro); letter-spacing: .12em; text-transform: uppercase;
   color: var(--faint); font-weight: var(--w-semi);
 }
-/* The number scales with the card so a big balance stays on one line. */
+/* ROUND 6: A TOKEN SCALE THAT A vw UNIT OVERRIDES IS NOT A SCALE.
+   This was `clamp(var(--fs-xl), 2.1vw, var(--fs-3xl))`, so the same number was
+   a different size in every window -- measured at 21.5px in a 1024 viewport,
+   26.88px at 1280 and 18px at 400, none of which is a step in theme.css's
+   nine. The two fixed steps below are: --fs-3xl (28px) everywhere, and
+   --fs-xl (18px) under 480px, which is the override already in the phone
+   block at the bottom of this file. Two sizes from the scale, rather than a
+   continuum that happens to pass through it twice. */
 .stat-v {
-  font-size: clamp(var(--fs-xl), 2.1vw, var(--fs-3xl)); font-weight: var(--w-bold); letter-spacing: -0.03em;
+  font-size: var(--fs-3xl); font-weight: var(--w-bold); letter-spacing: -0.03em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .kpi-v  { font-size: var(--fs-xl); font-weight: var(--w-bold); letter-spacing: -0.025em; white-space: nowrap; }

@@ -255,6 +255,8 @@ s_flat = histperf.ladder_slice(sid="ladder", label="DCA ladder", stats=flat,
 check("a FLAT book is worth 0 and needs no mark to say so",
       s_flat["open_pl"], 0.0)
 check("... so the total is realised in full", s_flat["total_pl"], 10.0)
+check("... and the page says exactly that rather than leaving it implied",
+      s_flat["total_why"], "every lot is closed, so this is realised in full")
 
 
 # ========================================== 4. the options slice's scoping
@@ -514,6 +516,12 @@ ok("this view owns its css instead of editing app.css",
    's.id = "histCss"' in SRC and "document.head.appendChild" in SRC)
 ok("the reports live behind a disclosure, not in a card of their own",
    "details.h-more" in SRC)
+# `paint` runs on every poll and rebuilds both panels. Two controls would
+# otherwise be destroyed under whoever was using them, twice a second.
+ok("the strategy picker is not rebuilt unless its options changed",
+   "sel.dataset.ids !== want" in SRC)
+ok("the reports drawer remembers whether it was open",
+   "repsOpen" in SRC and "d.ontoggle" in SRC)
 
 print()
 if FAIL:

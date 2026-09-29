@@ -1089,18 +1089,21 @@ export function ratiobar(o) {
                 : why(o.cap, "no ceiling was reported for this"));
   }
   if (v === null) {
-    return wrap(`<span class="vrb-track"></span><span class="vrb-t">—<span
-      class="vrb-cap"> / ${esc(fmt(cap))}</span></span>`, "vrb-none",
-      why(o.value, "nothing has measured what is being used against this"));
+    return wrap(`<span class="vrb-track"></span><span class="vrb-t">—</span>`,
+      "vrb-none", "set to " + fmt(cap) + ", and "
+      + why(o.value, "nothing has measured what is being used against this"));
   }
   const frac = v / cap;
   const pc = Math.round(frac * 100);
   const t = frac > 0.9 ? "down" : frac > 0.7 ? "warn" : "up";
+  /* THE PERCENTAGE IS THE ONLY TEXT. The two absolute figures are what the
+     bar IS, and printing them beside it put a 24-character string next to a
+     38-pixel track -- measured at 400px, where "$307,518 / $131,565" ran off
+     the right edge of its tile. They are the tooltip. */
   return wrap(`<span class="vrb-track"><i class="vrb-fill ${t}"
       style="width:${clamp(frac, 0, 1) * 100}%"></i>${frac > 1
       ? `<i class="vrb-over" title="past the cap"></i>` : ""}</span>
-    <span class="vrb-t"><b class="${t}">${pc}%</b><span class="vrb-cap"> ${
-      esc(fmt(v))} / ${esc(fmt(cap))}</span></span>`, "",
+    <span class="vrb-t"><b class="${t}">${pc}%</b></span>`, "",
     `${fmt(v)} of ${fmt(cap)}${o.label ? " — " + o.label : ""}`);
 }
 
@@ -1305,7 +1308,6 @@ const CSS = `
 .vrb-t b{font-weight:var(--w-semi);}
 .vrb-t b.up{color:var(--up);} .vrb-t b.warn{color:var(--warn);}
 .vrb-t b.down{color:var(--down);}
-.vrb-cap{color:var(--faint);opacity:.75;}
 .vrb-off{color:var(--down);font-weight:var(--w-semi);}
 .viz-rbr.vrb-none .vrb-track{background:repeating-linear-gradient(90deg,
   var(--viz-track) 0 4px,transparent 4px 8px);}

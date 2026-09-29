@@ -393,8 +393,13 @@ def ladder_slice(*, sid: str, label: str, stats: dict, recent: list,
         "open_why": "" if unreal is not None else
                     "no live price in this snapshot",
         "total_pl": _r2(total),
-        "total_why": "" if total is not None else
-                     "the open lots cannot be valued, so this cannot be totalled",
+        # The CAVEAT when there is a number, the REASON when there is not. The
+        # flat line is the owner's own sentence answered: "we sold all of our
+        # positions, so whatever we have now is what we realized".
+        "total_why": ("every lot is closed, so this is realised in full"
+                      if (total is not None and not open_lots) else
+                      "" if total is not None else
+                      "the open lots cannot be valued, so this cannot be totalled"),
         "counts": {"trades": len(rows), "open": open_lots, "closed": closes},
         "curve": curve["points"],
         "curve_basis": "realised, from Alpaca's fill tape"

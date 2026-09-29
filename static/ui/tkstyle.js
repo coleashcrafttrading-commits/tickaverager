@@ -76,8 +76,14 @@ const CSS = `
 .tkx-mk-q{display:flex;align-items:center;gap:var(--s2)}
 .tkx-mk-qv{font-size:var(--fs-sm);font-variant-numeric:tabular-nums;
   font-weight:var(--w-med)}
+/* NO justify-content HERE. Centring the segment was what made the marker's
+   position a decoration: the offset is computed from the quote and set as a
+   margin-left, and a flex rule that re-centres it silently overrides the
+   measurement. */
 .tkx-mk-qt{flex:1 1 auto;min-width:24px;height:6px;border-radius:var(--radius-pill);
-  background:var(--surface-3);display:flex;justify-content:center}
+  background:var(--surface-3);display:block;position:relative}
+.tkx-mk-qs{font-size:var(--fs-micro);color:var(--ink-3);
+  font-variant-numeric:tabular-nums;flex:1 1 auto;text-align:center}
 .tkx-mk-qt i{display:block;height:100%;border-radius:var(--radius-pill);
   background:var(--warn);opacity:.8}
 

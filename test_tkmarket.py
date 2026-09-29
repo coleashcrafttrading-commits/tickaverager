@@ -57,6 +57,11 @@ SCRATCH = Path(tempfile.mkdtemp(prefix="ta_tkmarket_"))
 (SCRATCH / "state").mkdir(parents=True, exist_ok=True)
 os.environ["TICKAVERAGER_STATE"] = str(SCRATCH / "state")
 os.environ["TICKAVERAGER_JOURNAL"] = str(SCRATCH / "journal.jsonl")
+# Blank, not absent. app.py loads .env at import and `load_dotenv` fills only
+# MISSING variables, so an empty value is what keeps the real keys out of a
+# suite that boots the app in section 14. test_app_accounts.py does the same.
+for _k in ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY"):
+    os.environ[_k] = ""
 
 import optvol                                                  # noqa: E402
 import tkmarket as T                                           # noqa: E402
@@ -482,12 +487,51 @@ def main():
                    % (M % ("null", '"x"'), M % ("null", '"y"')))
     check("no series is a dash", "<i " in thin_vb, False)
     check_true("with the reason handed in", "no daily bars held" in thin_vb)
+    # THE MARKER IS DERIVED FROM THE BARS IT SITS ON. It used to divide a
+    # hub-metric average by the tallest bar of the daily tape -- two sources,
+    # two units. Measured on RAM: 6,060-6,763-share bars under an adv of 1.26M
+    # gave bottom:18600.9%, a marker 186 track-heights above the chart.
+    import re as _re
+
+    def _bottom(html):
+        m = _re.search(r'bottom:([-0-9.]+)%', html)
+        return None if not m else float(m.group(1))
+
+    check_true("the average marker is ON the track", 0.0 <= (_bottom(vb) or -1) <= 100.0)
+    mismatch = call("volumeBars([%s], %s, %s, '')"
+                    % (rows, M % ("6763", "null"), M % ("1260000", "null")))
+    b = _bottom(mismatch)
+    check_true("an adv in another unit cannot throw it off the track",
+               b is not None and 0.0 <= b <= 100.0)
+    check("and it is nowhere near the 18600.9% that shipped", (b or 0) > 1000, False)
+    # With no adv at all there is still an average: the mean of the sessions
+    # actually drawn. Refusing one while plotting twenty bars was the old
+    # behaviour and it threw away a figure we hold.
     no_adv = call("volumeBars([%s], %s, %s, '')"
                   % (rows, M % ("1190", "null"),
                      M % ("null", '"no average to compare against"')))
-    check("no average is NOT a ratio of 1", "× avg" in no_adv, False)
-    check_true("it is a dash carrying why",
-               "no average to compare against" in no_adv)
+    check_true("no adv still compares against the plotted sessions",
+               "× avg" in no_adv)
+    check_true("and the marker is still on the track",
+               0.0 <= (_bottom(no_adv) or -1) <= 100.0)
+
+    print(chr(10) + "11b. the quote marker is POSITIONED, not centred")
+    # It used to emit a width and no offset over a track whose CSS said
+    # justify-content:center, so the segment sat dead centre for every symbol,
+    # always, between two labels reading bid and ask.
+    qb = call('quoteBar(%s, %s, {low:10.00, high:11.00})'
+              % (M % ("10.75", "null"), M % ("10.80", "null")))
+    ml = _re.search(r'margin-left:([0-9.]+)%', qb)
+    check_true("the segment carries a measured offset", ml is not None)
+    check_true("and the offset is where the quote falls in the day range",
+               ml is not None and 74.0 <= float(ml.group(1)) <= 76.0)
+    check_true("the track's ends are the day range, not the quote",
+               "10.00" in qb and "11.00" in qb)
+    flat = call('quoteBar(%s, %s, null)'
+                % (M % ("10.75", "null"), M % ("10.80", "null")))
+    check("with no day range NOTHING is positioned",
+          "margin-left" in flat, False)
+    check_true("and it says the spread instead", "spread" in flat)
 
     print("\n12. news renders as a list, and an empty feed says why")
     nl = call('newsList({items:[{headline:"A headline", source:"benzinga",'
@@ -534,6 +578,43 @@ def main():
     for word in ("sentiment", "consensus", "buy/hold/sell"):
         check(f"the renderer invents no {word!r}",
               word in js_src.lower().split("========= */")[-1], False)
+
+    # =============================== 14. the route, actually called =========
+    print("\n14. the route RUNS with no broker and answers in dashes")
+    # Booted the way test_app_accounts.py boots it: no keys, so no default
+    # account and no client. The point is that ticker_market is EXECUTED --
+    # source invariants cannot catch a typo in a handler nothing calls.
+    import accounts
+    accounts.STATE_DIR = SCRATCH / "acct"
+    accounts.ACCOUNTS_DIR = accounts.STATE_DIR / "accounts"
+    accounts.REGISTRY_PATH = accounts.STATE_DIR / "accounts.json"
+    import fleet as fleet_mod
+    fleet_mod.CONFIG_PATH = SCRATCH / "root_config.json"
+    import remoteauth
+    remoteauth.TOKEN_FILE = SCRATCH / "dash_token.txt"
+    import app as app_mod
+
+    class StubFleet:
+        """The three attributes ticker_market reads. No broker on purpose."""
+        broker = None
+        state_dir = sd
+        account_id = "scratch"
+
+    T.cache_clear()
+    got = app_mod.ticker_market("RAM", f=StubFleet())
+    check("it answered rather than raising", isinstance(got, dict), True)
+    check("for the symbol asked about", got["symbol"], "RAM")
+    check("the account rides along", got["account"], "scratch")
+    check("implied volatility is a dash", got["iv"]["atm"]["value"], None)
+    check_true("whose reason names the missing broker",
+               "broker is not connected" in got["iv"]["atm"]["reason"])
+    check("the rank is a dash too", got["iv"]["rank"]["value"], None)
+    check("news is empty", got["news"]["items"], [])
+    check_true("and says it was not requested", got["news"]["why"])
+    check("the answer is stamped with its own age", "stale_s" in got, True)
+    again = app_mod.ticker_market("RAM", f=StubFleet())
+    check("a second call inside the TTL is served from the cache",
+          again["as_of"], got["as_of"])
 
     # -------------------------------------------------------------- verdict
     print()

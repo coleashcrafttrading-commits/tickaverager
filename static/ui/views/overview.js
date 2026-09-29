@@ -642,7 +642,7 @@ function paintRisk() {
         <span class="rk-l" title="${esc(r.label)}">${esc(r.label)}</span>
         ${stateChip(r.state, { sm: true })}
         <span class="rk-v">${mnum(r.at_risk, { dp: 0 })}</span></div>`).join("")
-    : `<div class="faint" style="font-size:12px">No strategy on this account.</div>`)
+    : `<div class="faint" style="font-size:var(--fs-sm)">No strategy on this account.</div>`)
     + `<div class="rk-row rk-tot" title="What each strategy could still lose on
         what it holds NOW: for the share ladder, the cost basis of its open
         lots, which has no stop under it; for a defined-risk options structure,

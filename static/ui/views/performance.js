@@ -51,6 +51,10 @@ let reports = [];
 let scope = { strategy: "", symbol: "", days: 7 };
 let forAcct = "";
 let loadErr = "";
+/* The reports disclosure's own state. `paint` runs on every poll and rebuilds
+   this panel, so without remembering it the drawer snapped shut under whoever
+   had just opened it -- once every two seconds. */
+let repsOpen = false;
 
 const WINDOW = { 1: "today", 7: "7 days", 30: "30 days", 0: "all time" };
 
@@ -289,12 +293,20 @@ function render() {
   const v = perf.view || {};
   const c = v.counts || {};
 
-  /* ---- the pickers. The strategy list is the SERVER'S, which is hub's. ---- */
+  /* ---- the pickers. The strategy list is the SERVER'S, which is hub's. ----
+     REBUILT ONLY WHEN IT CHANGED. `paint` runs on every poll, and replacing a
+     <select>'s options while somebody has it open closes the dropdown under
+     their finger -- the symbol picker has been guarded this way since it was
+     written and this one needs the same guard. */
   const sel = el("hStrat");
-  if (sel) {
+  const want = (perf.strategies || []).map((s) => s.id).join("|");
+  if (sel && sel.dataset.ids !== want) {
+    sel.dataset.ids = want;
     sel.innerHTML = (perf.strategies || []).map((s) =>
       `<option value="${esc(s.id)}"${s.readable ? "" : ` data-x="1"`}>${
         esc(s.label)}</option>`).join("");
+  }
+  if (sel && sel.value !== (perf.strategy || "all")) {
     sel.value = perf.strategy || "all";
   }
   el("hRows").textContent = `${c.trades || 0} trade${c.trades === 1 ? "" : "s"}`
@@ -332,7 +344,7 @@ function render() {
        strategy this is, and repeating it was one of the duplications the
        owner called clutter. The state pill stays: it is a fact the picker
        does not carry. */
-    actions: v.kind ? stateChip(stateOf(v.strategy)) : "",
+    actions: stateOf(v.strategy),
   });
 
   /* ---- the trades, and the reports behind a disclosure ---- */
@@ -357,18 +369,25 @@ function render() {
     dense: true,
   }), {
     sub: "newest first",
-    actions: `<details class="h-more"><summary>Reports</summary></details>`,
+    actions: `<details class="h-more"${repsOpen ? " open" : ""}
+                ><summary>Reports</summary></details>`,
     flush: true,
   });
   mountReports();
 }
 
-/* The strategy's own state word, out of the hub payload the shell already
-   holds -- so this tab never invents a seventh vocabulary. */
+/* The strategy's own state pill, out of the hub payload the shell already
+   holds -- so this tab never invents a seventh vocabulary.
+
+   NOTHING is drawn when the hub has not answered. `stateChip("off")` would
+   print "off" beside a strategy that is live, which is worse than printing
+   nothing: it is the same class of mistake as rendering an unmeasured number
+   as a 0. */
 function stateOf(id) {
-  const rows = ((S.hub && S.hub.portfolio) || {}).by_strategy || [];
+  const h = S.hub && S.hub.account === S.account ? S.hub : null;
+  const rows = ((h && h.portfolio) || {}).by_strategy || [];
   const hit = rows.find((r) => r.id === id);
-  return hit ? hit.state : "off";
+  return hit ? stateChip(hit.state) : "";
 }
 
 /* ---------------------------------------------------------------- the depth
@@ -404,6 +423,7 @@ function depthStrip() {
 function mountReports() {
   const d = el("view").querySelector("details.h-more");
   if (!d) return;
+  d.ontoggle = () => { repsOpen = d.open; };
   d.insertAdjacentHTML("beforeend", `<div>
     <div class="row-btns" style="margin-bottom:8px">
       <button class="btn primary sm" data-rep="daily">Daily</button>

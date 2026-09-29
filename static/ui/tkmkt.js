@@ -138,14 +138,36 @@ export function quoteBar(bid, ask, day) {
   const mid = (a + b) / 2;
   const dl = day && n(day.low), dh = day && n(day.high);
   const span = (dl !== null && dh !== null && dh > dl) ? (dh - dl) : null;
-  const frac = span ? (a - b) / span : (mid ? (a - b) / mid : 0);
-  const w = Math.max(clamp01(frac) * 100, 1.5);
-  const scale = span ? "of today's range" : "of the mid";
-  return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)} — the bar is
-    the spread, ${scale}">
-    <span class="tkx-mk-qv down">${px(b)}</span>
-    <span class="tkx-mk-qt"><i style="width:${w.toFixed(2)}%"></i></span>
-    <span class="tkx-mk-qv up">${px(a)}</span></div>`;
+
+  /* THE MARKER'S POSITION IS MEASURED OR IT IS NOT DRAWN. This used to emit a
+     width and no offset, over a track whose CSS said justify-content:center --
+     so the spread segment sat dead centre for every symbol, always, between
+     two labels reading bid and ask. A reader took that as "the quote is
+     mid-range"; it meant nothing at all, and a mark that cannot be trusted is
+     worse than the sentence it replaced.
+
+     The track is TODAY'S RANGE. The ends are the day's low and high, which is
+     what the ends of that track actually are, and the segment sits where the
+     quote genuinely falls inside it. With no day range there is no position to
+     draw, so nothing is positioned: the spread prints as a figure instead. */
+  if (span === null) {
+    const pct = mid ? ((a - b) / mid) * 100 : null;
+    return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)}. Today's
+      range is not known, so there is nowhere on a range to put this quote">
+      <span class="tkx-mk-qv down">${px(b)}</span>
+      <span class="tkx-mk-qs">${pct === null ? "—"
+        : pct.toFixed(2) + "% spread"}</span>
+      <span class="tkx-mk-qv up">${px(a)}</span></div>`;
+  }
+  const left = clamp01((b - dl) / span) * 100;
+  const w = Math.max(clamp01((a - b) / span) * 100, 1.2);
+  const room = Math.max(0, 100 - left);
+  return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)} on a track
+    that is today's range, ${px(dl)} to ${px(dh)}">
+    <span class="tkx-mk-qv down">${px(dl)}</span>
+    <span class="tkx-mk-qt"><i style="margin-left:${left.toFixed(2)}%;width:${
+      Math.min(w, room).toFixed(2)}%"></i></span>
+    <span class="tkx-mk-qv up">${px(dh)}</span></div>`;
 }
 
 /* ------------------------------------------------------------ the volume */
@@ -164,20 +186,36 @@ export function volumeBars(series, volume, adv, why) {
       why || mreason(volume) || "no daily bars held for this symbol")}</div>`;
   }
   const hi = Math.max.apply(null, rows.map((r) => r.v)) || 1;
-  const avg = av === null ? null : av / hi;
+
+  /* THE MARKER IS DERIVED FROM THE BARS IT SITS ON. It used to divide an
+     average taken from the hub metric block by the tallest bar of the daily
+     tape -- two sources in two units. Measured on RAM: bars of 6,060-6,763
+     shares under an `adv` of 1.26M, giving bottom:18600.9%, a marker 186 track
+     heights above the chart. Whatever the number was, it could not be drawn on
+     this scale, and nothing on screen said so.
+
+     The mean of the plotted series IS the average of those sessions, in their
+     own unit, so the marker cannot leave the track. The passed-in figure is
+     still used for the LINE underneath, where it is a number and not a
+     position -- but only when it agrees in magnitude with what is drawn;
+     otherwise the ratio refuses rather than comparing two different things. */
+  const mean = rows.reduce((s, r) => s + r.v, 0) / rows.length;
+  const avg = mean / hi;
+  const sameUnit = av !== null && mean > 0
+    && av / mean >= 0.2 && av / mean <= 5;
   const bars = rows.map((r, i) => {
     const h = Math.max((r.v / hi) * 100, 2);
     const last = i === rows.length - 1;
     return `<i class="${last ? "on" : ""}" style="height:${h.toFixed(1)}%"
       title="${esc(r.d)} ${vol(r.v)}"></i>`;
   }).join("");
-  const ratio = (now !== null && av) ? (now / av) : null;
+  const shown = (now !== null && sameUnit) ? now : rows[rows.length - 1].v;
+  const ratio = mean ? (shown / mean) : null;
   return `<div class="tkx-mk-vol">
-    <div class="tkx-mk-vt">${avg === null ? "" : `<b class="tkx-mk-avg"
-      style="bottom:${(avg * 100).toFixed(1)}%" title="20-session average ${
-      vol(av)}"></b>`}${bars}</div>
-    <div class="tkx-mk-vl"><span>${vol(now === null ? rows[rows.length - 1].v
-      : now)}</span>${ratio === null
+    <div class="tkx-mk-vt"><b class="tkx-mk-avg"
+      style="bottom:${(avg * 100).toFixed(1)}%" title="${rows.length}-session
+      average ${vol(mean)}, over the sessions drawn here"></b>${bars}</div>
+    <div class="tkx-mk-vl"><span>${vol(shown)}</span>${ratio === null
         ? `<span class="faint" title="${esc(mreason(adv)
             || "no average to compare against")}">—</span>`
         : `<span class="${ratio >= 1 ? "up" : "faint"}">${

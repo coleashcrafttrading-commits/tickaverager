@@ -586,7 +586,12 @@ function ensureSettingsStyles() {
     ".acct-label{font-size:var(--fs-xl);font-weight:var(--w-semi);",
     "letter-spacing:-.01em}",
     ".acct-id .faint{font-size:var(--fs-sm);margin-top:2px}",
-    ".row-btns .btn .imp{margin-left:6px}",
+    ".row-btns .btn .imp,.srv-a .btn .imp{margin-left:6px}",
+    /* An impact badge on a FILLED button has to borrow the button's ink: the
+       badge's own --warn on a saturated purple was measured at a contrast the
+       eye reads as decoration rather than as a word. */
+    ".btn.primary .imp{color:inherit;border-color:currentColor;",
+    "background:transparent;opacity:.8}",
     ".srv{display:grid;gap:var(--s4);grid-template-columns:minmax(0,220px) ",
     "minmax(0,1fr);align-items:start}",
     ".srv-a{display:flex;flex-direction:column;gap:8px}",
