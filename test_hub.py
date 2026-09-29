@@ -673,6 +673,36 @@ def main() -> int:
         finally:
             app_mod.app.dependency_overrides.pop(app_mod.cur, None)
 
+    print(chr(10) + "15. portfolio() WITH A FILL TAPE -- realised from Alpaca")
+    # THE GAP THAT SHIPPED A 500. Every other check builds a Ctx with no
+    # fills, so the whole fills branch of portfolio() was unexercised: a local
+    # named `eq` shadowed the account equity twenty lines above it and
+    # `eq - _fund` became dict-minus-float on every live request. A branch no
+    # test enters is a branch that reaches production first.
+    sd15 = SCRATCH / "s15"
+    sd15.mkdir(parents=True, exist_ok=True)
+    f15 = FakeFleet(sd15)
+    tape = [
+        {"id": "1", "symbol": "RAM", "side": "buy", "qty": "10",
+         "price": "10.00", "transaction_time": "2026-09-01T14:00:00Z"},
+        {"id": "2", "symbol": "RAM", "side": "sell", "qty": "10",
+         "price": "12.00", "transaction_time": "2026-09-02T14:00:00Z"},
+    ]
+    c15 = hub.Ctx(f15, option_positions=[], fills=tape)
+    p15 = hub.portfolio(c15)
+    check("the call returns at all (it used to 500)", isinstance(p15, dict), True)
+    check("realised is the fill tape's, not the journal's",
+          p15["pl"]["realized"]["value"], 20.0)
+    check("and it is counted in FILLS", p15["pl"]["realized"]["n"], 2)
+    check("total P/L is still a number or an honest dash",
+          isinstance(p15["pl"]["total"]["value"], (int, float, type(None))), True)
+    check("and it did not become a dict (the shadowing bug's signature)",
+          isinstance(p15["pl"]["total"]["value"], dict), False)
+    c15b = hub.Ctx(f15, option_positions=[], fills=None)
+    p15b = hub.portfolio(c15b)
+    check("with NO tape it falls back to the logs without raising",
+          isinstance(p15b, dict), True)
+
     print()
     if FAIL:
         print(f"{FAIL} CHECK(S) FAILED")

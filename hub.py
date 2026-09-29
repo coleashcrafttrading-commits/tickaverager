@@ -1140,15 +1140,19 @@ def portfolio(ctx: Ctx) -> dict:
     fills = getattr(ctx, "fills", None)
     if fills:
         import perf as _perf
-        eq = _perf.realized_from_fills(fills)
+        # NOT `eq` -- that name already holds the account's equity twenty
+        # lines up, and shadowing it made `eq - _fund` a dict minus a float on
+        # every hub request. Measured in production as a 500 on
+        # /api/hub/portfolio.
+        eq_real = _perf.realized_from_fills(fills)
         opt = 0.0
         for s in strategies_:
             if str(getattr(s, "kind", "")) == "options":
                 v, _n, _w = s.realized()
                 if v is not None:
                     opt += v
-        realized = round(eq["total"] + opt, 2)
-        realized_n = eq["fills"]
+        realized = round(eq_real["total"] + opt, 2)
+        realized_n = eq_real["fills"]
         realized_why = None
         measured = True
     else:
