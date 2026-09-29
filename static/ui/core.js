@@ -738,13 +738,21 @@ export const tileGrid = (tiles, opts = {}) =>
    sentence explaining the block under it. A sub-line that names a REAL fact
    ("2 of 3 strategies active") is worth its line; a sub-line that defines the
    panel it sits on is not, and it belongs on hover. Views pass one or the
-   other, never both. */
+   other, never both.
+
+   ROUND 7: AND "ON HOVER" IS NOT GOOD ENOUGH ON ITS OWN. A title attribute
+   does not exist on a phone and a keyboard user never reaches it, so a panel
+   that carries a hint is marked `data-why` here and reason.js turns it into a
+   real disclosure -- focusable, openable by tap and by Enter -- wherever a
+   room has called `wireReasons`. The heading stays a heading; reason.js is
+   careful not to put role="button" on it. Nothing changes for a room that has
+   not wired it: the attribute is inert and the title still hovers. */
 export function panel(title, body, opts = {}) {
   const head = (title || opts.sub || opts.actions)
     ? `<header class="panel-h">
          <div class="panel-tt">
            ${title ? `<h2 class="panel-t"${opts.titleHint
-             ? ` title="${esc(opts.titleHint)}"` : ""}>${title}</h2>` : ""}
+             ? ` data-why title="${esc(opts.titleHint)}"` : ""}>${title}</h2>` : ""}
            ${opts.sub ? `<div class="panel-sub">${opts.sub}</div>` : ""}
          </div>
          ${opts.actions ? `<div class="panel-x">${opts.actions}</div>` : ""}

@@ -110,8 +110,7 @@ export function priceBand(day, year, price, why) {
   const raw = p === null ? null : at(p);
   const out = raw !== null && (raw < 0 || raw > 1);
   return `<div class="tkx-mk-band">
-    <div class="tkx-mk-track" title="52-week ${px(yl)} to ${px(yh)}; the bright
-      segment is today's own range">
+    <div class="tkx-mk-track" title="52-week ${px(yl)} to ${px(yh)}">
       ${seg}${raw === null ? "" : `<i class="tkx-mk-pin"
         style="left:${(clamp01(raw) * 100).toFixed(2)}%"
         title="last ${px(p)}"></i>`}</div>
@@ -152,8 +151,8 @@ export function quoteBar(bid, ask, day) {
      draw, so nothing is positioned: the spread prints as a figure instead. */
   if (span === null) {
     const pct = mid ? ((a - b) / mid) * 100 : null;
-    return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)}. Today's
-      range is not known, so there is nowhere on a range to put this quote">
+    return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)}. No day
+      range, so there is nowhere to put it">
       <span class="tkx-mk-qv down">${px(b)}</span>
       <span class="tkx-mk-qs">${pct === null ? "—"
         : pct.toFixed(2) + "% spread"}</span>
@@ -162,8 +161,7 @@ export function quoteBar(bid, ask, day) {
   const left = clamp01((b - dl) / span) * 100;
   const w = Math.max(clamp01((a - b) / span) * 100, 1.2);
   const room = Math.max(0, 100 - left);
-  return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)} on a track
-    that is today's range, ${px(dl)} to ${px(dh)}">
+  return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)}">
     <span class="tkx-mk-qv down">${px(dl)}</span>
     <span class="tkx-mk-qt"><i style="margin-left:${left.toFixed(2)}%;width:${
       Math.min(w, room).toFixed(2)}%"></i></span>
@@ -214,7 +212,7 @@ export function volumeBars(series, volume, adv, why) {
   return `<div class="tkx-mk-vol">
     <div class="tkx-mk-vt"><b class="tkx-mk-avg"
       style="bottom:${(avg * 100).toFixed(1)}%" title="${rows.length}-session
-      average ${vol(mean)}, over the sessions drawn here"></b>${bars}</div>
+      average ${vol(mean)}"></b>${bars}</div>
     <div class="tkx-mk-vl"><span>${vol(shown)}</span>${ratio === null
         ? `<span class="faint" title="${esc(mreason(adv)
             || "no average to compare against")}">—</span>`
@@ -241,7 +239,7 @@ export function volScale(iv, rv) {
     if (v === null) return "";
     return `<i class="tkx-mk-dot ${cls}" style="left:${
       (clamp01(v) * 100).toFixed(2)}%" title="${esc(label)} ${
-      pctTxt(v, 0)} of its own range"></i>`;
+      pctTxt(v, 0)}"></i>`;
   };
   const chip = (m, cls, label, obs, needs) => {
     const v = measured(m) ? n(mv(m)) : null;
@@ -252,8 +250,8 @@ export function volScale(iv, rv) {
   const line = ivLine(iv.history);
   return `<div class="tkx-mk-vol2">
     <div class="tkx-mk-track wide">
-      ${dot(rv.rank, "rv", "realised volatility rank")}
-      ${dot(iv.rank, "iv", "implied volatility rank")}</div>
+      ${dot(rv.rank, "rv", "realised vol rank")}
+      ${dot(iv.rank, "iv", "implied vol rank")}</div>
     <div class="tkx-mk-chips">
       ${chip(iv.rank, "iv", "IV rank", iv.obs || 0, iv.needs || 20)}
       ${chip(rv.rank, "rv", "RV rank", rv.obs || 0, rv.needs || 20)}

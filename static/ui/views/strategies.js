@@ -42,7 +42,7 @@
 "use strict";
 import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, tableHTML, go, dur,
-  panel, segmented, wireSegmented, emptyState, hashFor,
+  panel, segmented, wireSegmented, emptyState,
 } from "../core.js";
 import { preset as btPreset } from "./backtest.js";
 /* The bank renders hub's metric envelope and the stores' settings schemas
@@ -54,25 +54,9 @@ import {
   applySearch, readValues, GOVERNORS, fieldByKey, FIELD_GROUPS,
 } from "../fields.js";
 
-/* One sentence per HUB strategy, from CLAUDE.md rather than from imagination.
-   hub.py gives an id, a label and a kind and deliberately gives no prose, so
-   the sentences live here keyed by id, and an id with no sentence SAYS it has
-   none. A bank entry carries its own `summary` and never needs this. */
-const BLURB = {
-  ladder:
-    "Buys a rung every time price moves a set distance against the last fill, "
-    + "and rests that lot's own take-profit at Alpaca from the moment it opens. "
-    + "There is no stop loss on an unarmed lot.",
-  "index-put-credit-spread":
-    "Sells the ~0.20 delta put about a month out and buys the put two listed "
-    + "strikes below, ten contracts, one entry per session between 10:30 and "
-    + "15:30 ET. Exits at +50% / -25% of the position.",
-  "swing-atm-hourly":
-    "Buys the at-the-money call when the 1-hour bar closes above BOTH the 9 EMA "
-    + "and session VWAP, the put when it closes below both. One contract, about "
-    + "a month out, no time-of-day filter. Exits at +50% / -25%.",
-};
-const blurbOf = (id) => BLURB[id] || "";
+/* Every bank entry carries its own `summary`, so the page does not keep a
+   second copy of one. A sentence typed here could only drift from the
+   document it describes. */
 
 /* The one state vocabulary. hub.py hands one word out of one list and this is
    where it becomes something to look at. */
@@ -104,10 +88,13 @@ const stateOf = (s) => STATE[String(s || "off")]
   || { t: String(s), cls: "st-warn",
        why: "A state this page has not met. Shown as the server spelled it." };
 
-const KIND = { shares: "shares", options: "options" };
-
 /* The four stores, in the words the owner uses for them. `kind` comes off the
-   row; this file never decides what something is. */
+   row; this file never decides what something is.
+
+   `why` is a DEFINITION, and a definition belongs where the word is chosen --
+   on the kind filter's own segments, ONCE -- not on every card that carries
+   the word. Measured before this round: the kind and origin pills put 612
+   words of hover on 36 cards to say four things. */
 const BKIND = {
   ladder:            { label: "Ladder",    why: "a share ladder preset: the rung, the target, the filter" },
   indicator:         { label: "Indicator", why: "a document of indicators and rules, or real Python with an on_bar" },
@@ -355,6 +342,11 @@ function renderHead() {
       ).join("")}</div>`
     : "";
 
+  /* Open P/L and Realised are never added, here or anywhere: they come from
+     different origins. Nothing on this page adds them, so the page does not
+     also carry a paragraph saying it does not -- and the count of what is on
+     the shelf was a seventh tile repeating the number the shelf panel below
+     prints in its own header. */
   host.innerHTML = panel("Running on this account", `
     <div class="mrow">
       ${metricTile("Live or armed", { value: live, n: rows.length, unit: "count" })}
@@ -363,19 +355,9 @@ function renderHead() {
       ${metricTile("Open P/L", sum("open_pl"), { signed: true })}
       ${metricTile("Realised", sum("realized_pl"), { signed: true })}
       ${metricTile("At risk", sum("at_risk"))}
-      ${metricTile("On the shelf",
-        SHELF_ERR
-          ? { value: null, n: 0, unit: "count", reason: SHELF_ERR }
-          : { value: SHELF.length, n: SHELF.length, unit: "count" })}
     </div>
-    ${warn}
-    <div class="tip" style="margin-bottom:0"><b>Open P/L and Realised are not
-      added together anywhere</b>: they come from different origins and
-      reconciling them on screen would invent a number nobody measured. The
-      account's own profit and loss — equity less what was paid in — is on
-      <a href="${hashFor({ kind: "overview", tab: "history" })}">Portfolio →
-      History</a>.</div>`,
-    { sub: "hub's own figures: what is attached, and what it is worth",
+    ${warn}`,
+    { sub: "what is attached, and what it is worth",
       actions: `<button class="btn sm" id="catRefresh">Refresh</button>` });
   wireRefresh();
 }
@@ -402,7 +384,6 @@ function attachedBySymbol() {
 }
 
 const shelfById = (id) => SHELF.find((r) => r.id === id) || null;
-const rowById = (id) => CAT_ROWS.find((r) => r.id === id) || null;
 
 /* A bank id maps to a HUB strategy id only for the kinds hub knows about --
    the ladder (whatever preset or document is driving it) and the tailored
@@ -449,12 +430,11 @@ function renderOnTickers() {
       </header>
       ${rows.map((a) => onRowHTML(sym, a)).join("")}
     </section>`;
-  }).join("")}</div>
-  <div class="tip">A ticker may carry SEVERAL: its ladder, an indicator
-    document driving that ladder, any number of tailored plays and any number
-    of banked option structures. The ladder is the one exception and it says so
-    — a ticker has exactly one engine config, so attaching a second ladder
-    strategy replaces the first and the answer names what it replaced.</div>`;
+  }).join("")}</div>`;
+  /* "A ticker may carry several" was a paragraph here saying what the grid
+     already shows -- SPY is listed with two rows. The one part of it that
+     changed a decision, that a second ladder REPLACES the first, is said in
+     the attach confirmation, which is where that decision is taken. */
   host.innerHTML = panel("On your tickers", body, {
     sub: `${syms.length} ticker${syms.length === 1 ? "" : "s"} carrying `
        + `${ATTACHED.length} attachment${ATTACHED.length === 1 ? "" : "s"}`,
@@ -467,6 +447,11 @@ function renderOnTickers() {
   });
 }
 
+/* One attachment, as marks. The kind word, the origin word and "off" define
+   themselves and their definitions live on the shelf's own filters; what a
+   STATE word means does not, so the state pill keeps its hover and it is the
+   only definition left on this row. `a.why` is the server saying the ticker
+   and the bank disagree -- it is a PROBLEM, so it stays printed, in full. */
 function onRowHTML(sym, a) {
   const st = stateOf(a.state);
   const nSet = Object.keys(a.settings || {}).length;
@@ -475,18 +460,17 @@ function onRowHTML(sym, a) {
   return `<div class="on-row">
     <button class="lnk on-name" data-openatt="${esc(a.id || "")}"
       data-sym="${esc(sym)}">${esc(a.name || a.id || "unnamed")}</button>
-    <span class="pill${a.kind === "ladder" ? " acc" : ""}"
-      title="${esc(kind.why)}">${esc(kind.label)}</span>
-    ${a.origin === "personal"
-      ? `<span class="pill mine" title="you made this one">mine</span>` : ""}
+    <span class="pill${a.kind === "ladder" ? " acc" : ""}">${esc(kind.label)}</span>
+    ${a.origin === "personal" ? `<span class="pill mine">mine</span>` : ""}
     <span class="st ${st.cls}" title="${esc(st.why)}">${esc(st.t)}</span>
-    ${a.enabled === false
-      ? `<span class="pill" title="attached but switched off">off</span>` : ""}
+    ${a.enabled === false ? `<span class="pill">off</span>` : ""}
     <span style="flex:1"></span>
     <span class="faint on-src" title="${esc(a.source || "")}">${
       nSet ? `${nSet} setting${nSet === 1 ? "" : "s"}` : "no overrides"}</span>
-    ${dead ? `<span class="pill warn" title="${esc(a.trades.why || "")}"
-      >records only</span>` : ""}
+    ${dead ? `<span class="pill warn" title="${esc(
+      (a.trades && a.trades.why)
+      || "this attachment records only -- the server gave no reason")
+      }">records only</span>` : ""}
     ${a.why ? `<div class="on-why">${esc(a.why)}</div>` : ""}
   </div>`;
 }
@@ -548,9 +532,15 @@ function renderShelf() {
     (SHELF_KINDS.length ? SHELF_KINDS : Object.keys(counts)).map((k) =>
       [k, `${bkindOf(k).label} ${counts[k] || 0}`, bkindOf(k).why]));
 
+  /* ONE strip for one failing read. `tickers === null` is the bank saying it
+     could not read what is attached; it is the same failure on every row, so
+     the rows show the dash and the reason is stated once, loudly. */
+  const unread = shown.filter((r) => r.tickers === null);
+  const unreadWhy = (unread.find((r) => r.tickers_reason) || {}).tickers_reason;
+
   const body = `
     <div class="sh-bar">
-      <input id="shQ" class="cat-q" placeholder="Search 259 strategies — try “condor”, “ladder”, “SPY”"
+      <input id="shQ" class="cat-q" placeholder="Search ${SHELF.length}"
              value="${esc(fq)}" spellcheck="false" autocomplete="off">
       ${segmented({ id: "shOrigin", value: forigin, size: "sm", label: "origin",
         options: [["", "Everything"],
@@ -564,9 +554,14 @@ function renderShelf() {
     ${segmented({ id: "shKind", value: fkind, size: "sm", label: "kind",
       options: kindOpts })}
     ${addingTo ? `<div class="note" style="margin:12px 0 0">Adding to
-      <b>${esc(addingTo)}</b> — pick a strategy below and it will be offered
-      with ${esc(addingTo)} already ticked.
+      <b>${esc(addingTo)}</b> — pick one below.
       <button class="lnk" id="shClearAdd">clear</button></div>` : ""}
+    ${unread.length
+      ? `<div class="note warn" style="margin:12px 0 0"><b>${unread.length}
+          row${unread.length === 1 ? "" : "s"} could not be checked against
+          your tickers.</b> ${esc(unreadWhy || "the bank did not say why")}
+          Those rows show a dash rather than nought.</div>`
+      : ""}
     <div class="sh-count">${hits.length === SHELF.length
       ? `All <b>${SHELF.length}</b> strategies.`
       : `<b>${hits.length}</b> of ${SHELF.length} match.`}
@@ -574,7 +569,13 @@ function renderShelf() {
         ? ` Showing the first <b>${shown.length}</b>.` : ""}</div>
     ${hits.length
       ? `${gateKeyHTML(shown, GATES)}
-         <div class="cat-grid">${shown.map(shelfCardHTML).join("")}</div>
+         <div class="cat-tbl">
+           <div class="cat-thead">
+             <span>Strategy</span><span>Kind</span><span>What it is</span>
+             <span>On</span><span class="cat-num">Set</span><span></span>
+           </div>
+           ${shown.map(shelfCardHTML).join("")}
+         </div>
          ${hits.length > shown.length
            ? `<div class="sh-more"><button class="btn" id="shMore">Show
                ${Math.min(36, hits.length - shown.length)} more</button></div>`
@@ -586,11 +587,11 @@ function renderShelf() {
           action: `<button class="btn" id="shClear">Clear filters</button>`,
         })}`;
 
-  host.innerHTML = panel("The bank", body, {
-    sub: "every strategy there is — three ladder presets, the indicator "
-       + "documents, 231 researched option structures and the tailored plays, "
-       + "in one id space",
-  });
+  /* No sub-line. The view's own subtitle already says what this bank is, and
+     the kind filter directly below counts every store by name -- a sentence
+     spelling out "three ladder presets, 231 option structures" is the same
+     four numbers a second time. */
+  host.innerHTML = panel("The bank", body);
   wireShelf(host);
 }
 
@@ -618,25 +619,110 @@ function wireShelf(host) {
   host.querySelectorAll("[data-attach]").forEach((b) => {
     b.onclick = () => attachFlow(b.dataset.attach);
   });
-  host.querySelectorAll("[data-copy]").forEach((b) => {
-    b.onclick = () => copyFlow(b.dataset.copy);
-  });
-  host.querySelectorAll("[data-edit]").forEach((b) => {
-    b.onclick = () => editFlow(b.dataset.edit);
-  });
-  host.querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = () => deleteFlow(b.dataset.del);
+  /* Copy, Edit and Delete moved onto the entry sheet the name opens. They are
+     things you do to ONE strategy after you have chosen it, and three buttons
+     per row is a row nobody can scan. */
+  host.querySelectorAll("[data-open]").forEach((b) => {
+    b.onclick = () => openEntry(b.dataset.open);
   });
   host.querySelectorAll("[data-openatt]").forEach((b) => {
     b.onclick = () => openAttachment(b.dataset.openatt, b.dataset.sym);
   });
 }
 
+/* --------------------------------------------------- one entry, opened
+   Where the prose went. The catalogue compares; this reads. It is the entry's
+   own words -- `summary`, its tags, the server's refusal in full -- plus the
+   things you do to one strategy once you have picked it. Nothing here is
+   computed and nothing is abbreviated: a reader who has got this far asked
+   for the detail. */
+function openEntry(eid) {
+  const r = shelfById(eid);
+  if (!r) return;
+  const k = bkindOf(r.kind);
+  const g = gateOf(r);
+  const t = r.tags || {};
+  const tagRows = Object.keys(t).filter((x) => t[x] !== null && t[x] !== "")
+    .map((x) => `<div><span class="faint">${esc(x)}</span>
+      <b>${esc(Array.isArray(t[x]) ? t[x].join(", ") : String(t[x]))}</b></div>`);
+  paintSheet({
+    title: r.name || r.slug,
+    sub: `<span class="mono">${esc(r.id)}</span>
+      <span class="pill${r.kind === "ladder" ? " acc" : ""}"
+        >${esc(k.label)}</span>
+      <span class="faint">${esc(k.why)}</span>`,
+    body: `
+      ${r.error ? `<div class="note bad">${esc(r.error)}</div>` : ""}
+      ${g ? `<div class="${g.note}" style="margin-top:0"><b>${esc(g.lead)}</b>
+        ${esc(g.why)}</div>` : ""}
+      <p class="cat-blurb${r.summary ? "" : " none"}"
+        style="margin-top:0">${r.summary
+          ? esc(r.summary)
+          : "No summary. This entry is on the shelf and nothing in it says "
+            + "what it does."}</p>
+      ${tagRows.length ? `<div class="att-kv">${tagRows.join("")}</div>` : ""}
+      <div class="att-kv"><div><span class="faint">on</span>
+        <b>${r.tickers === null ? "—"
+          : ((r.tickers || []).join(", ") || "no ticker")}</b></div>
+        <div><span class="faint">settings</span><b>${
+          (r.params_schema || []).length
+            || esc(r.params_reason || "—")}</b></div></div>`,
+    foot: `${(r.attach && r.attach.ok !== false)
+        ? `<button class="btn primary" id="enAttach">Attach</button>` : ""}
+      ${r.origin === "personal"
+        ? `${r.kind === "ladder"
+             ? `<button class="btn" id="enEdit">Edit</button>` : ""}
+           <button class="btn danger" id="enDel">Delete</button>`
+        : `<button class="btn" id="enCopy">Copy to mine</button>`}
+      <span style="flex:1"></span>
+      <button class="btn" data-bkclose>Close</button>`,
+  });
+  wireFoot();
+  const on = (id, fn) => { const b = el(id); if (b) b.onclick = fn; };
+  on("enAttach", () => { closeSheet(); attachFlow(r.id); });
+  on("enCopy", () => { closeSheet(); copyFlow(r.id); });
+  on("enEdit", () => { closeSheet(); editFlow(r.id); });
+  on("enDel", () => { closeSheet(); deleteFlow(r.id); });
+}
+
+/* --------------------------------------------------------- what it IS
+   The comparable part of a strategy, off the row's own `tags`, as marks. This
+   is the column a chooser reads down: 2L / credit / neutral against 4L / debit
+   / neutral is a comparison; two paragraphs are not. Nothing is derived here
+   -- every mark is a key the server sent, and a tag that is absent draws
+   nothing rather than a nought. */
+function shapeHTML(r) {
+  const t = r.tags || {};
+  const m = [];
+  const put = (cls, text) => m.push(`<span class="cat-m${cls ? " " + cls : ""}"
+    >${esc(String(text))}</span>`);
+  if (typeof t.legs === "number" && t.legs > 0) put("", `${t.legs}L`);
+  if (t.net) put(t.net === "credit" ? "up" : t.net === "debit" ? "dn" : "",
+                 t.net);
+  if (t.bias) put("", String(t.bias).replace(/_/g, " "));
+  if (t.zero_dte) put("", "0DTE");
+  if (t.default === true) put("acc", "default");
+  for (const i of (t.indicators || []).slice(0, 4)) put("", i);
+  /* The two tailored plays are the only entries that actually trade, and what
+     their legs ARE is the whole difference between them. The server states it
+     in one clause, so one clause is printed. */
+  if (t.legs_desc) {
+    return `${m.join("")}<span class="cat-legs">${esc(t.legs_desc)}</span>`;
+  }
+  return m.join("");
+}
+
 /* The key that stands above the grid: one row per sentence that MORE THAN ONE
-   card carries, the mark it corresponds to, and how many of the cards below
-   carry it. Built from the same `shown` rows the grid is, so the count is a
-   measurement of this screen. Deliberately not a `.note`: a key to marks that
-   are on screen is a legend, and the strips are for things that are wrong. */
+   row below carries, the mark it corresponds to, and how many rows carry it.
+   Built from the same `shown` rows the grid is, so the count is a measurement
+   of this screen. Deliberately not a `.note`: a key to marks that are on
+   screen is a legend, and the strips are for things that are wrong.
+
+   It now also covers the Settings column's dash. `params_reason` is a 36-word
+   constant the bank returns for all 231 option structures, and it used to be
+   PRINTED in each card's footer -- ten of them on the first paint, 360 words
+   to say one thing. It is the same repetition the gate marks already solved,
+   so it gets the same answer: the dash on the row, the reason here, once. */
 function gateKeyHTML(shown, tally) {
   const seen = [];
   const rows = [];
@@ -652,77 +738,75 @@ function gateKeyHTML(shown, tally) {
       <span class="cat-key-w"><b>${esc(g.lead)}</b> ${esc(g.why)}</span>
     </div>`);
   }
+  const why = {};
+  for (const r of shown) {
+    if ((r.params_schema || []).length || !r.params_reason) continue;
+    why[r.params_reason] = (why[r.params_reason] || 0) + 1;
+  }
+  for (const w of Object.keys(why)) {
+    rows.push(`<div class="cat-key-r">
+      <span class="cat-m dash">—</span>
+      <span class="cat-key-n">${why[w]} below</span>
+      <span class="cat-key-w"><b>Nothing to set.</b> ${esc(w)}</span>
+    </div>`);
+  }
   return rows.length
     ? `<div class="cat-key"><div class="cat-key-h">What the marks mean</div>
         ${rows.join("")}</div>`
     : "";
 }
 
+/* ONE ROW, not a card. The name kept as `shelfCardHTML` because the rule this
+   file is checked against slices the function by that name.
+
+   What changed and why: a catalogue is read DOWN, and until this round every
+   entry was a block of its own -- a 29-word summary, a heading saying "On no
+   tickers", a sentence saying it is not attached, and a footer sentence saying
+   how many settings it has. 36 of those was 2,066 words and 6,317 pixels for
+   36 choices, and no two of them lined up, so nothing could be compared
+   without reading. Now each entry is one line of marks under a shared header
+   and the prose it used to print lives one click away, in the sheet the name
+   opens, where a reader who has NARROWED to one strategy can read all of it.
+
+   Nothing here is on hover. The kind, origin and gate definitions that were
+   sitting in 36 copies of `title=` are stated once -- on the filter that
+   chooses them, and in the key above the grid. */
 function shelfCardHTML(r) {
   const k = bkindOf(r.kind);
   const syms = r.tickers || [];
   const nset = (r.params_schema || []).length;
   const canAttach = r.attach && r.attach.ok !== false;
-  /* The mark, and whether this card is the only one on screen carrying it. */
+  /* The mark, and whether this row is the only one on screen carrying it. */
   const g = gateOf(r);
   const solo = gateSolo(g, GATES);
-  return `<section class="cat-card${r.origin === "personal" ? " mine" : ""}"
+  return `<div class="cat-row${r.origin === "personal" ? " mine" : ""}"
       data-eid="${esc(r.id)}">
-    <header class="cat-h">
-      <div class="cat-h-t">
-        <span class="cat-name">${esc(r.name || r.slug)}</span>
-        <span class="pill${r.kind === "ladder" ? " acc" : ""}"
-          title="${esc(k.why)}">${esc(k.label)}</span>
-        ${r.origin === "personal"
-          ? `<span class="pill mine" title="you or Claude built this one; it is
-             editable">mine</span>`
-          : `<span class="pill" title="shipped or researched; copy it to edit
-             it">standard</span>`}
-        ${g ? `<span class="${g.cls} cat-mark" title="${
-          esc(g.lead + " " + g.why)}">${esc(g.mark)}</span>` : ""}
-      </div>
+    <div class="cat-c">
+      <button class="lnk cat-name" data-open="${esc(r.id)}"
+        >${esc(r.name || r.slug)}</button>
       <div class="cat-id mono">${esc(r.id)}</div>
-    </header>
-
-    <p class="cat-blurb${r.summary ? "" : " none"}">${r.summary
-      ? esc(r.summary)
-      : "No summary. This entry is on the shelf and nothing in it says what it "
-        + "does."}</p>
-
+    </div>
+    <div class="cat-c">
+      <span class="pill${r.kind === "ladder" ? " acc" : ""}">${esc(k.label)}</span>
+      ${r.origin === "personal" ? `<span class="pill mine">mine</span>` : ""}
+      ${g ? `<span class="${g.cls} cat-mark">${esc(g.mark)}</span>` : ""}
+    </div>
+    <div class="cat-c cat-shape">${shapeHTML(r)}</div>
+    <div class="cat-c">${r.tickers === null
+      ? `<span class="cat-m dash">—</span>`
+      : syms.map((s) => `<button class="cat-chip" data-openatt="${esc(r.id)}"
+          data-sym="${esc(s)}">${esc(s)}<span class="chip-x">⋯</span></button>`)
+          .join("")}</div>
+    <div class="cat-c cat-num">${nset
+      || `<span class="cat-m dash">—</span>`}</div>
+    <div class="cat-c cat-act">${canAttach
+      ? `<button class="cat-chip add" data-attach="${esc(r.id)}">${
+          addingTo ? `→ ${esc(addingTo)}` : "Attach"}</button>`
+      : ""}</div>
     ${r.error ? `<div class="note bad cat-why">${esc(r.error)}</div>` : ""}
     ${g && solo ? `<div class="${g.note}"><b>${esc(g.lead)}</b>
       ${esc(g.why)}</div>` : ""}
-
-    <div class="cat-sec">
-      <div class="cat-sec-h">On ${syms.length || "no"} ticker${
-        syms.length === 1 ? "" : "s"}${r.tickers === null
-          ? ` <span class="warn">(not read)</span>` : ""}</div>
-      <div class="chips">
-        ${syms.map((s) => `<button class="cat-chip" data-openatt="${esc(r.id)}"
-            data-sym="${esc(s)}" title="Settings and detach for ${esc(s)}"
-            >${esc(s)}<span class="chip-x">⋯</span></button>`).join("")
-          || `<span class="faint">Not attached. It holds no position and opens
-              nothing.</span>`}
-        ${canAttach
-          ? `<button class="cat-chip add" data-attach="${esc(r.id)}"
-              >+ attach to ticker${addingTo ? ` ${esc(addingTo)}` : "s"}</button>`
-          : ""}
-      </div>
-    </div>
-
-    <footer class="cat-f">
-      <span class="faint">${nset
-        ? `${nset} setting${nset === 1 ? "" : "s"}, per ticker`
-        : esc(r.params_reason || "no settings")}</span>
-      <span style="flex:1"></span>
-      ${r.origin === "personal"
-        ? `${r.kind === "ladder"
-             ? `<button class="btn sm" data-edit="${esc(r.id)}">Edit</button>` : ""}
-           <button class="btn sm danger" data-del="${esc(r.id)}">Delete</button>`
-        : `<button class="btn sm" data-copy="${esc(r.id)}"
-            title="duplicate it as a personal entry you can edit">Copy to mine</button>`}
-    </footer>
-  </section>`;
+  </div>`;
 }
 
 /* ========================================================= attaching ==== */
@@ -1708,6 +1792,15 @@ function ensureCatStyles() {
   s.id = "catCSS";
   s.textContent = [
     ".cat-q{flex:1;min-width:190px;font-size:12px;padding:7px 11px}",
+    /* `.lnk` was used in four places in this file and DEFINED NOWHERE, in any
+       stylesheet -- so every one of them rendered with the platform's own grey
+       3D button chrome, including the 36 strategy names this round put on the
+       shelf. It is this file's class and nobody else's (grepped), so it is
+       defined here, beside them. */
+    ".lnk{font:inherit;color:inherit;background:none;border:0;padding:0;",
+    "margin:0;text-align:left;cursor:pointer;border-radius:var(--r-xs)}",
+    ".lnk:hover{color:var(--accent)}",
+    ".lnk:focus-visible{outline:2px solid var(--accent);outline-offset:2px}",
     ".mrow{display:grid;gap:18px 22px;",
     "grid-template-columns:repeat(auto-fit,minmax(132px,1fr));margin:2px 0 14px}",
     ".mrow.tight{gap:14px 18px;margin:12px 0}",
@@ -1735,19 +1828,37 @@ function ensureCatStyles() {
     ".cat-key-w b{color:var(--text)}",
     /* A MARK, not a label. Dashed so the two gate marks read as one family
        beside the solid kind and origin pills -- the reader should be able to
-       find "which of these is gated" without reading a word. */
-    ".cat-mark{cursor:help;border-style:dashed}",
-    /* cards */
-    ".cat-grid{display:grid;gap:16px;",
-    "grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}",
-    ".cat-card{background:var(--surface);border:1px solid var(--hairline);",
-    "border-radius:var(--radius);padding:18px 20px 14px;display:flex;",
-    "flex-direction:column;min-width:0}",
-    ".cat-card.mine{border-color:var(--accent-line)}",
-    ".cat-h{display:flex;flex-direction:column;gap:2px}",
-    ".cat-h-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
-    ".cat-name{font-size:15.5px;font-weight:650;letter-spacing:-.015em}",
-    ".cat-id{font-size:11px;color:var(--faint)}",
+       find "which of these is gated" without reading a word. It is no longer
+       `cursor:help`, because there is nothing behind it to hover: the sentence
+       is in the key above. */
+    ".cat-mark{border-style:dashed}",
+    /* ------------------------------------------------------------- rows
+       ONE grid template, repeated on the header and on every row, in units
+       that do not depend on content (fr and px, never `auto`). That is what
+       makes the columns line up across 36 independently-sized rows without a
+       <table>, and a table is what the sub-rows below rule out: the server's
+       error string and a solo gate sentence span the whole width. */
+    ".cat-tbl{display:flex;flex-direction:column;",
+    "border:1px solid var(--hairline);border-radius:var(--r-md);",
+    "background:var(--surface);overflow:hidden}",
+    ".cat-thead,.cat-row{display:grid;align-items:center;gap:6px 12px;",
+    "grid-template-columns:minmax(0,2.1fr) 142px minmax(0,2.3fr) 118px 46px 92px;",
+    "padding:8px 14px}",
+    ".cat-thead{font-size:var(--fs-micro);letter-spacing:.08em;",
+    "text-transform:uppercase;color:var(--faint);font-weight:650;",
+    "background:var(--surface-2);border-bottom:1px solid var(--hairline)}",
+    ".cat-row{border-top:1px solid var(--hairline)}",
+    ".cat-row:first-of-type{border-top:0}",
+    ".cat-row:hover{background:var(--surface-2)}",
+    ".cat-row.mine{box-shadow:inset 3px 0 0 var(--accent-line)}",
+    ".cat-c{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}",
+    ".cat-c.cat-num{justify-content:flex-end}",
+    ".cat-c.cat-act{justify-content:flex-end}",
+    ".cat-c.cat-shape{gap:4px}",
+    ".cat-name{font-size:var(--fs-sm);font-weight:640;text-align:left;",
+    "letter-spacing:-.01em;min-width:0}",
+    ".cat-id{font-size:var(--fs-micro);color:var(--faint);flex:0 0 100%;",
+    "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
     ".pill.mine{color:var(--accent-2);border-color:var(--accent-line)}",
     ".pill.warn{color:var(--warn);border-color:var(--warn)}",
     ".st{font-size:10px;letter-spacing:.07em;text-transform:uppercase;",
@@ -1756,23 +1867,28 @@ function ensureCatStyles() {
     ".st-live{color:var(--up)}.st-idle{color:var(--muted)}",
     ".st-off{color:var(--faint)}.st-warn{color:var(--warn)}",
     ".st-bad{color:var(--down)}",
+    /* the comparable marks: one word each, coloured only where the colour is
+       a fact (a credit is money in, a debit is money out). */
+    ".cat-m{font-size:var(--fs-micro);font-weight:640;letter-spacing:.02em;",
+    "padding:1px 6px;border-radius:var(--r-xs);background:var(--surface-2);",
+    "color:var(--muted);white-space:nowrap}",
+    ".cat-row:hover .cat-m{background:var(--surface)}",
+    ".cat-m.up{color:var(--up)}.cat-m.dn{color:var(--down)}",
+    ".cat-m.acc{color:var(--accent-2)}",
+    ".cat-m.dash{background:none;color:var(--faint);padding:0}",
+    ".cat-legs{font-size:var(--fs-micro);color:var(--muted);min-width:0;",
+    "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
     ".cat-blurb{font-size:12.5px;line-height:1.6;color:var(--muted);margin:10px 0 0}",
     ".cat-blurb.none{color:var(--faint);font-style:italic}",
-    ".cat-why{margin:10px 0 0}",
-    ".cat-sec{margin-top:6px;padding-top:12px;border-top:1px solid var(--hairline)}",
-    ".cat-sec-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;",
-    "color:var(--faint);font-weight:650;margin-bottom:9px}",
+    ".cat-why{grid-column:1/-1;margin:6px 0 2px}",
     ".chips{display:flex;flex-wrap:wrap;gap:7px;align-items:center}",
-    ".cat-chip{font:inherit;font-size:12px;font-weight:600;padding:5px 11px;",
+    ".cat-chip{font:inherit;font-size:12px;font-weight:600;padding:3px 9px;",
     "border-radius:var(--radius-pill);border:1px solid var(--hairline2);",
     "background:var(--surface-2);color:var(--text);cursor:pointer;",
-    "display:inline-flex;gap:6px;align-items:center}",
+    "display:inline-flex;gap:5px;align-items:center}",
     ".cat-chip:hover{border-color:var(--accent);color:var(--accent)}",
     ".chip-x{color:var(--faint);font-size:11px}",
     ".cat-chip.add{border-style:dashed;color:var(--accent);background:transparent}",
-    ".cat-f{display:flex;align-items:center;gap:8px;margin-top:14px;",
-    "padding-top:11px;border-top:1px solid var(--hairline);font-size:11.5px;",
-    "flex-wrap:wrap}",
     /* on your tickers */
     ".on-grid{display:grid;gap:14px;",
     "grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}",
@@ -1846,9 +1962,20 @@ function ensureCatStyles() {
     ".att-form{display:flex;flex-direction:column;gap:14px}",
     ".att-diff{display:flex;flex-direction:column;gap:6px;font-size:12.5px}",
     ".att-diff code{color:var(--accent)}",
-    "@media (max-width:560px){.cat-grid{grid-template-columns:1fr}",
-    ".on-grid{grid-template-columns:1fr}",
-    ".cat-q{width:100%}.cat-card{padding:15px 15px 12px}}",
+    /* THE COLUMN, NOT THE WINDOW, is what runs out of room -- the same
+       mistake test_layout.py exists for. The six-column template needs about
+       760px of CONTENT width, so it collapses to a stack below that and the
+       header row, which labels columns that no longer exist, goes with it. */
+    "@media (max-width:860px){.cat-thead{display:none}",
+    ".cat-row{grid-template-columns:minmax(0,1fr);gap:5px;padding:11px 13px}",
+    ".cat-c.cat-num,.cat-c.cat-act{justify-content:flex-start}",
+    /* stacked, a cell with nothing in it is a blank line, and the Set number
+       has lost the column that named it -- so empty cells collapse and that
+       one number gets its label back. */
+    ".cat-c:empty{display:none}",
+    ".cat-c.cat-num::before{content:'set ';color:var(--faint);",
+    "font-size:var(--fs-micro);letter-spacing:.08em;text-transform:uppercase}",
+    ".on-grid{grid-template-columns:1fr}.cat-q{width:100%}}",
   ].join("");
   document.head.appendChild(s);
 }

@@ -28,6 +28,10 @@
      THE SCORECARD       five derived measures out of six, with the holdings
                          that lift each one and the ones that hold it back
      THE DISPERSION      every holding as one dot on one axis of return
+     BOOKED vs OPEN      each holding's realised bar and the open bar stacked
+                         on top of it, so the owner's own complaint -- booked
+                         flatters a book that has not sold anything -- is
+                         readable per name instead of only for the account
      CONTRIBUTORS        highest and lowest, per ticker and per strategy
      THE DETAILED TABLE  shares, price, value, cost, unrealised, realised,
                          total and a cash-flow IRR, with a TOTAL row
@@ -36,11 +40,22 @@
                          which is the finding, not a tidy result
 
    ------------------------------------------------------------- the visuals
-   Four components are written here rather than in viz.js: `waterfall`,
-   `dotstrip`, `sumbar` and `radar`. They are not in the shared library because five
-   agents edit this repo at once and adding to viz.js while others are reading
-   it is the easiest merge collision in the tree. If a second page ever wants
-   one, it moves -- until then it lives beside its only caller.
+   Five components are written here rather than in viz.js: `waterfall`,
+   `dotstrip`, `sumbar`, `splitbar` and `radar`. They are not in the shared
+   library because five agents edit this repo at once and adding to viz.js
+   while others are reading it is the easiest merge collision in the tree. If
+   a second page ever wants one, it moves -- until then it lives beside its
+   only caller.
+
+   ROUND 7 DELETED THE "How these are measured" PANEL -- 506 visible words in
+   475px, six definitions of what a term MEANS -- and spent part of that room
+   on `splitbar`. Every one of those six strings is ALSO the `reason` on the
+   metric envelope it describes, so it is still on the number it is about, on
+   hover, once; the panel was a second printed copy of all six. The strings
+   themselves were shortened in perf.py rather than truncated here, so the
+   payload and the page say the same thing. What a term MEANS went; what it
+   CAVEATS (turnover, not capital; a chosen scale, not a measurement; no sign
+   change means no rate) stayed.
 
    They obey viz.js's rules, which are the house rules and not this file's:
      * a null is a GAP with its reason, never a zero-length bar;
@@ -91,6 +106,7 @@ VIEWS.returns = {
       <div id="rtTiles"></div>
       <div id="rtScore"></div>
       <div id="rtDisp"></div>
+      <div id="rtSplit"></div>
       ${/* The detailed table is TEN columns wide and it goes full-bleed.
             Measured at 1280px inside `.grid main`'s left column: the table
             laid out at 816px in a 573px wrapper and scrolled sideways, so
@@ -105,8 +121,7 @@ VIEWS.returns = {
         <div id="rtContrib"></div>
         <div id="rtStrat"></div>
       </div>
-      <div id="rtLiq"></div>
-      <div id="rtBasis"></div>`;
+      <div id="rtLiq"></div>`;
     render();
     load(true);
   },
@@ -139,11 +154,11 @@ function render() {
   renderTiles();
   renderScorecard();
   renderDispersion();
+  renderSplit();
   renderContributors();
   renderStrategies();
   renderTable();
   renderLiquidated();
-  renderBasis();
 }
 
 /* =========================================================== the components */
@@ -202,10 +217,14 @@ function waterfall(o) {
     run += r.v;
     r.to = run;
   }
+  /* THE FACT STAYS, THE ESSAY GOES. This tooltip reports a BREAK in the
+     drawing, so round 7 left it saying which term broke it and that the value
+     under it is still real; what went was the paragraph re-explaining that a
+     running total was never formed, which is what "the bridge stops at"
+     already says. */
   const looseWhy = (lbl) => "the bridge stops at “" + brokeAt
-    + "”, which was not measured, so " + lbl + " is drawn from zero "
-    + "rather than from a running total that was never formed. The value "
-    + "itself is measured.";
+    + "”, unmeasured, so " + lbl + " is drawn from zero. Its own value is "
+    + "measured.";
   const ends = [0];
   for (const r of rows) {
     if (r.from !== null) ends.push(r.from);
@@ -367,10 +386,83 @@ function dotstrip(o) {
     ${agg === null ? "" : `<div class="ds-leg"><i class="ds-agg static"></i>
       ${esc(o.aggLabel || "portfolio")} ${esc(vfmt(agg, { unit, signed: true }))}
       </div>`}
-    ${gone.length ? `<div class="viz-note">${gone.length} holding(s) are not on
-      this axis because nothing measured them: ${
-      esc(gone.map((g) => g.label).join(", "))}. A dot at zero would claim they
-      returned nothing.</div>` : ""}</div>`;
+    ${gone.length ? `<div class="viz-note">Not on this axis, unmeasured: ${
+      esc(gone.map((g) => g.label).join(", "))}.</div>` : ""}</div>`;
+}
+
+/* ========================================================= booked vs open
+   splitbar({rows}) -- one holding per row: the REALISED bar drawn from zero,
+   and the OPEN bar stacked on the end of it. It is the account waterfall's
+   grammar applied per name, and it exists because the owner's complaint was
+   about exactly this pair -- "booked makes the account look like it is making
+   money when it isnt". At the account level the bridge already answers him.
+   Per name, until now, the answer was two columns of a ten-column table.
+
+   THE SECOND SEGMENT STARTS WHERE THE FIRST ENDS, so a ticker whose realised
+   bar runs right and whose open bar runs back past zero reads as what it is:
+   a name that has booked profit and is holding a loss bigger than it. A pair
+   of bars both drawn from zero would let the eye add them, and they do not
+   add -- the total is the END of the second bar, which is where the tick is.
+
+   A ROW IS DRAWN ONLY IF BOTH TERMS ARE MEASURED. One of them missing means
+   the stack has no place to start or no length, and half a stack at zero is a
+   claim about a term nobody measured. Those names are listed under the chart
+   with their reason, the way `dotstrip` lists an unmeasured dot. */
+function splitbar(o) {
+  o = o || {};
+  const unit = o.unit || "usd";
+  const rows = (o.rows || []).map((r) => ({
+    label: r.label,
+    rv: num(r.realized), uv: num(r.unrealized),
+    why: why(r.realized) || why(r.unrealized) || "",
+  }));
+  const have = rows.filter((r) => r.rv !== null && r.uv !== null);
+  const gone = rows.filter((r) => r.rv === null || r.uv === null);
+  if (!have.length) {
+    return vizEmpty({ h: o.h || 120,
+                      title: o.empty || "Nothing to split",
+                      body: gone.length ? gone[0].why : "" });
+  }
+  const ends = [0];
+  have.forEach((r) => { ends.push(r.rv, r.rv + r.uv); });
+  let lo = Math.min.apply(null, ends);
+  let hi = Math.max.apply(null, ends);
+  const pad = (hi - lo) * 0.04 || 0.01;
+  lo -= pad; hi += pad;
+  const X = (v) => ((v - lo) / (hi - lo)) * 100;
+  const zero = X(0);
+  const money = (v) => vfmt(v, { unit, signed: true });
+
+  /* A segment is drawn between two MEASURED ends and nowhere else; a zero
+     term is a real 0-length move and gets the 0.4% stub so the row does not
+     look like it is missing a bar. */
+  const seg = (cls, a, b, t) => {
+    const x0 = X(Math.min(a, b));
+    const w = Math.max(X(Math.max(a, b)) - x0, 0.4);
+    return `<i class="sp-b ${cls}" style="left:${x0.toFixed(3)}%;width:${
+      w.toFixed(3)}%" title="${esc(t)}"></i>`;
+  };
+
+  const body = have.map((r) => {
+    const tot = r.rv + r.uv;
+    return `<div class="sp-r"><span class="sp-l" title="${esc(r.label)}">${
+      esc(r.label)}</span>
+      <span class="sp-t"><i class="sp-z" style="left:${zero.toFixed(3)}%"></i>
+        ${seg("booked " + toneOf(r.rv), 0, r.rv,
+              r.label + " booked " + money(r.rv))}
+        ${seg("open " + toneOf(r.uv), r.rv, tot,
+              r.label + " open " + money(r.uv))}
+        <i class="sp-tick" style="left:${X(tot).toFixed(3)}%"></i></span>
+      <span class="sp-v num ${toneOf(tot)}" title="${esc(r.label + " total "
+        + money(tot))}">${esc(vfmt(tot, { unit, signed: true,
+        compact: true }))}</span></div>`;
+  }).join("");
+
+  return `<div class="viz sp">${body}
+    <div class="sp-leg"><i class="sp-k booked"></i>booked<i
+      class="sp-k open"></i>open<i class="sp-k tick"></i>total</div>
+    ${gone.length ? `<div class="viz-note">Not drawn, one term unmeasured: ${
+      esc(gone.map((g) => g.label).join(", "))}.</div>` : ""}</div>`;
 }
 
 /* ============================================================== the radar
@@ -563,9 +655,14 @@ function attrRow(r, m, exact, color) {
 function attribution(m) {
   const a = m && m.attribution;
   if (!m) return "";
+  /* NO `m.basis` PARAGRAPH. It ran 57 words defining what the measure MEANS,
+     under a row that already prints the measure's label, the band it fell in
+     and its measured value in the measure's own units -- which is the part a
+     reader acts on. Round 7 deleted it rather than moving it to a title: a
+     definition behind a hover is still a definition on the page, and this one
+     had a scale beside it saying the same thing in numbers. */
   const head = `<div class="sc-ah"><b>${esc(m.label)}</b></div>
-    ${bandScale(m)}
-    <div class="sc-abasis">${prose(m.basis)}</div>`;
+    ${bandScale(m)}`;
   if (!a) {
     return `<div class="sc-attr">${head}${vizEmpty({ h: 110,
       title: "Nothing stands behind this measure",
@@ -615,16 +712,16 @@ function renderScorecard() {
       <div class="sc-rad">${radar(ms, SEL, sc.max)}</div>
       <div class="sc-list">${ms.map((m) => scRow(m, SEL)).join("")}</div>
     </div>
+    ${/* THE COUNT AND THE NAMES STAY -- this reports a hole in the drawing,
+          and round 7 was told not to make a problem quieter. What went is the
+          paragraph explaining why an unmeasured vertex is not a zero one; the
+          radar itself already draws that difference. */ ""}
     ${gone.length ? `<div class="viz-note">${gone.length} of ${ms.length}
       ${gone.length === 1 ? "axis is" : "axes are"} not plotted — ${
-      esc(gone.map((m) => m.label).join(", "))} — and the web between the
-      points is not drawn, because a line through a vertex nobody measured
-      would put that vertex somewhere. A point at the centre would be a score
-      of nothing, which is a different claim.</div>` : ""}
+      esc(gone.map((m) => m.label).join(", "))} — so the web is not drawn.
+      </div>` : ""}
     ${attribution(cur)}`,
-    { sub: "Each axis is scored against a stated scale, and the measured "
-         + "value is beside it. Pick one to see which holdings lift it and "
-         + "which hold it back.",
+    { sub: "Pick an axis for the holdings that lift it and hold it back.",
       actions: `<div class="sc-ov">${mnum(sc.overall, { unit: "count" })}<i>of ${
         sc.max} across ${sc.scored} measure${sc.scored === 1 ? "" : "s"}</i></div>`,
       cls: "rt-score" });
@@ -699,9 +796,7 @@ function renderBridge() {
     `${waterfall({ parts: b.parts, total: b.total, h: 220,
                    totalLabel: "THE ACCOUNT" })}
      ${sumbar(b)}`,
-    { sub: "Each bar is a TERM. They add up to the account's own profit and "
-         + "loss — equity less every deposit and withdrawal — so no single one "
-         + "of them is the headline.",
+    { sub: "Each bar is a TERM, not a headline. They add to the account.",
       cls: "rt-bridge" });
 }
 
@@ -742,7 +837,19 @@ function renderDispersion() {
     dotstrip({ rows, unit: "pct", aggregate: D.totals.return_pct,
                aggLabel: "the whole book",
                empty: "No holding has a measurable return yet" }),
-    { sub: "Return on the capital each one took. The marker is the book's own." });
+    { sub: "Return on the capital each one took." });
+}
+
+/* ======================================================== booked vs open */
+function renderSplit() {
+  const host = el("rtSplit");
+  if (!host || !D) return;
+  host.innerHTML = panel("Booked against still open",
+    splitbar({ rows: (D.holdings || []).map((h) => ({
+                 label: h.symbol, realized: h.realized,
+                 unrealized: h.unrealized })),
+               empty: "No holding has both a realised and an open figure" }),
+    { sub: "Realised, then the open lots stacked on it. The tick is the total." });
 }
 
 /* ========================================================= the contributors */
@@ -788,14 +895,11 @@ function renderContributors() {
                unit: "usd", sort: false,
                empty: "Nothing has contributed yet" })}
     </div>
-    ${(c.unranked || []).length ? `<div class="viz-note">${
-      esc(c.unranked.join(", "))} could not be ranked: nothing measured a total
-      gain for them.</div>` : ""}`;
+    ${(c.unranked || []).length ? `<div class="viz-note">Not ranked, no total
+      gain measured: ${esc(c.unranked.join(", "))}.</div>` : ""}`;
   host.innerHTML = panel(split ? "Contributors, by ticker"
                                : "Every holding, ranked", body,
-    { sub: "Dollars, with the return on that ticker's capital beside them. "
-         + "Ranked on TOTAL gain — realised plus what the open lots are worth "
-         + "— so a name holding an underwater bag cannot top the list." });
+    { sub: "Ranked on TOTAL gain, realised plus open." });
 }
 
 function renderStrategies() {
@@ -805,9 +909,11 @@ function renderStrategies() {
   host.innerHTML = panel("Contributors, by strategy",
     hbar({ rows: contribRows(s), unit: "usd", sort: false,
            empty: "No strategy has booked anything yet" }),
-    { sub: "Realised only. A position at the broker does not record which "
-         + "strategy opened it, so splitting the open P/L between them would "
-         + "be attribution by guesswork." });
+    /* "Realised only" is a CAVEAT -- these bars are a different quantity from
+       the ticker bars beside them -- so it stays. The sentence explaining why
+       the open side cannot be split lives on the payload's own
+       `contributors.why` and is not printed a second time here. */
+    { sub: "Realised only: a broker position records no strategy." });
 }
 
 /* ========================================================= the big table */
@@ -849,10 +955,14 @@ function renderTable() {
   if (!host || !D) return;
   const cols = [
     { label: "Holding" },
+    /* THE HEADER TITLES ARE CAVEATS NOW, NOT DEFINITIONS. Each one used to
+       restate a `*_BASIS` string that the CELLS under it already carry as
+       their own reason -- so the same paragraph was on the header and on
+       fifteen cells below it. What is left is the part that stops a
+       misreading: a contract is not a share, a log is not the whole story,
+       the denominator is turnover. */
     { label: "Size", num: true,
-      title: "Shares for an equity position, CONTRACTS for an option one — "
-           + "each row says which. Contracts of different strikes do not add "
-           + "to one size, so a multi-leg underlying reports a dash here." },
+      title: "Shares, or CONTRACTS on an option row — each row says which." },
     { label: "Price", num: true },
     { label: "Value", num: true, title: "At the broker's marks." },
     { label: "Cost basis", num: true, title: "What the OPEN position cost." },
@@ -861,18 +971,14 @@ function renderTable() {
       /* The basis, not a claim about the account. "On this account it is
          wins-only" was a constant here too, printed over a column that on a
          book with 41 closed losers shows every one of them. */
-      title: "What the strategies' own logs have booked. A log only ever "
-           + "records the exits it saw, so this is not the whole story of "
-           + "what a ticker did." },
+      title: "Booked by the strategies' own logs, which see only the exits "
+           + "they made." },
     { label: "Total", num: true, title: "Realised plus open." },
     { label: "Return", num: true,
-      title: "Total gain over the capital deployed — the open cost plus every "
-           + "closed lot's entry cost. A ladder recycles the same dollars, so "
-           + "that denominator is turnover, and this is a return per dollar "
-           + "traded rather than on capital." },
+      title: "Over capital deployed, which is TURNOVER — per dollar traded, "
+           + "not on capital." },
     { label: "Annualised", num: true,
-      title: "A money-weighted IRR over the actual dated fills, not "
-           + "(end/start)^(1/years)." },
+      title: "Money-weighted IRR over the dated fills." },
   ];
   const rows = (D.holdings || []).map(holdingRow);
   const t = D.totals;
@@ -891,9 +997,10 @@ function renderTable() {
   host.innerHTML = panel("Detailed returns",
     dataTable({ cols, rows, dense: true, cls: "rt-tbl",
                 empty: "No holding and no closed trade on this account yet." }),
-    { sub: "The TOTAL row's gains are the ACCOUNT's own figures, not the sum "
-         + "of the rows above — anything the broker holds that no row claims "
-         + "would otherwise vanish out of the total." });
+    /* THE TOTAL ROW IS NOT THE SUM OF THE ROWS and a reader who adds the
+       column and disagrees with it would be right to distrust the page, so
+       this one stays. It is compressed, not moved. */
+    { sub: "TOTAL is the account's own, not the sum of the rows." });
 }
 
 /* ================================================= the liquidated holdings */
@@ -916,10 +1023,13 @@ function renderLiquidated() {
        class="rt-sym">${esc(h.symbol)}</a>`,
     String(h.trades),
     `<span class="up">${h.wins}</span>`,
+    /* A MEASURED ZERO, not a dash: every closed trade on this symbol was
+       checked and none lost. The banner above says what that means about the
+       exit rule -- loudly, once, in the room -- so the cell does not repeat
+       it on every row. */
     h.losses ? `<span class="down">${h.losses}</span>`
-      : `<span class="unmeasured" title="not one closed trade on ${esc(h.symbol)
-        } was a loss. With no stop loss a losing lot is never closed, so this
-        is a fact about the exit rule and not about the entries.">0</span>`,
+      : `<span class="unmeasured" title="${esc(h.trades)} closed, none at a
+        loss">0</span>`,
     mcell(h.realized),
     mcell(h.deployed, { signed: false }),
     mcell(h.return_pct),
@@ -936,32 +1046,20 @@ function renderLiquidated() {
   host.innerHTML = panel("Liquidated holdings",
     banner + dataTable({ cols, rows, dense: true,
       empty: "Nothing on this account has been fully closed out yet." }),
-    { sub: "A position that was closed keeps its realised contribution and "
-         + "sits in the same table as the winners. That is what stops a "
-         + "wins-only log from quietly dropping its losers." });
+    { sub: "Closed positions, winners and losers in one table." });
 }
 
-/* ================================================================ the basis */
+/* ================================================================ the prose */
 /* perf.py writes `--` for an em dash, which is the house style in PYTHON
    source. On screen it is two hyphens in the middle of a sentence. Converted
    here rather than in perf.py, because the module's own comments and its
-   payload are one text and it is the rendering that differs. */
-const prose = (s) => esc(String(s || "")).replace(/ -- /g, " — ");
+   payload are one text and it is the rendering that differs.
 
-function renderBasis() {
-  const host = el("rtBasis");
-  if (!host || !D) return;
-  host.innerHTML = panel("How these are measured", `
-    <dl class="rt-basis">
-      <dt>The decomposition</dt><dd>${prose(D.breakdown.why)}</dd>
-      ${D.scorecard ? `<dt>The five measures</dt><dd>${
-        prose(D.scorecard.basis)}</dd>` : ""}
-      <dt>Annualised (IRR)</dt><dd>${prose(D.irr_basis)}</dd>
-      <dt>Capital deployed</dt><dd>${prose(D.deployed_basis)}</dd>
-      <dt>The TOTAL row</dt><dd>${prose(D.totals.why)}</dd>
-      <dt>Contributors</dt><dd>${prose(D.contributors.why)}</dd>
-    </dl>`, { cls: "rt-basisp" });
-}
+   THIS USED TO HAVE A PANEL UNDER IT -- "How these are measured", six terms
+   defined at 506 words in 475px. It is gone; see the visuals note at the top
+   of this file. `prose` stays because the scorecard's attribution still uses
+   it, and because the payload keeps writing `--`. */
+const prose = (s) => esc(String(s || "")).replace(/ -- /g, " — ");
 
 /* ================================================================== the CSS
    Injected under its own id rather than added to app.css: several agents edit
@@ -1046,13 +1144,38 @@ const CSS = `
   text-transform:uppercase;margin:var(--s3) 0 var(--s2);}
 .rt-ct-h:first-child{margin-top:0;}
 
-/* ---- the basis list ---- */
-.rt-basis{margin:0;display:grid;grid-template-columns:minmax(140px,22%) 1fr;
-  gap:var(--s2) var(--s4);}
-.rt-basis dt{font-size:var(--fs-sm);color:var(--text);
-  font-weight:var(--w-med);}
-.rt-basis dd{margin:0;font-size:var(--fs-xs);color:var(--muted);
-  line-height:1.6;}
+/* ---- booked against open ----
+   .sp-* and not a second .wf-* skin: round 6 shipped a class-name collision
+   between two files' injected stylesheets and test_rooms section 3 pins it.
+   Nothing else in static/ui defines an .sp- class -- checked, not assumed. */
+.sp{display:flex;flex-direction:column;gap:6px;}
+.sp-r{display:grid;grid-template-columns:minmax(56px,16%) 1fr minmax(78px,auto);
+  align-items:center;gap:var(--s3);min-height:22px;}
+.sp-l{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;}
+.sp-t{position:relative;height:18px;border-radius:var(--r-sm);
+  background:var(--bg-3);overflow:hidden;}
+.sp-b{position:absolute;top:3px;height:12px;border-radius:3px;min-width:2px;
+  background:var(--faint);}
+.sp-b.up{background:var(--up);} .sp-b.down{background:var(--down);}
+.sp-b.flat{background:var(--faint);}
+/* THE OPEN SEGMENT IS THE SAME MONEY COLOUR, FADED. --up/--down mean money
+   moved and mean nothing else (viz.js rule 2), so "not yet sold" cannot be a
+   third hue -- it is the same hue at .42 with a dashed edge, which is how the
+   bridge already draws a bar whose place is provisional. */
+.sp-b.open{opacity:.42;outline:1px dashed var(--hairline2);outline-offset:-1px;}
+.sp-z{position:absolute;top:0;bottom:0;width:1px;background:var(--viz-zero);}
+.sp-tick{position:absolute;top:0;bottom:0;width:1px;
+  background:var(--hairline2);}
+.sp-v{text-align:right;font-size:var(--fs-sm);font-weight:var(--w-med);
+  font-variant-numeric:tabular-nums;}
+.sp-leg{display:flex;align-items:center;gap:5px;margin-top:var(--s2);
+  font-size:var(--fs-micro);color:var(--faint);}
+.sp-leg i{margin-left:var(--s3);}
+.sp-leg i:first-child{margin-left:0;}
+.sp-k{width:14px;height:8px;border-radius:2px;background:var(--faint);}
+.sp-k.open{opacity:.42;outline:1px dashed var(--hairline2);outline-offset:-1px;}
+.sp-k.tick{width:1px;height:12px;border-radius:0;background:var(--hairline2);}
 
 /* ---- the scorecard radar ---- */
 .rt-score .panel-x{align-self:center;}
@@ -1117,8 +1240,6 @@ const CSS = `
 .sc-sb.on{background:var(--viz-c1);}
 .sc-scale-l{font-size:var(--fs-micro);color:var(--faint);
   font-variant-numeric:tabular-nums;}
-.sc-abasis{font-size:var(--fs-xs);color:var(--muted);line-height:1.6;
-  margin:var(--s3) 0;}
 .sc-anote{margin-top:var(--s2);font-size:var(--fs-micro);color:var(--faint);
   line-height:1.5;}
 
@@ -1138,8 +1259,8 @@ const CSS = `
   .wf-r{grid-template-columns:minmax(76px,34%) 1fr minmax(66px,auto);
     gap:var(--s2);}
   .ds-d b{display:none;}
-  .rt-basis{grid-template-columns:1fr;gap:2px var(--s2);}
-  .rt-basis dd{margin-bottom:var(--s3);}
+  .sp-r{grid-template-columns:minmax(44px,26%) 1fr minmax(62px,auto);
+    gap:var(--s2);}
 }
 `;
 

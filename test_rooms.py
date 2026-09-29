@@ -372,18 +372,53 @@ check("riskmath.js's capRow prints no paragraph",
 section(5, "what those paragraphs said is still reachable")
 # ===========================================================================
 # A deletion that loses the reason is not the change that was asked for.
+#
+# ROUND 7 EDITED THIS LIST, and the reason has to be written down or the next
+# reader will take it for a test loosened to fit a change.
+#
+# Round 6 was measured afterwards and the finding was that it had not deleted
+# prose, it had RELOCATED it: counting visible words plus every title=, the
+# Hub went 1,498 -> 1,469 (-2%), Risk went UP 1%, Ticker Overview UP 13%. The
+# Hub was carrying 80 title attributes holding 1,113 words behind 356 visible
+# ones. This section is the rule that made that the easy move -- every retired
+# sentence had to still be FINDABLE, so every retired sentence was kept, word
+# for word, on a hover.
+#
+# Round 7's brief splits those sentences in two, and the split is the whole
+# round:
+#
+#   a REASON   -- why a number is missing, why a figure is thin, what a
+#                 control costs -- is this product's contract and STAYS,
+#                 and must now be reachable without a mouse (reason.js)
+#   a GLOSSARY -- a sentence that defines the word already printed above it --
+#                 is DELETED, not hovered
+#
+# So five phrases below are gone from the source and are not coming back. Each
+# is replaced here by the SHORTER phrase that carries the same reason, so this
+# section still asserts what it always asserted -- the reason survived -- and
+# stops asserting the thing round 7 was sent to undo, that the wording did.
+# Two were deleted outright and are recorded as deletions:
+#
+#   overview.js  "a shorter window has a younger peak"  -> the Drawdown panel
+#                still says the figures are since inception and the chart is
+#                the window you pick; the third copy of it, on the plot's own
+#                title, is deleted
+#   settings.js  "Affects: "  -> `hint` + `affects` are one `why` per row now,
+#                and it is a consequence, not a description. The row's mark is
+#                a REAL disclosure this round (see section 8), so what it says
+#                is reachable by tab and by tap rather than by hover alone.
 KEPT = [
     ("overview.js", "net-credit structure", "on the bar's title"),
-    ("overview.js", "the cost basis of its open\n        lots",
+    ("overview.js", "the cost basis of its open lots",
      "on the At risk total's title"),
-    ("overview.js", "the two are never added",
+    ("overview.js", "never added to an options play",
      "on the Ladder realised column"),
     ("overview.js", "share ladder", "on the fleet button group"),
-    ("overview.js", "a shorter window has a younger peak",
+    ("overview.js", "the figures are since inception",
      "on the Drawdown panel title"),
     ("risk.js", "the same quantity as the ticker ring",
      "on the By strategy button"),
-    ("risk.js", "sample that cannot contain a loss",
+    ("risk.js", "a curve from it cannot fall",
      "on the Drawdown panel title"),
     ("risk.js", "auto-exercised", "inside the assignment disclosure"),
     ("risk.js", "ladder has no fixed depth",
@@ -392,8 +427,18 @@ KEPT = [
      "on the Rename button"),
     ("settings.js", "one process for every account",
      "on the Restart button"),
-    ("settings.js", "Affects: ", "in the row's info mark"),
+    ("settings.js", "Halts every ladder at once",
+     "on the daily-loss row's disclosure"),
 ]
+# and the two that round 7 deleted outright may not come back either
+for room, phrase, why in (
+    ("overview.js", "a shorter window has a younger peak",
+     "-> the panel title says it once; the plot's third copy is deleted"),
+    ("settings.js", "Affects: ",
+     "-> `hint` + `affects` are one short `why`, on a real disclosure"),
+):
+    check(f"{room} no longer carries {phrase[:34]!r}", phrase not in ROOMS[room],
+          why)
 for room, phrase, where in KEPT:
     check(f"{room}: still says {phrase.split(chr(10))[0][:38]!r}",
           phrase in ROOMS[room], f"it should be {where}")

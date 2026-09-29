@@ -426,4 +426,4 @@ def hub_profile(scen: str, spec: dict, engine_factory) -> Optional[dict]:
             # let a view that has neither of them right pass.
             "watch": [],
             "account": dict(spec["account"]), "account_exact": True,
-            "made_today": None, "base_value": None, "realized": None}
+            "made_today": None, "base_value": None}

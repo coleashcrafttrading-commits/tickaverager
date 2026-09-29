@@ -261,10 +261,8 @@ export function contributions(parts) {
   return { rows: rows, gross: r2(gross), net: r2(net), measured: measured,
            missing: missing,
            why: gross ? null
-             : (measured ? "every strategy here has realised exactly $0.00, so "
-                         + "there is nothing to divide"
-                         : "no strategy on this ticker reports a realised "
-                         + "figure, so there is nothing to divide") };
+             : (measured ? "every strategy here realised exactly $0.00"
+                         : "no strategy here reports a realised figure") };
 }
 
 /* ========================================================== the metric set */
@@ -279,35 +277,40 @@ export function contributions(parts) {
    `signed` marks the figures where the SIGN is the meaning and colour is
    earned. Nothing else is coloured -- a green Sharpe is decoration. */
 export var METRIC_GROUPS = [
+  /* NO `note` ON ANY GROUP from 29 Sep 2026. ticker.js rendered these three
+     sentences into the group heading's title=, which is how round 6's cut
+     of the Ticker Overview came out 13% LONGER counted with its tooltips
+     than it went in. Each one defined the heading above it -- "the counts
+     every other figure on this page is divided by" under a heading that
+     says Activity -- and none of them reported that anything was wrong.
+     What DOES report that is still here and still loud: perf.py's own
+     `caveats`, drawn as a banner by recCaveats, and `equity_basis`, which
+     names the curve the risk figures were measured on and which recFull
+     already prefers over any static sentence. */
   {
     id: "result", title: "Result",
-    note: "realised is what closed. Open is what is still in the book. The "
-        + "sum is the only one of the three that is this ticker's P/L.",
     items: [
-      { key: "net_pl", label: "Realised", signed: true,
-        hint: "every closed trade on this ticker, added up" },
-      { key: "open_pl", label: "Open P/L", signed: true, unitWord: "position",
-        hint: "Alpaca's own mark on what is still held here" },
+      { key: "net_pl", label: "Realised", signed: true },
+      { key: "open_pl", label: "Open P/L", signed: true, unitWord: "position" },
       { key: "total_pl", label: "Realised + open", signed: true, big: true,
-        unitWord: "trade or position",
-        hint: "the number a 100% win rate hides: what these trades are worth "
-            + "once the inventory they are still holding is counted" },
+        unitWord: "trade or position" },
       { key: "gross_win", label: "Gross win", signed: true, unitWord: "winner" },
+      /* SIGN, not description: this one arrives POSITIVE and a reader who
+         takes it for a signed P/L reads the worst number on the tile as the
+         best. */
       { key: "gross_loss", label: "Gross loss", unitWord: "loser",
-        hint: "positive by contract -- the size of what was lost" },
+        hint: "positive by contract: the size lost" },
     ],
   },
   {
     id: "edge", title: "Edge",
-    note: "a win rate with no losing trade behind it is not a win rate; it is "
-        + "what a ladder with no stop loss always prints.",
     items: [
       { key: "profit_factor", label: "Profit factor", dp: 2 },
       { key: "expectancy", label: "Expectancy", signed: true,
         hint: "per closed trade" },
       { key: "win_rate", label: "Win rate", dp: 1 },
       { key: "win_loss_ratio", label: "Win / loss size", dp: 2,
-        unitWord: "pair", hint: "the average winner over the average loser" },
+        unitWord: "pair" },
       { key: "avg_win", label: "Average win", signed: true, unitWord: "winner" },
       { key: "avg_loss", label: "Average loss", unitWord: "loser" },
       { key: "best_trade", label: "Best trade", signed: true },
@@ -316,8 +319,6 @@ export var METRIC_GROUPS = [
   },
   {
     id: "risk", title: "Risk",
-    note: "measured on whichever curve the block says it used. On one ticker "
-        + "that is its own realised curve, which cannot see open inventory.",
     items: [
       { key: "max_drawdown", label: "Max drawdown" },
       { key: "max_drawdown_pct", label: "Max drawdown %", dp: 2 },
@@ -328,13 +329,11 @@ export var METRIC_GROUPS = [
       { key: "sortino", label: "Sortino", dp: 2 },
       { key: "calmar", label: "Calmar", dp: 2 },
       { key: "annual_return", label: "Annualised", dp: 1 },
-      { key: "exposure", label: "Exposure", dp: 1,
-        hint: "the share of the measured span with a position open" },
+      { key: "exposure", label: "Exposure", dp: 1 },
     ],
   },
   {
     id: "activity", title: "Activity",
-    note: "the counts every other figure on this page is divided by.",
     items: [
       { key: "trades", label: "Closed trades" },
       { key: "wins", label: "Winners" },
@@ -342,8 +341,9 @@ export var METRIC_GROUPS = [
       { key: "scratches", label: "Scratches" },
       { key: "max_consecutive_wins", label: "Longest win run" },
       { key: "max_consecutive_losses", label: "Longest loss run" },
+      /* SIGN again: -3 and +3 are opposite facts. */
       { key: "current_streak", label: "Current streak",
-        hint: "positive is a run of winners, negative a run of losers" },
+        hint: "+ is winners, - is losers" },
       { key: "avg_hold_days", label: "Average hold", dp: 2, unitWord: "trade" },
       { key: "up_days", label: "Up days", unitWord: "day", unit: "count" },
       { key: "down_days", label: "Down days", unitWord: "day", unit: "count" },
@@ -392,8 +392,8 @@ export function metricOf(block, spec) {
       ? block.equity_points : 0;
     if (!measured) {
       var why = (sharpe && sharpe.reason)
-        || ("under " + MIN_DAILY_POINTS + " daily points on the curve behind "
-            + "this, so the day counts were never really sampled");
+        || ("under " + MIN_DAILY_POINTS + " daily points on the curve, so "
+            + "this was never sampled");
       return { value: null, n: pts, unit: unit, reason: why, thin: false };
     }
     return { value: v, n: pts, unit: unit, reason: null, thin: false };
@@ -452,12 +452,11 @@ function noDenominator(m, key) {
     n: (m && m.n) || 0,
     unit: (m && m.unit) || "pct",
     thin: false,
-    reason: "there is no per-ticker equity curve, so this is measured on the "
-          + "cumulative realised curve -- and a percentage of that divides the "
-          + "fall by the best cumulative P/L the log ever reached, not by any "
-          + "capital. Read the dollar figure beside it; perf.py published "
+    reason: "no per-ticker equity curve: this divides the fall by the best "
+          + "cumulative P/L the log ever reached, not by capital. Read the "
+          + "dollar figure beside it. perf.py published "
           + (m && m.value !== null && m.value !== undefined
-              ? String(m.value) : "a value") + " for " + key + ".",
+              ? String(m.value) : "a value") + ".",
   };
 }
 

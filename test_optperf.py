@@ -900,6 +900,28 @@ def main() -> int:
           True)
 
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
+    # ----------------------------------------------------------------------
+    # THE EXIT MIX AND THE WIN/LOSS STATS COUNT THE SAME TRADES
+    # ----------------------------------------------------------------------
+    # They did not. `_exits` took every closed-and-filled trade while
+    # `_outcomes` took only `judged` ones -- closed, filled, OURS (not adopted)
+    # and priced. Measured on one panel: AVERAGE WIN +$402.00 over 9 wins,
+    # above a table whose own wins were (3120+446)/9 = $396.22, and AVERAGE
+    # LOSS -$261.00 over a table giving $251.20. Neither figure was wrong; they
+    # answered about different sets, with nothing on screen saying so.
+    import inspect as _inspect
+    print(chr(10) + "35. exit mix and outcomes share ONE population")
+    _blk = _inspect.getsource(OP._exits)
+    check("the mix counts `judged` trades", "t.judged" in _blk, True)
+    check("not every closed-and-filled one",
+          'if t.state == "closed" and t.filled]' in _blk, False)
+    check("and it reports what it excluded", '"excluded"' in _blk, True)
+    check("with a reason that names the count", '"excluded_why"' in _blk, True)
+    check("the outcomes use the same predicate",
+          "t.judged" in _inspect.getsource(OP._outcomes), True)
+
+    print(chr(10) + ("ALL CHECKS PASSED" if not FAIL
+                     else "%d CHECK(S) FAILED" % FAIL))
     return 1 if FAIL else 0
 
 

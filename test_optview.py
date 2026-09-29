@@ -128,6 +128,15 @@ def view_source() -> str:
     src2 = re.sub(r"^import \{[\s\S]*?\} from \"\.\./core\.js\";", "", src,
                   flags=re.M)
     assert src2 != src, "the core.js import line moved"
+    # reason.js is another module's, it needs a real DOM, and what it does is
+    # make a `title` reachable by keyboard and by tap. The shim below defines
+    # wireReasons as a no-op, so the markup under test is the markup that
+    # ships -- `data-why` and the title are both still on it -- and the
+    # accessibility upgrade itself is the browser half's to check.
+    src3 = re.sub(r"^import \{[^}]*\} from \"\.\./reason\.js\";", "", src2,
+                  flags=re.M)
+    assert src3 != src2, "the reason.js import line moved"
+    src2 = src3
     return src2
 
 
@@ -150,10 +159,17 @@ def excise(src: str) -> str:
 
 
 def core_helpers() -> str:
-    """The real el/esc/money/sgn/stat/card/tableHTML, lifted from core.js.
+    """The real el/esc/money/sgn/stat/card/tableHTML/panel, lifted from core.js.
 
     Copied out rather than rewritten. A second, prettier implementation of
     money() in a test harness proves only that the harness is self-consistent.
+
+    `panel` is lifted SEPARATELY because it lives below the api marker rather
+    than in the formatting block. It is here from 29 Sep 2026, when the
+    Overview room became five panels: without it every ov* builder threw
+    ReferenceError inside mountPerf's own try, the room rendered its host and
+    nothing else, and this whole suite still printed ALL CHECKS PASSED. A
+    harness that cannot build the page under test verifies an empty string.
     """
     src = CORE.read_text(encoding="utf-8")
     a = src.index("export const $  =")
@@ -162,7 +178,12 @@ def core_helpers() -> str:
     for name in ("el", "esc", "money", "sgn", "stat", "card", "tableHTML"):
         assert re.search(rf"\b(const|function) {name}\b", block), \
             f"core.js no longer defines {name} in the formatting block"
-    return block
+
+    pa = src.index("export function panel(title, body, opts = {}) {")
+    pb = src.index("\n}\n", pa) + 3
+    pan = src[pa:pb].replace("export ", "")
+    assert pan.count("{") == pan.count("}"), "panel() no longer ends at a bare }"
+    return block + "\n" + pan
 
 
 SHIM = r"""
@@ -347,6 +368,9 @@ function __getCount(frag) {
 
 var VIEWS = {};
 var SHARED_API = ["/api/accounts", "/api/presets"];
+/* reason.js's one export, stubbed. It upgrades a mark that ALREADY carries a
+   title; with no layout and no focus there is nothing here for it to do. */
+function wireReasons() {}
 1;
 """
 

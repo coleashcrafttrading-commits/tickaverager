@@ -16,6 +16,16 @@ that could happen here, and both are closed:
     builds no broker and fetches nothing. So the real module is cheap to run
     offline, and there is no excuse for a hand-typed Sharpe ratio anywhere in
     this repo's fixtures. There is none.
+  * BY BEING TWO OBJECTS. The hub routes used to read an equity curve
+    generated in mockserver and an activity log that did not exist, while
+    these routes read the curve and the log below -- one account with two
+    histories. Three verifiers reported the resulting disagreement as a
+    product bug at CRITICAL or HIGH, and all three reproduced against fixtures
+    only. Since 29 Sep 2026 `mockserver._hub_ctx` builds its stub broker from
+    `_perf_spec()`, i.e. from the very dicts this file returns, so `activities`
+    and `equity_points` here ARE what the hub routes read. Adding a fact to a
+    profile now changes both pages, which is the point.
+
   * BY CONTRADICTING ITSELF. The last round's account block disagreed with its
     own position book and made a real warning fire on every scenario. Here the
     fixture is ONE set of facts and everything else is derived from it:
@@ -144,6 +154,22 @@ def equity_curve(kind: str, *, funded: float, equity: float, days: int,
             # down with rallies: a losing account is not a straight line, and
             # a straight line has no drawdown RECOVERY for the chart to mark
             v = 1.0 - 0.22 * f + 0.035 * math.sin(f * 7.1) + 0.02 * math.sin(f * 19.0)
+        elif kind == "drawdown":
+            # UP, THEN A CLIFF, THEN A PARTIAL RECOVERY -- the shape the
+            # `hubdrawdown` scenario exists to put on screen. It used to live
+            # in mockserver's own `_curve_for`, which only the hub routes read,
+            # so the same account's P/L page was drawn off a different curve
+            # and published a different drawdown. The shape moved here so that
+            # ONE curve feeds both.
+            if f < 0.55:
+                v = 1.0 + 0.45 * (f / 0.55)
+            elif f < 0.78:
+                k = (f - 0.55) / 0.23
+                v = 1.45 - 0.30 * k
+            else:
+                k = (f - 0.78) / 0.22
+                v = 1.15 + 0.16 * k
+            v += 0.006 * math.sin(f * 23.0)
         elif kind == "flat":
             v = 1.0
         elif kind == "thin":
@@ -469,7 +495,13 @@ def from_hub_profile(prof: dict, positions: list, acct: dict) -> dict:
                 "option_ledger": None,
                 "note": "no funding was read for this account"}
     funded = float(funded)
-    kind = "fall" if equity < funded else "rise"
+    # THE SCENARIO'S OWN SHAPE. `prof["curve"]` used to steer a SECOND curve
+    # generator inside mockserver, read by the hub routes alone, while this
+    # one fed /api/perf -- so `hubdrawdown` showed an 18% drawdown on one page
+    # and 2.4% on the other for one account. The shape is a `kind` here now,
+    # and there is one curve.
+    kind = {"drawdown": "drawdown", "thin": "thin"}.get(
+        prof.get("curve"), "fall" if equity < funded else "rise")
     if prof.get("curve") == "empty":
         return {"journal": prof.get("journal") or "rich",
                 "positions": positions, "account": dict(acct),

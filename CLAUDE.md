@@ -522,6 +522,30 @@ a shape on the page is a promise that something fills it. It needs a data
 source the account does not have. `test_tkmarket.py` section 8 asserts that no
 key and nothing in the renderer has grown one.
 
+## The Strategies room (29 Sep 2026) -- claimed names, and one measured rule
+
+| | |
+|---|---|
+| `static/ui/views/strategies.js` | the Bank room. Its injected stylesheet owns `cat-*`, `sh-*`, `on-*`, `nlg-*`, `nw-*`, `tk-*`, `att-*` and `lnk` |
+| `test_stratroom.py` | pins the shape below, offline |
+
+**A TOOLTIP IS NOT A DELETE.** Measured at 1280x900 against `mockshell.py
+--scenario hub`, counting visible words in `#view` AND every `title=` word:
+the room was 2,490 visible + 2,041 hidden = **4,531**; it is now 764 + 128 =
+**892**, over 3,800px instead of 7,237. The 2,041 was not incidental -- 1,555
+of it was four definitions (the kind pill, the origin pill and two gate
+sentences) written out again on each of 36 cards. **A definition belongs where
+the word is CHOSEN** -- on the filter segment that selects it, once -- and a
+sentence more than one row carries belongs in the key above the grid with the
+count of rows it covers. `.cat-thead` and `.cat-row` share ONE
+`grid-template-columns` in `fr` and `px` and never `auto`, because every row is
+its own grid and a content-sized track would measure only that row.
+
+Also found and fixed here: **`.lnk` was emitted four times from this file and
+defined by no stylesheet in the repo**, so all four rendered with the
+platform's grey 3D button chrome. `test_stratroom.py` section 7 now checks
+every class this file emits against every sheet that could define it.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -596,17 +620,21 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_engine_strategy
   test_entry_rule test_fractional test_greeks test_history test_indicators
   test_latency
+  test_mockharness test_mockreturns
   test_layout test_ledgertruth test_notes test_motion
   test_optapi test_optbacktest test_optbank test_optbook test_optcal
   test_optdata test_optengine test_optexec test_optgates test_optgrade
   test_options test_options_api test_optquotes test_optrest
   test_optrun
+  test_optroom
   test_optstructures test_optsym test_optview test_optvol test_presets
   test_tickerview test_tkmarket
   test_reconcile test_refresh_trend test_report test_research test_returns
-  test_reverse
+  test_returnscut test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
-  test_optplays test_rooms test_touch_adds test_trail test_trend test_trend_v2
+  test_optplays test_rooms test_stratroom test_touch_adds test_trail test_trend
+  test_words
+  test_trend_v2
   test_unwind`,
   each printing `ALL CHECKS PASSED`, with `TICKAVERAGER_JOURNAL` pointed at a
   scratch file. Two people build in this repo at once, so this list is the

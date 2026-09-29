@@ -951,7 +951,21 @@ def _exits(trades: list) -> dict:
     designed, however good its P/L looks -- it means the targets and stops are
     not the thing deciding trades, the calendar is.
     """
-    closed = [t for t in trades if t.state == "closed" and t.filled]
+    # THE SAME POPULATION AS THE STATISTICS BESIDE IT. This used to count every
+    # closed-and-filled trade while `_outcomes` counted only `judged` ones --
+    # closed, filled, OURS (not adopted) and carrying a P/L. Two populations in
+    # one panel, with nothing on screen saying so: measured, AVERAGE WIN read
+    # +$402.00 over 9 wins above a table whose own wins were (3120+446)/9 =
+    # $396.22, and AVERAGE LOSS -$261.00 over a table giving $251.20. Both were
+    # right about different sets, which is the worst kind of disagreement
+    # because neither is wrong.
+    #
+    # `judged` is the honest set for a statistic -- an adopted position was not
+    # this strategy's decision and a trade with no P/L cannot be scored -- so
+    # the mix adopts it, and what that drops is REPORTED rather than dropped.
+    closed = [t for t in trades if t.judged]
+    dropped = [t for t in trades
+               if t.state == "closed" and t.filled and not t.judged]
     n = len(closed)
     mix = []
     for cls in (EXIT_PROFIT, EXIT_STOP, EXIT_GUARD, EXIT_EXPIRY, EXIT_GONE,
@@ -969,7 +983,20 @@ def _exits(trades: list) -> dict:
                                    reason=None if rs else "nothing to average",
                                    thin=bool(rs and len(rs) < 5)),
         })
-    return {"n": n, "mix": mix}
+    adopted_n = len([t for t in dropped if t.adopted])
+    unpriced_n = len(dropped) - adopted_n
+    return {
+        "n": n, "mix": mix,
+        # Never silently. A panel that drops rows has to say how many and why,
+        # or its total stops matching the header above it.
+        "excluded": len(dropped),
+        "excluded_why": ("" if not dropped else
+                         "%d closed trade(s) are not in this mix: %d adopted "
+                         "from the broker rather than opened by this strategy, "
+                         "%d with no P/L to place. They are in the position "
+                         "counts and out of every statistic."
+                         % (len(dropped), adopted_n, unpriced_n)),
+    }
 
 
 def _holding(trades: list) -> dict:

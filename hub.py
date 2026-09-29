@@ -1359,13 +1359,24 @@ def _net_funding(ctx: "Ctx") -> tuple:
     try:
         import perf as _perf
         acts = []
+        got = False
         for kind in _perf.CASH_FUNDING_TYPES:
             try:
                 acts.extend(b.activities(activity_type=kind) or [])
+                got = True
             except Exception:
                 # One unsupported activity type is a 422 on some accounts and
                 # must not blank the whole cost basis.
                 continue
+        if not got:
+            # EVERY CALL FAILED, WHICH IS NOT AN EMPTY LOG. Swallowing each
+            # failure and then reading net_funding([]) turned "the broker
+            # refused all six requests" into "this account has no deposit in
+            # Alpaca's activity log" -- the same conflation of "we could not
+            # look" with "we looked and found none" that account_pl, hub.pl
+            # and reconcile each had to be fixed for. The caller already has
+            # the right sentence for this; it was simply never reached.
+            return (None, 0)
         _nf = _perf.net_funding(acts)
         val = (_nf.get("value"), _nf.get("n") or 0)
     except Exception:

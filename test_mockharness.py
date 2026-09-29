@@ -42,6 +42,27 @@ def check(name, got, want):
     print("%-4s %-58s got=%r want=%r" % ("ok" if ok else "FAIL", name, got, want))
 
 
+def quiet(name, ok):
+    """A check that prints ONLY when it fails.
+
+    Section 11 compares six quantities across every scenario and both
+    accounts. Printing all 500 passes buries the one line that matters, and a
+    suite nobody reads is a suite whose red line gets scrolled past. The pass
+    count is reported once at the end of the block instead.
+    """
+    global FAIL
+    if not ok:
+        FAIL += 1
+        print("%-4s %s" % ("FAIL", name))
+    return ok
+
+
+def quiet_close(name, got, want, tol=0.01):
+    return quiet("%s  got=%r want=%r" % (name, got, want),
+                 got is not None and want is not None
+                 and abs(float(got) - float(want)) <= tol)
+
+
 def close(name, got, want, tol=0.01):
     global FAIL
     ok = got is not None and abs(float(got) - float(want)) <= tol
@@ -428,6 +449,288 @@ check("bank entries carry the kinds and origins lists",
       all(k in ent for k in ("ok", "kinds", "origins", "count", "entries")),
       True)
 check("...and count matches the rows", ent["count"], len(ent["entries"]))
+
+
+# ========== 11. ONE ACCOUNT, ONE NUMBER -- every scenario, every quantity
+#
+# THE CHECK THIS FILE EXISTS FOR, and it is worth more than any individual
+# fixture. Three times a verifier has reported, at CRITICAL or HIGH, that the
+# dashboard publishes two numbers for one quantity -- and all three reproduced
+# against FIXTURES ONLY. Measured against the live account the two routes
+# agreed to the cent every time:
+#
+#   drawdown   fixture -0.02% (hub) against -8.02% (perf), a 400x gap.
+#              Live: -0.086937 from both, n=26 from both.
+#   P/L total  the fixture dashed hub with "no deposit in Alpaca's activity
+#              log" while perf published the figure. Live: 3055.43 from both.
+#   realised   the fixture's hub read a literal out of the scenario table;
+#              perf summed the journal. Live: they agree.
+#
+# Each one cost a real investigation. A harness that manufactures a
+# disagreement the product is incapable of costs exactly what a harness that
+# hides a real one costs. So: the INPUTS are asserted to be one object, and
+# then every quantity both modules publish is asserted to be one number.
+print("\n-- 11. hub and perf cannot disagree about one account")
+
+import hub as _hub                                # noqa: E402
+import mockreturns as _MR                         # noqa: E402
+
+_FUND_TYPES = perf.CASH_FUNDING_TYPES
+
+
+def _val(m):
+    return None if m is None else m.get("value")
+
+
+def _step(rep, key):
+    for st in rep["reconciliation"]["steps"]:
+        if st["key"] == key:
+            return st["value"]
+    return None
+
+
+# ---- 11a. the two modules are handed the SAME two snapshots ---------------
+# Not "equivalent" -- the same rows and the same points. `_MockBroker` used to
+# invent its own curve and had no `activities()` at all, which is the root of
+# all three reports above.
+_probed = 0
+for _scen in MS.SCENARIOS:
+    for _acct in [a["id"] for a in MS.HUB_ACCOUNTS]:
+        _spec = MS._perf_spec(_scen, _acct)
+        _ctx, _ = MS._hub_ctx(_scen, _acct)
+        _b = _ctx.fleet.broker
+        _probed += 1
+
+        _want_acts = _spec.get("activities")
+        if _want_acts is None:
+            # NOBODY LOOKED. The broker must refuse, not answer [] -- an empty
+            # list is the claim that the log was read and held no transfer,
+            # which is a different account (see `perfnofunding`).
+            try:
+                _b.activities(activity_type="JNLC")
+                check("%s/%s: an unread activity log refuses"
+                      % (_scen, _acct), "answered", "raised")
+            except Exception:
+                pass
+        else:
+            _got = []
+            try:
+                for _k in _FUND_TYPES:
+                    _got.extend(_b.activities(activity_type=_k) or [])
+            except Exception as _e:
+                # The original defect was that `_MockBroker` had NO
+                # `activities` method, and `hub._net_funding` swallows that
+                # into an empty log rather than a refusal. Named here instead
+                # of raised, so the failure reads as a finding and not as a
+                # crash in the test.
+                quiet("%s/%s: the broker cannot answer for its own funding "
+                      "rows (%r)" % (_scen, _acct, _e), False)
+            _want = [r for r in _want_acts
+                     if str(r.get("activity_type") or "").upper() in _FUND_TYPES]
+            quiet("%s/%s: the broker serves perf's own funding rows "
+                  "(got %d rows / %.2f, want %d / %.2f)"
+                  % (_scen, _acct, len(_got),
+                     sum(r["net_amount"] for r in _got), len(_want),
+                     sum(r["net_amount"] for r in _want)),
+                  len(_got) == len(_want)
+                  and round(sum(r["net_amount"] for r in _got), 2)
+                  == round(sum(r["net_amount"] for r in _want), 2))
+
+        _want_pts = _spec.get("equity_points")
+        if _want_pts is None:
+            try:
+                _b.portfolio_history("all", "1D")
+                check("%s/%s: an unread equity curve refuses" % (_scen, _acct),
+                      "answered", "raised")
+            except Exception:
+                pass
+        else:
+            try:
+                _raw = _b.portfolio_history("all", "1D")
+            except Exception as _e:
+                quiet("%s/%s: the broker cannot answer for its own equity "
+                      "curve (%r)" % (_scen, _acct, _e), False)
+                _raw = {"timestamp": [], "equity": []}
+            _got_pts = list(zip(_raw["timestamp"], _raw["equity"]))
+            _w = [(float(t), round(float(v), 2)) for t, v in _want_pts]
+            quiet("%s/%s: period=all is perf's curve VERBATIM (%d points vs "
+                  "%d; first differs at %r vs %r)"
+                  % (_scen, _acct, len(_got_pts), len(_w),
+                     next((a for a, b in zip(_got_pts, _w) if a != b), None),
+                     next((b for a, b in zip(_got_pts, _w) if a != b), None)),
+                  _got_pts == _w)
+check("every scenario and account was probed", _probed,
+      len(MS.SCENARIOS) * len(MS.HUB_ACCOUNTS))
+
+# THE FILL TAPE IS NOT MODELLED, and both contexts must be equally without it.
+# `app.py` gives hub.Ctx AND perf.Ctx `fills=_fill_tape(f)`; if only one of
+# them had a tape here, hub would compute realised from Alpaca fills and perf
+# from the journal, which is a real disagreement in the product and would be
+# an invented one here.
+_ctx, _ = MS._hub_ctx("hub", ACCT)
+check("hub.Ctx is given no fill tape", getattr(_ctx, "fills", "missing"), None)
+check("...and neither is perf.Ctx",
+      MP.context(MS._perf_spec("hub", ACCT), journal_rows=[],
+                 account_id=ACCT, label="x").fills, None)
+try:
+    MS._hub_ctx("hub", ACCT)[0].fleet.broker.activities(activity_type="FILL")
+    check("...and asking for one RAISES rather than answering []",
+          "answered", "raised")
+except NotImplementedError:
+    check("...and asking for one RAISES rather than answering []", True, True)
+
+
+# ---- 11b. every quantity both modules publish is ONE number ---------------
+# The pairs, and why each is the counterpart of the other:
+#   equity     hub.value            <-> headline.equity      (one account block)
+#   total P/L  hub.pl.total         <-> headline.all_time    (equity less net
+#                                       funding, both, from the same log)
+#   realised   hub.pl.realized      <-> reconciliation step `realized`. NOT
+#                                       portfolio.net_pl, which is the trade
+#                                       LOG's statistic and is deliberately a
+#                                       different quantity.
+#   open P/L   hub.pl.open          <-> reconciliation step `open`
+#   drawdown   hub.drawdown.max/_pct<-> portfolio.max_drawdown/_pct
+#
+# DRAWDOWN IS ONLY THE SAME QUANTITY WHEN BOTH ARE ON THE ACCOUNT CURVE. Where
+# the account has no portfolio history, `perf.metrics` falls back to the
+# cumulative REALISED curve and says so in `equity_basis`; hub has no fallback
+# and dashes. Two different bases is not two answers to one question, so the
+# check asserts the DECLARATION instead of comparing the numbers.
+_FLOORS = {
+    # (quantity, hub-side, perf-side): what makes it legitimate, checked
+    # against the fixture rather than taken on trust.
+    "realized": ("an empty trade log: hub's Ladder.realized answers 0.00 with "
+                 "'no lot has closed yet' (hub.py:515) and perf's "
+                 "log_realized is None when there are no rows (perf.py:1385)"),
+    "open_pl": ("an empty position book: perf reads it as 0.00 measured "
+                "(perf.py:1405) and hub dashes it"),
+    "dd_usd": ("a one-point equity curve: perf.drawdown_from refuses under two "
+               "points (perf.py:743) and hub.drawdown has no such floor"),
+    "dd_pct": ("a one-point equity curve: perf.drawdown_from refuses under two "
+               "points (perf.py:743) and hub.drawdown has no such floor"),
+}
+_floor_hits = []
+_compared = 0
+_nocurve = 0
+for _scen in MS.SCENARIOS:
+    for _acct in [a["id"] for a in MS.HUB_ACCOUNTS]:
+        _spec = MS._perf_spec(_scen, _acct)
+        _hb = MS.hub_portfolio(_scen, _acct)
+        _rep = MS._perf_call(MP.report, _scen, _acct)
+        _own_curve = "portfolio history" in (
+            _rep["portfolio"].get("equity_basis") or "")
+        _pairs = [
+            ("equity", _val(_hb["value"]), _val(_rep["headline"]["equity"])),
+            ("total_pl", _val(_hb["pl"]["total"]),
+             _val(_rep["headline"]["all_time"])),
+            ("realized", _val(_hb["pl"]["realized"]), _step(_rep, "realized")),
+            ("open_pl", _val(_hb["pl"]["open"]), _step(_rep, "open")),
+        ]
+        if _own_curve:
+            _pairs += [
+                ("dd_usd", _val(_hb["drawdown"]["max"]),
+                 _val(_rep["portfolio"]["max_drawdown"])),
+                ("dd_pct", _val(_hb["drawdown"]["max_pct"]),
+                 _val(_rep["portfolio"]["max_drawdown_pct"])),
+            ]
+        else:
+            # perf is on the realised curve. hub must NOT publish a drawdown
+            # off a curve it never read -- that would be a number nobody
+            # measured, which is the whole complaint.
+            quiet("%s/%s: no account curve, so hub's drawdown must be a "
+                  "dash (got %r)" % (_scen, _acct, _val(_hb["drawdown"]["max"])),
+                  _val(_hb["drawdown"]["max"]) is None)
+            quiet("%s/%s: perf must name the basis it fell back to"
+                  % (_scen, _acct),
+                  "REALISED curve" in (_rep["portfolio"]["equity_basis"] or ""))
+            _nocurve += 1
+        for _name, _a, _b2 in _pairs:
+            _compared += 1
+            if _a is None and _b2 is None:
+                continue
+            if _a is not None and _b2 is not None:
+                # TWO NUMBERS FOR ONE QUANTITY. Never allowed, no exceptions,
+                # no tolerance beyond a cent of rounding.
+                quiet_close("%s/%s: %s is TWO NUMBERS for one quantity"
+                            % (_scen, _acct, _name), _a, _b2, tol=0.011)
+                continue
+            # One published, one dashed. Legitimate only where the two modules
+            # apply different FLOORS to the same degenerate input -- and the
+            # input is checked, not assumed.
+            _why = None
+            if _name == "realized" and _a == 0.0 and _b2 is None:
+                import journal as _j
+                _rows = _j.load(path=str(MS._hub_ctx(_scen, _acct)[0]
+                                         .fleet.journal_path))
+                if not [r for r in _rows if r.get("event") in ("close", "partial")]:
+                    _why = _FLOORS["realized"]
+            elif _name == "open_pl" and _a is None and _b2 == 0.0:
+                if not (_spec.get("positions") or []):
+                    _why = _FLOORS["open_pl"]
+            elif _name in ("dd_usd", "dd_pct") and _a == 0.0 and _b2 is None:
+                if len(_spec.get("equity_points") or []) < 2:
+                    _why = _FLOORS[_name]
+            if _why is None:
+                quiet("%s/%s: %s is published by one module (%r) and dashed by "
+                      "the other (%r), and no measured floor explains it"
+                      % (_scen, _acct, _name, _a, _b2), False)
+            elif (_name, _why) not in [(n, w) for n, w, _sc in _floor_hits]:
+                _floor_hits.append((_name, _why, _scen))
+check("quantities compared, every scenario x every account",
+      _compared, 6 * len(MS.SCENARIOS) * len(MS.HUB_ACCOUNTS) - 2 * _nocurve)
+
+# PRINTED, NOT SWALLOWED. These are not fixture defects -- the inputs are now
+# identical and these are the two modules' own floors disagreeing on a
+# degenerate input. They are hub.py's and perf.py's to settle, they are not
+# this file's to fix, and they are printed on every run so nobody has to
+# rediscover them from a screenshot.
+for _name, _why, _scen in _floor_hits:
+    print("note  %-10s hub and perf differ on %s (first seen: %s)"
+          % (_name, _why, _scen))
+
+
+# ---- 11c. the deliberate dash stays deliberate ---------------------------
+# `perfnofunding` reproduces a REAL account (PA3YVTECEQFE, $100,000, never
+# traded, an activity log that was READ and is EMPTY). It SHOULD dash. The
+# point of this block is that it now dashes in BOTH modules for the SAME
+# reason, rather than in one because the mock forgot a method.
+_nf_hub = MS.hub_portfolio("perfnofunding", ACCT)["pl"]["total"]
+_nf_perf = MS._perf_call(MP.report, "perfnofunding", ACCT)["headline"]["all_time"]
+check("perfnofunding: hub dashes the all-time P/L", _nf_hub["value"], None)
+check("...and so does perf", _nf_perf["value"], None)
+for _label, _m in (("hub", _nf_hub), ("perf", _nf_perf)):
+    check("...%s says the cost basis is unknown, not that it is zero" % _label,
+          "unknown" in (_m["reason"] or ""), True)
+check("...and the log really was read and really is empty",
+      _MR.profile("perfnofunding")["activities"], [])
+
+# `perfnofeed` is the OTHER dash: nobody read the log at all. Both modules
+# dash, and now BOTH say so for the same reason.
+#
+# THIS CHECK USED TO PIN THE BUG GREEN. It asserted that hub's reason contained
+# "no deposit" -- the defective string -- with a comment calling it "hub's own
+# bug to fix". `hub._net_funding` swallowed every failing activities call and
+# then read `net_funding([])`, turning "the broker refused all six requests"
+# into "this account has no deposit in Alpaca's activity log". Asserting the
+# defect as the expected value meant the suite went RED the moment anyone
+# fixed it, so the loop in CLAUDE.md actively blocked the repair the comment
+# was asking for.
+#
+# hub now returns (None, 0) when not one call succeeded, which the caller
+# already had the right sentence for. The check asserts the CORRECTED
+# behaviour and, more usefully, that neither module claims to have read
+# something it could not.
+_feed_hub = MS.hub_portfolio("perfnofeed", ACCT)["pl"]["total"]
+_feed_perf = MS._perf_call(MP.report, "perfnofeed", ACCT)["headline"]["all_time"]
+check("perfnofeed: both dash the all-time P/L",
+      (_feed_hub["value"], _feed_perf["value"]), (None, None))
+check("...perf says the history was never read",
+      "not been read" in (_feed_perf["reason"] or ""), True)
+check("...and hub says it could not READ the funding, not that there is none",
+      "could not be read" in (_feed_hub["reason"] or ""), True)
+check("...so neither module claims an empty log it never saw",
+      "no deposit" in (_feed_hub["reason"] or ""), False)
 
 
 print("\nFAIL count: %d" % FAIL)

@@ -27,6 +27,43 @@ each one that could be read two ways says which unit it is. `_wire_spread_pct`
 below is the single place the chain's spread is computed, and it is a copy of
 optdata.py's line with the reference in the comment.
 
+--------------------------------------------- the trap, in the OTHER direction
+The same rule bites the other way, and it cost three rounds of verifier time
+before anyone noticed. THREE TIMES a verifier reported, at CRITICAL or HIGH,
+that the dashboard publishes two numbers for one quantity -- and all three
+reproduced against THESE FIXTURES ONLY. Measured against the live account, the
+two routes agreed to the cent every time:
+
+  drawdown   fixture -0.02% (hub) against -8.02% (perf), a 400x gap.
+             Live: -0.086937 from both, n=26 from both.
+  P/L total  the fixture DASHED hub with "no deposit in Alpaca's activity log"
+             while perf published the figure. Live: 3055.43 from both.
+  realised   hub read a literal out of the scenario table; perf summed the
+             journal file. Live: they agree.
+
+The cause was one object being two: `_MockBroker` invented its own equity
+curve per window and had no `activities()` method at all, while `mockperf`
+handed `perf.Ctx` a different curve and a real activity log for the same
+account. A harness that manufactures a disagreement the product is incapable
+of costs exactly what one that hides a real disagreement costs -- each of
+those three cost a full investigation.
+
+FIXED AT THE ROOT, 29 Sep 2026. `_hub_ctx` now builds the stub fleet FROM
+`_perf_spec(scenario, account)`: the broker is handed the same `activities`
+list and the same `equity_points` curve that `mockperf.context()` puts into
+`perf.Ctx`, `_MockFleet.realized_total()` sums the scenario's own journal file
+the way the real Fleet does, and the options play ledger goes to both. The
+per-scenario `realized` literal is deleted. `test_mockharness.py` section 11
+walks every scenario x both accounts and FAILS on any quantity the two modules
+publish differently -- 442 comparisons, and it is worth more than any single
+fixture in this file.
+
+What is deliberately NOT modelled is the FILL tape: `app.py` gives both
+contexts `fills=_fill_tape(f)` and this harness gives neither, so both fall
+back to the journal for realised TOGETHER. `_MockBroker.activities("FILL")`
+raises rather than answering `[]`, because `[]` would be a claim that the tape
+was read and held no fill.
+
 ------------------------------------------------------- where positions went
 There is no positions route and no positions scenario here any more. The
 Options tab lost that room when app.py's /api/options/positions was removed:
@@ -424,36 +461,49 @@ _HEDGE_NOTE = ("a short leg is counted net of a long of the same underlying, "
                "gap between assignment and exercising that long is NOT zero "
                "and is not modelled here")
 
-# The breakdown reconciles with the headline on purpose: 6 + 14 judged,
-# realized 640 + 1670 = 2310, open 85 - 552.50 = -467.50. A fixture whose rows
-# do not add up to its own totals teaches the page to render a contradiction
-# and nobody notices until the real route does it.
+# The breakdown reconciles with the headline on purpose: realized
+# 640 + 1670 = 2310. Open does NOT add to pl.open and that is the fact rather
+# than a slip -- the sixth open position is ADOPTED, so it is in neither play
+# and 60 - 347.50 = -287.50 is the plays' half of -467.50. A fixture whose
+# rows do not add up to its own totals teaches the page to render a
+# contradiction and nobody notices until the real route does it.
+#
+# The open counts and at_risk were re-derived 29 Sep 2026 from
+# `_PERF_POSITIONS_OPEN` below, which is now the detail the page draws: two
+# index spreads at 1750 + 525 and three swings at 1172 + 4050 + 1425, which
+# is risk.at_risk's 8922 exactly. Before that, this block claimed 3500 and
+# 5422 against a by_ticker column that summed to 12422 -- three different
+# answers to "what is at risk" on one screen.
 _PERF_BY_PLAY = [
     {"key": "index-put-credit-spread", "label": "index-put-credit-spread",
      "open": 2, "closed": 6, "judged": 6,
-     "realized": _m(640.0, 6, "usd"), "open_pl": _m(85.0, 2, "usd"),
+     "realized": _m(640.0, 6, "usd"), "open_pl": _m(60.0, 1, "usd"),
      "win_rate": _m(0.8333, 6, "pct", reason="6 trades is not a sample",
                     thin=True),
      "expectancy": _m(106.67, 6, "usd", reason="6 trades is not a sample",
                       thin=True),
-     "at_risk": _m(3500.0, 2, "usd")},
+     "at_risk": _m(2275.0, 2, "usd")},
     {"key": "swing-atm-hourly", "label": "swing-atm-hourly",
-     "open": 4, "closed": 14, "judged": 14,
-     "realized": _m(1670.0, 14, "usd"), "open_pl": _m(-552.5, 3, "usd"),
+     "open": 3, "closed": 14, "judged": 14,
+     "realized": _m(1670.0, 14, "usd"), "open_pl": _m(-347.5, 3, "usd"),
      "win_rate": _m(0.5714, 14, "pct"),
      "expectancy": _m(119.29, 14, "usd"),
-     "at_risk": _m(5422.0, 4, "usd")},
+     "at_risk": _m(6647.0, 3, "usd")},
 ]
 
 # GOOGL has nothing open, so its open P/L is ABSENT with its reason rather
 # than 0.00. A fixture that sent 0 there would never exercise the dash.
+#
+# `open` and `at_risk` re-derived 29 Sep 2026 against `_PERF_POSITIONS_OPEN`:
+# AAPL carries two (its swing and the ADOPTED call), TSLA's only row never
+# filled, and the column now sums to 8922 rather than 12422.
 _PERF_BY_TICKER = [
     ("SPY", 1, 3, 380.0, 40.0, 1.0, 126.67, 1750.0, None),
-    ("QQQ", 1, 3, 260.0, 45.0, 0.6667, 86.67, 1750.0, None),
-    ("AAPL", 1, 3, 520.0, -120.0, 0.6667, 173.33, 1172.0, None),
+    ("QQQ", 1, 3, 260.0, 45.0, 0.6667, 86.67, 525.0, None),
+    ("AAPL", 2, 3, 520.0, -120.0, 0.6667, 173.33, 1172.0, None),
     ("META", 1, 3, 410.0, -300.0, 0.5, 136.67, 4050.0, None),
-    ("NVDA", 1, 3, 700.0, -60.0, 0.6667, 233.33, 2200.0, None),
-    ("TSLA", 1, 3, -20.0, -72.5, 0.3333, -6.67, 1500.0, None),
+    ("NVDA", 1, 3, 700.0, -60.0, 0.6667, 233.33, 1425.0, None),
+    ("TSLA", 0, 3, -20.0, None, 0.3333, -6.67, None, "nothing open here"),
     ("GOOGL", 0, 2, 60.0, None, 0.5, 30.0, None, "no open position"),
 ]
 
@@ -506,6 +556,161 @@ _PERF_REFUSALS = [
      "example": "one entry per session and this session already has one"},
 ]
 
+# ---------------------------------------------------------------------------
+# `positions`: optperf's own trade_dict, one per row. Added 29 Sep 2026 because
+# the Options Overview now DRAWS the open book -- it was `[]` here while
+# optperf.report() has always published it, so the one room the owner watches
+# had no fixture for the only thing on it he can act on.
+#
+# UNITS, because three of these are the ones a spread is misread by:
+#   entry_net   $/share, SIGNED: + is a credit received, - a debit paid
+#   target_px   $/share, ABSOLUTE and positive -- what the closing order pays
+#   stop_px     the same. On a CREDIT structure target < entry < stop (both
+#               are debits to buy it back); on a DEBIT structure stop < entry
+#               < target. `mark` is on that same scale, positive, so a mark
+#               between the two is measurable in BOTH directions and the page
+#               may not assume one.
+#   risk        DOLLARS for the whole position: (width - credit) * 100 * ct on
+#               a spread, premium paid on a long option.
+#
+# The numbers are the ones CLAUDE.md records for 27-28 Sep: SPY 739/737 and
+# QQQ 703/701 two-wide put credit spreads at ten contracts, and Mag-7 ATM
+# swings about a month out. They reconcile with the blocks beside them --
+# open risk 1750+525+1172+4050+1425 = 8922 = risk.at_risk, and the five priced
+# opens 60+68-385-30.5-180 = -467.50 = pl.open. The adopted AAPL call is the
+# sixth open and sits in NEITHER play, which is why by_play's two rows now add
+# to -287.50 and not to the headline.
+_PERF_POSITIONS_OPEN = [
+    # SPY: the one with NO resting exit. Critical, and the reason the page has
+    # an attention card at all.
+    dict(id="SPY-index-put-credit-spread-20260927T143000", symbol="SPY",
+         play="index-put-credit-spread", kind="put_credit_spread",
+         expiry="2026-10-30", dte=31, contracts=10, requested=10, size=10,
+         partial=False, entry_net=0.25, target_px=0.13, stop_px=0.31,
+         mark=0.19, mark_age_s=14.0, open_pl=60.0, risk=1750.0,
+         rest_order_id="", rest_refused="", age_days=2.1),
+    # QQQ: filled 3 of 10 and never priced. Two attention rows point here.
+    dict(id="QQQ-index-put-credit-spread-20260927T144000", symbol="QQQ",
+         play="index-put-credit-spread", kind="put_credit_spread",
+         expiry="2026-10-30", dte=31, contracts=3, requested=10, size=3,
+         partial=True, entry_net=0.25, target_px=0.13, stop_px=0.31,
+         mark=None, mark_age_s=None, open_pl=None, risk=525.0,
+         rest_order_id="b1d0-mock-rest", rest_refused="", age_days=2.0,
+         open_pl_reason=("no mark -- this position cannot be priced, so no "
+                         "profit target and no stop can trip on it")),
+    dict(id="AAPL-swing-atm-hourly-20260926T150000", symbol="AAPL",
+         play="swing-atm-hourly", kind="long_call", expiry="2026-10-30",
+         dte=31, contracts=1, requested=1, size=1, partial=False,
+         entry_net=-11.72, target_px=17.58, stop_px=8.79, mark=12.40,
+         mark_age_s=19.0, open_pl=68.0, risk=1172.0,
+         rest_order_id="7c22-mock-rest", rest_refused="", age_days=3.0),
+    # META: the broker REFUSED the rest, so the loop owns the target. Loud.
+    dict(id="META-swing-atm-hourly-20260927T151500", symbol="META",
+         play="swing-atm-hourly", kind="long_put", expiry="2026-10-30",
+         dte=31, contracts=1, requested=1, size=1, partial=False,
+         entry_net=-40.50, target_px=60.75, stop_px=30.38, mark=36.65,
+         mark_age_s=17.0, open_pl=-385.0, risk=4050.0, rest_order_id="",
+         rest_refused=("422 position intent mismatch, inferred: "
+                       "sell_to_open"),
+         age_days=2.0),
+    dict(id="NVDA-swing-atm-hourly-20260925T143000", symbol="NVDA",
+         play="swing-atm-hourly", kind="long_call", expiry="2026-10-30",
+         dte=31, contracts=1, requested=1, size=1, partial=False,
+         entry_net=-14.25, target_px=21.38, stop_px=10.69, mark=13.945,
+         mark_age_s=241.0, open_pl=-30.5, risk=1425.0,
+         rest_order_id="9f10-mock-rest", rest_refused="", age_days=4.0),
+    # Adopted: held on this account, never sized here. It is MONITORED -- no
+    # target, no stop, no risk we set -- and it must not look like the rest.
+    dict(id="adopted-AAPL261016C00350000", symbol="AAPL", play="",
+         kind="long_call", expiry="2026-10-16", dte=17, contracts=2,
+         requested=0, size=2, partial=False, entry_net=None, target_px=None,
+         stop_px=None, mark=4.10, mark_age_s=22.0, open_pl=-180.0, risk=None,
+         rest_order_id="", rest_refused="", adopted=True, age_days=9.0,
+         risk_reason="adopted: we did not choose the entry, so nothing here "
+                     "bounds the loss",
+         open_pl_reason="adopted: no entry of ours to measure against"),
+]
+
+# 14 closed, bucketed so they add up to the two blocks that are read off them:
+# `exits.mix` (8 profit target 3120, 4 stop -1044, 1 guard -212, 1 expiry 446)
+# and pl.realized (2310). Nine wins and five losses, largest +980 and -612.
+_PERF_POSITIONS_CLOSED = [
+    ("profit_target", 980.0), ("profit_target", 560.0),
+    ("profit_target", 520.0), ("profit_target", 400.0),
+    ("profit_target", 330.0), ("profit_target", 190.0),
+    ("profit_target", 90.0), ("profit_target", 50.0),
+    ("stop", -612.0), ("stop", -200.0), ("stop", -145.0), ("stop", -87.0),
+    ("assignment_guard", -212.0), ("expiry", 446.0),
+]
+
+_EXIT_LABELS = {"profit_target": "profit target", "stop": "stop",
+                "assignment_guard": "assignment guard",
+                "expiry": "closed before expiry"}
+
+
+def _perf_positions():
+    """21 rows: 6 open, 14 closed, 1 proposed that never filled."""
+    out = []
+    for i, base in enumerate(_PERF_POSITIONS_OPEN):
+        r = dict(base)
+        age = r.pop("age_days", 1.0)
+        r.setdefault("adopted", False)
+        r.setdefault("risk_reason", None)
+        r.setdefault("open_pl_reason", None)
+        r.update(state="open", filled=True, judged=False,
+                 has_resting_exit=bool(r.get("rest_order_id")),
+                 opened_at=_plays_iso(-age), filled_at=_plays_iso(-age),
+                 closed_at=None, hold_days=None, age_days=age,
+                 close_reason="", exit_class=None, exit_label=None,
+                 realized=None, realized_basis=None,
+                 realized_reason="still open",
+                 open_pl_basis="broker" if r.get("open_pl") is not None
+                               else None)
+        out.append(r)
+
+    syms = ["SPY", "QQQ", "AAPL", "META", "NVDA", "TSLA", "GOOGL"]
+    for i, (cls, pl) in enumerate(_PERF_POSITIONS_CLOSED):
+        sym = syms[i % len(syms)]
+        credit = sym in ("SPY", "QQQ")
+        out.append(dict(
+            id="%s-closed-%02d" % (sym, i), symbol=sym,
+            play="index-put-credit-spread" if credit else "swing-atm-hourly",
+            kind="put_credit_spread" if credit else "long_call",
+            expiry="2026-09-%02d" % (10 + i), dte=-(3 + i), state="closed",
+            adopted=False, contracts=0, requested=10 if credit else 1,
+            size=10 if credit else 1, partial=False,
+            entry_net=0.30 if credit else -8.40,
+            target_px=0.15 if credit else 12.60,
+            stop_px=0.38 if credit else 6.30,
+            mark=None, mark_age_s=None,
+            opened_at=_plays_iso(-(9 - i * 0.5)),
+            filled_at=_plays_iso(-(9 - i * 0.5)),
+            closed_at=_plays_iso(-(4 - i * 0.2)),
+            hold_days=round(5.0 - i * 0.3, 2), age_days=None,
+            close_reason=_EXIT_LABELS[cls], exit_class=cls,
+            exit_label=_EXIT_LABELS[cls],
+            realized=pl, realized_basis="booked", realized_reason=None,
+            open_pl=None, open_pl_basis=None, open_pl_reason=None,
+            risk=510.0 if credit else 840.0, risk_reason=None,
+            rest_order_id="", rest_refused="", has_resting_exit=False,
+            judged=True, filled=True))
+
+    # counts.refused = 1: proposed, never filled, so it is not a trade and
+    # carries no P/L at all.
+    out.append(dict(
+        id="TSLA-swing-atm-hourly-20260924T160000", symbol="TSLA",
+        play="swing-atm-hourly", kind="long_put", expiry="2026-10-30",
+        dte=31, state="refused", adopted=False, contracts=0, requested=1,
+        size=0, partial=False, entry_net=None, target_px=None, stop_px=None,
+        mark=None, mark_age_s=None, opened_at=_plays_iso(-5),
+        filled_at=None, closed_at=None, hold_days=None, age_days=None,
+        close_reason="", exit_class=None, exit_label=None, realized=None,
+        realized_basis=None, realized_reason="never filled -- not a trade",
+        open_pl=None, open_pl_basis=None, open_pl_reason=None,
+        risk=None, risk_reason="never filled", rest_order_id="",
+        rest_refused="", has_resting_exit=False, judged=False, filled=False))
+    return out
+
 
 def _perf_ticker_rows():
     out = []
@@ -521,9 +726,14 @@ def _perf_ticker_rows():
             "expectancy": _m(exp, judged, "usd",
                              reason="%d trades is not a sample" % judged,
                              thin=True),
+            # "nothing is open" and "nothing bounds the loss" are OPPOSITE
+            # facts and both used to print the second one. A ticker with no
+            # open row has no risk to state; one with an open row and no
+            # figure is the dangerous case.
             "at_risk": _m(risk, op, "usd",
                           reason=None if risk is not None else
-                          "nothing here bounds the loss"),
+                          ("nothing open here" if not op else
+                           "nothing here bounds the loss")),
         })
     return out
 
@@ -718,7 +928,7 @@ def perf(scenario="perf"):
                     "open_oldest_days": _m(4.0, 6, "days")},
         "by_play": [dict(r) for r in _PERF_BY_PLAY],
         "by_ticker": _perf_ticker_rows(),
-        "daily": [], "positions": [],
+        "daily": [], "positions": _perf_positions(),
         "attention": [dict(r) for r in _PERF_ATTENTION],
         "decisions": {"window_h": 24.0, "proposals": 68, "ok": 7,
                       "refused": 61, "submitted": 7,
@@ -1746,61 +1956,176 @@ class _MockEngine:
 
 
 class _MockBroker:
-    """The two calls hub makes on a broker, answered from literals.
+    """The three calls the REAL routes make on a broker, answered from the ONE
+    fixture `perf.py` is handed.
 
-    `portfolio_history` is Alpaca's own shape -- parallel `timestamp` and
-    `equity` arrays plus a `base_value` -- because `hub._equity_history` reads
-    those three keys and nothing else. Handing it a different shape here would
-    prove a chart works against data the real route never sends.
+    ------------------------------------------------------------- the root fix
+    Until 29 Sep 2026 this stub invented its own equity curve (`_curve_for`,
+    now deleted) and had NO `activities` method at all, while `/api/perf/*`
+    was handed a completely different curve and a real activity log out of
+    `mockperf`. One account therefore had two histories, and a scenario could
+    -- and did -- manufacture a disagreement the product is incapable of.
+
+    Three separate verifiers reported, at CRITICAL or HIGH, that the dashboard
+    published two numbers for one quantity. All three reproduced against
+    FIXTURES ONLY; measured against the live account the two routes agreed to
+    the cent:
+
+      drawdown   fixture -0.02% (hub) against -8.02% (perf), a 400x gap.
+                 Live: -0.086937 from both, n=26 from both.
+      P/L total  the fixture DASHED hub with "no deposit in Alpaca's activity
+                 log" while perf published the figure -- because `_MockBroker`
+                 had no `activities()` and `hub._net_funding` reads an
+                 unanswerable broker as an EMPTY log. Live: 3055.43 from both.
+      realised   the fixture's hub read a literal out of the scenario table
+                 while perf summed the journal file. Live: they agree.
+
+    A harness that disagrees with the real route hides bugs instead of finding
+    them -- this file's own docstring -- and it was failing that rule in the
+    other direction, inventing bugs that were not there. Each one cost a real
+    investigation. So the broker now reads the SAME `activities` list and the
+    SAME `equity_points` curve that `mockperf.context()` puts into `perf.Ctx`,
+    both handed down from `_perf_spec(scenario, account)`.
+
+    NOT MODELLED, and said out loud rather than faked: the FILL tape. `app.py`
+    gives BOTH `hub.Ctx` and `perf.Ctx` `fills=_fill_tape(f)`; this harness
+    gives neither, so both fall back to the journal for realised and they fall
+    back TOGETHER. `activities("FILL")` therefore RAISES rather than answering
+    `[]`, which would be a claim that the tape was read and was empty --
+    exactly the kind of invented measurement this file exists to stop.
+    `test_mockharness.py` section 11 pins that neither context is given fills.
     """
 
-    def __init__(self, quotes, kind, base, equity=None):
+    def __init__(self, quotes, *, equity_points, activities):
         self._quotes = quotes
-        self._kind = kind                    # which story the equity tells
-        self._base = base
-        #: The account's OWN equity. The curve is scaled so its last point is
-        #: exactly this -- see portfolio_history.
-        self._equity = equity
+        #: [(epoch_seconds, equity)] or None. None is NOBODY LOOKED and it is
+        #: not the same as []: `portfolio_history` raises on None, so hub's
+        #: `_equity_history` reports the read failure instead of drawing a
+        #: curve nobody measured.
+        self._points = (None if equity_points is None else
+                        [(float(t), float(v)) for t, v in equity_points])
+        #: Alpaca's non-trade activity rows, or None for the same reason.
+        self._acts = (None if activities is None
+                      else [dict(a) for a in activities])
 
     def latest_quotes(self, syms):
         return {s: dict(self._quotes[s]) for s in syms if s in self._quotes}
 
-    def portfolio_history(self, period, timeframe, extended=True):
-        """A DIFFERENT series per window, which is what Alpaca actually does.
+    # ------------------------------------------------------------ activities
+    def activities(self, activity_type: str = "FILL", date: str = "",
+                   page_size: int = 100, max_pages: int = 10) -> list:
+        """`broker.Broker.activities`'s own signature, because that is how the
+        real callers reach it: `hub._net_funding` calls it once per entry in
+        `perf.CASH_FUNDING_TYPES`, and `app._fill_tape` calls it with "FILL".
 
-        Serving one fixed curve for every period was this harness's own first
-        bug: `hub.series` buckets by timeframe, so a 6-hour curve came back as
-        ONE candle at tf=1M and every chart above a day looked broken. A
-        reviewer would have read that as a charting bug and gone hunting in
-        the view. The window now decides the span and the sample step, and the
-        page gets a real number of candles at every timeframe.
-
-        THE CURVE ENDS AT THE ACCOUNT'S OWN EQUITY, in every window. It did
-        not, and the browser is where it showed: the `perfwins` scenario put
-        "ACCOUNT VALUE $53,055.43" in the tile and "Account value $141.5k
-        +$44.7k (+46.15%)" in the chart directly beneath it, with a $142,653
-        peak and a drawdown card built on it. The shapes came from a fixed
-        sine profile that had never been tied to the account block beside it.
-        A reviewer reading that page would have found the account's own chart
-        disagreeing with the account's own headline and gone looking in the
-        view for a bug this file had put there.
-
-        Scaled, not shifted. A multiplier keeps every peak-to-trough ratio
-        exactly where it was, so the drawdown PERCENTAGES the shape was
-        designed to produce survive; adding a constant would flatten them.
+        The rows are the scenario's own -- the ones `perf.net_funding` is
+        summing on the other page. That is the whole point of the method.
         """
-        pts, base = _curve_for(self._kind, period, timeframe)
-        if not pts:
-            return {"timestamp": [], "equity": [], "base_value": None}
-        k = 1.0
-        if self._equity and pts[-1][1]:
-            k = float(self._equity) / float(pts[-1][1])
-        if base is not None:
-            base = round(base * k, 2)
-        return {"timestamp": [t for t, _v in pts],
-                "equity": [round(v * k, 2) for _t, v in pts],
-                "base_value": base if base is not None else self._base,
+        kind = str(activity_type or "").upper()
+        if kind == "FILL":
+            raise NotImplementedError(
+                "this harness models no fill tape. Answering [] here would "
+                "claim the tape was read and held no fill, which would put "
+                "hub on Alpaca-fills realised and perf on journal realised "
+                "for one account -- the disagreement this class exists to "
+                "make impossible")
+        if self._acts is None:
+            raise RuntimeError(
+                "Alpaca's activity history was not read for this account")
+        rows = [dict(a) for a in self._acts
+                if str(a.get("activity_type") or "").upper() == kind]
+        if date:
+            rows = [r for r in rows
+                    if str(r.get("date") or "")[:10] == str(date)[:10]]
+        # Alpaca caps a page at 100 and `broker.py` pages through; the cap is
+        # honoured here so a fixture cannot quietly serve more than the real
+        # call could return in `max_pages` pages.
+        return rows[:max(1, min(100, int(page_size))) * max(1, int(max_pages))]
+
+    # ----------------------------------------------------- portfolio history
+    def portfolio_history(self, period, timeframe, extended=True):
+        """Alpaca's own shape -- parallel `timestamp` and `equity` arrays plus
+        a `base_value` -- over the FIXTURE'S curve.
+
+        `period="all"` returns the fixture's points VERBATIM, because that is
+        the window `hub.drawdown` reads and the one `perf.metrics` is handed.
+        Same list, same `perf.clean_equity` on both sides, so the two cannot
+        publish two drawdowns for one account.
+
+        `base_value` is the FIRST POINT OF THE WINDOW, which is what Alpaca
+        sends and why neither module may use it as a cost basis: it moves when
+        the window moves. hub and perf both take the basis from the activity
+        log instead, and this field being window-shaped here is what keeps
+        that provable.
+        """
+        pts = self._points
+        if pts is None:
+            raise RuntimeError(
+                "Alpaca's portfolio history was not read for this account")
+        win = self._window(period, timeframe)
+        if not win:
+            return {"timestamp": [], "equity": [], "base_value": None,
+                    "timeframe": timeframe, "period": period}
+        return {"timestamp": [t for t, _v in win],
+                "equity": [round(v, 2) for _t, v in win],
+                "base_value": round(win[0][1], 2),
                 "timeframe": timeframe, "period": period}
+
+    def _window(self, period, timeframe):
+        """The fixture curve, cut to one window.
+
+        A DIFFERENT SERIES PER WINDOW, which is what Alpaca actually does and
+        what `hub.series` buckets by -- serving one curve at every period was
+        this harness's first bug, and a 6-hour window that came back as ONE
+        candle read as a charting bug in the view.
+
+        Real prints are preferred: where the window holds three or more of the
+        fixture's own points they are returned untouched. Only when it holds
+        fewer -- an intraday window over a curve of daily closes -- is the
+        window DRAWN, by interpolating the fixture's own segment, and it still
+        ends exactly on the fixture's last point. That is modelled rather than
+        measured, which is why nothing that has to agree with perf.py is read
+        off any window but `period="all"`.
+        """
+        pts = self._points or []
+        if period == "all" or len(pts) < 2:
+            return list(pts)
+        span = _PERIOD_SPAN.get(period)
+        if span is None:
+            return list(pts)
+        end = pts[-1][0]
+        # Never earlier than the account's first print. Padding a window back
+        # past the account's own birth is the exact thing `perf.clean_equity`
+        # exists to strip, and inventing it here would test the stripper
+        # against data this fixture made up.
+        start = max(end - span, pts[0][0])
+        win = [p for p in pts if p[0] >= start]
+        if len(win) >= 3:
+            return win
+        step = _GRAN_STEP.get(timeframe, 3600) or 3600
+        n = max(2, min(int((end - start) / step), _MAX_POINTS))
+        out = [(start + i * ((end - start) / n)) for i in range(n + 1)]
+        out = [(t, self._at(t)) for t in out]
+        out[-1] = (end, pts[-1][1])
+        return out
+
+    def _at(self, t):
+        """The fixture curve's value at `t`, linearly between its own prints."""
+        pts = self._points or []
+        if not pts:
+            return 0.0
+        if t <= pts[0][0]:
+            return pts[0][1]
+        if t >= pts[-1][0]:
+            return pts[-1][1]
+        for i in range(1, len(pts)):
+            t0, v0 = pts[i - 1]
+            t1, v1 = pts[i]
+            if t <= t1:
+                if t1 == t0:
+                    return v1
+                return v0 + (v1 - v0) * ((t - t0) / (t1 - t0))
+        return pts[-1][1]
 
 
 class _MockFleet:
@@ -1814,8 +2139,8 @@ class _MockFleet:
     """
 
     def __init__(self, *, account_id, label, state_dir, account, positions,
-                 engines, quotes, curve_kind, base, realized, journal_path,
-                 made_today=None, base_value=None, assets=()):
+                 engines, quotes, equity_points, activities, journal_path,
+                 made_today=None, assets=()):
         self.account_id = account_id
         self.label = label
         self.state_dir = state_dir
@@ -1829,19 +2154,39 @@ class _MockFleet:
         # a strategy-less ticker actually takes.
         self.quotes = {}
         self.snap_at = time.time()
-        self.broker = _MockBroker(quotes, curve_kind, base,
-                                  equity=(account or {}).get("equity"))
+        # THE SAME TWO SNAPSHOTS `perf.Ctx` IS BUILT FROM. See _MockBroker's
+        # docstring: they used to be two different objects, and that is how
+        # one account came to publish two drawdowns and two all-time P/Ls.
+        self.broker = _MockBroker(quotes, equity_points=equity_points,
+                                  activities=activities)
         self.journal_path = journal_path
         self._assets = list(assets)
-        self._realized = realized
         self._made_today = made_today
-        self._base_value = base_value
 
     def symbols(self):
         return sorted(self.engines)
 
     def realized_total(self):
-        return self._realized
+        """WHAT THE REAL FLEET DOES: `journal.realized_sum` over THIS account's
+        own journal file (`fleet.py:1180`).
+
+        It used to be a literal in the scenario table, and that literal is how
+        `hub.pl.realized` came to read $3,123.23 while `/api/perf` read $527.15
+        off the same file for the same account. `perf.reconcile` sums the same
+        rows by the same definition -- `journal.realized_sum` and
+        `perf.rows_from_journal` exclude dry-run and bookkeeping rows
+        identically -- so with one file there is one answer.
+
+        None, not 0.0, when the file cannot be read: hub renders that as a
+        dash with its reason, and a zero there would claim the ladder has
+        booked nothing.
+        """
+        try:
+            import journal as _journal
+            rows = _journal.load(path=str(self.journal_path))
+            return round(_journal.realized_sum(rows), 2)
+        except Exception:
+            return None
 
     def made_today(self):
         """Alpaca equity less YESTERDAY'S CLOSE. None when there is no
@@ -1851,10 +2196,28 @@ class _MockFleet:
         return self._made_today
 
     def base_value(self):
-        """Alpaca's base value for the account, i.e. since inception. Falsy
-        means hub's `pl.total` comes back as a dash with its reason, which is
-        the correct rendering and not an error."""
-        return self._base_value
+        """Alpaca's base value for the account, from the account's OWN
+        activity log -- net funding, the same sum `perf.net_funding` makes.
+
+        NOT `portfolio_history`'s `base_value`, which is the first point of
+        whichever window was asked for and moves when the window does; that is
+        the number `hub.pl` and `perf.account_pl` both refuse by name. Nothing
+        in `hub.portfolio` reads this any more -- it takes the basis straight
+        off the activity log -- so this exists for the callers that still ask
+        a fleet for its basis, and it answers from the one source.
+        """
+        b = getattr(self, "broker", None)
+        if b is None:
+            return None
+        try:
+            import perf as _perf
+            acts = []
+            for kind in _perf.CASH_FUNDING_TYPES:
+                acts.extend(b.activities(activity_type=kind) or [])
+            nf = _perf.net_funding(acts)
+            return nf["value"] if nf["n"] else None
+        except Exception:
+            return None
 
     def bars_history_multi(self, syms, timeframe, start, adjustment="split"):
         return {s: _daily_bars(s) for s in syms if s in _HUB_BAR_SEED}
@@ -2038,52 +2401,19 @@ _GRAN_STEP = {"1Min": 60, "5Min": 300, "15Min": 900, "1H": 3600, "1D": 86400}
 _MAX_POINTS = 1500          # a harness, not a load test
 
 
-def _curve_for(kind, period, timeframe):
-    """(epoch, equity) pairs for ONE window, in Alpaca's own shape.
-
-    `kind` picks the story: a rising book, a book 18% off its peak, an account
-    with no history at all, or a curve so sparse that every bucket holds one
-    sample -- the case where a candle is a doji and `hub.series` says so in
-    `reason`. The thin case is built by sampling at exactly hub's own bucket
-    width for the window, so it is one-per-bucket by construction rather than
-    by a number that happens to work out today.
-    """
-    if kind == "empty":
-        return [], None
-    span = _PERIOD_SPAN.get(period, 31 * 86400)
-    step = _GRAN_STEP.get(timeframe, 3600)
-    if kind == "thin":
-        # hub buckets by tf, so sample at the bucket width for whichever tf
-        # asked for this (period, timeframe) pair
-        for _tf, (per, gran, bucket) in hub.TIMEFRAMES.items():
-            if per == period and gran == timeframe:
-                step = bucket
-                break
-    n = int(span / step)
-    n = max(2, min(n, _MAX_POINTS))
-    step = span / n
-    now = int(time.time())
-    seed = sum(ord(c) for c in str(period) + str(timeframe))
-    pts = []
-    for i in range(n + 1):
-        t = now - (n - i) * step
-        frac = i / float(n)
-        if kind == "drawdown":
-            knee = 0.62
-            if frac < knee:
-                v = 50000 + 14000.0 * (frac / knee)
-            else:
-                k = (frac - knee) / (1.0 - knee)
-                v = 64000 * (1.0 - 0.18 * k)
-            v += 180 * math.sin((i + seed) / 9.0)
-        elif kind == "thin":
-            v = 52000 + 900 * math.sin((i + seed) / 3.0) + 40.0 * i
-        else:
-            v = (96000 + 46000.0 * frac
-                 + 520 * math.sin((i + seed) / 23.0)
-                 + 180 * math.sin((i + seed) / 5.0))
-        pts.append((float(int(t)), round(v, 2)))
-    return pts, pts[0][1]
+#: `_curve_for` USED TO LIVE HERE AND IT HAS BEEN DELETED.
+#:
+#: It generated a second equity curve, per (period, timeframe), for the hub
+#: routes alone -- while `/api/perf/*` was handed `mockperf`'s curve for the
+#: same account. One account, two histories, and three verifiers spent a round
+#: each reporting a drawdown disagreement that reproduces against fixtures and
+#: does not exist on the live route. `_MockBroker.portfolio_history` now slices
+#: the ONE fixture curve, and the shape a scenario wants (a rise, a fall, a
+#: cliff, a sparse print) is a `kind` in `mockperf.equity_curve`, which is the
+#: curve both modules read.
+#:
+#: `_PERIOD_SPAN`, `_GRAN_STEP` and `_MAX_POINTS` above are still the window
+#: table `_MockBroker._window` cuts with.
 
 
 # ------------------------------------------------------------ journal fixture
@@ -2542,7 +2872,21 @@ def _perf_hub_profile(scen):
 def _hub_profile(scen, acct):
     """Everything one (scenario, account) pair is: the whole fixture in one
     dict, so a scenario is readable top to bottom instead of assembled from
-    branches scattered through the builders."""
+    branches scattered through the builders.
+
+    `realized` USED TO BE A KEY HERE AND IT IS GONE. It was a literal that
+    `_MockFleet.realized_total()` handed straight back, while `/api/perf`
+    summed the scenario's journal FILE -- so one account's hub page read
+    $3,123.23 and its P/L page read $527.15, and a verifier spent a round on
+    it. The fleet now reads the journal, which is what the real one does
+    (`fleet.py:1180`), so there is one number and no second place to state it.
+
+    `curve` is still here and is now a SHAPE, not a second curve: it picks the
+    `kind` `mockperf.equity_curve` builds (rise, fall, drawdown, thin, or the
+    one-print "empty"), and that single curve is what both the broker stub and
+    `perf.Ctx` are handed. It is ignored for the perf* and returns* scenarios,
+    which state their own points.
+    """
     test_acct = acct != HUB_DEFAULT_ACCOUNT
     shares, opts = _rich_positions()
     engines = _rich_engines()
@@ -2570,8 +2914,7 @@ def _hub_profile(scen, acct):
         return {"engines": {}, "shares": {}, "opts": [], "plays": "none",
                 "curve": "empty", "journal": "empty", "watch": [],
                 "account": _acct_block(100000.00, 100000.00, 0.0),
-                "made_today": None, "base_value": None,
-                "realized": None}
+                "made_today": None, "base_value": None}
 
     if scen == "hubwatch":
         # One ladder, and two tickers nobody trades. ZZZQ has no quote and no
@@ -2583,8 +2926,7 @@ def _hub_profile(scen, acct):
                 "curve": "rich", "journal": "rich",
                 "watch": ["NVDA", "ZZZQ"],
                 "account": _acct_block(None, 71240.10, 23150.00),
-                "made_today": 184.20, "base_value": 95000.00,
-                "realized": 2974.23}
+                "made_today": 184.20, "base_value": 95000.00}
 
     if scen == "hubdouble":
         # SPY carries the ladder AND the credit spread at once. Two strategy
@@ -2603,16 +2945,14 @@ def _hub_profile(scen, acct):
                 "plays": "spy-only", "curve": "rich", "journal": "rich",
                 "watch": [],
                 "account": _acct_block(None, 84500.00, 128420.00),
-                "made_today": 218.30, "base_value": 200000.00,
-                "realized": 475.45}
+                "made_today": 218.30, "base_value": 200000.00}
 
     if scen == "hubdrawdown":
         return {"engines": engines, "shares": shares, "opts": opts,
                 "plays": "rich", "curve": "drawdown", "journal": "rich",
                 "watch": ["NVDA"],
                 "account": _acct_block(None, 19880.00, 31460.22),
-                "made_today": -812.44, "base_value": 60000.00,
-                "realized": 2974.23}
+                "made_today": -812.44, "base_value": 60000.00}
 
     if scen == "hubunclaimed":
         # A second unclaimed thing, and an OPTION one: hub keys option claims
@@ -2626,8 +2966,7 @@ def _hub_profile(scen, acct):
                 "plays": "none", "curve": "rich", "journal": "rich",
                 "watch": [],
                 "account": _acct_block(142900.00, 44100.00, 98800.00),
-                "made_today": 96.10, "base_value": 130000.00,
-                "realized": 2974.23}
+                "made_today": 96.10, "base_value": 130000.00}
 
     if scen == "hubclash":
         # THE LOUD ONE. The lots ledger says the ladder is LONG 1800 RAM and
@@ -2642,16 +2981,14 @@ def _hub_profile(scen, acct):
                 "journal": "rich", "watch": [],
                 "account": _acct_block(98420.55, 121400.00, 0.0,
                                        short_mv=-23148.00),
-                "made_today": 12.00, "base_value": 95000.00,
-                "realized": 2974.23}
+                "made_today": 12.00, "base_value": 95000.00}
 
     if scen == "hubthin":
         return {"engines": {"RAM": engines["RAM"]},
                 "shares": {"RAM": shares["RAM"]}, "opts": [], "plays": "none",
                 "curve": "thin", "journal": "rich", "watch": ["NVDA"],
                 "account": _acct_block(52400.00, 29250.00, 23150.00),
-                "made_today": 41.10, "base_value": 50000.00,
-                "realized": 2974.23}
+                "made_today": 41.10, "base_value": 50000.00}
 
     # "hub": the account as it actually stands. The Test account is the SAME
     # profile with the options book taken off it and a smaller ladder, because
@@ -2667,14 +3004,12 @@ def _hub_profile(scen, acct):
                 # account on screen has `pl.total` as a dash with a reason
                 # while the other has a number. Two accounts that always agree
                 # never prove the unmeasured path renders.
-                "made_today": -44.90, "base_value": None,
-                "realized": 2974.23}
+                "made_today": -44.90, "base_value": None}
     return {"engines": engines, "shares": shares, "opts": opts,
             "plays": "rich", "curve": "rich", "journal": "rich",
             "watch": ["NVDA", "ZZZQ"],
             "account": _acct_block(146880.44, 41520.30, 105360.14),
-            "made_today": 612.85, "base_value": 125000.00,
-            "realized": 2974.23}
+            "made_today": 612.85, "base_value": 125000.00}
 
 
 def _positions_of(prof):
@@ -2736,16 +3071,40 @@ def _hub_ctx(scen, acct):
         _write_journal(jpath, _journal_rows(prof["journal"]))
     meta = next((a for a in HUB_ACCOUNTS if a["id"] == acct), HUB_ACCOUNTS[0])
 
+    # hub's FUNDING cache is keyed by ACCOUNT ID ALONE and holds for 300 s
+    # (hub.py:1334). In production one id is one fleet and that is fine; here
+    # every scenario is served under the SAME two account ids, so the first
+    # scenario's deposit was answered for all of them -- `perfloss`'s hub page
+    # read its basis as $50,000 (perfwins's deposit) against perf's $45,000,
+    # which is the fixture inventing a disagreement all over again. Cleared
+    # for the same reason a fresh fleet is built per request, just below:
+    # a scenario switch has to be visible on the next poll.
+    #
+    # `_SERIES_CACHE` needs no help -- it already keys on the fleet OBJECT as
+    # well as the id. That the funding cache does not is worth a look in
+    # hub.py; it is invisible in production and it is not this file's to fix.
+    try:
+        hub._FUNDING_CACHE.clear()
+    except Exception:
+        pass
+
     _acct = _derived_account(prof)
+
+    # THE FLEET READS THE PERF FIXTURE. Not a curve of its own and not a
+    # realised literal: the broker is handed the same `activities` list and
+    # the same `equity_points` curve that `mockperf.context()` puts into
+    # `perf.Ctx` for this scenario, so no scenario can make the two modules
+    # answer a money question differently. `test_mockharness.py` section 11
+    # is the check that keeps it true.
+    _spec = _perf_spec(scen, acct)
 
     fleet = _MockFleet(account_id=acct, label=meta["label"], state_dir=sdir,
                        account=_acct, positions=dict(prof["shares"]),
                        engines=_hub_engines(scen, acct, prof["engines"]),
                        quotes=_HUB_QUOTES,
-                       curve_kind=prof["curve"], base=None,
-                       realized=prof["realized"],
+                       equity_points=_spec.get("equity_points"),
+                       activities=_spec.get("activities"),
                        made_today=prof.get("made_today"),
-                       base_value=prof.get("base_value"),
                        journal_path=jpath, assets=_HUB_NAMES)
     ctx = hub.Ctx(fleet, option_positions=list(prof["opts"]))
 
@@ -2823,21 +3182,7 @@ def hub_optlab_ticker(scen, acct, sym):
     prof = _hub_profile(scen, acct)
     sdir = _hub_state_dir(scen, acct)
     ctx, providers = _hub_ctx(scen, acct)
-    kind = prof["plays"]
-    if kind == "rich":
-        pcs, swing, orphan = _rich_play_rows()
-        rows = pcs + swing + orphan
-    elif kind == "spy-only":
-        rows = _rich_play_rows()[0][:1]
-    else:
-        rows = []
-    if scen == "playsnoquote":
-        # An open position with NO two-sided quote: mark, P/L and % all absent.
-        # They must render as dashes. 0.00 is a different fact and it is the
-        # one a page invents when it treats None as a number.
-        rows = [r for r in rows if r.pl is None] or rows[:1]
-        for r in rows:
-            r.pl, r.pl_pct, r.mark = None, None, None
+    rows = _play_positions(scen, acct)
     with _Providers(providers):
         # RUN THE PROVIDERS FIRST. The play ASSIGNMENTS are written into the
         # scratch store by the provider itself (`_rich_plays` calls
@@ -2873,6 +3218,34 @@ def _ai_scen(scen):
     return scen if scen in _mockai.SCENARIOS else "assistant"
 
 
+def _play_positions(scen, acct):
+    """The scenario's options-play LEDGER: the `_PlayPos` rows behind it.
+
+    ONE list, read by three callers -- `_rich_plays` builds hub's strategy
+    cards over it, `hub_optlab_ticker` hands it to `optticker.report`, and
+    `_perf_spec` hands it to `perf.Ctx` as `option_positions`. perf missed it
+    entirely until 29 Sep 2026, so hub's `pl.realized` counted the closed
+    plays and perf's reconciliation did not, and the two published different
+    realised figures for one account.
+    """
+    kind = _hub_profile(scen, acct)["plays"]
+    if kind == "rich":
+        pcs, swing, orphan = _rich_play_rows()
+        rows = pcs + swing + orphan
+    elif kind == "spy-only":
+        rows = _rich_play_rows()[0][:1]
+    else:
+        rows = []
+    if scen == "playsnoquote":
+        # An open position with NO two-sided quote: mark, P/L and % all absent.
+        # They must render as dashes. 0.00 is a different fact and it is the
+        # one a page invents when it treats None as a number.
+        rows = [r for r in rows if r.pl is None] or rows[:1]
+        for r in rows:
+            r.pl, r.pl_pct, r.mark = None, None, None
+    return rows
+
+
 def _perf_spec(scen, acct):
     """The perf fixture for this (scenario, account).
 
@@ -2880,13 +3253,22 @@ def _perf_spec(scen, acct):
     off the hub profile that is already on screen, so /api/perf and
     /api/hub/portfolio answer about ONE account. Serving two would reproduce
     the owner's complaint inside the tool built to end it.
+
+    THE OPTIONS PLAY LEDGER IS PART OF THE FIXTURE. `option_ledger` used to be
+    None on every scenario, so `perf.reconcile` reported "the options play
+    ledger was not read" while hub's own page was drawing two play cards off
+    it. Where the scenario HAS plays it is handed over; where it has none it
+    stays None, which is the honest "this machine has no ledger" case and the
+    branch `perf.py` renders differently.
     """
     spec = _mockperf.profile(scen) or _mockreturns.profile(scen)
-    if spec is not None:
-        return spec
-    prof = _hub_profile(scen, acct)
-    return _mockperf.from_hub_profile(prof, _positions_of(prof),
-                                      _derived_account(prof))
+    if spec is None:
+        prof = _hub_profile(scen, acct)
+        spec = _mockperf.from_hub_profile(prof, _positions_of(prof),
+                                          _derived_account(prof))
+    rows = _play_positions(scen, acct)
+    return dict(spec, option_ledger=(rows if rows else
+                                     spec.get("option_ledger")))
 
 
 def _perf_journal_rows(scen, acct):

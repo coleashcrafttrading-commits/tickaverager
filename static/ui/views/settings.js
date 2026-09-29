@@ -37,6 +37,9 @@ import { ratiobar } from "../viz.js";
 import {
   ensureFieldStyles, impactOf, impactBadge, applySearch, IMPACT,
 } from "../fields.js";
+/* the disclosure layer: a REASON that only a hover can reach is not reachable
+   on a phone and not reachable from the keyboard */
+import { wireReasons } from "../reason.js";
 
 let renaming = false;   // the label is being edited; the poll must not repaint it
 let acctMsg = "";       // the last Test-keys answer, survives the poll repaint
@@ -97,8 +100,8 @@ function mountAccount() {
             class="imp imp-safe">display</span></button>
           <button class="btn sm danger" id="acctRemove" title="Deletes the keys
             and the fleet FROM THIS SERVER. Positions and resting orders at
-            Alpaca are left exactly as they are — which is why it is the loud
-            one: the ladder stops managing them and they stay open.">Remove
+            Alpaca are left as they are — the ladder stops managing them and
+            they stay open.">Remove
             account <span class="imp imp-money">trades money</span></button>
         </div>
       </div>
@@ -108,12 +111,17 @@ function mountAccount() {
     ${panel("The server", `
       <div class="srv">
         <div class="srv-a">
-          <button class="btn primary" id="sRestart" title="Relaunches the
-            server so new code and settings take effect. No order is placed or
-            cancelled and nothing is armed that was not armed before — but this
-            is ONE process for every account, so all of their fleets stop for
-            the duration. Take-profits resting at Alpaca are the broker's
-            orders and stay live throughout.">Restart dashboard <span
+          ${/* ROUND 7: 55 words to 24. Nothing that names a CONSEQUENCE
+                left: no order placed or cancelled, every account's fleet
+                stops, resting take-profits survive. What left is the part
+                that described the button -- "so new code and settings take
+                effect" -- and the reassurance that nothing is armed that was
+                not armed before, which "no order is placed or cancelled"
+                already covers. */ ""}
+          <button class="btn primary" id="sRestart" title="Places and cancels
+            nothing, but it is ONE process for every account: all of their
+            fleets stop for the duration. Take-profits resting at Alpaca are
+            the broker's and stay live.">Restart dashboard <span
             class="imp imp-guard">limit</span></button>
           <button class="btn" id="bTheme">Toggle light / dark</button>
         </div>
@@ -149,71 +157,65 @@ function mountAccount() {
    rather than on a read-only table somewhere else. (p = ov.portfolio,
    ov = the overview, set = the value currently in the box.)
    ========================================================================= */
+/* ROUND 7: `hint` + `affects` ARE ONE `why`, AND IT IS SHORT.
+
+   Each row used to carry two sentences, joined into one 26-to-54 word title on
+   a mark that could not be opened. Seven rows held 241 words that way. What
+   those 241 words mostly did was restate the label: "Poll seconds -- how often
+   the fleet reads Alpaca". The reader already knew.
+
+   What is left is the part a label cannot say: WHAT IT COSTS when it is wrong.
+   Nothing here describes the control; every line names a consequence. The
+   group `lead` paragraphs are not shortened, they are GONE -- "Market data",
+   "Portfolio guardrails" and "This dashboard" are what they said, and the one
+   fact in them that a heading cannot carry (0 turns a guardrail off) is drawn
+   on the field itself, in red, the moment it is 0. */
 const SET_GROUPS = [
   {
     id: "data", title: "Market data",
-    lead: "How this account sees prices. Nothing here sends an order — but "
-        + "every engine decides on what these two settings fetch.",
     fields: [
       { k: "feed", label: "Data feed", t: "sel",
-        opts: [["auto", "auto — Blue Ocean overnight, SIP otherwise"],
-               ["sip", "sip — the consolidated tape"],
-               ["iex", "iex — one venue only, thinner"],
-               ["boats", "boats — Blue Ocean, the overnight venue"]],
-        hint: "The SIP tape is <b>dark 20:00–04:00 ET</b>. On <b>auto</b> the fleet "
-            + "switches to Blue Ocean overnight by itself and back at 04:00.",
-        affects: "Every quote, bar and indicator every ladder in this account reads." },
+        opts: [["auto", "auto"],
+               ["sip", "sip"],
+               ["iex", "iex — thinner"],
+               ["boats", "boats — overnight"]],
+        why: "SIP is dark 20:00–04:00 ET; auto covers that with Blue Ocean. "
+           + "Every ladder's quotes and bars come from it." },
       { k: "poll_seconds", label: "Poll seconds", t: "num", step: 0.5, min: 1,
-        hint: "How often the fleet reads Alpaca <b>once for all tickers</b>. "
-            + "Positions, orders, quotes and bars are batched, so adding tickers "
-            + "costs almost nothing here.",
-        affects: "The 200 requests/minute this account gets, which the ladders "
-               + "also place orders through. Below 1s it starts competing with "
-               + "them; far above it every engine decides on stale prices." },
+        why: "One batched read for all tickers. Below 1s it competes with the "
+           + "ladders' own orders; far above it they decide on stale prices." },
     ],
   },
   {
     id: "guards", title: "Portfolio guardrails",
-    lead: "Limits measured across the whole account — the checks no single "
-        + "engine can make for itself. 0 turns one off entirely.",
     fields: [
       { k: "max_total_exposure", label: "Max total exposure ($)", t: "num",
         step: 1000, min: 0, unit: "$",
-        hint: "Cost basis across <b>every</b> ladder. A ladder that would push "
-            + "past this stops adding — it is not halted and nothing is sold.",
-        affects: "Whether a new rung may open. Existing lots and their resting "
-               + "take-profits are untouched.",
+        why: "Blocks a new rung across every ladder. Nothing is sold and "
+           + "nothing is halted.",
         used: (p) => p.deployed || 0 },
       { k: "reserve_cash", label: "Cash reserve ($)", t: "num", step: 1000, min: 0,
         unit: "$",
-        hint: "Buying power the fleet will never spend, whatever any ladder wants.",
-        affects: "Every entry order in this account. The bar fills as buying "
-               + "power falls toward the reserve.",
+        why: "Buying power the fleet never spends.",
         used: (p, ov, set) => Math.max(0, set - (p.buying_power || 0)) },
       { k: "account_daily_loss_limit", label: "Account daily loss limit ($)",
         t: "num", step: 100, min: 0, unit: "$",
-        hint: "Measured on the <b>account</b>, not one ladder. Hitting it halts "
-            + "every ladder at once.",
-        affects: "Every engine in this account, simultaneously. Raising it is "
-               + "the single loosest change on this page.",
+        why: "Halts every ladder at once. Raising it is the loosest change on "
+           + "this page.",
         used: (p) => Math.max(0, -(p.today_pl != null ? p.today_pl : p.made_today || 0)) },
       { k: "max_running_tickers", label: "Max running tickers", t: "num",
         step: 1, min: 0, unit: "n",
-        hint: "Engines allowed to be running at once in this account.",
-        affects: "How many ladders may be started. It does not stop one that "
-               + "is already running.",
+        why: "Caps how many may be started. It does not stop one already "
+           + "running.",
         used: (p, ov) => (ov.tickers || []).filter((t) => t.running).length },
     ],
   },
   {
     id: "dash", title: "This dashboard",
-    lead: "What the browser does. No order path reads anything here.",
     fields: [
       { k: "ui_refresh_ms", label: "Dashboard refresh (ms)", t: "num",
         step: 500, min: 500,
-        hint: "How often this page asks the server for the overview.",
-        affects: "This browser tab only. The fleet's own decisions are on "
-               + "<b>Poll seconds</b> above and are not affected by it." },
+        why: "This browser tab only. The fleet's own rate is Poll seconds." },
     ],
   },
 ];
@@ -248,17 +250,32 @@ function setRowHTML(f) {
      right. The old row stacked six blocks of prose under every control and
      that stack IS the "endless widgets" complaint -- at three groups and
      seven settings the page was four screens long. */
-  /* The two sentences, as ONE tooltip on ONE mark. `plain` strips the <b>
-     tags they were written with, because a title attribute renders them as
+  /* ROUND 7: THE MARK IS A REAL DISCLOSURE. It shipped as
+     `<button tabindex="-1">` with no click handler: clicking it left #view's
+     innerText identical, `onclick` was null, and the tabindex took it out of
+     the keyboard order. Its only content was a `title`, so on a phone -- where
+     there is no hover -- the cost of every account-wide guardrail was
+     unreachable. It is a plain <button> now, in the tab order, opened by tap,
+     click or Enter through reason.js, and the native tooltip still works for a
+     mouse. `plain` strips any markup: a title attribute renders tags as
      literal angle brackets. */
   const plain = (h) => String(h || "").replace(/<[^>]*>/g, "");
-  const tip = plain(f.hint) + " Affects: " + plain(f.affects);
+  const tip = plain(f.why);
+  /* THE TIER BLURB IS NOT REPEATED ON EVERY ROW. `impactBadge` (fields.js)
+     hangs the tier's 22-word definition off the badge, and with five guarded
+     settings on this page that was 110 words saying the same thing five times
+     -- a glossary, measured. The badge still says LIMIT or DISPLAY, the impact
+     filter above still counts them, and each row now carries its OWN cost on a
+     mark that opens. fields.js is another agent's file and is not touched: the
+     title is simply not rendered here. If its markup ever changes shape this
+     is a no-op, never a break. */
+  const badge = impactBadge(f.k).replace(/\s*title="[^"]*"/, "");
   return `<div class="fld set-row" data-k="${f.k}" data-impact="${impactOf(f.k)}"
     data-tip="${esc(tip)}">
-    <div class="fld-h"><span class="fld-l">${esc(f.label)}</span>${impactBadge(f.k)}
+    <div class="fld-h"><span class="fld-l">${esc(f.label)}</span>${badge}
       <span class="fld-key mono">${esc(f.k)}</span>
-      <button type="button" class="set-q-m" tabindex="-1"
-        aria-label="what ${esc(f.label)} does" title="${esc(tip)}">i</button></div>
+      <button type="button" class="set-q-m" data-why
+        aria-label="what ${esc(f.label)} costs" title="${esc(tip)}">i</button></div>
     ${ctl}
     ${f.used ? `<div class="use" data-use="${f.k}"></div>` : ""}
   </div>`;
@@ -286,24 +303,25 @@ function impactOptions() {
   const opts = [["", `All ${SET_ALL.length}`]];
   for (const t of ["money", "guard", "safe", "unknown"]) {
     if (!c[t]) continue;
-    opts.push([t, `${TIER_WORD[t]} ${c[t]}`, IMPACT[t].blurb]);
+    /* ROUND 7: NO BLURB ON THE FILTER BUTTON. `IMPACT[t].blurb` defined the
+       word already printed on the button -- "Limits" meant "limits" -- for 31
+       words of hover nobody could reach on a phone. The badge on each row
+       carries the same classification, from the same table. */
+    opts.push([t, `${TIER_WORD[t]} ${c[t]}`]);
   }
   return opts;
 }
 
 /* ROUND 6: THE LEGEND IS GONE. It restated, as four lines of type under the
-   toolbar, what each badge's own tooltip already says and what the impact
-   filter's buttons already say -- and it did it on a page with seven
-   settings. What it said is not lost: `impactOptions()` below carries each
-   tier's blurb as the filter button's title, and the "nothing here places an
-   order" fact, which IS worth stating, is the filter control's own label. */
+   toolbar, what each badge's own tooltip already says.
+   ROUND 7: and what replaced it is eight words, not thirty-five. The long
+   version explained where per-ticker settings live; the rail is one click
+   away and says so itself. */
 function scopeHint() {
   const c = impactCounts();
   return c.money
-    ? "Every setting on this page is measured across the whole account."
-    : "Nothing on this page places or prices an order: every setting here is "
-      + "a limit or a display preference. The settings that change what is "
-      + "bought are a ticker's own, on that ticker's Settings tab.";
+    ? "Measured across the whole account."
+    : "Account-wide limits and display only. Nothing here prices an order.";
 }
 
 /* ================================================================ engine */
@@ -352,8 +370,7 @@ function mountEngine() {
   el("setCol").innerHTML = SET_GROUPS.map((g) => `
     <section class="set-g" id="setg-${g.id}">
       <header class="set-g-h">
-        <h3 class="set-g-t" title="${esc(g.lead.replace(/<[^>]*>/g, ""))}">${
-          esc(g.title)}</h3>
+        <h3 class="set-g-t">${esc(g.title)}</h3>
         <span class="faint set-count" data-setcount="${g.id}"></span>
       </header>
       <div class="set-fields" data-setgroup="${g.id}">
@@ -369,6 +386,8 @@ function mountEngine() {
   wireSegmented("setImp", (v) => { setImp = v; runSetSearch(); });
   runSetSearch();
   paintEngine();
+  /* every mark that carries a cost is now openable by tab and by tap */
+  wireReasons(el("view"));
 }
 
 /* Search hides rows by CLASS and never by `disabled`, so a filtered form still
@@ -510,14 +529,27 @@ function paintEngine() {
     if (!g.used) continue;
     const host = f.querySelector(`[data-use="${g.k}"]`);
     if (!host) continue;
-    const set = Number((f.elements[g.k] || {}).value) || 0;
-    const raw = g.used(p, ov, set);
+    /* AN EMPTY FIELD IS NOT A ZERO. `Number(value) || 0` turned a setting
+       that had not loaded into 0, and the row then made a POSITIVE CLAIM from
+       it -- "this limit is set to 0, which turns it off, nothing caps it" --
+       about a number nobody had read. Measured: every field in settings/engine
+       renders value="" on first paint, so all four account guardrails asserted
+       that no cap existed. A cap that is genuinely 0 IS off and says so; a cap
+       nobody has read yet is a dash with that reason. */
+    const el_ = f.elements[g.k];
+    const rawSet = el_ ? String(el_.value == null ? "" : el_.value).trim() : "";
+    const known = rawSet !== "" && Number.isFinite(Number(rawSet));
+    const set = known ? Number(rawSet) : null;
+    const raw = known ? g.used(p, ov, set) : null;
     const used = Number.isFinite(Number(raw)) ? Math.max(0, Number(raw)) : null;
+    let why_ = "";
+    if (!known) why_ = el_ ? "not read back from the server yet"
+                           : "this dashboard has no field for it";
+    else if (!set) why_ = "set to 0, which turns it off — nothing caps it";
     host.innerHTML = ratiobar({
-      value: used, cap: set, unit: g.unit === "$" ? "usd" : "count", dp: 0,
-      label: g.label,
-      why: set ? "" : "this limit is set to 0, which turns it off — nothing "
-                    + "caps it",
+      value: known ? used : null, cap: set,
+      unit: g.unit === "$" ? "usd" : "count", dp: 0,
+      label: g.label, why: why_,
     });
   }
 }
@@ -564,12 +596,17 @@ function ensureSettingsStyles() {
     ".set-row.i-out{display:none !important}",
     ".set-row input,.set-row select{width:100%}",
     ".set-row .use{margin-top:7px}",
-    /* the one mark that replaced two paragraphs per row */
+    /* the one mark that replaced two paragraphs per row. It is a REAL button
+       now: in the tab order, and `cursor:pointer` because it does something
+       when it is pressed. A control that looks interactive and is not was the
+       defect round 7 was sent to fix. */
     ".set-q-m{margin-left:auto;flex:none;width:15px;height:15px;padding:0;",
     "border-radius:50%;border:1px solid var(--hairline2);background:none;",
     "color:var(--faint);font:inherit;font-size:var(--fs-micro);",
-    "font-style:italic;line-height:1;cursor:help}",
+    "font-style:italic;line-height:1;cursor:pointer}",
     ".set-q-m:hover{color:var(--text);border-color:var(--muted)}",
+    ".set-q-m[aria-expanded=\"true\"]{color:var(--text);",
+    "border-color:var(--muted);background:var(--hairline)}",
     /* the save bar. SOLID, not a gradient: a translucent sticky bar over a
        form reads as a button floating on top of a field -- measured at 400px,
        where the Save sat across the Data feed row and the gradient's

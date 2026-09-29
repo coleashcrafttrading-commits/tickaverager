@@ -1592,14 +1592,18 @@ IRR_CEIL = 1.0e6
 #: believes it is worse off than one who reads the sentence.
 IRR_REPORT_MAX = 10.0
 
+#: ROUND 7 SHORTENED THIS AND THE TWO BELOW, at the source rather than in the
+#: view. Each of these strings is a `reason` on a metric envelope, so it is
+#: printed as a TOOLTIP on every cell that carries it -- DEPLOYED_BASIS alone
+#: was measured on 15 cells of the Returns table, 71 words each. A definition
+#: relocated into 15 tooltips is not a deletion, it is the same essay in a
+#: filing cabinet. What is kept here is the CAVEAT (this is turnover; the
+#: bands are chosen; no sign change means no rate); what went is the worked
+#: explanation of what the term means.
 IRR_BASIS = (
-    "A money-weighted IRR over the ACTUAL dated cash flows -- money out when a "
-    "lot opened, money back when it closed -- solved for the annual rate that "
-    "discounts them to zero. It is NOT (end/start)^(1/years): that formula "
-    "cannot see WHEN the money went in, so it scores a position funded "
-    "yesterday the same as one funded a year ago. A stream with no sign change "
-    "has no such rate and is a dash with that reason, exactly as `ratios()` "
-    "refuses an annualised return on a curve that crosses zero.")
+    "A money-weighted IRR over the ACTUAL dated cash flows, not "
+    "(end/start)^(1/years) -- that formula cannot see WHEN the money went in. "
+    "A stream with no sign change has no such rate and is a dash saying so.")
 
 #: NO WORKED EXAMPLE IN HERE. This string used to read "so 68 closed RAM lots
 #: add 68 entry costs", which was typed, not measured: on the owner's own
@@ -1627,14 +1631,12 @@ def _wins_only_clause(rows: list) -> str:
             "net figure and not a run of winners." % (losers, len(rows)))
 
 
+#: MEASURED: this string is the `reason` on 13 separate elements of the
+#: Returns room, so every word in it is printed thirteen times. At 71 words
+#: that was 923 words of tooltip for one definition.
 DEPLOYED_BASIS = (
-    "Capital deployed: what an OPEN position cost at the broker, plus the "
-    "entry cost of every lot that has since closed. READ THE SECOND HALF "
-    "CAREFULLY -- a DCA ladder recycles the same dollars, so a ticker's closed "
-    "lots each add their own entry cost and the figure is TURNOVER, not money "
-    "the account ever had at risk at one time. A return measured against it is "
-    "a return per dollar traded. The account's own return on capital is the "
-    "headline, which is measured against net funding.")
+    "Capital deployed is TURNOVER -- open cost plus every closed lot's entry "
+    "cost, so a return against it is per dollar traded, not on capital.")
 
 
 def _npv(rate: float, flows: list, t0: float) -> Optional[float]:
@@ -2051,8 +2053,7 @@ def contributors(holdings: list, rows: list, *, as_of: float) -> dict:
         "unranked": unranked,
         "by_strategy": strat,
         "why": ("Ranked on TOTAL gain -- realised plus what the open lots are "
-                "worth right now -- because ranking on realised alone puts a "
-                "ticker that is holding an underwater bag at the top of the "
+                "worth -- so a ticker holding an underwater bag cannot top the "
                 "list. The per-strategy rows are realised only: a position at "
                 "the broker does not record which strategy opened it."),
         "as_of": as_of,
@@ -2089,15 +2090,11 @@ SCORE_MAX = 6
 ATTR_LIMIT = 6
 
 SCORECARD_BASIS = (
-    "Five measures, each scored out of %d. Every score is DERIVED from a "
-    "figure published elsewhere in this same payload -- the funding step of "
-    "the reconciliation, the totals row, each holding's own money out of "
-    "per_ticker(), and the account's equity curve. THE BANDS ARE A CHOSEN "
-    "SCALE AND NOT A MEASUREMENT: they are published on every measure, and "
-    "the measured value is published beside the score so it can be read "
-    "without them. A measure with nothing behind it scores NOTHING and says "
-    "why -- that is not a zero, and an axis drawn at the centre would be "
-    "claiming the account was measured and failed." % SCORE_MAX)
+    "Five measures, each scored out of %d and each DERIVED from a figure "
+    "published elsewhere in this payload. THE BANDS ARE A CHOSEN SCALE AND NOT "
+    "A MEASUREMENT: every measure publishes its own, with the measured value "
+    "beside the score. A measure with nothing behind it scores NOTHING and "
+    "says why, which is not a zero." % SCORE_MAX)
 
 
 def _bandset(edges: list) -> list:
@@ -2470,14 +2467,35 @@ def scorecard(ctx: Ctx, *, holdings: list, breakdown: dict, totals: dict,
                "zero.")
 
     # ------------------------------------------------------------ 5. coverage
-    n_all = len(holdings)
+    # THE RESIDUAL IS A ROW NOBODY MEASURED. Coverage used to count only the
+    # HOLDINGS it could value, so six symbols out of six scored 6/6, "every
+    # holding measured, 100.00%" -- on a screen whose own banner read
+    # "+$4,512.15 of this account is unexplained" against a P/L of +$6,565.30.
+    # 69% of what the account made was attributable to nothing, and the measure
+    # named "How much of the book is measured" called that complete.
+    #
+    # A reader takes coverage to mean "how much of this account do these rows
+    # explain". So the part no row explains stands in the denominator as an
+    # unmeasured row. Six real rows beside one unexplained chunk is 6/7, not
+    # 6/6, and the attribution names the chunk.
+    resid_m = (recon.get("residual") or {}) if isinstance(recon, dict) else {}
+    resid_v = resid_m.get("value")
+    tot_v = acct_total.get("value")
+    unexplained = (resid_v is not None and tot_v not in (None, 0)
+                   and abs(resid_v) > max(1.0, abs(tot_v) * 0.005))
+    n_all = len(holdings) + (1 if unexplained else 0)
     if not n_all:
         m5_val = dash(0, "pct",
                       "this account holds nothing and has closed nothing, so "
                       "there is no book to measure coverage over", as_of=as_of)
     else:
         m5_val = metric(round(len(measured_h) / float(n_all), 6), n_all, "pct",
-                        as_of=as_of)
+                        reason=(None if not unexplained else
+                                "%s of this account's profit and loss is not "
+                                "attributable to any holding, and stands here "
+                                "as a row nobody could measure"
+                                % "${:,.2f}".format(abs(resid_v))),
+                        thin=bool(unexplained), as_of=as_of)
     m5_attr = None
     if n_all:
         each = 1.0 / n_all
@@ -2488,7 +2506,12 @@ def scorecard(ctx: Ctx, *, holdings: list, breakdown: dict, totals: dict,
                      "n": h["trades"] + h["open_positions"],
                      "why": (h["total"].get("reason")
                              or "nothing measured a total gain for this row")}
-                    for h in unmeasured_h])
+                    for h in unmeasured_h]
+                 + ([{"symbol": "not attributable", "value": resid_m,
+                      "effect": 0.0, "n": 0,
+                      "why": "no holding accounts for this part of the "
+                             "account, so nothing here explains it"}]
+                    if unexplained else []))
         m5_attr = _attribution(
             items, as_of, exact=True, sums_to=m5_val["value"],
             basis="one row in %d for every holding whose total gain could be "
@@ -2647,12 +2670,10 @@ def returns(ctx: Ctx, *, rows: Optional[list] = None,
         # on a book with 64 closed trades, 23 winners and 41 losers, the page
         # printed "on this account it is wins-only ... a losing lot is never
         # closed and never books" directly beneath a table listing the 41.
-        "why": ("Every one of these is a TERM, not a headline. They sum to the "
-                "account's whole profit and loss -- equity less net funding -- "
-                "by construction: the residual is defined as equity minus the "
-                "other four plus funding, so either the identity holds or a "
-                "step has changed meaning. Realised sits in here as one bar, "
-                "never as the answer."
+        "why": ("Every one of these is a TERM, not a headline: they sum to the "
+                "account's own profit and loss -- equity less net funding -- "
+                "by construction, so either the identity holds or a step has "
+                "changed meaning."
                 + _wins_only_clause(rows)),
         "as_of": as_of,
     }
@@ -2743,12 +2764,10 @@ def returns(ctx: Ctx, *, rows: Optional[list] = None,
         "irr": acct_irr,
         "account_pl": breakdown["total"],
         "why": ("The TOTAL row's gains are the ACCOUNT's own realised and open "
-                "figures, not the sum of the rows above them -- the rows are "
-                "per underlying, and anything the broker holds that no row "
-                "claims would otherwise vanish out of the total. The "
-                "annualised figure is the account's money-weighted IRR over "
-                "its deposits and withdrawals, which is the one IRR on this "
-                "page with nothing missing from it."),
+                "figures, not the sum of the rows above -- anything the broker "
+                "holds that no row claims would otherwise vanish out of the "
+                "total. Its annualised figure is the account's own IRR, over "
+                "its deposits and withdrawals."),
     }
 
     # ------------------------------------------------- liquidated holdings
