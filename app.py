@@ -808,7 +808,8 @@ def journal_backfill(body: dict = Body(default={}), f: Fleet = Depends(cur)):
 
     import agentctl                 # local, as in get_audit below
     rows, report = journal.backfill_closes(
-        inv, sells, held, account=f.account_id)
+        inv, sells, held, closed=journal.closed_totals(base),
+        account=f.account_id)
     report["dry_run"] = dry
     report["fills_read"] = len(sells)
     report["open_lots_before"] = len(inv)

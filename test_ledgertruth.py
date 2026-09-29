@@ -179,26 +179,20 @@ short = [{"symbol": "RAM", "qty": "1", "price": "9.00",
 rows, rep = journal.backfill_closes(inv8, short, {}, account="default")
 check("no rows written", len(rows), 0)
 check("the lots stay open", rep["lots"], 0)
-check("and the reason names the gap",
-      "does not go back far enough" in rep["skipped"][0]["why"], True)
+check("and the reason names the mismatch",
+      "do not match" in rep["skipped"][0]["why"], True)
 
 print()
 print("=" * 78)
-print("11. the VWAP is taken over the TAIL of the tape, newest first")
+print("11. with nothing yet recorded, every sell is the missing one")
 print("=" * 78)
-# 3 shares open; the tape has an old take-profit at 20 and a flatten at 9/9.
 inv11 = [lot("G-%d" % i, "RAM", 1, 10.0, "2026-09-0%dT14:00:00+00:00" % i)
          for i in (1, 2, 3)]
-tape = [{"symbol": "RAM", "qty": "5", "price": "20.00",
-         "transaction_time": "2026-09-02T18:00:00Z"},
-        {"symbol": "RAM", "qty": "1", "price": "9.00",
-         "transaction_time": "2026-09-04T18:00:00Z"},
-        {"symbol": "RAM", "qty": "2", "price": "9.00",
-         "transaction_time": "2026-09-05T18:00:00Z"}]
-rows, rep = journal.backfill_closes(inv11, tape, {}, account="default")
-check("exactly the open quantity is consumed", rep["symbols"][0]["shares"], 3)
-check("the flatten price wins, not the old take-profit",
-      rep["symbols"][0]["vwap"], 9.0)
+tape = [{"symbol": "RAM", "qty": "1", "price": "9.00"},
+        {"symbol": "RAM", "qty": "2", "price": "9.00"}]
+rows, rep = journal.backfill_closes(inv11, tape, {}, closed={})
+check("exactly the open quantity is covered", rep["symbols"][0]["shares"], 3)
+check("priced at what Alpaca got", rep["symbols"][0]["vwap"], 9.0)
 check("so the loss is booked, not a phantom profit", rep["realized"], -3.0)
 
 print()
@@ -217,6 +211,68 @@ st = journal.stats(after, marks={}, inventory=journal.open_inventory(after))
 check("realised is the true figure", st["realized"], -4.0)
 check("open is zero, not a dash", st["unrealized"], 0.0)
 check("and P/L equals realised exactly", st["total_pl"], -4.0)
+
+print()
+print("=" * 78)
+print("13. the remainder is a SUBTRACTION, not a guess at which fills")
+print("=" * 78)
+# The tape holds an old take-profit the journal DID record (5 @ 20) and a
+# flatten it did not (3 @ 9). Consuming the newest sells would be right here
+# by luck; consuming the remainder is right by construction. The regression
+# that matters is the opposite order, tested below.
+inv13 = [lot("H-%d" % i, "RAM", 1, 10.0, "2026-09-0%dT14:00:00+00:00" % i)
+         for i in (1, 2, 3)]
+tape13 = [{"symbol": "RAM", "qty": "5", "price": "20.00"},
+          {"symbol": "RAM", "qty": "3", "price": "9.00"}]
+booked13 = {"RAM": {"shares": 5, "value": 100.0}}     # the recorded closes
+rows, rep = journal.backfill_closes(inv13, tape13, {}, closed=booked13)
+check("only the unbooked 3 shares are used", rep["symbols"][0]["shares"], 3)
+check("at the flatten price", rep["symbols"][0]["vwap"], 9.0)
+check("so the loss is booked", rep["realized"], -3.0)
+
+print()
+print("=" * 78)
+print("14. THE REGRESSION: the newest fills are NOT the missing ones")
+print("=" * 78)
+# The flatten happened FIRST and a take-profit sale came after. Taking the
+# tail of the tape would price the missing lots at 20 and invent a profit --
+# which is exactly what the first version did on the live account, booking
+# +$8,169.05 against a hole known to be -$5,515.33.
+tape14 = [{"symbol": "RAM", "qty": "3", "price": "9.00",
+           "transaction_time": "2026-09-04T18:00:00Z"},
+          {"symbol": "RAM", "qty": "5", "price": "20.00",
+           "transaction_time": "2026-09-09T18:00:00Z"}]
+rows, rep = journal.backfill_closes(inv13, tape14, {}, closed=booked13)
+check("the price is still the flatten's", rep["symbols"][0]["vwap"], 9.0)
+check("the loss is still booked", rep["realized"], -3.0)
+check("a profit is NOT invented", rep["realized"] < 0, True)
+
+print()
+print("=" * 78)
+print("15. the self-check refuses when the two records cannot be squared")
+print("=" * 78)
+rows, rep = journal.backfill_closes(
+    inv13, [{"symbol": "RAM", "qty": "9", "price": "9.00"}], {},
+    closed={"RAM": {"shares": 0, "value": 0.0}})
+check("nothing is written", len(rows), 0)
+check("and it says the counts disagree",
+      "do not match" in rep["skipped"][0]["why"], True)
+
+print()
+print("=" * 78)
+print("16. closed_totals counts what stats() counts, and nothing else")
+print("=" * 78)
+rows16 = [
+    {"event": "close", "symbol": "RAM", "shares": 2, "exit_price": 10.0},
+    {"event": "partial", "symbol": "RAM", "shares": 1, "exit_price": 12.0},
+    {"event": "close", "symbol": "RAM", "shares": 9, "exit_price": 99.0,
+     "dry_run": True},
+    {"event": "open", "symbol": "RAM", "shares": 5, "entry_price": 1.0},
+]
+t = journal.closed_totals(rows16)
+check("closes and partials both count", t["RAM"]["shares"], 3)
+check("valued at their exit prices", t["RAM"]["value"], 32.0)
+check("a dry run is excluded", "RAM" in t and t["RAM"]["shares"] == 3, True)
 
 print()
 print("=" * 78)

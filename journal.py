@@ -1058,59 +1058,59 @@ def open_inventory(rows: list[dict]) -> list[dict]:
 
 
 def backfill_closes(inv: list[dict], sells: list[dict], held: dict[str, float],
-                    *, now_iso: str = "", account: str = "default"
-                    ) -> tuple[list[dict], dict]:
+                    *, closed: Optional[dict] = None, now_iso: str = "",
+                    account: str = "default") -> tuple[list[dict], dict]:
     """The `close` rows the journal never wrote, rebuilt from Alpaca's fills.
 
     WHY THIS EXISTS. `reconcile_inventory` was the wrong answer to the right
     problem: it hid 494 phantom lots behind a banner explaining that the
     journal and the broker disagreed. The owner's reply was the correct one --
     "WHY DO WE HAVE THOSE IN THE JOURNAL THEN, I FLATTENED THEM AND ALPACA SOLD
-    THEM". The sells are in Alpaca's own activity log. A record that is missing
-    rows should be REPAIRED from the source that has them, not annotated.
+    THEM". The sells are in Alpaca's own activity log. A record missing rows is
+    REPAIRED from the source that has them, not annotated.
 
-    Measured on this account, 29 Sep 2026: 27,569 equity fills since 21 Aug,
-    every symbol netting to exactly 0.00 shares, true realised +$3,367.53
-    against a journal claiming +$8,882.86 -- because the journal recorded
-    10,956 take-profit closes and not one of the flatten sells. The missing
-    rows are worth -$5,515.33, which is the -$5,512.97 residual `perf.reconcile`
-    was already computing from the other end. Two independent derivations of
-    the same hole, which is why this can be written with confidence.
+    THE DERIVATION IS A SUBTRACTION, and the first version of this got it
+    wrong in a way worth recording. It tried to identify WHICH fills were the
+    flatten by consuming the newest sells on the tape -- and those were the
+    take-profits the journal had ALREADY recorded, so the preview booked
+    +$8,169.05 of profit against a hole independently known to be -$5,515.33.
+    Which sells they were is unknowable and does not matter. What is missing is
+    the REMAINDER:
 
-    APPEND-ONLY, AND HONEST ABOUT ITSELF. Every row returned carries
-    `backfilled: true` and `exit_basis`, so a reader can always tell a row the
-    engine wrote as it happened from a row reconstructed afterwards. Nothing is
-    rewritten and nothing is deleted.
+        unrecorded shares   = everything Alpaca sold - what the journal closed
+        unrecorded proceeds = every dollar Alpaca took - what the journal booked
 
-    WHICH SELLS. A symbol the broker no longer holds was sold in full, so the
-    unrecorded quantity is exactly what the journal still calls open. Those are
-    the LAST sells on the tape -- the journal's own closes were take-profits
-    written as they filled -- so the tail of the sell history is consumed,
-    newest first, until that quantity is covered.
+    and that identity makes the result self-checking, because the unrecorded
+    share count must come out equal to the shares the journal still calls open.
+    It does, or this refuses. The arithmetic then lands on the truth by
+    construction: realised after the repair is Alpaca's total proceeds less the
+    journal's total cost, which is what the account actually did.
 
-    WHICH PRICE. Every lot of a symbol is closed at the volume-weighted price
-    of exactly those consumed sells. The pairing of one lot to one fill is
-    arbitrary in a flatten -- one order sold 52 shares across many lots -- so a
-    per-lot price would be invented precision. The VWAP makes the TOTAL exact,
-    which is the number that has to be right, and `exit_basis` says so on every
-    row.
+    APPEND-ONLY AND HONEST ABOUT ITSELF. Every row carries `backfilled: true`
+    and `source`, so a row rebuilt afterwards is never mistaken for one the
+    engine wrote as it happened. Nothing is rewritten, nothing deleted.
 
-    Returns (rows_to_append, report). A symbol the broker still holds is left
-    completely alone: this repairs a CLOSED book, it never guesses at an open
-    one.
+    A symbol Alpaca still holds is left completely alone: this repairs a CLOSED
+    book and never infers at an open one. Every lot of a symbol is closed at
+    the volume-weighted price of the unrecorded remainder, because one flatten
+    order sold 52 shares across many lots and a per-lot price would be invented
+    precision. The VWAP makes the TOTAL exact and `exit_basis` says so.
     """
     now_iso = now_iso or _now_iso()
+    closed = closed or {}
     by_sym: dict[str, list[dict]] = {}
     for x in inv:
         by_sym.setdefault(str(x.get("symbol") or ""), []).append(x)
 
-    sells_by: dict[str, list[dict]] = {}
+    sold_q: dict[str, float] = {}
+    sold_v: dict[str, float] = {}
     for f in sells:
         s = str(f.get("symbol") or "")
-        if s:
-            sells_by.setdefault(s, []).append(f)
-    for s in sells_by:
-        sells_by[s].sort(key=lambda r: str(r.get("transaction_time") or ""))
+        if not s:
+            continue
+        q = qty(f.get("qty"))
+        sold_q[s] = round(sold_q.get(s, 0.0) + q, QTY_DP)
+        sold_v[s] = sold_v.get(s, 0.0) + q * float(f.get("price") or 0.0)
 
     out: list[dict] = []
     detail: list[dict] = []
@@ -1125,25 +1125,26 @@ def backfill_closes(inv: list[dict], sells: list[dict], held: dict[str, float],
                             "why": "the broker still holds this symbol, so its "
                                    "open lots are real and nothing is inferred"})
             continue
-        # consume the tail of the sell tape, newest first
-        take_q = 0.0
-        take_v = 0.0
-        for f in reversed(sells_by.get(sym, [])):
-            if take_q + QTY_EPS >= want:
-                break
-            q = qty(f.get("qty"))
-            px = float(f.get("price") or 0.0)
-            use = min(q, round(want - take_q, QTY_DP))
-            take_q = round(take_q + use, QTY_DP)
-            take_v += use * px
-        if take_q + QTY_EPS < want:
-            skipped.append({"symbol": sym, "journal_open": qnum(want),
-                            "sells_found": qnum(take_q),
-                            "why": "Alpaca's fill history does not go back far "
-                                   "enough to cover these lots, so they are "
-                                   "left open rather than closed at a guess"})
+        ctot = closed.get(sym) or {}
+        left_q = round(sold_q.get(sym, 0.0) - float(ctot.get("shares") or 0.0),
+                       QTY_DP)
+        left_v = sold_v.get(sym, 0.0) - float(ctot.get("value") or 0.0)
+        # THE SELF-CHECK. The shares Alpaca sold that the journal never booked
+        # must be exactly the shares the journal still calls open. If they are
+        # not, the two records cannot be squared by subtraction and writing
+        # anything would be a guess.
+        if abs(left_q - want) > max(QTY_EPS, want * 0.001):
+            skipped.append({
+                "symbol": sym, "journal_open": qnum(want),
+                "unrecorded_sold": qnum(left_q),
+                "why": ("Alpaca's unrecorded sells (%s share(s)) do not match "
+                        "the %s share(s) the journal calls open, so these two "
+                        "records cannot be squared by subtraction and nothing "
+                        "is written" % (qnum(left_q), qnum(want)))})
             continue
-        vwap = round(take_v / take_q, 6) if take_q else 0.0
+        if left_q <= QTY_EPS:
+            continue
+        vwap = round(left_v / left_q, 6)
         booked = 0.0
         for x in lots:
             sh = qty(x.get("shares"))
@@ -1158,13 +1159,14 @@ def backfill_closes(inv: list[dict], sells: list[dict], held: dict[str, float],
                         "the close was never journalled"),
                 "entry_time": x.get("opened"),
                 "backfilled": True,
-                "exit_basis": ("volume-weighted price of the %s unrecorded "
-                               "sell share(s) in %s" % (qnum(take_q), sym)),
+                "exit_basis": ("volume-weighted price of the %s %s share(s) "
+                               "Alpaca sold that the journal never booked"
+                               % (qnum(left_q), sym)),
                 "source": "alpaca_activities_fill",
                 "dry_run": False, "ts": now_iso, "account": account,
             })
         detail.append({"symbol": sym, "lots": len(lots), "shares": qnum(want),
-                       "vwap": round(vwap, 4), "proceeds": round(take_v, 2),
+                       "vwap": round(vwap, 4), "proceeds": round(left_v, 2),
                        "cost": round(sum(float(x.get("cost") or 0) for x in lots), 2),
                        "realized": booked})
     return out, {
@@ -1174,6 +1176,33 @@ def backfill_closes(inv: list[dict], sells: list[dict], held: dict[str, float],
         "realized": round(sum(d["realized"] for d in detail), 2),
         "lots": sum(d["lots"] for d in detail),
     }
+
+
+def closed_totals(rows: list[dict]) -> dict:
+    """{SYMBOL: {shares, value}} for every close the journal HAS recorded.
+
+    `value` is the exit proceeds -- shares times exit price -- which is the
+    term `backfill_closes` subtracts from Alpaca's total to find what is
+    missing. Bookkeeping rows and dry runs are excluded, exactly as `stats()`
+    excludes them, so the two functions count the same history.
+    """
+    out: dict[str, dict] = {}
+    for r in rows:
+        if r.get("event") not in ("close", "partial"):
+            continue
+        if r.get("dry_run") or is_bookkeeping(r):
+            continue
+        s = str(r.get("symbol") or "")
+        if not s:
+            continue
+        sh = qty(r.get("shares"))
+        px = float(r.get("exit_price") or 0.0)
+        d = out.setdefault(s, {"shares": 0.0, "value": 0.0})
+        d["shares"] = round(d["shares"] + sh, QTY_DP)
+        d["value"] += sh * px
+    for s in out:
+        out[s]["value"] = round(out[s]["value"], 2)
+    return out
 
 
 def reconcile_inventory(inv: list[dict], held: dict[str, float], *,
