@@ -48,13 +48,14 @@
 "use strict";
 import {
   S, VIEWS, el, esc, GET, go,
-  card, stat, tableHTML, money, money0, sgn, pct, px, qty,
-  mv, mfmt, mnum, measured, mreason, unmeasured, pctf, toneOf, sparkline,
-  tile, tileGrid, panel, dataTable, segmented, wireSegmented, emptyState,
+  card, money, money0, sgn, pct, px, qty,
+  mv, mnum, measured, mreason, unmeasured, pctf, toneOf, sparkline,
+  tile, panel, dataTable, segmented, wireSegmented, emptyState,
   stateChip, chip, STATE_WORDS,
   fleetControlsHTML, wireFleetControls,
 } from "../core.js";
 import { SeriesChart, METRIC_LABEL } from "../serieschart.js";
+import { dotscale } from "../viz.js";
 import { mountHistory, paintHistory } from "./performance.js";
 
 /* =================================================== the hub's answers ====
@@ -145,6 +146,34 @@ class HubChart extends SeriesChart {
   setForm(f) {
     super.setForm(f);
     this.chart.set("candleStyle", CHART_STYLE[f] || "line");
+  }
+
+  /* ROUND 6: THE DEFINITION UNDER THE CHART IS A TOOLTIP NOW.
+     serieschart prints the hub's `basis` and `v_means` as a strip of type
+     under every plot -- "the account's own equity, as Alpaca reckons it",
+     "samples in the bucket, NOT traded volume". Both define what the axis
+     means; neither says anything is wrong, and on this page there are two
+     charts, so the same shape of sentence appeared four times.
+
+     They move onto the plot itself, where a reader who wonders can hover.
+     WHAT STAYS PRINTED IS EVERY LINE THAT REPORTS A PROBLEM: a failed load,
+     a `reason` for missing points, and the doji warning. That split is the
+     owner's own rule -- keep the warnings, drop the explanations -- and it is
+     done by overriding here rather than by editing serieschart.js, which is
+     a component three rooms share and another agent is in this week. */
+  _note() {
+    super._note();
+    const el = this.$note;
+    if (!el) return;
+    const r = this.payload || {};
+    const defs = [r.basis, r.v_means].filter(Boolean);
+    if (!defs.length) return;
+    const kept = [...el.querySelectorAll("span")]
+      .filter((x) => !defs.includes(x.textContent));
+    if (this.host) this.host.title = defs.join(" · ");
+    if (!kept.length) { el.hidden = true; el.textContent = ""; return; }
+    el.innerHTML = "";
+    for (const k of kept) el.appendChild(k);
   }
 }
 
@@ -290,7 +319,6 @@ function repaint() {
   if (el("hubNotes")) el("hubNotes").innerHTML = notes();
   if (el("hubBand")) {
     paintBand();
-    paintTiles();
     paintAlloc();
     paintRisk();
     paintDrawdownNums();
@@ -311,7 +339,6 @@ function mountHub() {
   el("view").innerHTML = `
     <div id="hubNotes"></div>
     <div class="hub-band" id="hubBand"></div>
-    <div id="hubTiles"></div>
     <div class="grid main lead-rail">
       <div>
         ${panel("", `
@@ -320,44 +347,50 @@ function mountHub() {
             value: metric, id: "hubMetric", label: "Which series",
           })}</div>
           <div id="hubChart"></div>`, { cls: "hub-chart-p" })}
-        ${panel("Across strategies", `<div id="hubAlloc"></div>`, {
-          sub: "the ladder and every options play on the same footing, "
-             + "largest first",
-        })}
+        ${panel("Across strategies", `<div id="hubAlloc"></div>`)}
       </div>
       <div>
         ${panel("Drawdown", `<div id="hubDDNums"></div>
           <div id="hubDD" class="hub-dd-chart"></div>`, {
-          /* The three figures are SINCE INCEPTION and the chart is whatever
-             window is picked. Saying so matters: hub measures a drawdown
-             against the peak inside the window, so a 1M chart shows a
-             shallower one than the numbers above it, and without this line
-             that reads as a contradiction rather than as two questions. */
-          sub: "the figures are since inception; the chart is the window you "
-             + "pick, and a shorter window has a younger peak",
+          /* THE DISCLAIMER IS A TOOLTIP NOW. The three figures are SINCE
+             INCEPTION and the chart is whatever window is picked, so a 1M
+             chart shows a shallower fall than the numbers above it. That is
+             worth knowing and it is not worth a line of type on every load:
+             it hangs off the title, where a reader who wonders can find it. */
+          titleHint: "The three figures are since inception. The chart is the "
+            + "window you pick, and a shorter window has a younger peak, so it "
+            + "draws a shallower fall than the figures above it.",
         })}
         ${panel("At risk", `<div id="hubRisk"></div>`, {
-          sub: "what each strategy could still lose on what it holds",
+          titleHint: "what each strategy could still lose on what it holds",
         })}
         ${panel("Held by no strategy", `<div id="hubUnc"></div>`, {
-          sub: "hand-placed, another agent's, or a ledger that disagrees",
+          titleHint: "held at the broker and owned by no strategy: a "
+            + "hand-placed trade, another agent's position, or a ledger that "
+            + "disagrees with the broker. It is counted rather than hidden, "
+            + "because the account holds it either way.",
           flush: true,
         })}
       </div>
     </div>
     ${panel("Tickers", `<div id="hubTickers"></div>`, {
-      sub: "a ticker is a symbol this account cares about — a strategy is "
-         + "something you attach to one, or do not",
-      actions: `<button class="btn sm pri" data-go="add">Add a ticker</button>`,
+      /* ROUND 6: the "Share-ladder controls" PANEL is gone. Its entire body
+         was one explanatory paragraph, and its four buttons belong beside the
+         ladders they act on rather than in a frame of their own. The sentence
+         they carried ("these act on the share ladder only") is the group's
+         tooltip, which is where it can be read once by whoever wonders. */
+      titleHint: "a ticker is a symbol this account cares about; a strategy is "
+        + "something you attach to one, or do not",
+      actions: `<span class="hub-fleet" title="These four act on the SHARE
+        LADDER only — the strategy that runs an engine per ticker, and the only
+        one with a fleet-wide switch. An options play is armed from the Options
+        tab, and a play's arm gates opening and never closing.">${
+        fleetControlsHTML()}</span>
+        <button class="btn sm pri" data-go="add">Add a ticker</button>`,
       flush: true,
     })}
-    ${panel("Share-ladder controls", `<div class="tip" style="margin-top:0">
-      These four act on the <b>share ladder</b> only — it is the strategy that
-      runs an engine per ticker, and the only one with a fleet-wide switch. An
-      options play is armed from the Options tab, and a play's arm gates
-      OPENING and never closing.</div>`, { actions: fleetControlsHTML() })}
     ${panel("Activity", `<div class="log" id="hubLog"></div>`, {
-      sub: "every ladder engine in this account", flush: true,
+      titleHint: "every ladder engine in this account", flush: true,
     })}`;
 
   wireFleetControls(el("view"));
@@ -433,42 +466,59 @@ function paintBand() {
   const started = (total != null && value != null) ? value - total : null;
   const totalPc = (total != null && started) ? total / started : null;
 
-  const col = (k, body, sub, why) => `
-    <div class="hb-c">
+  /* ROUND 6: the caption line under each figure is GONE. Every one of them
+     ("vs yesterday's close", "the account since inception", "on 7 position(s)
+     held now") explained what the number above it meant, which is the shape
+     the owner called clutter. The sentence is now the column's own tooltip and
+     the space is a mark instead. `extra` is that mark, never a sentence. */
+  const col = (k, body, why, extra) => `
+    <div class="hb-c"${why ? ` title="${esc(why)}"` : ""}>
       <div class="hb-k">${esc(k)}</div>
       <div class="hb-n">${body}</div>
-      <div class="hb-s"${why ? ` title="${esc(why)}"` : ""}>${sub}</div>
+      ${extra || ""}
     </div>`;
 
   host.innerHTML = `
     <div class="hb-lead">
       <div class="hb-k">Account value</div>
       <div class="hb-v">${mnum(P.value, { dp: 2 })}</div>
-      <div class="hb-s">${esc(P.label || "")}${P.as_of
-        ? ` · as of ${esc(new Date(P.as_of * 1000).toLocaleTimeString())}` : ""}</div>
-      <div class="hb-spark">${sparkline(pts, {
+      <div class="hb-spark" title="${esc((P.label || "")
+        + (P.as_of ? " · as of "
+            + new Date(P.as_of * 1000).toLocaleTimeString() : "")
+        + " · the past month")}">${sparkline(pts, {
         w: 240, h: 40, tone: "flat",
         why: (h.series && h.series.reason)
           || "the value series has fewer than two points",
       })}</div>
-      <div class="hb-s faint">the past month</div>
     </div>
     ${col("P/L today", mnum(P.pl.today, { signed: true }),
-          "vs yesterday's close", P.pl.basis.today)}
+          "vs yesterday's close. " + (P.pl.basis.today || ""))}
     ${col("P/L all time",
           mnum(P.pl.total, { signed: true })
           + (totalPc != null
              ? ` <span class="hb-pc">${totalPc > 0 ? "+" : ""}${
                  (totalPc * 100).toFixed(1)}%</span>` : ""),
-          "the account since inception", P.pl.basis.total)}
+          "the account since inception. " + (P.pl.basis.total || ""))}
     ${col("Open P/L", mnum(P.pl.open, { signed: true }),
-          `on ${(P.counts || {}).positions_open || 0} position(s) held now`,
-          P.pl.basis.open)}
+          `on ${(P.counts || {}).positions_open || 0} position(s) held now. `
+          + (P.pl.basis.open || ""))}
     ${col("Drawdown", mnum(dd.current, { signed: true }),
-          dd.peak_at
-            ? `peak ${esc(whenDay(dd.peak_at))}`
-            : esc(mreason(dd.current) || "no equity history"),
-          dd.basis)}`;
+          `now against the peak of ${dd.peak == null ? "an unrecorded high"
+            : money0(dd.peak)}${dd.peak_at ? " on " + whenDay(dd.peak_at) : ""}`
+          + `, and the worst this account has been. ` + (dd.basis || ""),
+          /* THE MARK THAT REPLACED THE CAPTION. Where the peak date was a
+             sentence, the same three figures -- worst, now, peak -- are a
+             track with the dot where the account is standing. An unmeasured
+             drawdown draws NO dot, which is the point: a dot parked at the
+             right-hand end would be a claim that the account is at its high. */
+          `<div class="hb-ds">${dotscale({
+            value: mv(dd.current), min: mv(dd.max), max: 0,
+            unit: "usd", dp: 0, signed: true, tone: "down",
+            lo: mv(dd.max) == null ? "worst —" : "worst " + money0(mv(dd.max)),
+            hi: "peak",
+            aria: "how far below the account's own peak it is standing now",
+            why: mreason(dd.current) || "no equity history",
+          })}</div>`)}`;
 }
 
 const whenDay = (t) => {
@@ -478,52 +528,21 @@ const whenDay = (t) => {
                                         year: "numeric" });
 };
 
-/* ---- 2. where the money is --------------------------------------------- */
-function paintTiles() {
-  const P = hubOf().portfolio;
-  const host = el("hubTiles");
-  if (!host) return;
-  if (!P) { host.innerHTML = ""; return; }
-  const c = P.counts || {};
-  const n = (v, unit) => ({ value: v == null ? null : v, n: v == null ? 0 : 1,
-                            unit: unit || "count",
-                            reason: v == null ? "not reported" : null });
-  const u = P.unclaimed || {};
-  host.innerHTML = tileGrid([
-    tile({ label: "Cash", metric: P.cash, dp: 0,
-           sub: "uninvested at Alpaca" }),
-    tile({ label: "Invested", metric: P.invested, dp: 0,
-           sub: `${c.positions_open || 0} position(s), both asset classes` }),
-    /* NOT "booked". That tile is gone: on this account the figure is
-       WINS-ONLY -- the ladder has no stop loss, so a losing lot is never
-       closed and never books, and the journal carries 322 realised rows with
-       zero losses. A tile labelled with a number that can only go up is not a
-       performance measure. What replaces it is the number that cannot lie:
-       what the account is worth against what was put into it. The realised /
-       open decomposition lives in the Returns breakdown below, where it has
-       to sum to the total. */
-    tile({ label: "Open P/L", metric: P.pl.open, signed: true, dp: 0,
-           sub: `on ${c.positions_open || 0} position(s) held now`,
-           hint: P.pl.basis.open }),
-    tile({ label: "Strategies active",
-           html: `${c.strategies_active == null
-             ? unmeasured("the strategy list was not read")
-             : `<span class="num">${c.strategies_active}</span>`}<span
-             class="faint">/${c.strategies == null ? "—" : c.strategies}</span>`,
-           sub: "live, armed or adopted", go: "overview", tab: "strategies" }),
-    tile({ label: "Tickers", metric: n(c.tickers), sub: "watched, held or traded",
-           go: "overview" }),
-    /* A count of zero here IS a measurement -- everything held is accounted
-       for -- so it says that in words rather than leaving "worth —" beside a
-       bare 0 for a reader to interpret. */
-    tile({ label: "Unclaimed", metric: u.positions,
-           sub: mv(u.positions)
-             ? `worth ${mnum(u.value, { dp: 0 })} · held by no strategy`
-             : "every position held is owned by a strategy",
-           hint: u.why }),
-  ], { cols: 6, cls: "hub-tiles" });
-}
+/* ---- 2. where the money was ---------------------------------------------
+   THE SIX-TILE ROW IS GONE, deleted in round 6, and it is a deletion rather than a move, because every
+   one of the six tiles said something the page already said somewhere else:
 
+     Cash, Invested        the "Across strategies" bars, which put cash and
+                           every strategy on one scale and are a PICTURE of
+                           the same split
+     Open P/L              the band, three inches above it, with the same
+                           `positions_open` caption under it
+     Strategies active     the page's own sub-line ("2 of 3 strategies active")
+     Tickers               the same sub-line ("8 tickers"), and the rail
+     Unclaimed             its own panel in the right rail, and a row in the
+                           allocation bars
+
+   Six tiles and six captions for nothing that was not already on screen. */
 /* ---- 4. the split across strategies ------------------------------------
    The whole point of the rewrite: one loop, one row per strategy, sorted by
    size by the server, with the unclaimed bucket and the cash on the same
@@ -565,13 +584,20 @@ function paintAlloc() {
   }
 
   const widest = Math.max(1e-9, ...rows.map((r) => Math.abs(r.v || 0)));
-  const anyNeg = rows.some((r) => (r.v || 0) < 0);
 
   host.innerHTML = rows.map((r) => {
     const cls = r.kind === "cash" ? "cash" : r.kind === "unclaimed" ? "unc"
       : r.kind === "options" ? "opt" : "sh";
     const w = r.v == null ? 0 : (Math.abs(r.v) / widest) * 100;
-    return `<div class="al-row"${r.nav ? ` data-go="overview" data-tab="strategies"` : ""}>
+    const neg = (r.v || 0) < 0;
+    const tip = `${r.label}${r.v == null ? "" : " — " + money0(r.v)
+      + " held, " + (r.share == null ? "an unknown share"
+        : (r.share * 100).toFixed(1) + "% of account value")}`
+      + (neg ? ". A NET-CREDIT structure: the account was paid to open it, so "
+             + "the broker marks it below zero and these shares do not sum to "
+             + "100%. That is what the hatching means." : "")
+      + (r.why ? ". " + r.why : "");
+    return `<div class="al-row" title="${esc(tip)}"${r.nav ? ` data-go="overview" data-tab="strategies"` : ""}>
       <div class="al-top">
         <span class="al-dot ${cls}"></span>
         <span class="al-l">${esc(r.label)}</span>
@@ -586,16 +612,17 @@ function paintAlloc() {
       </div>
       <div class="al-bar"><i class="${cls}${(r.v || 0) < 0 ? " neg" : ""}"
         style="width:${w.toFixed(2)}%"></i></div>
-      <div class="al-sub">${r.tickers.length
-        ? r.tickers.map((s) => chip(esc(s), "accent")).join("")
-        : `<span class="faint">${esc(r.why || "")}</span>`}</div>
+      ${r.tickers.length
+        ? `<div class="al-sub">${r.tickers.map((s) => chip(esc(s), "accent"))
+            .join("")}</div>` : ""}
     </div>`;
-  }).join("")
-    + `<div class="tip">The bar is the size of what that strategy holds; the
-       percentage is its share of account value.${anyNeg
-        ? ` A <b>negative</b> value is a net-credit structure — the account was
-           paid to open it, so the broker marks it below zero and these shares
-           do not sum to 100%. The hatched bar is that case.` : ""}</div>`;
+  }).join("");
+  /* ROUND 6: the paragraph under these bars said what a bar is and what a
+     percentage is. Both are on the bar itself now, as its title -- including
+     the net-credit case, which is the only part of it that was ever news and
+     is now attached to the one bar it is about. A row with no tickers used to
+     print its `why` as a line of prose under an empty chip row; it is the
+     row's tooltip instead, and the row is one line shorter. */
 }
 
 /* ---- 5a. at risk ------------------------------------------------------- */
@@ -616,19 +643,25 @@ function paintRisk() {
         ${stateChip(r.state, { sm: true })}
         <span class="rk-v">${mnum(r.at_risk, { dp: 0 })}</span></div>`).join("")
     : `<div class="faint" style="font-size:12px">No strategy on this account.</div>`)
-    + `<div class="rk-row rk-tot">
+    + `<div class="rk-row rk-tot" title="What each strategy could still lose on
+        what it holds NOW: for the share ladder, the cost basis of its open
+        lots, which has no stop under it; for a defined-risk options structure,
+        width less credit. They are added because they are the same kind of
+        number, not because they are comparable bets.">
         <span class="rk-l">${got} of ${rows.length} could say</span>
         <span class="rk-v">${got ? `<span class="num">${money0(sum)}</span>`
           : unmeasured("no strategy could measure what it has at risk")}</span>
        </div>`
-    + `<div class="tip">What each one could still lose on what it holds NOW:
-       for the share ladder, the cost basis of its open lots, which has no stop
-       under it; for a defined-risk options structure, width less credit.
-       ${blind
-         ? `<b>${blind}</b> could not say, so the total is a floor and not the
-            account's risk.`
-         : `They are added because they are the same kind of number, not
-            because they are comparable bets.`}</div>`;
+    /* ROUND 6: the definition of "at risk" was a three-line paragraph under
+       every reading of it. It is the total row's tooltip now. What stayed
+       visible is the half that says a figure is WRONG -- a total built from
+       strategies that could not all answer is a floor, and the owner asked
+       for warnings to stay. */
+    + (blind
+        ? `<div class="note warn" style="margin:8px 0 0"><b>${blind}</b> of
+           ${rows.length} could not measure what they have at risk, so
+           ${money0(sum)} is a floor and not the account's risk.</div>`
+        : "");
 }
 
 /* ---- 5b. the drawdown figures ------------------------------------------ */
@@ -637,22 +670,26 @@ function paintDrawdownNums() {
   const host = el("hubDDNums");
   if (!host || !P) return;
   const dd = P.drawdown || {};
+  /* ROUND 6: "below the peak" and "at its deepest" were words of scaffolding
+     under a percentage that already says it. The percentage is the caption
+     now -- a number, not a sentence -- and the words are the cell's tooltip. */
   host.innerHTML = `
     <div class="dd-g">
-      <div><div class="tile-k">Now</div>
+      <div title="how far below its own high-water mark the account is standing right now">
+        <div class="tile-k">Now</div>
         <div class="dd-v">${mnum(dd.current, { signed: true, dp: 0 })}</div>
-        <div class="tile-s">${mnum(dd.current_pct, { signed: true, dp: 2 })}
-          below the peak</div></div>
-      <div><div class="tile-k">Worst ever</div>
+        <div class="tile-s">${mnum(dd.current_pct, { signed: true, dp: 2 })}</div></div>
+      <div title="the deepest this account has ever been below its own peak">
+        <div class="tile-k">Worst ever</div>
         <div class="dd-v">${mnum(dd.max, { signed: true, dp: 0 })}</div>
-        <div class="tile-s">${mnum(dd.max_pct, { signed: true, dp: 2 })}
-          at its deepest</div></div>
-      <div><div class="tile-k">Peak</div>
+        <div class="tile-s">${mnum(dd.max_pct, { signed: true, dp: 2 })}</div></div>
+      <div title="${esc(dd.peak_at ? "the high-water mark, set on "
+        + whenDay(dd.peak_at) : "the high-water mark; the date it was set was not recorded")}">
+        <div class="tile-k">Peak</div>
         <div class="dd-v">${dd.peak == null
           ? unmeasured(mreason(dd.current) || "no equity history")
           : `<span class="num">${money0(dd.peak)}</span>`}</div>
-        <div class="tile-s">${dd.peak_at ? esc(whenDay(dd.peak_at))
-          : "not recorded"}</div></div>
+        <div class="tile-s">${dd.peak_at ? esc(whenDay(dd.peak_at)) : ""}</div></div>
     </div>`;
 }
 
@@ -787,9 +824,10 @@ function paintTickers() {
           row: it keeps its market data and its history, and nothing trades
           it.">none</span>`;
     return `<tr class="click" data-go="ticker" data-sym="${esc(r.symbol)}">
-      <td><b>${esc(r.symbol)}</b>${r.name
-        ? `<div class="t-sub">${esc(r.name)}</div>` : ""}
-        <div class="t-src">${esc((r.sources || []).join(" · "))}</div></td>
+      <td title="${esc("on this list because: "
+        + ((r.sources || []).join(", ") || "no source was reported"))}">
+        <b>${esc(r.symbol)}</b>${r.name
+        ? `<div class="t-sub">${esc(r.name)}</div>` : ""}</td>
       <td class="dt-n">${mnum(r.price)}</td>
       <td class="dt-n">${pctf(mv(r.change_pct))}</td>
       <td class="dt-n">${heldCell}</td>
@@ -809,13 +847,11 @@ function paintTickers() {
     </tr>`;
   }).join("");
 
+  /* ROUND 6: the paragraph that used to sit under this table said exactly
+     what the "Ladder realised" column header's own tooltip says, in more
+     words. One copy, on the thing it is about. */
   host.innerHTML = `<div class="tw dt hub-tt"><table>
-      <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
-    <div class="tip" style="padding:0 var(--s4) var(--s4)"><b>Ladder
-      realised</b> is the share ladder's own journal, and nothing else writes to
-      it — a ticker whose only strategy is an options play shows a dash there
-      and carries its realised P/L on that play's card instead. The two are
-      never added: different logs, different windows.</div>`;
+      <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 
   host.querySelectorAll("[data-sk]").forEach((th) => {
     th.onclick = () => {
@@ -851,8 +887,7 @@ function paintUnclaimed() {
             r.unrealized_pl > 0 ? "+" : ""}${money(r.unrealized_pl)}</span>`,
     ]),
     empty: "Every position held is owned by a strategy.",
-  }) + `<div class="tip" style="padding:0 var(--s4) var(--s4)">${
-    esc(u.why || "")}</div>`;
+  });
 }
 
 /* ---- activity ---------------------------------------------------------- */
@@ -880,18 +915,13 @@ function mountStrategies() {
   el("view").innerHTML = `
     <div id="hubNotes"></div>
     ${panel("Every strategy on this account", `<div id="stRows"></div>`, {
-      sub: "sorted by what each one holds — the ladder has no special place "
-         + "in this list",
+      titleHint: "sorted by what each one holds — the ladder has no special "
+        + "place in this list",
       flush: true,
     })}
-    ${panel("What these words mean", `<div id="stLegend"></div>
-      <div class="tip">One vocabulary, defined once in <code>core.js</code>
-      and served by <code>hub.py</code>. It used to be two: "armed" meant
-      <i>this ladder is not in dry run</i> in the sidebar and <i>the options
-      playbook may open</i> on the Options tab, and both were on screen at the
-      same time meaning different things.</div>`)}
     ${panel("Settings each one exposes", `<div id="stSchema"></div>`, {
-      sub: "read-only here — a setting is changed on the ticker it belongs to",
+      titleHint: "read-only here — a setting is changed on the ticker it "
+        + "belongs to",
     })}`;
   if (window.__hubTick) window.__hubTick(true);
   loadStrategies(true);
@@ -924,7 +954,13 @@ function paintStrategies() {
   host.innerHTML = dataTable({
     cols: ["Strategy", "Kind", "State", "Tickers",
            { label: "Value", num: true }, { label: "Share", num: true },
-           { label: "Open P/L", num: true }, { label: "Booked", num: true },
+           { label: "Open P/L", num: true,
+             title: "Alpaca's mark on what this strategy holds right now" },
+           { label: "Booked", num: true,
+             title: "this strategy's own log since that log began. It is never "
+                  + "summed with Open P/L: booked alone rises in a straight "
+                  + "line for any strategy that does not close its losers, "
+                  + "which is exactly what the share ladder is" },
            { label: "Positions", num: true }, { label: "At risk", num: true }],
     rows: rows.map((r) => [
       `<b>${esc(r.label)}</b><div class="t-sub mono">${esc(r.id)}</div>`,
@@ -943,19 +979,8 @@ function paintStrategies() {
       mnum(r.at_risk, { dp: 0 }),
     ]),
     empty: "No strategy is defined for this account yet.",
-  }) + `<div class="tip" style="padding:0 var(--s4) var(--s4)"><b>Booked</b> is
-    each strategy's own log since that log began; <b>Open P/L</b> is Alpaca's
-    mark on what it holds right now. They sit side by side and are never summed
-    into one figure: booked alone rises in a straight line for any strategy
-    that does not close its losers, which is exactly what the share ladder
-    is.</div>`;
+  });
 
-  const lg = el("stLegend");
-  if (lg) {
-    lg.innerHTML = Object.keys(STATE_WORDS).map((k) => `
-      <div class="lg-row">${stateChip(k)}
-        <span class="faint">${esc(STATE_WORDS[k].why)}</span></div>`).join("");
-  }
   const sc = el("stSchema");
   if (sc) {
     sc.innerHTML = rows.map((r) => {
@@ -1115,8 +1140,17 @@ const CSS = `
   margin-top: var(--s1); overflow-wrap: anywhere; }
 .hb-n { font-size: var(--fs-2xl); font-weight: var(--w-semi);
   letter-spacing: var(--track-tight); margin-top: 3px; }
-.hb-s { font-size: var(--fs-xs); color: rgba(255,255,255,.7); margin-top: 3px; }
 .hb-pc { font-size: var(--fs-sm); opacity: .85; }
+/* The drawdown column's MARK, which is what replaced its caption line. The
+   track and the dot borrow the band's ink rather than the semantic red: on a
+   saturated gradient --down reads as a smudge, and the position of the dot is
+   what carries the meaning here. */
+.hb-ds { margin-top: 7px; }
+.hb-ds .vds-track { background: rgba(255,255,255,.18); }
+.hb-ds .vds-fill, .hb-ds .vds-fill.down { background: rgba(255,255,255,.55); }
+.hb-ds .vds-dot, .hb-ds .vds-dot.down { background: #fff;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.18); }
+.hb-ds .vds-ends { color: rgba(255,255,255,.72); }
 .hb-spark { margin-top: var(--s3); color: rgba(255,255,255,.88); }
 .hb-spark .spark { width: 100%; height: 40px; }
 /* Inside the band the semantic greens and reds would fight a saturated
@@ -1130,9 +1164,6 @@ const CSS = `
 .hub-band .spark, .hub-band .spark-up, .hub-band .spark-down,
 .hub-band .spark-flat { color: rgba(255,255,255,.9); }
 .hub-band .spark-none { border-color: rgba(255,255,255,.35); }
-
-/* ---- tiles ---- */
-.tile-grid.hub-tiles { margin-bottom: var(--s5); }
 
 /* ---- the chart panel ---- */
 .hub-chart-p .panel-b { padding-top: var(--s3); }
@@ -1185,6 +1216,11 @@ const CSS = `
 .dd-v { font-size: var(--fs-lg); font-weight: var(--w-semi); margin-top: 3px;
   letter-spacing: var(--track-tight); }
 
+/* ---- the four fleet buttons, in the Tickers panel header rather than in a
+   panel of their own whose entire body was one paragraph ---- */
+.hub-fleet { display: inline-flex; gap: var(--s2); flex-wrap: wrap;
+  align-items: center; }
+
 /* ---- the ticker table ---- */
 .hub-tt th.th-s { cursor: pointer; user-select: none; white-space: nowrap; }
 .hub-tt th.th-s:hover { color: var(--text); }
@@ -1192,8 +1228,6 @@ const CSS = `
 .hub-tt td { vertical-align: top; }
 .t-sub { font-size: var(--fs-micro); color: var(--faint); margin-top: 2px;
   font-weight: var(--w-reg); }
-.t-src { font-size: var(--fs-micro); color: var(--faint); opacity: .8;
-  letter-spacing: .03em; margin-top: 2px; }
 .t-strat { white-space: nowrap; }
 .t-st { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; }
 .t-st .chip { flex: none; }
@@ -1219,8 +1253,6 @@ const CSS = `
   text-transform: uppercase; letter-spacing: var(--track-caps); }
 
 /* ---- the strategies tab ---- */
-.lg-row { display: flex; gap: var(--s3); align-items: baseline; padding: 5px 0;
-  font-size: var(--fs-sm); }
 .sc-b { padding: var(--s3) 0; border-bottom: 1px solid var(--hairline); }
 .sc-b:last-child { border-bottom: 0; }
 .sc-h { font-size: var(--fs-md); font-weight: var(--w-semi);

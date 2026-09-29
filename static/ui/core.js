@@ -728,15 +728,23 @@ export const tileGrid = (tiles, opts = {}) =>
     Array.isArray(tiles) ? tiles.join("") : tiles}</div>`;
 
 /* ------------------------------------------------------------- the panel */
-/* panel(title, body, {sub, actions, flush, cls, id}) -- the section card.
-   `card()` above is the OLD one and is unchanged; views migrate at their own
-   pace. A panel differs in having a sub-line under its title and a proper
-   header slot, which is where a segmented control belongs. */
+/* panel(title, body, {sub, titleHint, actions, flush, cls, id}) -- the
+   section card. `card()` above is the OLD one and is unchanged; views migrate
+   at their own pace. A panel differs in having a sub-line under its title and
+   a proper header slot, which is where a segmented control belongs.
+
+   `titleHint` IS THE SUB-LINE THAT DOES NOT PRINT. Added in round 6, when the
+   owner's complaint was that every heading on the dashboard carried a
+   sentence explaining the block under it. A sub-line that names a REAL fact
+   ("2 of 3 strategies active") is worth its line; a sub-line that defines the
+   panel it sits on is not, and it belongs on hover. Views pass one or the
+   other, never both. */
 export function panel(title, body, opts = {}) {
   const head = (title || opts.sub || opts.actions)
     ? `<header class="panel-h">
          <div class="panel-tt">
-           ${title ? `<h2 class="panel-t">${title}</h2>` : ""}
+           ${title ? `<h2 class="panel-t"${opts.titleHint
+             ? ` title="${esc(opts.titleHint)}"` : ""}>${title}</h2>` : ""}
            ${opts.sub ? `<div class="panel-sub">${opts.sub}</div>` : ""}
          </div>
          ${opts.actions ? `<div class="panel-x">${opts.actions}</div>` : ""}

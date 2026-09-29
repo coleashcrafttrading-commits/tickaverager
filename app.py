@@ -87,6 +87,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request   # noqa: E40
 from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 
 import accounts                                           # noqa: E402
+import histperf                                           # noqa: E402
 import hub                                                # noqa: E402
 import journal                                            # noqa: E402
 import perf                                               # noqa: E402
@@ -678,94 +679,272 @@ def ticker_orders(sym: str, status: str = "all", limit: int = 50, f: Fleet = Dep
     return e.broker.orders(status=status, symbols=e.symbol, limit=limit)
 
 
+@app.get("/api/a/{acct}/ticker/{sym}/market")
+@app.get("/api/ticker/{sym}/market")
+def ticker_market(sym: str, f: Fleet = Depends(cur)):
+    """Implied volatility and its rank, realised volatility and its rank, the
+    earnings date and the news, for ONE symbol. `tkmarket.py` does all of it.
+
+    READ-ONLY EXCEPT ONE APPEND. The only thing this route writes is a row in
+    `state/iv_daily.jsonl` -- today's at-the-money implied volatility, once per
+    symbol per session -- because `optvol.iv_rank` is already correct and what
+    it was missing was an input nothing in this repo recorded. First write of
+    a session date wins, so a page somebody leaves open does not grow the file.
+
+    IT NEVER 503s ON A MISSING BROKER. Every block inside `tkmarket.report`
+    carries its own dash and its own reason, so a ticker with no options
+    listing, no bars or no news still renders the blocks that did measure.
+    The one thing that would be worse than a missing number here is a page
+    that refuses to draw because one of five feeds is down.
+
+    ANSWERED OUT OF A 5-MINUTE CACHE keyed by (account, symbol). The expiry
+    registry is on the 200/min TRADING host the live share ladders spend from;
+    a ticker page must never be the reason a lot cannot be covered.
+
+    NOTE FOR ANYONE ADDING TO IT: there is no analyst / public buy-hold-sell
+    consensus in this payload because Alpaca does not serve one and this
+    account has no other provider. Do not derive one from price action.
+    """
+    import tkmarket
+    symbol = str(sym or "").strip().upper()
+    od, why_no_iv = None, ""
+    if not f.broker:
+        why_no_iv = ("the broker is not connected, so no option chain was "
+                     "read")
+    else:
+        try:
+            od = _optdata(f)
+        except HTTPException as e:                            # noqa: BLE001
+            why_no_iv = str(e.detail)
+    out = tkmarket.cached_report(
+        symbol, key=str(f.account_id), od=od, alpaca=f.broker,
+        state_dir=f.state_dir, want_iv=od is not None,
+        want_news=bool(f.broker))
+    if why_no_iv and out.get("iv", {}).get("atm", {}).get("value") is None:
+        out["iv"]["atm"]["reason"] = why_no_iv
+    out["account"] = f.account_id
+    return out
+
+
 # ================================================================ performance
+def _hist_axis(f: Fleet) -> tuple:
+    """The History tab's strategy picker, READ OUT OF hub.py.
+
+    Not a list of two. `hub.build_strategies` is the strategy-agnostic model,
+    so a third kind appears on this tab the moment its adapter is appended to
+    `hub.PROVIDERS` and nobody edits this route. A failure here costs the axis
+    and nothing else -- the ladder's own history is still served, with the
+    reason on the payload, because a page that 500s because a dropdown could
+    not be built is worse than a page with one entry in it.
+    """
+    try:
+        ctx = _hub_ctx(f, options=True)
+        rows = [s.row(ctx.broker_book(), as_of=ctx.snap_at or ctx.now)
+                for s in hub.build_strategies(ctx)]
+        return histperf.axis(rows), ""
+    except Exception as e:                                  # noqa: BLE001
+        LOG.warning("history axis: %r", e)
+        return histperf.axis([{"id": "ladder", "label": "DCA ladder",
+                               "kind": "shares"}]), \
+            "the strategy list could not be read (%s), so only the share " \
+            "ladder is offered here" % (e.__class__.__name__,)
+
+
+def _options_report(f: Fleet):
+    """optperf's whole-book report, or (None, why). Never raises.
+
+    The History tab asks for this only when an options strategy -- or
+    Everything -- is selected, so a ladder-only view never pays for it and
+    never fails on it.
+    """
+    if not getattr(f, "broker", None):
+        return None, ("no broker is connected on this account, so the options "
+                      "ledger cannot be marked")
+    try:
+        pb = _playbook(f)
+        pb.refresh_stores()
+        import optperf as _operf
+        return _operf.report(ledger=pb.ledger,
+                             decisions_path=pb.decisions_path,
+                             broker_positions=_perf_positions(f),
+                             account=dict(f.account or {})), ""
+    except Exception as e:                                  # noqa: BLE001
+        LOG.warning("history options report: %r", e)
+        return None, ("the options ledger could not be read (%s: %s)"
+                      % (e.__class__.__name__, e))
+
+
 @app.get("/api/a/{acct}/performance")
 @app.get("/api/performance")
-def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
+def performance(symbol: str = "", days: int = 0, strategy: str = "",
+                f: Fleet = Depends(cur)):
     """What the ladders have actually done, out of the append-only journal.
 
     Separate from /api/ticker because this is HISTORY -- it survives lots
     closing, config changes and restarts, none of which the live ledger does.
+
+    `strategy` IS THE AXIS THE TAB WAS MISSING. Empty or "all" is every
+    strategy; otherwise it is an id out of `hub.strategies()`. The share
+    ladder's slice reads the journal and the fill tape; an options play's
+    reads `state/options/play_ledger.jsonl` through optperf. Every legacy key
+    below is still emitted for the ladder and for "all", so an older client
+    and `agentctl` see exactly what they saw before.
     """
-    # ONE read of the journal, two views of it. This used to call load()
-    # twice -- once day-filtered for the stats, once unfiltered for the open
-    # inventory -- which parsed 21 MB of JSON twice for one request, holding
-    # the GIL through both and blocking every other client on the box.
-    # `days` is relative to now, so the filter has to be applied here rather
-    # than cached; that is cheap, the parse is not.
-    base = journal.load(symbol=symbol.upper(), path=f.journal_path)
-    inv = journal.open_inventory(base)
-    rows = journal.filter_rows(base, days=days or None)
+    axis, axis_why = _hist_axis(f)
+    picked = histperf.resolve(axis, strategy)
+    want_ladder = picked["id"] in (histperf.ALL, "ladder") or \
+        picked.get("kind") == histperf.KIND_SHARES
+    want_options = picked["id"] == histperf.ALL or \
+        picked.get("kind") == histperf.KIND_OPTIONS
 
-    # THE BROKER DECIDES WHAT IS STILL OPEN. `open_inventory` is a replay of
-    # the journal and it over-counts by exactly the exits that were never
-    # journalled -- a manual flatten, a liquidation outside the fleet, fills
-    # that landed after the process died. Read live and reconcile, and keep
-    # "the read failed" strictly apart from "the account is flat": the first
-    # must leave the count alone, the second must zero it.
-    held, held_known = {}, False
-    if f.broker:
-        try:
-            held = {str(p.get("symbol")): float(p.get("qty") or 0)
-                    for p in (f.broker.positions() or [])
-                    if len(str(p.get("symbol") or "")) < 15}   # equities only
-            held_known = True
-        except Exception as e:
-            LOG.warning("performance reconcile: %s", e)
-    inv, reconciliation = journal.reconcile_inventory(inv, held, known=held_known)
-
-    # REALISED COMES FROM ALPACA, NOT FROM THE JOURNAL. The ladder's own log
-    # records what the ladder did while it was the one doing it -- measured
-    # here, 20,234 of the 39,960 MSTX shares Alpaca bought, and none of the
-    # flatten sells. Asking it what the account made gave +$8,882.86 against
-    # +$3,367.53 of real equity trading. The window bounds the BOOKING; the
-    # cost basis still walks in from before it.
+    # `since` bounds the BOOKING on both stores, so it is computed once and
+    # handed to each. A window is a window whichever ledger answers it.
     since = (time.time() - days * 86400) if days else 0.0
-    fills = _fill_tape(f)
-    if symbol:
-        fills = [r for r in fills
-                 if str(r.get("symbol") or "").upper() == symbol.upper()]
-    real = perf.realized_from_fills(fills, since=since) if fills else None
-
-    # The open book is what the booked figure hides, so it is valued here at
-    # the same marks the engines trade on. A symbol the fleet no longer holds
-    # has no mark; stats() lists those rather than pretending they are flat.
-    marks = {}
-    for sym in {str(x.get("symbol") or "") for x in inv}:
-        if not sym:
-            continue
-        px = 0.0
-        try:
-            q = f.quote_of(sym) or {}
-            bid, ask = float(q.get("bp") or 0), float(q.get("ap") or 0)
-            px = round((bid + ask) / 2, 4) if (bid and ask) else float(
-                (f.trade_of(sym) or {}).get("p") or 0)
-            if not px:
-                p = f.positions.get(sym) or {}
-                px = float(p.get("current_price") or 0)
-        except Exception:
-            px = 0.0
-        if px > 0:
-            marks[sym] = px
-
-    # Alpaca's own account curve: the only honest total-P/L-over-time series,
-    # since the journal cannot value a past open book. None when the call
-    # fails, and the report then says which curve it is drawing.
+    slices: list = []
+    inv: list = []
+    rows: list = []
+    stats: dict = {}
+    reconciliation: dict = {}
+    marks: dict = {}
+    real = None
     equity, equity_base = None, None
-    if f.broker:
-        try:
-            per = "1M" if not days else ("1D" if days <= 1 else "1W" if days <= 7 else "1M")
-            raw = f.broker.portfolio_history(per, "1D" if days != 1 else "5Min") or {}
-            base = float(raw.get("base_value") or 0)
-            eq = raw.get("equity") or []
-            ts = raw.get("timestamp") or []
-            equity = [{"t": float(t), "equity": round(float(e), 2),
-                       "pl": round(float(e) - base, 2)}
-                      for t, e in zip(ts, eq) if e is not None]
-            equity_base = round(base, 2)
-        except Exception as e:
-            LOG.warning("performance equity curve: %s", e)
-            equity = None
+
+    # ================================================== the share ladder
+    # SKIPPED ENTIRELY when an options play is selected. The journal is 21 MB
+    # on the VM and `journal.load()` plus `stats()` measures 5.9-6.5 s over it;
+    # parsing all of that to draw a page about a different strategy's ledger is
+    # the slowness note in CLAUDE.md made worse on purpose.
+    if want_ladder:
+        # ONE read of the journal, two views of it. This used to call load()
+        # twice -- once day-filtered for the stats, once unfiltered for the open
+        # inventory -- which parsed 21 MB of JSON twice for one request, holding
+        # the GIL through both and blocking every other client on the box.
+        # `days` is relative to now, so the filter has to be applied here rather
+        # than cached; that is cheap, the parse is not.
+        base = journal.load(symbol=symbol.upper(), path=f.journal_path)
+        inv = journal.open_inventory(base)
+        rows = journal.filter_rows(base, days=days or None)
+
+        # THE BROKER DECIDES WHAT IS STILL OPEN. `open_inventory` is a replay of
+        # the journal and it over-counts by exactly the exits that were never
+        # journalled -- a manual flatten, a liquidation outside the fleet, fills
+        # that landed after the process died. Read live and reconcile, and keep
+        # "the read failed" strictly apart from "the account is flat": the first
+        # must leave the count alone, the second must zero it.
+        held, held_known = {}, False
+        if f.broker:
+            try:
+                held = {str(p.get("symbol")): float(p.get("qty") or 0)
+                        for p in (f.broker.positions() or [])
+                        if len(str(p.get("symbol") or "")) < 15}   # equities only
+                held_known = True
+            except Exception as e:
+                LOG.warning("performance reconcile: %s", e)
+        inv, reconciliation = journal.reconcile_inventory(inv, held,
+                                                          known=held_known)
+
+        # REALISED COMES FROM ALPACA, NOT FROM THE JOURNAL. The ladder's own log
+        # records what the ladder did while it was the one doing it -- measured
+        # here, 20,234 of the 39,960 MSTX shares Alpaca bought, and none of the
+        # flatten sells. Asking it what the account made gave +$8,882.86 against
+        # +$3,367.53 of real equity trading. The window bounds the BOOKING; the
+        # cost basis still walks in from before it.
+        fills = _fill_tape(f)
+        if symbol:
+            fills = [r for r in fills
+                     if str(r.get("symbol") or "").upper() == symbol.upper()]
+        real = perf.realized_from_fills(fills, since=since) if fills else None
+
+        # The open book is what the booked figure hides, so it is valued here at
+        # the same marks the engines trade on. A symbol the fleet no longer holds
+        # has no mark; stats() lists those rather than pretending they are flat.
+        for sym in {str(x.get("symbol") or "") for x in inv}:
+            if not sym:
+                continue
+            px = 0.0
+            try:
+                q = f.quote_of(sym) or {}
+                bid, ask = float(q.get("bp") or 0), float(q.get("ap") or 0)
+                px = round((bid + ask) / 2, 4) if (bid and ask) else float(
+                    (f.trade_of(sym) or {}).get("p") or 0)
+                if not px:
+                    p = f.positions.get(sym) or {}
+                    px = float(p.get("current_price") or 0)
+            except Exception:
+                px = 0.0
+            if px > 0:
+                marks[sym] = px
+
+        # Alpaca's own account curve: the only honest total-P/L-over-time series,
+        # since the journal cannot value a past open book. None when the call
+        # fails, and the report then says which curve it is drawing.
+        if f.broker:
+            try:
+                per = "1M" if not days else ("1D" if days <= 1 else "1W" if days <= 7 else "1M")
+                raw = f.broker.portfolio_history(per, "1D" if days != 1 else "5Min") or {}
+                base_v = float(raw.get("base_value") or 0)
+                eq = raw.get("equity") or []
+                ts = raw.get("timestamp") or []
+                equity = [{"t": float(t), "equity": round(float(e), 2),
+                           "pl": round(float(e) - base_v, 2)}
+                          for t, e in zip(ts, eq) if e is not None]
+                equity_base = round(base_v, 2)
+            except Exception as e:
+                LOG.warning("performance equity curve: %s", e)
+                equity = None
+
+        stats = journal.stats(rows, marks=marks, inventory=inv,
+                              realized=(real["total"] if real else None),
+                              realized_n=(real["fills"] if real else 0))
+        lad = next((e for e in axis if e.get("kind") == histperf.KIND_SHARES),
+                   {"id": "ladder", "label": "DCA ladder"})
+        slices.append(histperf.ladder_slice(
+            sid=str(lad.get("id") or "ladder"),
+            label=str(lad.get("label") or "DCA ladder"),
+            stats=stats,
+            recent=[r for r in rows
+                    if r.get("event") in ("open", "close", "partial")][-200:][::-1],
+            fills=fills, since=since, symbol=symbol.upper(),
+            realized_from_fills=bool(real)))
+
+    # ===================================================== the options plays
+    # A SHORT OPTION OPENS WITH A SELL, so an average-cost-on-longs walk over
+    # the fill tape cannot book a credit spread at all -- it would call the
+    # opening credit a profit the day it was received. The play ledger knows
+    # the entry net and the close net, so it is the only record that can state
+    # one of these results, and it stays the source here.
+    opt_why = ""
+    if want_options:
+        report, opt_why = _options_report(f)
+        if report is None:
+            for e in axis:
+                if e.get("kind") != histperf.KIND_OPTIONS:
+                    continue
+                slices.append(histperf.empty_slice(
+                    e["id"], e["label"], e["kind"], opt_why))
+        else:
+            for e in axis:
+                if e.get("kind") != histperf.KIND_OPTIONS:
+                    continue
+                if picked["id"] not in (histperf.ALL, e["id"]):
+                    continue
+                slices.append(histperf.options_slice(
+                    report, sid=e["id"], label=e["label"], play_id=e["id"],
+                    symbol=symbol.upper(), since=since))
+
+    # A KIND NOBODY HERE CAN READ IS A NAMED DASH, never an empty history. A
+    # third strategy adapter appears on the axis the moment it is registered
+    # with hub, and until this module learns its store the tab says exactly
+    # that rather than drawing a page that reads as "it never traded".
+    if picked["id"] != histperf.ALL and not slices:
+        slices.append(histperf.empty_slice(
+            picked["id"], picked.get("label") or picked["id"],
+            picked.get("kind") or "",
+            opt_why or ("this tab does not know how to read a %r strategy's "
+                        "history yet" % (picked.get("kind") or "new",))))
+
+    view = (slices[0] if (picked["id"] != histperf.ALL and len(slices) == 1)
+            else histperf.combine(slices))
 
     return {
         "ok": True,
@@ -773,9 +952,13 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
         "symbol": symbol.upper() or "ALL",
         "days": days or None,
         "rows": len(rows),
-        "stats": journal.stats(rows, marks=marks, inventory=inv,
-                               realized=(real["total"] if real else None),
-                               realized_n=(real["fills"] if real else 0)),
+        # ---- the axis, and the slice the picker is pointing at ----
+        "strategy": picked["id"],
+        "strategies": axis,
+        "axis_why": axis_why,
+        "view": view,
+        # ---- every legacy key, unchanged, for the ladder and for "all" ----
+        "stats": stats,
         "realized_source": ("Alpaca fills" if real else "the ladder's journal"),
         "marks": marks,
         "equity": equity,

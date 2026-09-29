@@ -26,10 +26,12 @@
 "use strict";
 import {
   S, VIEWS, POST, DEL, act, ask, toast, el, esc, panel,
-  money, money0, go, toggleTheme, curAccount, acctLabel, acctNumber,
-  loadAccounts, setAccount, pickAccount, hashFor, segmented, wireSegmented,
+  money, go, toggleTheme, curAccount, acctLabel, acctNumber,
+  loadAccounts, setAccount, pickAccount, segmented, wireSegmented,
 } from "../core.js";
 import { mountAgents, paintAgents } from "./agents.js";
+/* the one bar this page draws, from the library that draws every other bar */
+import { ratiobar } from "../viz.js";
 /* One classification of what a setting can cost, one search, one badge --
    shared with the per-ticker settings tab rather than re-invented here. */
 import {
@@ -87,49 +89,41 @@ function mountAccount() {
           <div class="faint" id="acctMeta"></div>
         </div>
         <div class="row-btns">
-          <button class="btn sm" id="acctRename">Rename</button>
-          <button class="btn sm" id="acctTest">Test keys</button>
-          <button class="btn sm danger" id="acctRemove">Remove account</button>
+          <button class="btn sm" id="acctRename" title="Changes the name on
+            the rail, the title and every confirmation. Nothing at Alpaca is
+            touched.">Rename <span class="imp imp-safe">display</span></button>
+          <button class="btn sm" id="acctTest" title="One read of the account.
+            It places nothing and changes nothing.">Test keys <span
+            class="imp imp-safe">display</span></button>
+          <button class="btn sm danger" id="acctRemove" title="Deletes the keys
+            and the fleet FROM THIS SERVER. Positions and resting orders at
+            Alpaca are left exactly as they are — which is why it is the loud
+            one: the ladder stops managing them and they stay open.">Remove
+            account <span class="imp imp-money">trades money</span></button>
         </div>
       </div>
-      <div class="set-acts">
-        <div><b>Rename</b> <span class="imp imp-safe">display</span>
-          changes the name on the rail, the title and every confirmation.
-          Nothing at Alpaca is touched.</div>
-        <div><b>Test keys</b> <span class="imp imp-safe">display</span>
-          one read of the account. It places nothing and changes nothing.</div>
-        <div><b>Remove account</b> <span class="imp imp-money">trades money</span>
-          deletes the keys and the fleet <i>from this server</i>. Positions and
-          resting orders at Alpaca are left exactly as they are — which is why
-          it is the loud one: the ladder stops managing them and they stay
-          open.</div>
-      </div>
       <div class="tip" id="acctMsg"></div>`,
-      { sub: "one Alpaca key pair · one fleet" })}
+      { titleHint: "one Alpaca key pair · one fleet" })}
 
     ${panel("The server", `
       <div class="srv">
         <div class="srv-a">
-          <button class="btn primary" id="sRestart">Restart dashboard</button>
+          <button class="btn primary" id="sRestart" title="Relaunches the
+            server so new code and settings take effect. No order is placed or
+            cancelled and nothing is armed that was not armed before — but this
+            is ONE process for every account, so all of their fleets stop for
+            the duration. Take-profits resting at Alpaca are the broker's
+            orders and stay live throughout.">Restart dashboard <span
+            class="imp imp-guard">limit</span></button>
           <button class="btn" id="bTheme">Toggle light / dark</button>
         </div>
         <div class="srv-b">
-          <div class="set-acts" style="margin:0"><div>
-            <b>Restart</b> <span class="imp imp-guard">limit</span>
-            No order is placed or cancelled by a restart, and nothing is armed
-            that was not armed before — but every account's engines stop for the
-            duration.</div></div>
-          <div class="tip" id="sRestartNote">Relaunches the server so new code and
-            settings take effect. This is one process for <b>every account</b> —
-            all of their fleets restart, not just this one. Take-profits resting
-            at Alpaca are the broker's orders and stay live throughout.</div>
+          <div class="tip" id="sRestartNote" hidden></div>
           <div class="tip" id="sHealth"></div>
-          <div class="tip">Start all, Stop all, Disarm all and Panic are on
-            <a href="${hashFor({ kind: "overview" })}">Portfolio</a>, beside the
-            ladders they act on — one copy of them, not two. Balances and the
-            ticker list are there and in the rail for the same reason.</div>
         </div>
-      </div>`)}`;
+      </div>`, { titleHint: "one process for every account. Start all, Stop "
+        + "all, Disarm all and Panic are on Portfolio, beside the ladders they "
+        + "act on — one copy of them, not two." })}`;
 
   el("bTheme").onclick = toggleTheme;
   el("sRestart").onclick = doRestart;
@@ -254,17 +248,19 @@ function setRowHTML(f) {
      right. The old row stacked six blocks of prose under every control and
      that stack IS the "endless widgets" complaint -- at three groups and
      seven settings the page was four screens long. */
-  return `<div class="fld set-row" data-k="${f.k}" data-impact="${impactOf(f.k)}">
-    <div class="set-row-a">
-      <div class="fld-h"><span class="fld-l">${esc(f.label)}</span>${impactBadge(f.k)}
-        <span class="fld-key mono">${esc(f.k)}</span></div>
-      ${ctl}
-      ${f.used ? `<div class="use" data-use="${f.k}"></div>` : ""}
-    </div>
-    <div class="set-row-b">
-      <div class="hint">${f.hint}</div>
-      <div class="affects"><span>Affects</span> ${f.affects}</div>
-    </div>
+  /* The two sentences, as ONE tooltip on ONE mark. `plain` strips the <b>
+     tags they were written with, because a title attribute renders them as
+     literal angle brackets. */
+  const plain = (h) => String(h || "").replace(/<[^>]*>/g, "");
+  const tip = plain(f.hint) + " Affects: " + plain(f.affects);
+  return `<div class="fld set-row" data-k="${f.k}" data-impact="${impactOf(f.k)}"
+    data-tip="${esc(tip)}">
+    <div class="fld-h"><span class="fld-l">${esc(f.label)}</span>${impactBadge(f.k)}
+      <span class="fld-key mono">${esc(f.k)}</span>
+      <button type="button" class="set-q-m" tabindex="-1"
+        aria-label="what ${esc(f.label)} does" title="${esc(tip)}">i</button></div>
+    ${ctl}
+    ${f.used ? `<div class="use" data-use="${f.k}"></div>` : ""}
   </div>`;
 }
 
@@ -295,26 +291,19 @@ function impactOptions() {
   return opts;
 }
 
-function legendHTML() {
+/* ROUND 6: THE LEGEND IS GONE. It restated, as four lines of type under the
+   toolbar, what each badge's own tooltip already says and what the impact
+   filter's buttons already say -- and it did it on a page with seven
+   settings. What it said is not lost: `impactOptions()` below carries each
+   tier's blurb as the filter button's title, and the "nothing here places an
+   order" fact, which IS worth stating, is the filter control's own label. */
+function scopeHint() {
   const c = impactCounts();
-  const lines = [];
-  for (const t of ["money", "guard", "safe", "unknown"]) {
-    if (!c[t]) continue;
-    lines.push(`<span><span class="imp ${IMPACT[t].cls}">${IMPACT[t].badge}</span>
-      ${esc(IMPACT[t].blurb)}</span>`);
-  }
-  if (!c.money) {
-    /* Stated, not implied. Every account-wide setting here is a limit or a
-       display preference; the settings that change what is bought are a
-       TICKER's, and saying which scope you are in is the whole point of
-       splitting them across three pages. */
-    lines.push(`<span><b>Nothing on this page places or prices an order.</b>
-      The settings that change what is bought are a ticker's own, on that
-      ticker's Settings tab.</span>`);
-  }
-  lines.push(`<span>Every row says what it affects, and a guardrail says how
-    much of itself the account is using right now.</span>`);
-  return lines.join("");
+  return c.money
+    ? "Every setting on this page is measured across the whole account."
+    : "Nothing on this page places or prices an order: every setting here is "
+      + "a limit or a display preference. The settings that change what is "
+      + "bought are a ticker's own, on that ticker's Settings tab.";
 }
 
 /* ================================================================ engine */
@@ -337,48 +326,36 @@ function mountEngine() {
   ensureFieldStyles();
   ensureSettingsStyles();
   el("view").innerHTML = `
-    <div class="set-tools">
-      <div class="set-bar">
-        <input id="setQ" class="set-q" placeholder="Search settings — try “loss”, “feed”, “limit”"
-               value="${esc(setQ)}" spellcheck="false" autocomplete="off">
-        ${segmented({ id: "setImp", value: setImp, size: "sm", label: "impact",
-          options: impactOptions() })}
-        <span class="faint" id="setQn"></span>
-      </div>
-      <div class="set-legend">${legendHTML()}</div>
+    <div class="set-tools" title="${esc(scopeHint())}">
+      <input id="setQ" class="set-q" placeholder="Search settings — try “loss”, “feed”, “limit”"
+             value="${esc(setQ)}" spellcheck="false" autocomplete="off">
+      ${segmented({ id: "setImp", value: setImp, size: "sm", label: "impact",
+        options: impactOptions() })}
+      <span class="faint" id="setQn"></span>
     </div>
     <form id="gform">
-      <div class="set-room">
-        <nav class="set-nav" id="setNav" aria-label="setting groups"></nav>
-        <div id="setCol"></div>
-      </div>
+      <div id="setCol"></div>
       <div class="set-save">
         <button type="submit" class="btn primary" id="gsave">Save settings</button>
         <div class="tip" id="gmsg" style="margin:0"></div>
-        <span style="flex:1"></span>
-        <div class="set-foot">Everything here is measured across the
-          <b>account</b>. A ladder's own rung, target and sessions are on that
-          ticker's Settings tab; a strategy's own numbers are on
-          <a href="${hashFor({ kind: "strategies" })}">Strategies</a>; what a
-          move against you would <i>cost</i> is on
-          <a href="${hashFor({ kind: "risk" })}">Risk</a>. Three scopes, three
-          places.</div>
       </div>
     </form>`;
 
-  el("setNav").innerHTML = SET_GROUPS.map((g) =>
-    `<button type="button" class="set-nav-b" data-jump="setg-${g.id}">
-      ${esc(g.title)}
-      <span class="faint set-count" data-setcount="${g.id}"></span></button>`).join("");
-
+  /* ROUND 6: THE STICKY GROUP NAV IS GONE. It was a jump list for three
+     groups holding seven settings between them; with the prose out of the
+     rows the whole form is one screen, and a table of contents for one screen
+     is a control that costs a column and saves nothing.
+     THE GROUP LEAD PARAGRAPHS ARE GONE TOO. "Market data", "Portfolio
+     guardrails" and "This dashboard" are what they said. The one fact in them
+     that is not in a title -- that 0 turns a guardrail off -- is drawn on the
+     field itself, in red, the moment it is 0. */
   el("setCol").innerHTML = SET_GROUPS.map((g) => `
     <section class="set-g" id="setg-${g.id}">
       <header class="set-g-h">
-        <h3 class="set-g-t">${esc(g.title)}</h3>
-        <span class="faint">${g.fields.length} setting${
-          g.fields.length === 1 ? "" : "s"}</span>
+        <h3 class="set-g-t" title="${esc(g.lead.replace(/<[^>]*>/g, ""))}">${
+          esc(g.title)}</h3>
+        <span class="faint set-count" data-setcount="${g.id}"></span>
       </header>
-      <p class="set-g-lead">${g.lead}</p>
       <div class="set-fields" data-setgroup="${g.id}">
         ${g.fields.map(setRowHTML).join("")}</div>
     </section>`).join("");
@@ -387,12 +364,6 @@ function mountEngine() {
   f.addEventListener("input", () => { S.touched = true; paintEngine(); });
   f.addEventListener("submit", onSaveEngine);
 
-  for (const b of el("setNav").querySelectorAll("[data-jump]")) {
-    b.onclick = () => {
-      const t = el(b.dataset.jump);
-      if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-  }
   const q = el("setQ");
   q.oninput = () => { setQ = q.value; runSetSearch(); };
   wireSegmented("setImp", (v) => { setImp = v; runSetSearch(); });
@@ -426,11 +397,13 @@ function runSetSearch() {
     const rows = [...host.querySelectorAll(".fld")];
     const shown = rows.filter(live).length;
     const tag = f.querySelector(`[data-setcount="${host.dataset.setgroup}"]`);
-    if (tag) tag.textContent = (setQ || setImp) ? `${shown}/${rows.length}` : "";
+    if (tag) {
+      tag.textContent = (setQ || setImp)
+        ? `${shown}/${rows.length}`
+        : `${rows.length}`;
+    }
     const sec = host.closest(".set-g");
     if (sec) sec.hidden = (setQ || setImp) ? shown === 0 : false;
-    const nav = f.querySelector(`[data-jump="setg-${host.dataset.setgroup}"]`);
-    if (nav) nav.hidden = !!sec && sec.hidden;
   }
   const n = el("setQn");
   if (n) {
@@ -538,19 +511,14 @@ function paintEngine() {
     const host = f.querySelector(`[data-use="${g.k}"]`);
     if (!host) continue;
     const set = Number((f.elements[g.k] || {}).value) || 0;
-    if (!set) {
-      host.innerHTML = `<span class="use-t down">off — nothing caps this</span>`;
-      continue;
-    }
-    const used = Math.max(0, Number(g.used(p, ov, set)) || 0);
-    const pcUsed = Math.round(100 * used / set);
-    const cls = pcUsed > 90 ? "down" : pcUsed > 70 ? "warn" : "up";
-    const fmt = (x) => (g.unit === "$" ? money0(x) : String(x));
-    host.innerHTML = `
-      <span class="use-track"><span class="use-fill ${cls}"
-        style="width:${Math.min(100, pcUsed)}%"></span></span>
-      <span class="use-t"><b class="${cls}">${pcUsed}%</b> used —
-        ${fmt(used)} of ${fmt(set)}</span>`;
+    const raw = g.used(p, ov, set);
+    const used = Number.isFinite(Number(raw)) ? Math.max(0, Number(raw)) : null;
+    host.innerHTML = ratiobar({
+      value: used, cap: set, unit: g.unit === "$" ? "usd" : "count", dp: 0,
+      label: g.label,
+      why: set ? "" : "this limit is set to 0, which turns it off — nothing "
+                    + "caps it",
+    });
   }
 }
 
@@ -562,77 +530,72 @@ function ensureSettingsStyles() {
   const s = document.createElement("style");
   s.id = "setCSS";
   s.textContent = [
-    /* the toolbar */
-    ".set-tools{background:var(--surface);border:1px solid var(--hairline);",
-    "border-radius:var(--radius);padding:14px 16px;margin-bottom:var(--s5)}",
-    ".set-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}",
-    ".set-q{flex:1;min-width:200px;font-size:13px;padding:9px 12px}",
-    ".set-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;",
-    "margin-top:12px;font-size:11.5px;color:var(--faint);line-height:1.9}",
-    /* the room: a sticky rail of group links beside one column of rows */
-    ".set-room{display:grid;gap:var(--s5);grid-template-columns:190px minmax(0,1fr);",
-    "align-items:start}",
-    ".set-nav{position:sticky;top:var(--s4);display:flex;flex-direction:column;",
-    "gap:2px}",
-    ".set-nav-b{font:inherit;font-size:12.5px;text-align:left;cursor:pointer;",
-    "padding:8px 11px;border-radius:var(--r-sm);border:1px solid transparent;",
-    "background:transparent;color:var(--muted);display:flex;gap:8px;",
-    "align-items:baseline}",
-    ".set-nav-b:hover{background:var(--surface-2);color:var(--text)}",
-    ".set-nav-b[hidden]{display:none}",
+    /* ROUND 6. Two things changed in this block and both are the same fix.
+
+       FIRST, EVERY LITERAL PIXEL SIZE IS GONE. This sheet measured nine type
+       sizes -- 11, 11.5, 12, 12.5, 13, 19px and a 9.5px badge in riskmath --
+       on a page with seven settings. A scale with nine steps that a file may
+       add a tenth to is not a scale; theme.css has six (--fs-micro .. --fs-xl)
+       and every rule below now names one of them.
+
+       SECOND, THE RULES FOR THE BLOCKS THAT NO LONGER EXIST ARE DELETED
+       rather than left behind: .set-legend, .set-nav, .set-nav-b, .set-room,
+       .set-row-a/-b, .set-foot and .set-acts. A stylesheet that still styles
+       a block nobody renders is how the next agent puts the block back. */
+    /* the toolbar: a search, an impact filter, and a count */
+    ".set-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;",
+    "background:var(--surface);border:1px solid var(--hairline);",
+    "border-radius:var(--radius);padding:12px 14px;margin-bottom:var(--s5)}",
+    ".set-q{flex:1;min-width:200px;font-size:var(--fs-md);padding:9px 12px}",
+    /* one group */
     ".set-g{background:var(--surface);border:1px solid var(--hairline);",
-    "border-radius:var(--radius);padding:16px 18px;margin-bottom:var(--s4);",
+    "border-radius:var(--radius);padding:14px 18px;margin-bottom:var(--s4);",
     "scroll-margin-top:var(--s4)}",
     ".set-g[hidden]{display:none}",
     ".set-g-h{display:flex;align-items:baseline;gap:10px}",
     ".set-g-t{margin:0;font-size:var(--fs-md);font-weight:var(--w-semi)}",
-    ".set-g-lead{margin:5px 0 0;font-size:11.5px;color:var(--faint);",
-    "line-height:1.6;max-width:70ch}",
-    ".set-fields{display:flex;flex-direction:column;gap:2px;margin-top:14px}",
-    /* one row: control on the left, consequences on the right */
-    ".set-row{display:grid;gap:6px 22px;grid-template-columns:minmax(0,260px) ",
-    "minmax(0,1fr);align-items:start;padding-top:14px;padding-bottom:14px;",
-    "border-top:1px solid var(--hairline)}",
-    ".set-fields > .set-row:first-child{border-top:none;padding-top:4px}",
+    ".set-count{font-size:var(--fs-micro);margin-left:auto}",
+    /* THE ROWS GO SIDE BY SIDE. With the prose out of them a row is a label,
+       a control and a bar -- roughly 240px of content -- so stacking them one
+       per line was three screens of white space. */
+    ".set-fields{display:grid;gap:var(--s4) var(--s5);margin-top:12px;",
+    "grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}",
+    ".set-row{min-width:0}",
     ".set-row.i-out{display:none !important}",
-    ".set-row-a input,.set-row-a select{width:100%}",
-    ".set-row .hint{margin-top:0}",
-    ".set-row .affects{font-size:11.5px;color:var(--muted);margin-top:5px;",
-    "line-height:1.55}",
-    ".set-row .affects>span{font-size:10px;letter-spacing:.08em;font-weight:700;",
-    "text-transform:uppercase;color:var(--faint);margin-right:5px}",
-    ".set-count{font-size:11px;margin-left:auto}",
-    /* the save bar */
-    /* SOLID, not a gradient. A translucent sticky bar over a form reads as a
-       button floating on top of a field -- measured at 400px, where the Save
-       sat across the Data feed row and the gradient's transparent half let the
-       control show through it. */
+    ".set-row input,.set-row select{width:100%}",
+    ".set-row .use{margin-top:7px}",
+    /* the one mark that replaced two paragraphs per row */
+    ".set-q-m{margin-left:auto;flex:none;width:15px;height:15px;padding:0;",
+    "border-radius:50%;border:1px solid var(--hairline2);background:none;",
+    "color:var(--faint);font:inherit;font-size:var(--fs-micro);",
+    "font-style:italic;line-height:1;cursor:help}",
+    ".set-q-m:hover{color:var(--text);border-color:var(--muted)}",
+    /* the save bar. SOLID, not a gradient: a translucent sticky bar over a
+       form reads as a button floating on top of a field -- measured at 400px,
+       where the Save sat across the Data feed row and the gradient's
+       transparent half let the control show through it. */
     ".set-save{position:sticky;bottom:0;z-index:5;display:flex;gap:14px;",
     "align-items:center;flex-wrap:wrap;padding:14px 0 16px;margin-top:6px;",
     "background:var(--bg);border-top:1px solid var(--hairline)}",
     ".set-save .btn{min-width:190px}",
-    ".set-foot{font-size:11px;color:var(--faint);line-height:1.6;max-width:56ch}",
-    ".set-diff{display:flex;flex-direction:column;gap:7px;font-size:12.5px}",
-    ".set-acts{display:flex;flex-direction:column;gap:7px;margin-top:14px;",
-    "font-size:12px;line-height:1.6;color:var(--muted)}",
-    ".set-acts b{color:var(--text)}",
+    ".set-diff{display:flex;flex-direction:column;gap:7px;",
+    "font-size:var(--fs-sm)}",
     /* the account panel */
     ".acct-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}",
     ".acct-id{flex:1;min-width:240px}",
-    ".acct-label{font-size:19px;font-weight:650;letter-spacing:-.01em}",
-    ".acct-id .faint{font-size:12px;margin-top:2px}",
-    ".srv{display:grid;gap:var(--s4);grid-template-columns:minmax(0,200px) ",
+    ".acct-label{font-size:var(--fs-xl);font-weight:var(--w-semi);",
+    "letter-spacing:-.01em}",
+    ".acct-id .faint{font-size:var(--fs-sm);margin-top:2px}",
+    ".row-btns .btn .imp{margin-left:6px}",
+    ".srv{display:grid;gap:var(--s4);grid-template-columns:minmax(0,220px) ",
     "minmax(0,1fr);align-items:start}",
     ".srv-a{display:flex;flex-direction:column;gap:8px}",
     ".srv-a .btn{width:100%}",
-    ".srv-b .tip{margin-top:10px}",
-    "@media (max-width:900px){.set-room{grid-template-columns:1fr}",
-    ".set-nav{position:static;flex-direction:row;flex-wrap:wrap}",
-    ".srv{grid-template-columns:1fr}}",
-    "@media (max-width:620px){.set-row{grid-template-columns:1fr}",
-    ".set-legend{gap:8px;flex-direction:column;align-items:flex-start}",
-    ".set-save{gap:8px}.set-save .btn{min-width:0;width:100%}",
-    ".set-foot{max-width:none}}",
+    ".srv-b .tip{margin-top:0}",
+    ".srv-b .tip[hidden]{display:none}",
+    "@media (max-width:900px){.srv{grid-template-columns:1fr}}",
+    "@media (max-width:620px){",
+    ".set-save{gap:8px}.set-save .btn{min-width:0;width:100%}}",
   ].join("");
   document.head.appendChild(s);
 }
@@ -659,19 +622,20 @@ function paintAccount() {
   const rm = el("acctRemove");
   if (rm) {
     const why = a.is_default
-      ? "The default account is the one seeded from the server's .env; it cannot be removed here."
-      : "";
+      ? "The default account is the one seeded from the server's .env; it "
+        + "cannot be removed here, though its label can be changed."
+      : "Deletes the keys and the fleet FROM THIS SERVER. Nothing at Alpaca "
+        + "is cancelled or sold, and it is refused while anything in this "
+        + "account is running, armed or still holds lots.";
     rm.disabled = !!why;
     rm.title = why;
   }
+  /* ROUND 6: this used to print a standing paragraph about removal on every
+     load. The two sentences it carried are the Remove button's own tooltip
+     (and, for the default account, its disabled reason), so the slot now
+     holds only what is NEWS: the answer to a Test keys click. */
   const m = el("acctMsg");
-  if (m && !renaming) {
-    m.innerHTML = acctMsg || (a.is_default
-      ? `The default account cannot be removed — it is the one the server's <code>.env</code> `
-        + `points at. Its label can be changed.`
-      : `Removing an account deletes its keys and its fleet from this server. It is refused `
-        + `while anything in it is running, armed or still holds lots.`);
-  }
+  if (m && !renaming) m.innerHTML = acctMsg || "";
 
   /* the one health line that belongs to the server rather than to a ladder */
   const h = el("sHealth");
@@ -681,10 +645,14 @@ function paintAccount() {
       : `<span class="up">healthy</span>, ${ov.snap_age}s old`} · session
       <b>${esc(ov.session)}</b> on the <b>${esc(ov.feed)}</b> feed.`;
   }
+  /* THE ONE THING THAT IS STILL PRINTED HERE: a restart that cannot work.
+     That is a warning, not a definition, so it is shown rather than hovered
+     -- and the slot is hidden whenever it has nothing to report. */
   if (ov && ov.supervised === false && el("sRestartNote")) {
-    el("sRestartNote").innerHTML = `<span class="warn">Unavailable</span> — this
-      server was not launched by <code>start_bot.bat</code>, so nothing would bring
-      it back up.`;
+    el("sRestartNote").hidden = false;
+    el("sRestartNote").innerHTML = `<span class="warn">Restart is
+      unavailable</span> — this server was not launched by
+      <code>start_bot.bat</code>, so nothing would bring it back up.`;
     el("sRestart").disabled = true;
   }
 }

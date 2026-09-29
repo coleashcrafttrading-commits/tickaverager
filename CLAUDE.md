@@ -484,6 +484,44 @@ outranks the arm, and the dashboard draws it that way.
 - Short legs are closed at **2 DTE** by the calendar rule, so the expiry-day
   deadline is a backstop and not the plan.
 
+## The ticker page's market data (from 29 Sep 2026) -- claimed names
+
+Claimed here per the rule above, because "market data" is a namespace either
+person could reach for:
+
+| | |
+|---|---|
+| `tkmarket.py` | ATM implied volatility, IV rank, realised-vol rank, the earnings state and the news, all inside `hub.metric`'s envelope |
+| `static/ui/tkmkt.js` | the Market pane, drawn as marks. No DOM, no fetch |
+| `GET /api/ticker/{sym}/market` | the one route, and the only thing on the ticker page that writes |
+| `state/iv_daily.jsonl` | the trailing ATM-IV series |
+| `test_tkmarket.py` | proves all of it, offline |
+
+**`optvol.iv_rank` was already right and had no input.** Nothing in this repo
+recorded a trailing implied-volatility series for a SHARE ticker --
+`optfacts.iv_history_daily` mines `state/option_quotes.jsonl`, which only ever
+holds the OPTIONS watchlist. So `/api/ticker/{sym}/market` appends one row per
+symbol per session to `state/iv_daily.jsonl` (first write of a session date
+wins, and the row stamps `at`), and until there are `optvol.MIN_IV_HISTORY`
+observations the rank is A DASH THAT SAYS HOW MANY THERE ARE. It is never
+computed from one observation, which would be 0 or 100 by construction.
+**Realised**-volatility rank is available immediately off daily bars and is
+labelled realised, never implied. If a scheduled recorder is ever added, point
+it at ONE time of day (15:45 ET): rows taken at scattered times are noisier
+than rows taken at a fixed one, which is why `at` is on the row.
+
+**`unit: "pct"` is a FRACTION on this wire.** `optvol` returns rank 0-100 and
+the divide happens once, in `tkmarket.rank_block`. `test_tkmarket.py` section 3
+pins it against optvol's own answer.
+
+**THERE IS NO PUBLIC OR ANALYST BUY/HOLD/SELL CONSENSUS AND NONE MAY BE
+INVENTED.** The owner asked for one. Alpaca does not serve analyst ratings and
+this account has no other data provider configured, so it is absent rather
+than derived from price action and there is no empty widget shaped like one --
+a shape on the page is a promise that something fills it. It needs a data
+source the account does not have. `test_tkmarket.py` section 8 asserts that no
+key and nothing in the renderer has grown one.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -556,14 +594,15 @@ If two disagree, say so loudly rather than picking the convenient one.
   `test_accounts test_app_accounts test_bank test_btcode test_btview
   test_chart
   test_engine_strategy
-  test_entry_rule test_fractional test_greeks test_indicators test_latency
+  test_entry_rule test_fractional test_greeks test_history test_indicators
+  test_latency
   test_layout test_ledgertruth test_notes test_motion
   test_optapi test_optbacktest test_optbank test_optbook test_optcal
   test_optdata test_optengine test_optexec test_optgates test_optgrade
   test_options test_options_api test_optquotes test_optrest
   test_optrun
   test_optstructures test_optsym test_optview test_optvol test_presets
-  test_tickerview
+  test_tickerview test_tkmarket
   test_reconcile test_refresh_trend test_report test_research test_returns
   test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend

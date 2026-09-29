@@ -122,7 +122,11 @@ REGISTRY_FILE = "tickers.json"
 TIMEFRAMES: dict = {
     "1D":  ("1D",  "1Min",  300),
     "1W":  ("1W",  "15Min", 3600),
-    "1M":  ("1M",  "1H",    86400),
+    # 1D, NOT 1H. Alpaca: HTTP 400 "invalid timeframe provided: 1H.
+    # Valid timeframe for days > 30 is 1D" -- a month is 31 days often
+    # enough that this window simply returned nothing, every time, and
+    # the room drew an empty chart with no error on screen.
+    "1M":  ("1M",  "1D",    86400),
     "3M":  ("3M",  "1D",    86400 * 7),
     "6M":  ("6M",  "1D",    86400 * 7),
     "1A":  ("1A",  "1D",    86400 * 7),
@@ -1937,6 +1941,19 @@ def series(ctx: Ctx, metric_name: str = "value", tf: str = "1D",
         source = "Alpaca portfolio history (period=%s, timeframe=%s)" % (period, gran)
         if mname == "value":
             samples = list(pts)
+            # END WHERE THE HEADER ENDS. portfolio_history lags live equity by
+            # a bucket or more, so the chart's last point and the account tile
+            # were different numbers on one screen. Appending the live equity
+            # closes that, and only ever forward in time.
+            # ONLY WHERE THERE IS ALREADY A SERIES. Appending this to an
+            # EMPTY history would draw a single dot at today's equity on an
+            # account whose history Alpaca refused -- a line nobody measured,
+            # which is the one thing this file may never do. Caught by
+            # test_hub's "with no broker the series is EMPTY with a reason,
+            # not zeroes".
+            live = _num((ctx.account or {}).get("equity"))
+            if samples and live is not None and ctx.now > samples[-1][0]:
+                samples = samples + [(ctx.now, live)]
             basis = "the account's own equity, as Alpaca reckons it."
         elif mname == "pl":
             base = hist["base"]
@@ -1964,11 +1981,41 @@ def series(ctx: Ctx, metric_name: str = "value", tf: str = "1D",
                 "candles are dojis: open, high, low and close are the same "
                 "number. Line or bar is the honest form here.")
         why = "%s %s" % (why, flat) if why else flat
+    # THE ANCHOR, PUBLISHED. A chart whose change is read as last-minus-first
+    # answers a different question from the header, and on 29 Sep 2026 the two
+    # sat on one screen saying +$36 and -$937.04. Alpaca hands us the right
+    # anchor for every window in `base_value` -- for 1D it is yesterday's
+    # close, the same number `pl.today` subtracts -- and the chart was throwing
+    # it away. The overnight gap it hides is real: 53,292.34 at yesterday's
+    # close against a 52,563.34 first print this morning, $729 the line simply
+    # did not draw.
+    anchor = None
+    if mname == "value":
+        # `hist` exists only on the Alpaca path; `exposure` never reaches here.
+        anchor = hist.get("base")
+        if anchor is None and samples:
+            anchor = samples[0][1]
+    elif mname in ("pl", "drawdown"):
+        anchor = 0.0
+    last_v = samples[-1][1] if samples else None
+    change = (round(last_v - anchor, 2)
+              if (last_v is not None and anchor is not None) else None)
+    change_pct = (round(change / anchor, 6)
+                  if (change is not None and anchor) else None)
+
     return {
         "ok": True,
         "metric": mname, "tf": tf, "form": form,
         "unit": unit,
         "points": points,
+        # What the window actually did, measured from the anchor the header
+        # uses. A view that prints its own last-minus-first will disagree.
+        "anchor": anchor,
+        "anchor_is": ("the previous session's close, which is what the day "
+                      "P/L subtracts" if tf == "1D" and mname == "value"
+                      else "the window's starting value"),
+        "change": change,
+        "change_pct": change_pct,
         "count": len(points),
         "bucket_seconds": bucket,
         "source": source,

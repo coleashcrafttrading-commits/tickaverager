@@ -38,15 +38,18 @@ were sent and answer `{"ok": true}`; nothing reaches a network.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import math
 import mimetypes
 import os
 import time
+from typing import Optional
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import mockserver as MS
+import mockhist as MH
 
 ROOT = MS.ROOT
 STATIC = MS.STATIC
@@ -256,6 +259,129 @@ def _ticker_orders(sym: str) -> list:
              "status": "filled" if i % 2 else "new"} for i in range(6)]
 
 
+# ------------------------------------------------- the ticker MARKET pane
+# `/api/ticker/<sym>/market` runs the REAL `tkmarket.report` -- the real chain
+# adapter, the real solver, the real `optvol.iv_rank` and the real
+# `optcal.EventCalendar` -- against fixtures handed in through the seams that
+# module already has (`od`, `bars`, `calendar`, `news_transport`). A harness
+# that re-implemented the payload would agree with itself and with nothing
+# else; mockserver's own docstring says so.
+#
+# THE FIXTURE IS CHOSEN TO SHOW BOTH ANSWERS. RAM has 40 recorded observations
+# so its IV rank is a NUMBER; every other symbol has 3, so its rank is a DASH
+# that says 3 of 20. SPY's earnings key is present and empty (known: no
+# earnings), AAPL's carries a date, and everything else is absent (UNKNOWN,
+# which must not render as "no earnings").
+_MKT_STATE: Optional[str] = None
+_MKT_IV = {"RAM": 40, "MSTX": 3}
+
+
+def _mkt_state() -> str:
+    """A scratch state dir for the market fixture, seeded once. NOTHING here
+    touches the repo's own state/ -- this harness has no keys and no account."""
+    global _MKT_STATE
+    if _MKT_STATE:
+        return _MKT_STATE
+    import tempfile
+    d = tempfile.mkdtemp(prefix="tickaverager-mockshell-mkt-")
+    rows = []
+    for sym, n in _MKT_IV.items():
+        base = 0.28 + (sum(ord(c) for c in sym) % 7) / 100.0
+        for i in range(n):
+            day = _dt.date(2026, 9, 29) - _dt.timedelta(days=n - i)
+            rows.append({"symbol": sym, "d": day.isoformat(),
+                         "iv": round(base + 0.06 * math.sin(i / 3.0), 6),
+                         "at": day.isoformat() + "T20:00:00Z"})
+    with open(os.path.join(d, "iv_daily.jsonl"), "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, sort_keys=True) + "\n")
+    with open(os.path.join(d, "earnings.json"), "w", encoding="utf-8") as fh:
+        json.dump({"_comment": "mock fixture", "SPY": {"dates": []},
+                   "QQQ": {"dates": []}, "AAPL": {"dates": ["2026-10-29"]}},
+                  fh)
+    _MKT_STATE = d
+    return d
+
+
+class _MockChain:
+    """The three calls `tkmarket.atm_iv` makes on an OptionData, answered from
+    a Black-Scholes book priced at a known volatility, so the solver has
+    something real to recover. No network and no OCC registry."""
+
+    def __init__(self, sym: str, spot_px: float):
+        self.sym = sym.upper()
+        self.px = spot_px
+        self.vol = 0.22 + (sum(ord(c) for c in self.sym) % 23) / 100.0
+
+    def spot(self, sym, ttl=None):
+        return self.px
+
+    def expirations(self, sym, min_dte=0, max_dte=60, now=None, **kw):
+        today = (now or _dt.datetime.now(_dt.timezone.utc)).date()
+        out = []
+        for m in range(0, 4):
+            y, mo = divmod(today.month - 1 + m, 12)
+            d = _dt.date(today.year + y, mo + 1, 1)
+            first_fri = 1 + ((4 - d.weekday()) % 7)
+            e = _dt.date(d.year, d.month, first_fri + 14)
+            if min_dte <= (e - today).days <= max_dte:
+                out.append(e)
+        return sorted(out)
+
+    def chain(self, sym, expiry, around=None, pct=0.10, **kw):
+        import greeks as _g
+        S = float(around or self.px)
+        T = max((expiry - _dt.date.today()).days, 1) / 365.0
+        step = max(round(S * 0.025, 2), 0.5)
+        rows = []
+        for k in range(-4, 5):
+            K = round(S + k * step, 2)
+            if K <= 0:
+                continue
+            for right in ("call", "put"):
+                mid = _g.price(S, K, T, 0.043, self.vol, right)
+                rows.append({
+                    "occ": "%s%s%s%08d" % (self.sym, expiry.strftime("%y%m%d"),
+                                           right[0].upper(), int(K * 1000)),
+                    "underlying": self.sym, "expiry": expiry, "strike": K,
+                    "right": right, "bid": round(max(mid - 0.05, 0.01), 2),
+                    "ask": round(mid + 0.05, 2), "mid": round(mid, 4),
+                })
+        return rows
+
+
+def _mkt_news(sym: str):
+    def transport(path, params):
+        base = _dt.datetime(2026, 9, 29, 13, 30, tzinfo=_dt.timezone.utc)
+        return {"news": [
+            {"id": 1000 + i, "headline": h, "source": src,
+             "created_at": (base - _dt.timedelta(hours=3 * i)).isoformat()
+                               .replace("+00:00", "Z"),
+             "url": "https://example.invalid/%s/%d" % (sym.lower(), i),
+             "summary": "dropped on purpose -- see tkmarket.news"}
+            for i, (h, src) in enumerate([
+                ("%s closes higher as volume runs above its average" % sym,
+                 "benzinga"),
+                ("Analysts weigh in ahead of %s's next print" % sym, "reuters"),
+                ("%s names a new chief financial officer" % sym, "benzinga"),
+                ("Sector rotation lifts %s off its session low" % sym, "cnbc"),
+            ])]}
+    return transport
+
+
+def _ticker_market(sym: str) -> dict:
+    import tkmarket
+    sym = sym.upper()
+    px = _bars(sym, "1Min", 0.05, 60)["bars"][-1]["c"] or 100.0
+    bars = _bars(sym, "1Day", 400, 400)["bars"]
+    out = tkmarket.report(
+        sym, od=_MockChain(sym, px), alpaca=None, state_dir=_mkt_state(),
+        bars=bars, record=False, news_transport=_mkt_news(sym))
+    out["account"] = "mock"
+    out["stale_s"] = 0.0
+    return out
+
+
 PRESETS = {"default": "basic", "presets": [
     {"id": "basic", "label": "Basic $0.10 ladder",
      "description": "First red 1-minute candle, 1 share, +1 every $0.10 down, "
@@ -302,6 +428,107 @@ def _inspect(sym: str, known: set) -> dict:
             "in_fleet": sym in known}
 
 
+# ------------------------------------------------------------------ the risk
+# ADDED round 6. Until this existed mockshell had no /api/risk, so the Risk
+# room could only ever be LOOKED at in its own failure state: the donut, the
+# concentration bars, the cap gauges, the per-ladder table and the stress
+# table have never been on screen with data in them. That is the hole
+# mockserver's docstring warns about, in reverse -- a harness that cannot
+# serve a route hides the page instead of finding the bug in it.
+def _risk(scen: str, acct: str) -> dict:
+    """`/api/risk`, in app.py's own units and no others.
+
+    THE LADDERS COME FROM THE SAME ENGINE STUBS `/api/ticker/<sym>` READS, so
+    the Risk room and the Ladder tab cannot disagree about what a ladder holds
+    inside one harness -- which is what a second copy of a route always ends up
+    doing. Everything app.py derives (`tp_in_atr`, `ladder_depth`, `loss_1atr`,
+    `worst_case`) is derived here by the same arithmetic rather than typed in,
+    so a unit that moves there shows up here as a wrong picture rather than as
+    a plausible one.
+
+    TWO FIGURES THIS HARNESS CANNOT MEASURE, and neither is faked:
+
+      atr            app.py takes ATR(14) off 150 real bars. There are none
+                     here, so it is the mean high-low range of the synthetic
+                     1-minute series -- a different estimator of the same
+                     quantity, which moves with the symbol the way the real one
+                     does, rather than a constant.
+      buying_power   the hub fixture does not report it and there is no way to
+                     derive it from cash without inventing a margin ratio. It
+                     is None, which makes the Cash reserve gauge draw its
+                     unmeasured state -- a case worth having on screen.
+
+    The LIMITS are this harness's own choice and are labelled as such: one is
+    off (reserve_cash), one is close to binding, one is generous. A fixture
+    where every gauge is half full never shows what "off" looks like.
+    """
+    ov = MS.hub_overview(scen, acct)
+    pf = ov.get("portfolio") or {}
+    out = []
+    for row in ov.get("tickers") or []:
+        sym = str(row.get("symbol") or "").upper()
+        e = _engine_of(scen, acct, sym)
+        if e is None:
+            continue
+        summ = e.summary()
+        bars = _bars(sym, "1Min", 0.05, 60)["bars"]
+        px = bars[-1]["c"] if bars else 0.0
+        rng = [b["h"] - b["l"] for b in bars[-14:]] or [0.0]
+        atr = round(sum(rng) / len(rng), 4)
+        costs = [abs(l.cost) for l in e.ledger.open_lots]
+        held = abs(e.ledger.signed_shares)
+        spl = round(held / len(costs), 6) if costs else 1.0
+        maxlots = int(summ.get("max_lots") or 0)
+        tp = float(summ.get("take_profit") or 0.10)
+        add = 0.10
+        # app.py measures a ladder depth ONLY for fixed-dollar rungs. Half the
+        # rows here are left on ATR rungs on purpose: a dash that is not a zero
+        # is the thing this room has to get right, and a fixture where every
+        # row is measured never tests it.
+        points = (sum(ord(c) for c in sym) % 2) == 0
+        depth = add * maxlots if points else 0.0
+        out.append({
+            "symbol": sym, "price": round(px, 4), "atr": atr,
+            "atr_pct": round(100 * atr / px, 3) if px else 0.0,
+            "take_profit": tp, "add_distance": add,
+            "tp_in_atr": round(tp / atr, 2) if atr else None,
+            "add_in_atr": round(add / atr, 2) if atr else None,
+            "shares_per_lot": spl, "max_lots": maxlots,
+            "lots_open": len(costs), "shares_held": round(held, 6),
+            "cost_basis": round(sum(costs), 2),
+            "max_exposure": round(spl * maxlots * px, 2),
+            "used_pct": round(100 * len(costs) / maxlots, 1) if maxlots else 0.0,
+            "unrealized": round(float(summ.get("unrealized") or 0), 2),
+            "ladder_depth": round(depth, 2),
+            "ladder_depth_pct": round(100 * depth / px, 2) if (px and depth) else 0.0,
+            "armed": not bool(summ.get("dry_run")),
+            "running": bool(summ.get("running")),
+            "exit_mode": "limit",
+            "loss_1atr": round(-atr * held, 2),
+            "loss_full_ladder": round(-(depth / 2) * spl * maxlots, 2) if depth else 0.0,
+        })
+    deployed = round(sum(t["cost_basis"] for t in out), 2)
+    equity = pf.get("account_value") or 1
+    running = sum(1 for t in out if t["running"])
+    return {
+        "ok": True,
+        "account": {
+            "equity": pf.get("account_value"), "cash": pf.get("cash"),
+            "buying_power": None, "deployed": deployed,
+            "deployed_pct": round(100 * deployed / equity, 1),
+            "open_pl": pf.get("open_pl"), "made_today": pf.get("made_today"),
+        },
+        "limits": {
+            "max_total_exposure": round(deployed * 1.15, -3) or 50000,
+            "reserve_cash": 0,
+            "account_daily_loss_limit": 2500,
+            "max_running_tickers": max(running + 1, 2),
+        },
+        "tickers": out,
+        "worst_case": round(sum(t["max_exposure"] for t in out), 2),
+    }
+
+
 def _known(scen: str, acct: str) -> set:
     try:
         rows = MS.hub_tickers(scen, acct).get("tickers", [])
@@ -345,6 +572,24 @@ class Handler(MS.Handler):
                              "problem": "this is a mock harness with no model "
                                         "credential",
                              "fix": "nothing to fix here"})
+        # ------------------------------------------------- the History tab
+        # ADDED with the strategy axis. Until this existed /api/performance
+        # 404'd here, so every review of the History tab had been done against
+        # a page showing its own load-failure banner -- which is how a tab with
+        # no strategy dimension survived three rounds. mockhist.py runs the
+        # REAL journal.stats / perf.realized_from_fills / optperf.report /
+        # histperf over synthetic stores; nothing about the shape is typed out.
+        if bare == "/api/performance":
+            hscen = (q.get("hist") or [MH.DEFAULT])[0]
+            return ("json", MH.performance(
+                hscen, acct,
+                symbol=(q.get("symbol") or [""])[0],
+                days=int((q.get("days") or [0])[0] or 0),
+                strategy=(q.get("strategy") or [""])[0]))
+        if bare == "/api/reports":
+            return ("json", MH.reports((q.get("hist") or [MH.DEFAULT])[0]))
+        if bare == "/api/risk":
+            return ("json", _risk(scen, acct))
         if bare == "/api/presets":
             return ("json", PRESETS)
         if bare == "/api/search":
@@ -361,6 +606,8 @@ class Handler(MS.Handler):
                     return ("json", _ticker_trades(scen, acct, sym))
                 if tail == "orders":
                     return ("json", _ticker_orders(sym))
+                if tail == "market":
+                    return ("json", _ticker_market(sym))
                 if not tail:
                     return ("json", _ticker_status(scen, acct, sym))
             except KeyError:
@@ -415,7 +662,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=8099)
     ap.add_argument("--scenario", default="hub", choices=MS.SCENARIOS)
+    # The History tab has its own store and therefore its own states. Kept
+    # separate from --scenario so a hub fixture and a history fixture can be
+    # combined, which is how "the ladder is live but the options ledger is
+    # unreadable" is reached at all.
+    ap.add_argument("--hist", default=MH.DEFAULT, choices=MH.SCENARIOS)
     a = ap.parse_args()
+    MH.DEFAULT = a.hist
     with MS.LOCK:
         MS.STATE["scenario"] = a.scenario
     # Its OWN scratch directory, keyed by port. mockserver keeps one shared

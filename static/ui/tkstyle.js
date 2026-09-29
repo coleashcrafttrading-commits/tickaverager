@@ -52,6 +52,70 @@ const CSS = `
   color:var(--faint);font-size:var(--fs-xs);font-variant-numeric:tabular-nums}
 .tkx-why{color:var(--faint);font-size:var(--fs-xs);line-height:var(--lh)}
 
+/* -- the Market pane's marks (tkmkt.js) -------------------------------- */
+/* Every rule here replaces a metric tile. The pane is one rail column wide at
+   1280 and the whole page wide at 375, so nothing carries a fixed width and
+   every track is a percentage of its own box. */
+.tkx-mk{display:flex;flex-direction:column;gap:var(--s4)}
+.tkx-mk-track{position:relative;height:6px;border-radius:var(--radius-pill);
+  background:var(--surface-3)}
+.tkx-mk-track.wide{height:8px;margin:var(--s2) 0 var(--s3)}
+.tkx-mk-day{position:absolute;top:0;bottom:0;border-radius:var(--radius-pill);
+  background:var(--grad);opacity:.85;min-width:3px}
+.tkx-mk-pin{position:absolute;top:-4px;width:3px;height:14px;border-radius:2px;
+  background:var(--text);transform:translateX(-1.5px)}
+.tkx-mk-ends{display:flex;justify-content:space-between;margin-top:6px;
+  color:var(--faint);font-size:var(--fs-xs);font-variant-numeric:tabular-nums}
+.tkx-mk-k{font-size:var(--fs-micro);letter-spacing:var(--track-caps);
+  text-transform:uppercase}
+.tkx-mk-dot{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;
+  transform:translate(-5px,-5px);border:2px solid var(--surface)}
+.tkx-mk-dot.iv{background:var(--accent)}
+.tkx-mk-dot.rv{background:var(--muted)}
+
+.tkx-mk-q{display:flex;align-items:center;gap:var(--s2)}
+.tkx-mk-qv{font-size:var(--fs-sm);font-variant-numeric:tabular-nums;
+  font-weight:var(--w-med)}
+.tkx-mk-qt{flex:1 1 auto;min-width:24px;height:6px;border-radius:var(--radius-pill);
+  background:var(--surface-3);display:flex;justify-content:center}
+.tkx-mk-qt i{display:block;height:100%;border-radius:var(--radius-pill);
+  background:var(--warn);opacity:.8}
+
+.tkx-mk-vol{display:flex;flex-direction:column;gap:6px}
+.tkx-mk-vt{position:relative;display:flex;align-items:flex-end;gap:2px;
+  height:44px}
+.tkx-mk-vt i{flex:1 1 0;min-width:2px;border-radius:2px 2px 0 0;
+  background:var(--surface-3)}
+.tkx-mk-vt i.on{background:var(--accent)}
+.tkx-mk-avg{position:absolute;left:0;right:0;height:1px;background:var(--faint);
+  opacity:.65}
+.tkx-mk-vl{display:flex;justify-content:space-between;font-size:var(--fs-xs);
+  font-variant-numeric:tabular-nums;color:var(--muted)}
+
+.tkx-mk-vol2{display:flex;flex-direction:column}
+.tkx-mk-chips{display:flex;flex-wrap:wrap;gap:var(--s1)}
+.tkx-mk-chip{display:inline-flex;align-items:center;gap:5px;
+  padding:3px var(--s2);border-radius:var(--radius-pill);
+  background:var(--surface-3);color:var(--muted);font-size:var(--fs-micro);
+  letter-spacing:var(--track-caps);text-transform:uppercase;white-space:nowrap}
+.tkx-mk-chip b{font-size:var(--fs-sm);letter-spacing:normal;
+  text-transform:none;color:var(--text);font-variant-numeric:tabular-nums}
+.tkx-mk-chip.iv b{color:var(--accent-2)}
+.tkx-mk-chip.warn{background:var(--warn-dim);color:var(--warn)}
+.tkx-mk-chip.warn b{color:var(--warn)}
+.tkx-mk-line{display:block;width:100%;height:22px;margin-top:var(--s3);
+  color:var(--accent)}
+
+.tkx-mk-news{list-style:none;margin:0;padding:0;display:flex;
+  flex-direction:column;gap:var(--s3)}
+.tkx-mk-news li{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tkx-mk-news a{color:var(--text);font-size:var(--fs-sm);line-height:var(--lh);
+  text-decoration:none}
+.tkx-mk-news a:hover{color:var(--accent-2);text-decoration:underline}
+.tkx-mk-news span{color:var(--faint);font-size:var(--fs-micro);
+  text-transform:uppercase;letter-spacing:var(--track-caps)}
+.tkx-mk-err{margin:0}
+
 /* -- one strategy on this ticker -------------------------------------- */
 /* minmax(min(260px, 100%), 1fr), not minmax(260px, 1fr): the bare form makes
    the TRACK 260px wide whatever the container is, so at phone width the card

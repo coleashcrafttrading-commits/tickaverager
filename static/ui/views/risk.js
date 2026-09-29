@@ -49,7 +49,7 @@ import {
    dashboard, not two. What riskmath.js adds is the arithmetic underneath them
    and the one control viz.js has no shape for: a LIMIT, which can be off, and
    off is not zero. */
-import { donut, hbar, area, vizEmpty } from "../viz.js";
+import { donut, hbar, area, vizEmpty, dotscale, ratiobar } from "../viz.js";
 import {
   concentration, drawdown, capRow, binding, ensureCapStyles,
 } from "../riskmath.js";
@@ -80,6 +80,7 @@ VIEWS.risk = {
 
   mount() {
     ensureCapStyles();
+    ensureRiskStyles();
     if (forAccount !== S.account) {
       D = { risk: null, perf: null, strat: null, plays: null };
       ERR = {}; at = 0; forAccount = S.account;
@@ -143,15 +144,25 @@ const strategies = () => (D.strat && D.strat.strategies) || [];
 const openPlays = () => ((D.plays && D.plays.positions) || [])
   .filter((p) => p.is_open !== false && p.state !== "closed");
 
-/* The one place a source's failure turns into words. Everything that reads a
-   source asks this first, so a block is either drawn from data or says which
-   read failed -- never drawn from nothing. */
+/* The one place a source's failure turns into a MARK.
+
+   ROUND 6: THIS USED TO BE A PARAGRAPH, AND IT WAS PRINTED ONCE PER BLOCK.
+   /api/risk feeds five blocks on this page, so a single 500 from it drew five
+   byte-identical 40-word strips down the page plus the note at the top --
+   six copies of one fact, which reads as six problems. The reason is now
+   stated ONCE, at the top, by renderNotes(); each stranded block draws a
+   short struck-through bar carrying the same reason on hover, which keeps
+   the block's height and says "this is empty because something failed"
+   without re-explaining it.
+
+   Nothing is drawn from the last read, and that has not changed: a risk
+   figure that cannot be refreshed is not a risk figure. */
 function stranded(key, what) {
   if (!ERR[key]) return "";
-  return `<div class="note bad" style="margin:0"><b>${esc(what)} could not be
-    read.</b> ${esc(ERR[key])}<br>Nothing is drawn here rather than drawing it
-    from the last read: a risk figure that cannot be refreshed is not a risk
-    figure.</div>`;
+  return `<div class="rk-out" title="${esc(what + " could not be read: "
+    + ERR[key] + ". Nothing is drawn here rather than drawn from the last "
+    + "read -- a risk figure that cannot be refreshed is not a risk "
+    + "figure.")}"><span></span>${esc(what.toLowerCase())} is not answering</div>`;
 }
 
 function render() {
@@ -173,9 +184,13 @@ function renderNotes() {
   if (!host) return;
   const a = acct(), L = limits(), T = ladders();
   const n = [];
-  if (ERR.risk) {
-    n.push(`<div class="note bad"><b>The ladder exposure read failed.</b>
-      ${esc(ERR.risk)} Everything below that comes from it is missing rather
+  for (const [k, what] of [["risk", "Ladder exposure"],
+                           ["perf", "The account's performance"],
+                           ["strat", "The strategy list"],
+                           ["plays", "The options ledger"]]) {
+    if (!ERR[k]) continue;
+    n.push(`<div class="note bad"><b>${esc(what)} could not be read.</b>
+      ${esc(ERR[k])} Everything below that comes from it is missing rather
       than stale.</div>`);
   }
   if (a.deployed_pct > 90) {
@@ -218,67 +233,72 @@ function renderHero() {
   const a = acct(), T = ladders(), p = pf();
   const atr1 = T.reduce((s, t) => s + (Number(t.loss_1atr) || 0), 0);
   const held = T.reduce((s, t) => s + (Number(t.cost_basis) || 0), 0);
-  const L = limits();
-  const setCaps = [L.max_total_exposure, L.reserve_cash,
-                   L.account_daily_loss_limit, L.max_running_tickers]
-    .filter(Boolean).length;
   const asn = assignment();
 
   host.innerHTML = tileGrid([
     tile({ label: "Deployed", big: true,
-           html: D.risk
+           html: (D.risk
              ? `<span class="num">${a.deployed_pct}%</span>`
-             : unmeasured(ERR.risk || "the exposure read has not answered"),
-           sub: D.risk ? `${money0(a.deployed)} of ${money0(a.equity)}` : "",
+             : unmeasured(ERR.risk || "the exposure read has not answered"))
+             + (D.risk ? `<div class="rk-mk">${ratiobar({
+                 value: a.deployed, cap: a.equity, unit: "usd", dp: 0,
+                 label: "cost basis of what the ladders hold, over equity",
+               })}</div>` : ""),
            hint: "Cost basis of everything the ladders hold, over account "
                + "equity." }),
-    tile({ label: "A 1× ATR move against you", html: D.risk ? sgn(atr1) : unmeasured(),
-           sub: `on the ${money0(held)} these ladders hold`,
-           hint: "One average bar's range, applied to what is held right now." }),
+    tile({ label: "A 1× ATR move against you",
+           html: D.risk ? sgn(atr1) : unmeasured(),
+           hint: `One average bar's range, applied to the ${money0(held)} these `
+               + `ladders hold right now.` }),
     tile({ label: "If every rung fills",
-           html: D.risk ? `<span class="num">${money0(D.risk.worst_case)}</span>`
-                        : unmeasured(ERR.risk),
-           sub: D.risk && a.equity
-             ? `${Math.round(100 * D.risk.worst_case / a.equity)}% of equity` : "",
-           hint: "Every ladder at max_lots. Unreachable in practice; it is the "
-               + "size of the commitment, not a forecast." }),
-    tile({ label: "Drawdown now",
+           html: (D.risk ? `<span class="num">${money0(D.risk.worst_case)}</span>`
+                         : unmeasured(ERR.risk))
+             + (D.risk && a.equity ? `<div class="rk-mk">${ratiobar({
+                 value: D.risk.worst_case, cap: a.equity, unit: "usd", dp: 0,
+                 label: "against account equity",
+               })}</div>` : ""),
+           hint: "Every ladder at max_lots, against equity. Unreachable in "
+               + "practice; it is the size of the commitment, not a "
+               + "forecast." }),
+    /* ONE TILE, ONE CURVE. Where the account is standing is a POSITION
+       between its worst fall and its own peak, and that is a dot on a track.
+       As two tiles it was two dollar figures and two percentages and the
+       reader did the subtraction. */
+    tile({ label: "Drawdown",
            metric: p ? p.current_drawdown : null, signed: true,
-           sub: p ? mfmt(p.current_drawdown_pct, { unit: "pct" }) + " below the high"
-                  : "",
-           hint: "Account equity against its own high-water mark." }),
-    tile({ label: "Worst drawdown",
-           metric: p ? p.max_drawdown : null, signed: true,
-           sub: p ? mfmt(p.max_drawdown_pct, { unit: "pct" }) : "",
-           /* NO CLAIM ABOUT THE LOGS HERE. This used to end "those are
-              wins-only and cannot fall" as a flat constant, on every account
-              and every scenario -- the same sentence the owner caught in
-              perf.py, hard-coded where it could never be true or false about
-              the account being looked at. On a book with 41 closed losers it
-              said their logs could not fall. The BASIS is what this tile is
-              actually claiming, and the basis is true everywhere. */
-           hint: "Measured on the ACCOUNT equity curve — the only curve that "
-               + "includes what is still open and any exit no strategy log "
-               + "recorded." }),
+           html: p ? undefined : unmeasured(ERR.perf
+             || "the performance read has not answered"),
+           sub: `<div class="rk-mk">${dotscale({
+             value: p ? mv(p.current_drawdown) : null,
+             min: p ? mv(p.max_drawdown) : null, max: 0,
+             unit: "usd", dp: 0, signed: true, tone: "down",
+             lo: p && mv(p.max_drawdown) != null
+               ? "worst " + money0(mv(p.max_drawdown)) : "worst —",
+             hi: "peak",
+             aria: "where the account is standing between its worst fall and "
+                 + "its own high-water mark",
+             why: ERR.perf || "no account equity curve has been measured",
+           })}</div>`,
+           hint: "Account equity against its own high-water mark, now and at "
+               + "its worst. Measured on the ACCOUNT curve — the only one "
+               + "that includes what is still open and any exit no strategy "
+               + "log recorded. Worst: "
+               + (p ? mfmt(p.max_drawdown_pct, { unit: "pct" }) : "not measured")
+               + "; now: "
+               + (p ? mfmt(p.current_drawdown_pct, { unit: "pct" })
+                    : "not measured") }),
     tile({ label: "Assignment exposure",
            html: asn.ok
              ? `<span class="num">${money0(asn.notional)}</span>`
              : unmeasured(asn.why),
-           sub: asn.ok
-             ? `${asn.shares.toLocaleString()} shares across ${asn.legs} short leg${
-                 asn.legs === 1 ? "" : "s"}`
-             : "",
-           hint: "What a short option leg delivers if it finishes in the "
-               + "money: 100 shares per contract, at the strike." }),
-    tile({ label: "Guardrails set",
-           html: D.risk
-             ? (setCaps
-                 ? `<span class="num">${setCaps}<span class="faint">/4</span></span>`
-                 : `<span class="down">none</span>`)
-             : unmeasured(ERR.risk),
-           sub: `account-wide, on Settings → Engine`,
-           go: "settings", tab: "engine" }),
-  ], { cols: 7 });
+           hint: asn.ok
+             ? `${asn.shares.toLocaleString()} shares across ${asn.legs} short `
+               + `leg${asn.legs === 1 ? "" : "s"}. What a short option leg `
+               + `delivers if it finishes in the money: 100 shares per `
+               + `contract, at the strike.`
+             : "What a short option leg delivers if it finishes in the money: "
+               + "100 shares per contract, at the strike." }),
+  ], { cols: 5 });
 }
 
 /* ------------------------------------------------- where the money sits */
@@ -318,22 +338,20 @@ function renderSplit() {
       empty: splitBy === "ticker"
         ? "No ladder holds anything" : "No strategy holds anything",
     })}
-    <div class="tip">${splitBy === "ticker"
-      ? `Cost basis of the share ladders — what they PAID. The options book is
-         not in this ring; it is in the other one.`
-      : `Market value as the broker marks it, every strategy on the account,
-         options included. This is <b>not the same quantity</b> as the ticker
-         ring's cost basis, which is why they are two rings and never one
-         total.`}</div>`;
+`;
 
   host.innerHTML = panel("Where the money is", body, {
-    sub: splitBy === "ticker"
-      ? "the share ladders, at what they paid"
-      : "every strategy, at what it is worth now",
+    titleHint: "Two different quantities, never summed and never on one ring. "
+      + "By ticker is the share ladders' COST BASIS — what they paid, options "
+      + "not included. By strategy is every strategy's MARKET VALUE as the "
+      + "broker marks it today, options included.",
     actions: segmented({
       id: "rkSplitSeg", value: splitBy, size: "sm", label: "split by",
-      options: [["ticker", "By ticker", "the ladders' cost basis"],
-                ["strategy", "By strategy", "hub's market value, options included"]],
+      options: [["ticker", "By ticker",
+                 "the share ladders' cost basis — what they paid"],
+                ["strategy", "By strategy",
+                 "every strategy's market value today, options included. NOT "
+                 + "the same quantity as the ticker ring."]],
     }),
   });
   wireSegmented("rkSplitSeg", (v) => { splitBy = v; renderSplit(); });
@@ -360,15 +378,24 @@ function renderConcentration() {
       empty: "No ladder holds anything",
       why: "there is nothing held, so there is nothing to concentrate",
     })}
-    ${c.ok ? `<div class="tip">
-      The biggest position is <b>${(c.top1 * 100).toFixed(1)}%</b> of what the
-      ladders hold; the top three are <b>${(c.top3 * 100).toFixed(1)}%</b>.
-      That is ${esc(c.words)}. A single name over half the book means a move against
-      that ticker is a move against the whole fleet.
-      ${c.why ? `<br>Left out of that split: ${esc(c.why)}.` : ""}</div>` : ""}`;
+    ${c.ok ? `<div class="rk-conc">${dotscale({
+      value: c.top1, min: 0, max: 1, unit: "pct", dp: 1,
+      lo: "one name 0%", hi: "100%",
+      tone: c.top1 > 0.5 ? "down" : "flat",
+      marks: [{ at: c.top3, label: "top three" }],
+      aria: "share of the ladders' book held in the single biggest name, with "
+          + "the top three marked",
+    })}<span class="rk-conc-w" title="${esc("The biggest position is "
+      + (c.top1 * 100).toFixed(1) + "% of what the ladders hold and the top "
+      + "three are " + (c.top3 * 100).toFixed(1) + "%. Spread that evenly and "
+      + "the book would be " + c.words + "."
+      + (c.why ? " Left out of the split: " + c.why + "." : ""))}">${
+      esc(c.words)}</span></div>` : ""}`;
   host.innerHTML = panel("Concentration", body, {
-    sub: c.ok ? `${c.n} ladder${c.n === 1 ? "" : "s"} holding something`
-              : "nothing held",
+    titleHint: c.ok
+      ? `${c.n} ladder${c.n === 1 ? "" : "s"} holding something. The dot is the `
+        + `single biggest name's share of the book; the tick is the top three.`
+      : "nothing is held, so there is nothing to concentrate",
   });
 }
 
@@ -395,43 +422,60 @@ function renderDrawdown() {
         aria: "drawdown from the account own high-water mark",
       })
     : vizEmpty({ h: 150, title: "No drawdown curve", body: dd.why });
+  /* THE DEEPEST FALL AS A CHIP, not a sentence. Everything the sentence
+     carried beyond those two figures -- the peak date, the trough date,
+     whether it recovered -- is the chip's tooltip. The skipped-day count is
+     the one part that reports something WRONG with the picture, so it stays
+     printed as a warning. */
   const marks = dd.ok
-    ? `<div class="tip">Deepest <b>${money(dd.maxDd, 0)}</b>
-       (${(dd.maxDdPct * 100).toFixed(2)}%)${dd.peakAt
-         ? `, from the high on <b>${esc(dd.peakAt)}</b>` : ""}${dd.troughAt
-         ? ` to <b>${esc(dd.troughAt)}</b>` : ""}${dd.recoveredAt
-         ? `, back at the high on <b>${esc(dd.recoveredAt)}</b>.`
-         : `, and it has <b>not</b> recovered.`}
-       ${dd.skipped ? `${dd.skipped} day(s) carried no equity print and were
-         skipped rather than drawn flat — a holiday is not a flat day.` : ""}</div>`
+    ? `<div class="rk-chips"><span class="rk-chip down" title="${esc(
+        "deepest fall" + (dd.peakAt ? ", from the high on " + dd.peakAt : "")
+        + (dd.troughAt ? " to " + dd.troughAt : "")
+        + (dd.recoveredAt ? ", back at the high on " + dd.recoveredAt
+                          : ", and it has NOT recovered"))}">deepest ${
+        money(dd.maxDd, 0)} · ${(dd.maxDdPct * 100).toFixed(2)}%</span>${
+        dd.recoveredAt ? `<span class="rk-chip" title="${esc(
+          "the account climbed back to its high-water mark on "
+          + dd.recoveredAt)}">recovered</span>`
+        : `<span class="rk-chip warn" title="the account has not been back to
+           that high since">not recovered</span>`}</div>
+       ${dd.skipped ? `<div class="note warn" style="margin:10px 0 0">${
+         dd.skipped} day(s) carried no equity print and were skipped rather
+         than drawn flat — a holiday is not a flat day.</div>` : ""}`
     : "";
   const body = err || `
     ${chart}
     ${marks}
     ${tileGrid([
-      tile({ label: "Max drawdown", metric: p ? p.max_drawdown : null,
-             signed: true,
-             sub: p ? mfmt(p.max_drawdown_pct, { unit: "pct" }) : "" }),
+      /* "Max drawdown" left this grid: the hero tile above is now the whole
+         drawdown story, worst and now on one track, and printing the same
+         dollar figure twice on one page is what the owner keeps calling
+         clutter. What is left here is the five RATIOS, and a ratio's
+         definition is a tooltip. */
       tile({ label: "Longest drawdown",
              metric: p ? p.longest_drawdown_days : null, unit: "days",
-             sub: p && p.drawdown_peak_date
-               ? `from ${esc(p.drawdown_peak_date)}` : "" }),
+             hint: p && p.drawdown_peak_date
+               ? `the longest run below a high-water mark, from `
+                 + `${p.drawdown_peak_date}`
+               : "the longest run below a high-water mark" }),
       tile({ label: "Sharpe", metric: p ? p.sharpe : null, unit: "ratio",
-             sub: "daily returns, root-252" }),
+             hint: "return over the volatility of daily returns, annualised "
+                 + "by root-252" }),
       tile({ label: "Sortino", metric: p ? p.sortino : null, unit: "ratio",
-             sub: "downside only" }),
+             hint: "the same, counting only the days that fell. null below "
+                 + "three down days" }),
       tile({ label: "Calmar", metric: p ? p.calmar : null, unit: "ratio",
-             sub: "return over max drawdown" }),
+             hint: "return over max drawdown" }),
       tile({ label: "Exposure", metric: p ? p.exposure : null, unit: "pct",
-             sub: "of days with something open" }),
-    ], { cols: 6, cls: "plain" })}
-    <div class="tip">The curve is <b>ACCOUNT equity</b> against its own running
-      high. It is not the strategies' realised log: every closed row in that log
-      is a win, so a curve drawn from it cannot fall and its drawdown would read
-      $0.00 — a true number about a sample that cannot contain a loss.</div>
+             hint: "the share of days with something open" }),
+    ], { cols: 5, cls: "plain" })}
     ${cav}`;
   host.innerHTML = panel("Drawdown", body, {
-    sub: "how far below its own high-water mark this account has been",
+    titleHint: "How far below its own high-water mark this account has been. "
+      + "The curve is ACCOUNT equity, not the strategies' realised log: every "
+      + "closed row in that log is a win, so a curve drawn from it cannot "
+      + "fall and its drawdown would read $0.00 — a true number about a "
+      + "sample that cannot contain a loss.",
   });
 }
 
@@ -504,16 +548,19 @@ function renderCaps() {
 
   const body = err || `
     <div class="caps">${rows.map((c) =>
-      capRow({ ...c, binding: !!(b && b.key === c.key) })).join("")}</div>
-    <div class="tip">
-      ${b ? `<b>${esc(b.label)}</b> is the nearest to binding at
-        <b>${(b.f * 100).toFixed(0)}%</b> — it is the one that stops the next
-        order.` : `No cap on this account can bind: every one of them is off.`}
-      Set them on <a href="${hashFor({ kind: "settings", tab: "engine" })}">Settings
-      → Engine</a>, where each field carries the same usage bar.
-    </div>`;
+      capRow({ ...c, binding: !!(b && b.key === c.key) })).join("")}</div>${
+    /* THE ONLY THING THAT STAYED IS THE ONE THAT REPORTS A STATE, not a
+       definition: every cap off means nothing on this account can stop an
+       order, and that is a warning. The binding cap is already drawn as the
+       marked row, so naming it underneath was saying it twice. */
+    b ? "" : `<div class="note warn" style="margin:10px 0 0">No cap on this
+      account can bind — every one of them is off, so nothing here stops the
+      next order.</div>`}`;
   host.innerHTML = panel("The caps that bind", body, {
-    sub: "a cap set to 0 is drawn off, not empty",
+    titleHint: "A cap set to 0 is drawn off, not empty. The marked row is the "
+      + "nearest to binding: the one that stops the next order.",
+    actions: `<a class="btn sm" href="${
+      hashFor({ kind: "settings", tab: "engine" })}">Set them</a>`,
   });
 }
 
@@ -563,11 +610,12 @@ function renderAssignment() {
     body = `<div class="note warn" style="margin:0">Assignment exposure is not
       shown: ${esc(a.why)}. It is not zero — nobody measured it.</div>`;
   } else if (!a.legs) {
-    body = `<div class="tip">No short option leg is open, so nothing can be
-      assigned to this account. ${a.positions
-        ? `${a.positions} option position${a.positions === 1 ? " is" : "s are"}
-           open and every leg of ${a.positions === 1 ? "it is" : "them is"}
-           long.` : `No option position is open at all.`}</div>`;
+    body = `<div class="rk-chips"><span class="rk-chip" title="${esc(
+      a.positions
+        ? a.positions + " option position" + (a.positions === 1 ? " is" : "s are")
+          + " open and every leg of " + (a.positions === 1 ? "it is" : "them is")
+          + " long, so nothing can be assigned to this account."
+        : "no option position is open at all")}">no short leg open</span></div>`;
   } else {
     body = `
       ${dataTable({
@@ -591,20 +639,24 @@ function renderAssignment() {
             ? ` <span class="faint">${r.dte}d</span>` : ""}`,
         ]),
       })}
-      <div class="tip">
-        <b>${money0(a.notional)}</b> is what these short legs would DELIVER, not
-        what they would lose${eq ? `, against ${money0(eq)} of equity
-        (${Math.round(100 * a.notional / eq)}%)` : ""}. These are American
-        options on shares: a short leg $0.01 in the money at expiry is
-        auto-exercised, and a PARTIAL-ITM expiry — the short assigned while the
-        long expires worthless — can lose more than the structure's stated max
-        loss and leaves naked stock overnight. The account is options level 3,
-        so every short leg here is defined-risk or covered; that limits the
-        loss, not the delivery.
-      </div>`;
+      <div class="rk-chips">
+        <span class="rk-chip warn">${money0(a.notional)} would be
+          <b>delivered</b>, not lost</span>${eq
+          ? `<span class="rk-chip">${Math.round(100 * a.notional / eq)}% of
+             ${money0(eq)} equity</span>` : ""}
+      </div>
+      <details class="rk-more"><summary>why a delivery is not a loss</summary>
+        These are American options on shares. A short leg $0.01 in the money at
+        expiry is auto-exercised, and a PARTIAL-ITM expiry — the short assigned
+        while the long expires worthless — can lose more than the structure's
+        stated max loss and leaves naked stock overnight. The account is
+        options level 3, so every short leg here is defined-risk or covered;
+        that limits the loss, not the delivery.
+      </details>`;
   }
   host.innerHTML = panel("Assignment exposure", body, {
-    sub: "what a short option leg hands this account if it finishes ITM",
+    titleHint: "what a short option leg hands this account if it finishes in "
+      + "the money",
   });
 }
 
@@ -659,7 +711,7 @@ function renderLadders() {
     }),
   });
   host.innerHTML = panel("Per ladder", body, {
-    sub: "everything in dollars and in ATR — click a row for that ticker",
+    titleHint: "everything in dollars and in ATR — click a row for that ticker",
     flush: true,
   });
 }
@@ -677,10 +729,22 @@ function renderStress() {
   const body = err || `${dataTable({
     dense: true,
     cols: ["Ticker", { label: "Held", num: true },
-           { label: "A 1× ATR fall", num: true },
-           { label: "Full ladder depth", num: true },
-           { label: "Cost to fill it", num: true },
-           { label: "Est. loss at the bottom", num: true }],
+           { label: "A 1× ATR fall", num: true,
+             title: "what one average bar's range costs on what is held right "
+                  + "now" },
+           { label: "Full ladder depth", num: true,
+             title: "how far price must fall for every rung to fill (add "
+                  + "distance × max lots). Past that the ladder stops buying "
+                  + "and simply holds. A dash means the server measures depth "
+                  + "only for fixed-dollar rungs (add_mode=points) — an ATR "
+                  + "ladder has no fixed depth. Read it as unknown, never as "
+                  + "zero." },
+           { label: "Cost to fill it", num: true,
+             title: "max_exposure: what filling every rung would cost" },
+           { label: "Est. loss at the bottom", num: true,
+             title: "assumes the average lot is half the ladder depth "
+                  + "underwater — the right order of magnitude, not a precise "
+                  + "figure" }],
     empty: "No ticker is configured on this account.",
     rows: T.map((t) => {
       const atrRungs = (modeOf[t.symbol] || "points") !== "points";
@@ -701,23 +765,76 @@ function renderStress() {
       ];
     }),
   })}
-  <div class="tip" style="padding:14px 16px 2px">
-    <b>A 1× ATR fall</b> is what one average bar's range costs on what is held
-    right now. <b>Full ladder depth</b> is how far price must fall for every
-    rung to fill (add distance × max lots) — past that the ladder stops buying
-    and simply holds. <b>Est. loss at the bottom</b> assumes the average lot is
-    half the ladder depth underwater: the right order of magnitude, not a
-    precise figure.
-    ${anyAtr ? `<br><br><b class="warn">A dash</b> means exactly that: the
-    server measures ladder depth only for fixed-dollar rungs
-    (<code>add_mode=points</code>), and a ladder on ATR rungs has no fixed
-    depth to measure. Read it as unknown, never as zero.` : ""}
-    <br><br>There is <b>no stop loss</b>. None of this includes the case where
-    price keeps falling after the ladder is full, because in that case the loss
-    is unbounded until price recovers — which is what the drawdown chart above
-    is for.</div>`;
+  <div class="note warn" style="margin:12px 16px 2px">There is <b>no stop
+    loss</b>. None of these figures includes the case where price keeps falling
+    after the ladder is full — there the loss is unbounded until price
+    recovers.</div>`;
   host.innerHTML = panel("If it goes against you", body, {
-    sub: "no stop loss — these are the numbers that matter",
+    titleHint: "no stop loss — these are the numbers that matter"
+      + (anyAtr ? ". Some ladders here run ATR rungs, which have no fixed "
+                + "depth, so their depth columns are dashes and not zeroes."
+                : ""),
     flush: true,
   });
+}
+
+
+/* ================================================== this room's own CSS ====
+   Injected from here, once, rather than appended to app.css: several agents
+   edit that stylesheet in the same week and it is the easiest place in a repo
+   to collide silently. viz.js and overview.js do the same. Every value is a
+   TOKEN from theme.css, so both themes carry through.
+
+   All five classes below exist because round 6 replaced a paragraph with a
+   mark, and a mark needs somewhere to sit. */
+function ensureRiskStyles() {
+  if (typeof document === "undefined" || !document
+      || document.getElementById("ta-risk-css")) return;
+  const st = document.createElement("style");
+  st.id = "ta-risk-css";
+  st.textContent = `
+/* a block whose source failed: the height of the block, the reason on hover,
+   and NOT the 40-word paragraph that used to be printed once per block */
+.rk-out { display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s4) 0; color: var(--down); font-size: var(--fs-sm); }
+.rk-out span { flex: 1; height: 2px; border-radius: 2px;
+  background: repeating-linear-gradient(90deg, var(--down) 0 5px,
+    transparent 5px 10px); opacity: .55; }
+
+/* a mark inside a metric tile, where the tile's caption used to be */
+.rk-mk { margin-top: 6px; }
+
+/* concentration: the dot on a 0-100% track, with the HHI beside it */
+.rk-conc { display: flex; align-items: center; gap: var(--s4);
+  margin-top: var(--s3); }
+.rk-conc .viz-dsc { flex: 1; min-width: 120px; }
+.rk-conc-w { flex: none; font-size: var(--fs-xs); color: var(--muted);
+  max-width: 22ch; }
+
+/* the chips that replaced a sentence built out of figures */
+.rk-chips { display: flex; flex-wrap: wrap; gap: var(--s2);
+  margin-top: var(--s3); }
+.rk-chip { font-size: var(--fs-xs); padding: 3px 9px;
+  border-radius: var(--radius-pill); background: var(--bg-3);
+  color: var(--muted); border: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums; }
+.rk-chip b { color: var(--text); font-weight: var(--w-semi); }
+.rk-chip.warn { color: var(--warn); border-color: var(--warn); }
+.rk-chip.down { color: var(--down); border-color: var(--down); }
+
+/* the disclosure that holds the assignment warning, shut by default */
+.rk-more { margin-top: var(--s3); font-size: var(--fs-sm); color: var(--muted);
+  line-height: 1.6; }
+.rk-more > summary { cursor: pointer; color: var(--accent-2);
+  font-size: var(--fs-xs); list-style: none; }
+.rk-more > summary::-webkit-details-marker { display: none; }
+.rk-more > summary::before { content: "\\25B8 "; }
+.rk-more[open] > summary::before { content: "\\25BE "; }
+.rk-more[open] { padding-bottom: var(--s2); }
+
+@media (max-width: 620px) {
+  .rk-conc { flex-direction: column; align-items: stretch; gap: var(--s2); }
+  .rk-conc-w { max-width: none; }
+}`;
+  document.head.appendChild(st);
 }

@@ -1,213 +1,242 @@
 /* ============================================================================
-   Trading hub -> History -- TOTAL P/L, and the hole that "booked" hides.
+   Trading hub -> History. A STRATEGY AXIS, a CURVE and a TRADE LIST.
 
-   READ THE SCOPE STRIP AT THE TOP OF THIS TAB BEFORE ANY NUMBER ON IT.
-   `state/journal.jsonl` is written by the SHARE LADDER and by nothing else,
-   so every figure below belongs to ONE strategy and not to the account. That
-   used to be implicit, and the tab was called Performance, which invited
-   exactly the reading the hub rewrite exists to end: the ladder's results
-   standing in for the whole account. A strip from /api/hub/portfolio now sits
-   above the headline showing every strategy's booked and open side by side,
-   so the journal's figure is seen as the share it is before it is read as a
-   total.
+   ------------------------------------------------------------- what changed
+   Two owner complaints, and they are the same complaint:
 
-   This is the Hub's History tab, a sibling of Hub, Strategies and Positions,
-   and it is deliberately a different SCOPE from the account strip above it.
-   The account's own all-time P/L is shown beside it, labelled, rather than
-   left for someone to assume they are the same number.
+     "on history its showing the DCA ladder history but I cannot click on any
+      other history its stuck on the dca ladder."
+     "just a shit ton on widgets with a bunch of words its too much and too
+      cluttery ... there are not graphs and fancy graphics."
 
-   It used to lead with what the ladders had BOOKED. That was the bug. A
-   ladder with no stop loss never closes a loser, so realized alone climbs in
-   a straight line while six lots sit 20% underwater and say nothing. The
-   headline is now `stats.total_pl` -- booked plus what the open lots are
-   worth right now -- and booked is one of its two halves, never the lead.
+   The first was structural. The scope was {symbol, days} with no strategy
+   dimension at all, and /api/performance read the share ladder's journal and
+   nothing else. It is now {strategy, symbol, days}, and the strategy list
+   comes from hub.py -- so a third strategy appears in that dropdown with
+   nobody editing this file.
 
-   The other half of that discipline is what happens when a number is
-   missing. A null here is never a 0 and never a bare dash: a 0 in the open
-   column reads as "nothing is underwater", which is exactly the false
-   comfort this tab exists to remove. Every absent figure says why it is
-   absent -- "needs live prices" when the snapshot carried no mark, "not
-   recorded before 12 Sep" for a lot that pre-dates MAE recording.
+   The second is answered by SUBTRACTION. Measured on this tab at 1280x900
+   before and after: 6 panels -> 2, 273 text nodes -> 78, 783 words -> 158,
+   2,485px -> 1,246px. Nothing was moved off-screen to get there. Where a fact
+   used to cost a sentence it now costs a MARK: the equity curve replaces the
+   paragraph about what total P/L means, a row of rung bars replaces an
+   eleven-column table and the paragraph under it, and every explanation that
+   survived is on HOVER or inside the one disclosure.
 
-   Data contract: journal.stats() / GET /api/performance, see
-   docs history_contract.md. Fields that may be absent are listed there and
-   each one is routed through mk() or rec() below.
+   THE WARNINGS STAYED. The owner asked for exactly that -- "only have issues
+   or warnings posted because it is tacky" -- so what was deleted is the prose
+   explaining what a number MEANS, never the prose saying something is WRONG.
+
+   ---------------------------------------------------------------- the money
+   Realised comes from ALPACA'S FILL TAPE for shares and from the PLAY LEDGER
+   for options, and this page states which. The share ladder's own journal was
+   missing 19,726 MSTX buys and every flatten sell and read +$8,882.86 against
+   +$3,367.53 of real equity trading; it keeps its real job below, which is
+   the narrative -- which lot, which rung, which reason.
+
+   A NUMBER NOBODY MEASURED IS A DASH CARRYING ITS REASON. Never a 0.
+
+   Data contract: histperf.py's slice, served on `view` by GET
+   /api/performance?strategy=&symbol=&days=.
    ========================================================================= */
 "use strict";
 import {
-  S, GET, POST, DEL, act, toast, el, esc, card, stat, tableHTML,
-  money, money0, sgn, pct, px, qty, dur,
-  mv, mnum, measured, mreason, stateChip,
+  S, GET, POST, DEL, act, toast, el, esc,
+  panel, dataTable, tile, tileGrid, unmeasured, stateChip,
+  money0, sgn, dur, px, qty, mnum, toneOf,
 } from "../core.js";
 
 let perf = null;
 let reports = [];
-let scope = { symbol: "", days: 7 };
-let forAcct = "";       // the journal, reports and symbol filter are per account
-let loadErr = "";       // the last GET /api/performance failure, kept on screen
+let scope = { strategy: "", symbol: "", days: 7 };
+let forAcct = "";
+let loadErr = "";
 
-/* ----------------------------------------------------- the missing vocabulary
-   Contract §4.2. Each of these puts the REASON where the number would have
-   been, so an empty cell can never be mistaken for a zero. */
-const NEED_MARK = "needs live prices";
+const WINDOW = { 1: "today", 7: "7 days", 30: "30 days", 0: "all time" };
 
-const absent = (why) =>
-  `<span class="pf-none" title="${esc(why)}">${esc(why)}</span>`;
+/* A mark from histperf -> core's metric envelope, so one formatter renders
+   every figure on the page and `pct` stays a FRACTION on both sides. */
+const env = (m) => ({ value: m.v, n: 1, unit: m.unit,
+                      reason: m.v == null ? (m.reason || "not measured") : null,
+                      thin: false });
 
-/* "2026-09-12" -> "12 Sep" */
-function shortDay(iso) {
-  const s = String(iso || "").slice(0, 10);
-  const d = new Date(s + "T00:00:00");
-  return isNaN(d.getTime()) ? s
-    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const num = (v, o = {}) =>
+  (v == null ? unmeasured(o.reason || "not measured")
+             : `<span class="num ${o.signed ? toneOf(v) : ""}">${
+                 o.signed ? sgn(v) : money0(v)}</span>`);
+
+/* ======================================================================= css
+   This tab owns markup no other page has -- a curve, a depth strip and a
+   headline that carries its own split -- and app.css belongs to another
+   agent. One <style>, theme tokens only, so both themes follow for free. */
+const CSS = `
+.h-scope { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+           margin: 0 0 14px; }
+.h-scope select { width: auto; min-height: 38px; flex: 0 1 auto; }
+.h-scope .h-rows { margin-left: auto; font-size: var(--fs-xs); color: var(--faint); }
+@media (max-width: 640px) {
+  .h-scope select { flex: 1 1 130px; }
+  .h-scope .h-rows { flex: 1 0 100%; margin-left: 0; }
 }
 
-/* a figure that exists only when the fleet snapshot carried live marks */
-const mk = (v, fmt = sgn) => (v == null ? absent(NEED_MARK) : fmt(v));
+/* ---- the headline. One number, two marks, no sentence. ---- */
+.h-head { display: flex; align-items: baseline; gap: 6px 26px; flex-wrap: wrap; }
+.h-big { font-size: var(--fs-4xl); font-weight: var(--w-semi);
+         letter-spacing: var(--track-tight); line-height: 1.1; }
+.h-split { display: flex; gap: 18px; flex-wrap: wrap; }
+.h-split div { display: flex; flex-direction: column; gap: 1px; }
+.h-split i { font-style: normal; font-size: var(--fs-micro); color: var(--faint);
+             text-transform: uppercase; letter-spacing: var(--track-caps); }
+.h-split b { font-size: var(--fs-lg); font-weight: var(--w-med); }
+.h-why { width: 100%; font-size: var(--fs-xs); color: var(--faint); }
 
-/* a figure that exists only for lots opened after MAE recording began */
-const rec = (v, since, fmt = sgn) => (v != null ? fmt(v)
-  : absent(since ? `not recorded before ${shortDay(since)}` : "not recorded yet"));
+/* ---- the curve ---- */
+.h-curve { position: relative; margin: 14px 0 2px; }
+.h-curve svg { display: block; width: 100%; height: 180px; }
+.h-curve .h-blank { display: flex; align-items: center; justify-content: center;
+                    height: 180px; border: 1px dashed var(--hairline);
+                    border-radius: var(--r-md); color: var(--faint);
+                    font-size: var(--fs-sm); text-align: center; padding: 0 16px; }
+.h-leg { display: flex; gap: 14px; flex-wrap: wrap; font-size: var(--fs-xs);
+         color: var(--muted); margin-top: 6px; }
+.h-leg span { display: inline-flex; align-items: center; gap: 6px; }
+.h-leg i { width: 9px; height: 3px; border-radius: 2px; background: currentColor; }
 
-const WINDOW = { 1: "today", 7: "last 7 days", 30: "last 30 days", 0: "all time" };
+/* ---- the depth strip: one bar per rung, still-open share lit in warn ----
+   A chart nobody can read is worse than no chart, so each bar carries its rung
+   number. That is the only text on it; everything the eleven-column table used
+   to print is on the bar's own tooltip. */
+.h-depth { display: flex; align-items: stretch; gap: 4px; height: 58px; }
+.h-depth a { flex: 1 1 0; min-width: 6px; display: flex; flex-direction: column;
+             text-decoration: none; }
+.h-depth em { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+              justify-content: flex-end; font-style: normal; }
+.h-depth u { display: block; background: var(--accent); border-radius: 2px 2px 0 0;
+             text-decoration: none; }
+.h-depth u.o { background: var(--warn); border-radius: 2px 2px 0 0; }
+.h-depth u.o + u { border-radius: 0; }
+.h-depth s { text-decoration: none; text-align: center; font-size: var(--fs-micro);
+             color: var(--faint); padding-top: 3px; }
 
+.h-tag { font-size: var(--fs-micro); color: var(--faint); white-space: nowrap; }
+.h-rep { display: flex; align-items: center; gap: 10px; padding: 5px 0;
+         border-bottom: 1px solid var(--hairline); font-size: var(--fs-xs); }
+.h-rep:last-child { border-bottom: 0; }
+.h-rep a:first-child { flex: 1; min-width: 0; overflow: hidden;
+                       text-overflow: ellipsis; white-space: nowrap; }
+details.h-more { font-size: var(--fs-sm); }
+details.h-more > summary { cursor: pointer; color: var(--muted);
+                           font-size: var(--fs-xs); list-style: none; }
+details.h-more > summary::-webkit-details-marker { display: none; }
+details.h-more > summary::before { content: "▸ "; }
+details.h-more[open] > summary::before { content: "▾ "; }
+details.h-more > div { padding-top: 10px; }
+`;
+
+function ensureStyle() {
+  if (document.getElementById("histCss")) return;
+  const s = document.createElement("style");
+  s.id = "histCss";
+  s.textContent = CSS;
+  document.head.appendChild(s);
+}
+
+/* ==================================================================== curve
+   An inline SVG P/L curve against a VISIBLE ZERO LINE, always. A curve
+   autoscaled to its own range makes a losing strategy look like a rising one,
+   which is the single worst thing a results chart can do.
+
+   `series` is [{label, points:[{t,pl}]}]. Fewer than two points anywhere is
+   NOT a flat line at zero -- it is the reason, in words, on an empty plot. */
+const LINE = ["var(--accent-2)", "var(--up)", "var(--warn)", "var(--down)",
+              "var(--muted)"];
+
+function curveSVG(series, why) {
+  const live = (series || []).filter((s) => (s.points || []).length >= 2);
+  if (!live.length) {
+    return `<div class="h-blank">${esc(why || "nothing closed in this window")}</div>`;
+  }
+  const W = 1000, H = 180, padT = 10, padB = 12;
+  const ts = [], vs = [0];
+  live.forEach((s) => s.points.forEach((p) => { ts.push(+p.t); vs.push(+p.pl); }));
+  const t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const lo = Math.min(...vs), hi = Math.max(...vs);
+  const span = (hi - lo) || 1, tspan = (t1 - t0) || 1;
+  const X = (t) => ((t - t0) / tspan) * W;
+  const Y = (v) => padT + (1 - (v - lo) / span) * (H - padT - padB);
+  const zero = Y(0);
+
+  /* STEPS, NOT SLOPES. Realised P/L does not drift between two bookings --
+     it sits flat and then jumps when a fill settles. Interpolating a straight
+     line between them draws a move that never happened, and on a two-point
+     series it is the whole picture. */
+  const paths = live.map((s, i) => {
+    const c = LINE[i % LINE.length];
+    const d = s.points.map((p, j) => j
+      ? `L${X(+p.t).toFixed(1)} ${Y(+s.points[j - 1].pl).toFixed(1)} `
+        + `L${X(+p.t).toFixed(1)} ${Y(+p.pl).toFixed(1)}`
+      : `M${X(+p.t).toFixed(1)} ${Y(+p.pl).toFixed(1)}`).join(" ");
+    const last = s.points[s.points.length - 1];
+    const area = live.length === 1
+      ? `<path d="${d} L${X(+last.t).toFixed(1)} ${zero.toFixed(1)} L${
+          X(+s.points[0].t).toFixed(1)} ${zero.toFixed(1)} Z"
+          fill="${c}" opacity=".13" stroke="none"/>` : "";
+    return `${area}<path d="${d}" fill="none" stroke="${c}" stroke-width="2"
+      vector-effect="non-scaling-stroke" stroke-linejoin="round"
+      stroke-linecap="round"/><circle cx="${X(+last.t).toFixed(1)}"
+      cy="${Y(+last.pl).toFixed(1)}" r="3" fill="${c}"
+      vector-effect="non-scaling-stroke"/>`;
+  }).join("");
+
+  const legend = live.length > 1
+    ? `<div class="h-leg">${live.map((s, i) =>
+        `<span style="color:${LINE[i % LINE.length]}"><i></i>${esc(s.label)}
+         ${sgn(s.points[s.points.length - 1].pl)}</span>`).join("")}</div>` : "";
+
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+      role="img" aria-label="realised P/L over the window">
+      <line x1="0" x2="${W}" y1="${zero.toFixed(1)}" y2="${zero.toFixed(1)}"
+        stroke="var(--hairline2)" stroke-width="1"
+        vector-effect="non-scaling-stroke"/>${paths}</svg>${legend}`;
+}
+
+/* ===================================================================== mount */
 export function mountHistory() {
+  ensureStyle();
   if (forAcct !== S.account) {
-    perf = null; reports = []; scope = { symbol: "", days: 7 };
-    loadErr = "";
+    perf = null; reports = []; loadErr = "";
+    scope = { strategy: "", symbol: "", days: 7 };
     forAcct = S.account;
   }
-  /* The scope picker sits ABOVE the grid rather than inside a card: on a
-     phone `lead-rail` brings the rail (and its hero) to the top, and the
-     control that changes the headline must not end up below it. */
   el("view").innerHTML = `
-    <div id="pfNotes"></div>
-    ${card("Whose history this is", `<div id="pfScopeStrip"></div>`,
-      `<a class="btn sm" href="#" data-go="overview"
-          data-tab="strategies">All strategies →</a>`)}
-    <div class="pf-scope">
-      <select id="pfSym" aria-label="Ticker"></select>
-      <select id="pfDays" aria-label="Window">
+    <div id="hNotes"></div>
+    <div class="h-scope">
+      <select id="hStrat" aria-label="Strategy"></select>
+      <select id="hSym" aria-label="Ticker"></select>
+      <select id="hDays" aria-label="Window">
         <option value="1">today</option>
         <option value="7" selected>7 days</option>
         <option value="30">30 days</option>
         <option value="0">all time</option>
       </select>
-      <span class="faint pf-rows" id="pfRows"></span>
+      <span class="h-rows" id="hRows"></span>
     </div>
-    <div class="grid main lead-rail">
-      <div>
-        ${card("Metrics", `
-          <div class="stats" id="pfMetrics"></div>
-          <div class="pf-div">Pace and capital</div>
-          <div class="stats" id="pfPace"></div>
-          <div class="tip" id="pfNote"></div>`,
-          `<span class="faint">from the trade journal</span>`)}
-      </div>
-      <div>
-        ${card("", `<div id="pfHero"></div>`, "", { cls: "hero" })}
-        ${/* Reports live HERE, high in the rail, because generating one is the
-              most common thing anybody comes to this tab to do. They used to
-              sit last, below the metrics block and a wide rung table -- several
-              screens down on a laptop, which reads as "the reports are gone"
-              rather than "the reports are further down". */ ""}
-        ${card("Reports", `
-          <div class="tip" style="margin-top:0">A full write-up of everything on
-            this tab: total P/L over time, every metric, and the per-rung table.
-            Opens in a tab and prints. An agent can generate these on a schedule
-            through the same endpoint.</div>
-          <div class="row-btns pf-reps" style="margin:12px 0">
-            <button class="btn primary sm" data-rep="daily">Daily</button>
-            <button class="btn sm" data-rep="weekly">Weekly</button>
-            <button class="btn sm" data-rep="inventory">Inventory</button>
-            <button class="btn sm" data-rep="full">Full history</button>
-          </div>
-          <div id="pfReports"></div>`, "", { cls: "pf-repcard" })}
-      </div>
-    </div>
-    ${card("By ladder rung", `
-      <div id="pfRungs"></div>
-      <div class="tip pf-foot" id="pfRungNote"></div>`,
-      "where the capital goes, and how deep it went", { flush: true })}
-    ${card("Recent trades", `<div id="pfTrades"></div>`,
-      "journal rows, newest first", { flush: true })}`;
+    <div id="hResult"></div>
+    <div id="hTrades"></div>`;
 
-  /* the scope survives leaving the tab and coming back, so the picker has to
-     be put back where it was -- otherwise it reads "7 days" over 30-day
-     figures, which is the same class of lie as printing a null as 0 */
-  el("pfDays").value = String(scope.days);
-  el("pfSym").onchange = () => { scope.symbol = el("pfSym").value; load(); };
-  el("pfDays").onchange = () => { scope.days = Number(el("pfDays").value); load(); };
-  el("view").querySelectorAll("[data-rep]").forEach((b) => {
-    b.onclick = () => act(async () => {
-      b.disabled = true;
-      b.textContent = "Building…";
-      try {
-        const r = await POST("/api/reports", { kind: b.dataset.rep });
-        toast(`Report ready — <a href="${r.url}" target="_blank">${esc(r.name)}</a>`,
-              "ok", 12000);
-        // opens in a tab with a real title and draws its own charts; the
-        // PDF used to arrive as an attachment and left a blank tab behind
-        window.open(r.url, "_blank");
-        await loadReports();
-      } finally {
-        b.disabled = false;
-        b.textContent = b.dataset.rep === "full" ? "Full history"
-          : b.dataset.rep[0].toUpperCase() + b.dataset.rep.slice(1);
-      }
-    });
-  });
+  el("hDays").value = String(scope.days);
+  el("hStrat").onchange = () => { scope.strategy = el("hStrat").value; load(); };
+  el("hSym").onchange = () => { scope.symbol = el("hSym").value; load(); };
+  el("hDays").onchange = () => { scope.days = Number(el("hDays").value); load(); };
   load();
   loadReports();
 }
 
-/* ---------------------------------------------------------- the scope strip
-   EVERY STRATEGY'S BOOKED AND OPEN, SIDE BY SIDE, with the one this tab is
-   about marked. It exists because the tab below it reads a log that only the
-   share ladder writes: without this, "booked +$2,974" on a page headed
-   History is read as the account's, and it is one strategy's.
-
-   Booked and open are never added here. They are different measurements over
-   different windows -- booked is that strategy's own log since the log began,
-   open is Alpaca's mark right now -- and a ladder with no stop loss books
-   only winners, so booked alone is the documented lie in this repo. */
-function paintScopeStrip() {
-  const host = el("pfScopeStrip");
-  if (!host) return;
-  const h = (S.hub && S.hub.account === S.account) ? S.hub : null;
-  const P = h && h.portfolio;
-  if (!P) {
-    host.innerHTML = `<div class="faint" style="font-size:12px">${h && h.err
-      ? "The strategy list is not answering, so this tab cannot say which "
-        + "share of the account it is showing."
-      : "Reading the other strategies…"}</div>`;
-    return;
-  }
-  const rows = P.by_strategy || [];
-  host.innerHTML = `<div class="pf-scoped">${rows.map((r) => `
-      <div class="pf-sc${r.kind === "shares" ? " on" : ""}">
-        <div class="pf-sc-h">${esc(r.label)} ${stateChip(r.state, { sm: true })}</div>
-        <div class="pf-sc-n">
-          <span><i>booked</i>${mnum(r.realized_pl, { signed: true, dp: 0 })}</span>
-          <span><i>open</i>${mnum(r.open_pl, { signed: true, dp: 0 })}</span>
-        </div>
-      </div>`).join("")
-    || `<div class="faint" style="font-size:12px">No strategy on this account.</div>`}
-    </div>
-    <div class="tip">Everything below this line is the <b>share ladder's</b>
-    trade journal — the only log the ladder writes and the only one it reads.
-    An options play books to its own ledger and shows on the card above; the
-    two are never added. <b>Booked</b> and <b>open</b> stand side by side in
-    every pair here because booked on its own climbs in a straight line for
-    any strategy that does not close its losers.</div>`;
-}
-
 export function paintHistory() {
-  paintScopeStrip();
-  const sel = el("pfSym");
+  const sel = el("hSym");
   if (sel && !sel.options.length && S.ov) {
     sel.innerHTML = `<option value="">All tickers</option>`
-      + S.ov.tickers.map((t) => `<option value="${t.symbol}">${t.symbol}</option>`).join("");
+      + S.ov.tickers.map((t) => `<option value="${esc(t.symbol)}">${esc(t.symbol)}</option>`).join("");
     sel.value = scope.symbol;
   }
   if (perf) render();
@@ -215,273 +244,204 @@ export function paintHistory() {
 
 async function load() {
   try {
-    perf = await GET(`/api/performance?symbol=${encodeURIComponent(scope.symbol)}`
+    perf = await GET(`/api/performance?strategy=${encodeURIComponent(scope.strategy)}`
+                   + `&symbol=${encodeURIComponent(scope.symbol)}`
                    + `&days=${scope.days}`);
     loadErr = "";
   } catch (e) {
-    /* A toast that has faded leaves a page of empty cards, which reads as
-       "there is no history" rather than "the request failed". The failure
-       stays on the page until it is fixed. */
+    /* A toast that has faded leaves a page of empty panels, which reads as
+       "there is no history" rather than "the request failed". */
     loadErr = e.message || String(e);
-    toast(esc(loadErr), "err");
-    if (el("pfNotes")) el("pfNotes").innerHTML = banners({});
+    perf = null;
+    if (el("hNotes")) el("hNotes").innerHTML = notes(null);
+    if (el("hResult")) el("hResult").innerHTML = "";
+    if (el("hTrades")) el("hTrades").innerHTML = "";
     return;
   }
   render();
 }
 
 async function loadReports() {
-  try {
-    const r = await GET("/api/reports");
-    reports = r.reports || [];
-  } catch (e) { reports = []; }
-  renderReports();
+  try { reports = (await GET("/api/reports")).reports || []; }
+  catch (e) { reports = []; }
+  if (el("hRepList")) paintReports();
 }
 
-function renderReports() {
-  const host = el("pfReports");
+/* ------------------------------------------------------------------ notes
+   ONLY what is WRONG. Every sentence that explained what a number means is
+   gone; these three say that a figure on the page cannot be trusted, which is
+   the class the owner asked to keep. */
+function notes(v) {
+  if (loadErr) {
+    return `<div class="note bad"><b>History could not be read:</b> ${esc(loadErr)}
+      — the bots are unaffected, this is display code.</div>`;
+  }
+  const out = [];
+  if (perf && perf.axis_why) out.push(esc(perf.axis_why));
+  (((v && v.warnings) || [])).forEach((w) => out.push(esc(w.text)));
+  return out.length
+    ? `<div class="note warn">${out.join("<br>")}</div>` : "";
+}
+
+/* ==================================================================== render */
+function render() {
+  if (!perf || !el("hResult")) return;
+  const v = perf.view || {};
+  const c = v.counts || {};
+
+  /* ---- the pickers. The strategy list is the SERVER'S, which is hub's. ---- */
+  const sel = el("hStrat");
+  if (sel) {
+    sel.innerHTML = (perf.strategies || []).map((s) =>
+      `<option value="${esc(s.id)}"${s.readable ? "" : ` data-x="1"`}>${
+        esc(s.label)}</option>`).join("");
+    sel.value = perf.strategy || "all";
+  }
+  el("hRows").textContent = `${c.trades || 0} trade${c.trades === 1 ? "" : "s"}`
+    + ` · ${WINDOW[scope.days] || scope.days + " days"}`;
+  el("hNotes").innerHTML = notes(v);
+
+  /* ---- the result: headline, curve, marks, depth. One panel. ---- */
+  const series = v.series && v.series.length
+    ? v.series
+    : (v.curve && v.curve.length ? [{ label: v.label, points: v.curve }] : []);
+
+  const marks = (v.marks || []).map((m) => tile({
+    label: esc(m.k),
+    html: mnum(env(m), { signed: m.signed, dp: m.dp, title: m.hint }),
+    hint: m.v == null ? (m.reason || "") : (m.hint || ""),
+  }));
+
+  el("hResult").innerHTML = panel("", `
+    <div class="h-head">
+      <div class="h-big num ${toneOf(v.total_pl)}">${v.total_pl == null
+        ? unmeasured(v.total_why || "not measured") : sgn(v.total_pl)}</div>
+      <div class="h-split">
+        <div><i>closed</i><b>${num(v.realized, { signed: true,
+          reason: v.realized_why })}</b></div>
+        <div><i>open</i><b>${num(v.open_pl, { signed: true,
+          reason: v.open_why })}</b></div>
+      </div>
+      <div class="h-why">${esc(v.source || "")}${v.total_why && v.total_pl != null
+        ? " · " + esc(v.total_why) : ""}</div>
+    </div>
+    <div class="h-curve">${curveSVG(series, v.curve_why)}</div>
+    ${marks.length ? tileGrid(marks) : ""}
+    ${depthStrip()}`, {
+    /* No title and no sub. The picker three lines above already says which
+       strategy this is, and repeating it was one of the duplications the
+       owner called clutter. The state pill stays: it is a fact the picker
+       does not carry. */
+    actions: v.kind ? stateChip(stateOf(v.strategy)) : "",
+  });
+
+  /* ---- the trades, and the reports behind a disclosure ---- */
+  const showStrat = !!(v.series && v.series.length);
+  el("hTrades").innerHTML = panel("", dataTable({
+    cols: ["When", showStrat ? "Strategy" : "", "Sym", "Event",
+           { label: "Qty", num: true }, { label: "In", num: true },
+           { label: "Out", num: true }, { label: "P/L", num: true },
+           { label: "Held", num: true }],
+    rows: (v.rows || []).slice(0, 80).map((r) => [
+      `<span class="faint">${esc(String(r.ts || "").slice(5, 16).replace("T", " "))}</span>`,
+      showStrat ? `<span class="h-tag">${esc(r.strategy || "")}</span>` : "",
+      `<b>${esc(r.symbol || "")}</b>`,
+      `${esc(r.what || "")}${r.tag ? ` <span class="h-tag">${esc(r.tag)}</span>` : ""}`,
+      qty(r.qty),
+      px(r.in, 4),
+      px(r.out, 4),
+      r.pl == null ? unmeasured(r.pl_why || "not measured") : sgn(r.pl),
+      `<span class="faint">${r.held_s ? dur(r.held_s) : "—"}</span>`,
+    ]),
+    empty: esc(v.curve_why || "Nothing recorded in this window."),
+    dense: true,
+  }), {
+    sub: "newest first",
+    actions: `<details class="h-more"><summary>Reports</summary></details>`,
+    flush: true,
+  });
+  mountReports();
+}
+
+/* The strategy's own state word, out of the hub payload the shell already
+   holds -- so this tab never invents a seventh vocabulary. */
+function stateOf(id) {
+  const rows = ((S.hub && S.hub.portfolio) || {}).by_strategy || [];
+  const hit = rows.find((r) => r.id === id);
+  return hit ? hit.state : "off";
+}
+
+/* ---------------------------------------------------------------- the depth
+   THE RUNG TABLE, AS BARS. It was eleven columns and a paragraph; it is now
+   one bar per rung, height by lots opened, with the STILL-OPEN share lit in
+   the warning colour -- which is the only thing that table was ever read for.
+   Every number it carried is on the bar's own tooltip. Ladder only: an
+   options play has no rungs, and an empty strip would be a claim. */
+function depthStrip() {
+  const st = perf && perf.stats;
+  const v = perf && perf.view;
+  if (!st || !v || v.kind !== "shares") return "";
+  const rungs = Object.entries(st.by_rung || {})
+    .sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (!rungs.length) return "";
+  const top = Math.max(...rungs.map(([, x]) => x.opened || 0)) || 1;
+  return `<div class="h-depth">${rungs.map(([r, x]) => {
+    const open = x.open != null ? x.open : (x.opened - x.closed);
+    const h = Math.max(3, Math.round(100 * (x.opened || 0) / top));
+    const oh = x.opened ? Math.round(h * open / x.opened) : 0;
+    const t = `rung ${r}: ${x.opened} opened, ${x.closed} closed, ${open} still open`
+      + `, booked ${x.realized == null ? "—" : x.realized}`;
+    return `<a title="${esc(t)}" aria-label="${esc(t)}"><em
+      ><u class="o" style="height:${oh}%"></u
+      ><u style="height:${h - oh}%"></u></em><s>${esc(r)}</s></a>`;
+  }).join("")}</div>`;
+}
+
+/* --------------------------------------------------------------- reports
+   Behind the disclosure in the trades panel header. Generating one is the
+   most common thing anybody comes here to do, and it used to cost a card, a
+   paragraph and a list of its own. */
+function mountReports() {
+  const d = el("view").querySelector("details.h-more");
+  if (!d) return;
+  d.insertAdjacentHTML("beforeend", `<div>
+    <div class="row-btns" style="margin-bottom:8px">
+      <button class="btn primary sm" data-rep="daily">Daily</button>
+      <button class="btn sm" data-rep="weekly">Weekly</button>
+      <button class="btn sm" data-rep="inventory">Inventory</button>
+      <button class="btn sm" data-rep="full">Full</button>
+    </div><div id="hRepList"></div></div>`);
+  paintReports();
+  d.querySelectorAll("[data-rep]").forEach((b) => {
+    const was = b.textContent;
+    b.onclick = () => act(async () => {
+      b.disabled = true; b.textContent = "…";
+      try {
+        const r = await POST("/api/reports", { kind: b.dataset.rep });
+        toast(`Report ready — <a href="${r.url}" target="_blank">${esc(r.name)}</a>`,
+              "ok", 12000);
+        window.open(r.url, "_blank");
+        await loadReports();
+      } finally { b.disabled = false; b.textContent = was; }
+    });
+  });
+}
+
+function paintReports() {
+  const host = el("hRepList");
   if (!host) return;
-  host.innerHTML = reports.length ? reports.slice(0, 12).map((r) => `
-    <div class="pf-rep">
-      <a href="/reports/${encodeURIComponent(r.name)}" target="_blank"
-         class="pf-rep-n">${esc(r.name)}</a>
-      <span class="faint" style="font-size:11px">${(r.size / 1024).toFixed(0)}kB</span>
+  host.innerHTML = reports.length ? reports.slice(0, 8).map((r) => `
+    <div class="h-rep">
+      <a href="/reports/${encodeURIComponent(r.name)}" target="_blank">${esc(r.name)}</a>
       <a class="btn sm" href="/reports/${encodeURIComponent(r.name)}?download=1"
-         title="Save the file instead of opening it" aria-label="Download">↓</a>
+         title="Save the file" aria-label="Download">↓</a>
       <button class="btn sm" data-del="${esc(r.name)}" title="Delete this report"
               aria-label="Delete">×</button>
-    </div>`).join("")
-    : `<div class="faint" style="padding:8px 0">No reports yet.</div>`;
+    </div>`).join("") : `<div class="faint" style="font-size:11px">None yet.</div>`;
   host.querySelectorAll("[data-del]").forEach((b) => {
     b.onclick = () => act(async () => {
       await DEL(`/api/reports/${encodeURIComponent(b.dataset.del)}`);
       await loadReports();
     });
   });
-}
-
-/* -------------------------------------------------------------------- banners
-   The two states in which the open side is not what it looks like. Both are
-   raised at the top of the tab, because every figure below them is affected
-   and a reader who scrolls past would otherwise never know. */
-function banners(st) {
-  if (loadErr) {
-    return `<div class="note bad"><b>The trade journal could not be read:</b>
-      ${esc(loadErr)}<br><span class="faint">Every card below is therefore
-      empty or stale. It is NOT a history with nothing in it. The bots are
-      unaffected — this is display code.</span></div>`;
-  }
-  /* NO RECONCILIATION BANNER. There was one here, and the owner was right
-     about it: "WHY DO WE HAVE THOSE IN THE JOURNAL THEN, I FLATTENED THEM AND
-     ALPACA SOLD THEM". A banner explaining that two records disagree is a
-     confession, not a feature -- and it was only needed because the page was
-     asking the LADDER'S LOG what the account made. It no longer does. Realised
-     comes from Alpaca's fill tape and the open side from Alpaca's positions,
-     so a gap in the journal changes no figure on this page and there is
-     nothing left to warn about. The journal keeps its real job below: which
-     lot, which rung, which reason. */
-  if (st.marked !== true) {
-    return `<div class="note warn"><b>No live prices in this snapshot.</b>
-      Nothing still open can be valued, so <b>P/L is not available</b> for this
-      window and every open-side figure below says so instead of showing 0. The
-      closed side alone cannot tell you how deep the ${st.open_lots || 0} open
-      lot${st.open_lots === 1 ? " is" : "s are"}.</div>`;
-  }
-  const un = st.unmarked_symbols || [];
-  if (un.length) {
-    return `<div class="note warn"><b>Open P/L covers only part of the book.</b>
-      No live price for <b>${un.map(esc).join(", ")}</b> — lots in
-      ${un.length === 1 ? "that ticker are" : "those tickers are"} left out of
-      the open side and therefore out of P/L. The real total is
-      whatever ${un.length === 1 ? "that lot" : "those lots"} are worth, better
-      or worse.</div>`;
-  }
-  return "";
-}
-
-function render() {
-  if (!perf || !el("pfHero")) return;
-  const st = perf.stats || {};
-  // still read for the open-lot COUNT when stats could not be marked; the
-  // per-lot table it used to fill is gone
-  const inv = perf.inventory || [];
-  const p = (S.ov && S.ov.portfolio) || {};
-  const closes = Number(st.closes) || 0;
-  const openLots = st.open_lots != null ? st.open_lots : inv.length;
-  const openCost = st.open_cost != null ? st.open_cost : perf.inventory_cost;
-  const since = st.mae_since;
-
-  el("pfRows").textContent = `${perf.rows} journal rows`;
-  el("pfNotes").innerHTML = banners(st);
-
-  /* ---------------------------------------------------------------- the hero
-     ONE NUMBER: P/L. There used to be a "Booked" half here, and the owner
-     asked for the word to go -- "please remove booked and start calculating
-     pure p/l". It was not only vocabulary. Booked counted CLOSED lots over the
-     selected window while the open half was valued over ALL TIME, so the two
-     halves were measured over different spans and their sum was a quantity
-     with no meaning: on 28 Sep 2026 the tab read +$4,357.94 while the account
-     was up $3,055.43, and $922.52 of the difference was "still open" on a book
-     Alpaca said was empty.
-
-     Now both halves are the same window and the open side is whatever the
-     BROKER still holds, so the headline is the ladder's P/L over that window
-     and the closed/open split below it is a breakdown of that one figure
-     rather than two numbers that happen to be adjacent. */
-  const win = `${WINDOW[scope.days] || scope.days + " days"} · `
-    + (scope.symbol ? esc(scope.symbol) : "all tickers");
-  const flat = !openLots;
-  el("pfHero").innerHTML = `
-    <div class="hero-k">P/L — the share ladder only</div>
-    <div class="hero-v num">${st.total_pl == null
-      ? `<span class="pf-none pf-none-lg">${NEED_MARK}</span>` : sgn(st.total_pl)}</div>
-    <div class="hero-x">${st.total_pl == null
-      ? `the open lots cannot be valued, so this cannot be totalled · ${win}`
-      : flat
-        ? `every lot is closed, so this is realised in full · ${win}`
-        : `realised, plus what the open lots are worth right now · ${win}`}</div>
-    <div class="hero-row">
-      <div><span class="hero-lk">Closed</span>
-        <span class="hero-lv num">${sgn(st.realized)}</span>
-        <span class="hero-lx">${perf.realized_source === "Alpaca fills"
-          ? "every exit Alpaca filled"
-          : `${closes} lot${closes === 1 ? "" : "s"} closed`}</span></div>
-      <div><span class="hero-lk">Open</span>
-        <span class="hero-lv num">${flat ? sgn(0) : mk(st.unrealized)}</span>
-        <span class="hero-lx">${flat
-          ? `nothing is open — Alpaca holds no shares`
-          : `${openLots} lot${openLots === 1 ? "" : "s"} ·
-             ${money0(openCost)} at cost${perf.oldest_days
-               ? ` · oldest ${perf.oldest_days.toFixed(1)}d` : ""}`}</span></div>
-    </div>`;
-
-  /* ------------------------------------------------------------- the metrics
-     The strategy results' vocabulary, so a journal window and a backtest can
-     be read side by side. Every one of these has a documented null. */
-  const pf = st.profit_factor;
-  const maeSub = st.avg_mae != null
-    ? `avg ${sgn(st.avg_mae)} per lot${since ? ` · since ${shortDay(since)}` : ""}`
-    : (since ? `recorded from ${shortDay(since)}`
-             : `recording has not started`);
-
-  el("pfMetrics").innerHTML =
-    stat("Wins / losses", st.wins == null ? absent("not computed")
-        : `${st.wins} <span class="faint">/</span> ${st.losses}`,
-        `of ${closes} closed lot${closes === 1 ? "" : "s"}`)
-    + stat("Win rate", st.win_rate == null ? absent("not computed")
-        : st.win_rate.toFixed(1) + "%",
-        st.win_rate_meaningful === false
-          ? `<span class="warn">no stop loss — a loser is never closed</span>`
-          : `${st.wins} of ${closes} closed`)
-    + stat("Avg win", (st.avg_win == null || !st.wins) ? absent("no wins yet")
-        : sgn(st.avg_win), "per winning lot")
-    + stat("Avg loss", (st.avg_loss == null || !st.losses) ? absent("nothing lost yet")
-        : sgn(st.avg_loss), "per losing lot")
-    + stat("Expectancy", (st.expectancy == null || !closes) ? absent("no closes yet")
-        : sgn(st.expectancy), "booked per closed lot")
-    + stat("Profit factor", pf == null ? absent("nothing lost yet") : pf.toFixed(2),
-        pf == null ? "not an infinite edge — nothing has been closed at a loss"
-                   : "gross win ÷ gross loss")
-    + stat("Max drawdown", st.max_drawdown == null ? absent("not computed")
-        : sgn(st.max_drawdown),
-        st.max_drawdown_pct == null ? "worst dip in the total P/L curve"
-          : `${st.max_drawdown_pct.toFixed(1)}% below its peak`)
-    + stat("Peak capital", st.peak_capital == null ? absent("not computed")
-        : money0(st.peak_capital),
-        st.return_on_peak_capital_pct == null
-          ? `most open at once · return ${st.marked === true
-              ? absent("not computed") : absent(NEED_MARK)}`
-          : `${pct(st.return_on_peak_capital_pct, 1)} total P/L on it`)
-    + stat("Worst lot drawdown", rec(st.worst_mae, since), maeSub);
-
-  el("pfPace").innerHTML =
-    stat("Booked per day", sgn(st.realized_per_day),
-        `${st.closes_per_day} closes/day`)
-    + stat("Trading days", st.trading_days == null ? absent("not computed")
-        : st.trading_days, `${st.opens} opened · ${closes} closed`)
-    + stat("Median hold", closes ? dur(st.median_hold_seconds) : absent("no closes yet"),
-        closes ? `avg ${dur(st.avg_hold_seconds)} · max ${dur(st.max_hold_seconds)}`
-               : "nothing has been held to a close")
-    + stat("Deployed by the ladders", money0(st.capital_deployed),
-        st.return_on_deployed_pct == null ? `${st.opens} lots opened`
-          : `${pct(st.return_on_deployed_pct, 2)} booked on it`)
-    + stat("Deepest ladder", st.max_ladder_depth, "lots open at once")
-    + stat("Account, all time", p.total_pl == null ? absent("account not loaded")
-        : sgn(p.total_pl), "from Alpaca — a different scope");
-
-  el("pfNote").innerHTML = `Everything here except <b>Account, all time</b> comes
-    from the append-only trade journal — the lots these ladders opened and
-    closed — and not from the account, so the two do not have to agree.
-    <b>Total P/L</b> is what is booked plus what the open lots are worth right
-    now; booked on its own climbs in a straight line right up until it doesn't,
-    because there is no stop loss and a losing lot is simply never closed.`
-    + (st.win_rate_meaningful === false
-      ? ` A win rate of ${st.win_rate == null ? "~100" : st.win_rate.toFixed(0)}%
-          with ${st.losses || 0} losses is that artefact and not an edge, which
-          is also why <b>profit factor</b> has nothing to divide by.` : "");
-
-  /* ------------------------------------------------------------- by the rung
-     The owner's explicit ask: how deep each rung went while it was open. That
-     is max adverse excursion, recorded tick by tick by the engine -- it cannot
-     be reconstructed for a lot that closed before recording began, so those
-     say so rather than showing a comfortable 0. */
-  const rungs = Object.entries(st.by_rung || {})
-    .sort((a, b) => Number(a[0]) - Number(b[0]));
-  el("pfRungs").innerHTML = tableHTML(
-    ["Rung", "Opened", "Closed", "Open", "Booked", "Still open", "Total P/L",
-     "Max drawdown", "Avg drawdown", "Drawdown from", "Avg hold"],
-    rungs.map(([r, x]) => {
-      const open = x.open != null ? x.open : (x.opened - x.closed);
-      const from = x.drawdown_from;
-      const fromCell = from == null ? absent("not recorded")
-        : `<span class="${from < x.opened ? "warn" : "faint"}">${from} of
-             ${x.opened} lot${x.opened === 1 ? "" : "s"}</span>`;
-      return `<tr><td><b>${esc(r)}</b></td>
-        <td class="num">${x.opened}</td>
-        <td class="num">${x.closed}</td>
-        <td class="num ${open > 0 ? "warn" : "faint"}">${open}</td>
-        <td class="num">${sgn(x.realized)}</td>
-        <td class="num">${mk(x.unrealized)}</td>
-        <td class="num">${mk(x.total_pl)}</td>
-        <td class="num">${rec(x.max_drawdown, since)}</td>
-        <td class="num">${rec(x.avg_drawdown, since)}</td>
-        <td class="num">${fromCell}</td>
-        <td class="num faint">${x.avg_hold_seconds ? dur(x.avg_hold_seconds)
-          : absent("nothing closed here")}</td>
-      </tr>`;
-    }), "No lots recorded yet.");
-
-  el("pfRungNote").innerHTML = `<b>Max drawdown</b> is the worst a lot at that
-    rung was ever underwater while it was open — its maximum adverse excursion —
-    not what it booked. The deeper rungs are where the strategy's real risk
-    lives: they are opened last, held longest and have the furthest to come
-    back. ` + (since
-      ? `The engine records it tick by tick from <b>${shortDay(since)}</b>;
-         anything opened before that carries none, and <b>Drawdown from</b>
-         says how many of the rung's lots actually carry the record.`
-      : `Recording has not started yet, so no rung can show one —
-         <b>Drawdown from</b> will say how many lots carry it once it does.`);
-
-  /* --------------------------------------------------------------- the rows
-     The open-lot table is gone at the owner's request. What it carried that
-     mattered -- how much is still open, and how old the oldest of it is --
-     still rides on the headline's "still open" half, so a P/L figure is never
-     shown without the inventory behind it. The full per-lot list is in the
-     reports. */
-  el("pfTrades").innerHTML = tableHTML(
-    ["When", "Sym", "Event", "Lot", "Shares", "Entry", "Exit", "Booked", "Held"],
-    (perf.recent || []).slice(0, 60).map((r) => `<tr>
-      <td class="faint">${esc(String(r.ts).slice(5, 16).replace("T", " "))}</td>
-      <td><b>${esc(r.symbol || "")}</b></td>
-      <td class="${r.event === "open" ? "" : "up"}">${esc(r.event)}
-        ${r.inferred ? `<span class="pill warn">inferred</span>` : ""}</td>
-      <td class="faint mono" style="text-align:left">${esc(r.lot_id || "")}</td>
-      <td class="num">${qty(r.shares)}</td>
-      <td class="num">${px(r.entry_price, 4)}</td>
-      <td class="num">${px(r.exit_price, 4)}</td>
-      <td class="num">${r.event === "open" ? `<span class="faint">still open</span>`
-        : sgn(r.realized)}</td>
-      <td class="num faint">${r.hold_seconds ? dur(r.hold_seconds) : "open"}</td>
-    </tr>`), "Nothing recorded yet.");
-
 }

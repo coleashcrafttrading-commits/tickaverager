@@ -176,7 +176,14 @@ export function drawdown(points) {
    capRow({label, used, cap, fmt, why, unmeasured, binding}) -> HTML.
      cap falsy       -> OFF: a dashed track, in --down, saying so in words
      used not a number -> a dash with the reason, never a bar at zero
-     otherwise       -> used/cap, toned up / warn / down at 70% and 90% */
+     otherwise       -> used/cap, toned up / warn / down at 70% and 90%
+
+   ROUND 6: `why` AND THE TWO FIGURES ARE THE ROW'S TOOLTIP, NOT A PARAGRAPH
+   UNDER IT. Five of these stack in one panel, and five definitions stacked
+   down a column is the shape the owner keeps calling clutter. Nothing is
+   lost: the reason is on the row, where a reader who wonders about a bar is
+   already pointing. What stays PRINTED is the label, the "binds first" mark
+   and the percentage -- the three things that are read at a glance. */
 export function capRow(o) {
   o = o || {};
   const fmt = o.fmt || ((v) => String(v));
@@ -184,34 +191,37 @@ export function capRow(o) {
   const cap = Number(o.cap);
   const used = Number(o.used);
   const known = !Number.isNaN(used);
+  /* the sentence, stripped of its markup, for a title attribute */
+  const plain = (h) => String(h || "").replace(/<[^>]*>/g, "");
   if (!cap) {
-    return `<div class="cap cap-off">
+    return `<div class="cap cap-off" title="${esc(plain(o.why) + (known
+      ? " Using " + fmt(used) + " right now, against no limit." : ""))}">
       <div class="cap-h"><span class="cap-l">${esc(o.label || "")}</span>
         <span class="cap-v down">off — nothing caps this</span></div>
       <div class="cap-t"><span class="cap-f off" style="width:100%"></span></div>
-      <div class="cap-w">${o.why || ""}${known
-        ? ` Using <b>${esc(fmt(used))}</b> right now, against no limit.` : ""}</div>
     </div>`;
   }
   if (!known) {
-    return `<div class="cap">
+    return `<div class="cap" title="${esc("Set to " + fmt(cap)
+      + ", and nothing on this page can say how much of it is in use. "
+      + plain(o.why))}">
       <div class="cap-h"><span class="cap-l">${esc(o.label || "")}</span>
         <span class="cap-v unmeasured" title="${esc(o.unmeasured
           || "nobody measured what this is using")}">—</span></div>
       <div class="cap-t"></div>
-      <div class="cap-w">Set to <b>${esc(fmt(cap))}</b>, and nothing on this
-        page can say how much of it is in use.</div>
     </div>`;
   }
   const f = used / cap;
   const tone = f >= 0.9 ? "down" : f >= 0.7 ? "warn" : "up";
-  return `<div class="cap${o.binding ? " cap-bind" : ""}">
+  return `<div class="cap${o.binding ? " cap-bind" : ""}" title="${esc(
+    fmt(used) + " of " + fmt(cap) + ". " + plain(o.why)
+    + (o.binding ? " This is the cap nearest to binding: the one that stops "
+                 + "the next order." : ""))}">
     <div class="cap-h"><span class="cap-l">${esc(o.label || "")}</span>
       ${o.binding ? `<span class="cap-b">binds first</span>` : ""}
       <span class="cap-v ${tone}">${(f * 100).toFixed(0)}%</span></div>
     <div class="cap-t"><span class="cap-f ${tone}"
       style="width:${Math.min(100, f * 100).toFixed(1)}%"></span></div>
-    <div class="cap-w">${esc(fmt(used))} of ${esc(fmt(cap))}. ${o.why || ""}</div>
   </div>`;
 }
 
@@ -247,12 +257,13 @@ export function ensureCapStyles() {
     ".caps{display:flex;flex-direction:column;gap:15px}",
     ".cap-h{display:flex;align-items:baseline;gap:9px;font-size:var(--fs-sm)}",
     ".cap-l{flex:1;font-weight:var(--w-med);min-width:0}",
-    ".cap-b{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;",
+    ".cap-b{font-size:var(--fs-micro);letter-spacing:.07em;",
+    "text-transform:uppercase;",
     "font-weight:700;color:var(--warn);border:1px solid var(--warn);",
     "border-radius:999px;padding:1px 7px;white-space:nowrap}",
     ".cap-v{font-variant-numeric:tabular-nums}",
     ".cap-t{height:7px;border-radius:999px;background:var(--surface-3);",
-    "overflow:hidden;margin:6px 0 4px}",
+    "overflow:hidden;margin:6px 0 0}",
     ".cap-f{display:block;height:100%;border-radius:999px;background:var(--up)}",
     ".cap-f.warn{background:var(--warn)}.cap-f.down{background:var(--down)}",
     ".cap-f.off{background:repeating-linear-gradient(90deg,",

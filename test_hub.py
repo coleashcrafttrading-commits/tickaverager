@@ -470,7 +470,17 @@ def main() -> int:
     s = hub.series(c9, "value", "1D", "candle")
     check("OHLC keys are always present",
           sorted(s["points"][0]), ["c", "h", "l", "o", "t", "v"])
-    check("line and bar read .c", [p["c"] for p in s["points"]], [90.0, 95.0])
+    # THE SERIES NOW ENDS AT LIVE EQUITY, deliberately: portfolio_history lags
+    # by a bucket or more, so the chart's last point and the account tile were
+    # two different numbers on one screen. The history's own closes must still
+    # come through untouched, and the appended point must BE the account's
+    # equity -- not a rounded, scaled or invented version of it.
+    closes = [p["c"] for p in s["points"]]
+    check("line and bar read .c, history intact", closes[:2], [90.0, 95.0])
+    check("and the series ends at the account's live equity",
+          closes[-1], float(f9.account["equity"]))
+    check("which is one point past the history, never fewer",
+          len(closes), 3)
     check("v is labelled as samples, not volume",
           s["v_means"], "samples in the bucket, NOT traded volume")
     check("the form is echoed back", s["form"], "candle")
@@ -702,6 +712,49 @@ def main() -> int:
     p15b = hub.portfolio(c15b)
     check("with NO tape it falls back to the logs without raising",
           isinstance(p15b, dict), True)
+
+    print(chr(10) + "16. THE CHART AND THE HEADER MEASURE FROM THE SAME ANCHOR")
+    # The owner: "why does the 1d portfolio graph show me being up 55 dollars
+    # but the top says my day p/l is down 922". Both were right and they were
+    # answering different questions. Alpaca's 1D base_value IS the previous
+    # close -- the same number pl.today subtracts -- and the series threw it
+    # away, so the chart read last-minus-FIRST-PRINT and hid the overnight gap
+    # (53,292.34 close against a 52,563.34 open, $729 the line never drew).
+    sd16 = SCRATCH / "s16"
+    sd16.mkdir(parents=True, exist_ok=True)
+
+    class GapBroker(FakeBroker):
+        def portfolio_history(self, period, timeframe, extended=True):
+            # yesterday closed at 53,292.34; today OPENED at 52,563.34
+            return {"timestamp": [1790668800, 1790669100],
+                    "equity": [52563.34, 52599.34],
+                    "base_value": 53292.34}
+
+    f16 = FakeFleet(sd16)
+    f16.broker = GapBroker()
+    f16.account = {"equity": "52355.30", "last_equity": "53292.34"}
+    hub._SERIES_CACHE.clear()
+    c16 = hub.Ctx(f16, option_positions=[], fills=None)
+    s16 = hub.series(c16, "value", "1D")
+    check("the anchor is Alpaca's base, not the first print",
+          s16["anchor"], 53292.34)
+    check("and it says which anchor that is",
+          "previous session" in s16["anchor_is"], True)
+    check("the change is measured from it",
+          s16["change"], round(52355.30 - 53292.34, 2))
+    check("which is exactly equity less the previous close",
+          s16["change"], round(52355.30 - 53292.34, 2))
+    check("NOT last-minus-first, the number that disagreed",
+          s16["change"] == round(52599.34 - 52563.34, 2), False)
+
+    print(chr(10) + "17. every timeframe Alpaca will actually serve")
+    # 1M asked for 1H granularity and Alpaca answered HTTP 400 "Valid
+    # timeframe for days > 30 is 1D", so that window drew nothing, silently.
+    for tf, (period, gran, _b) in hub.TIMEFRAMES.items():
+        days = {"1D": 1, "1W": 7, "1M": 31, "3M": 93,
+                "6M": 186, "1A": 366, "All": 3650}[tf]
+        ok = (gran == "1D") or days <= 30
+        check("tf=%-4s gran=%-5s is one Alpaca accepts" % (tf, gran), ok, True)
 
     print()
     if FAIL:

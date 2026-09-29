@@ -61,6 +61,14 @@ import {
   perTrade, dailyRealised, contributions,
 } from "../tkperf.js";
 import { ensureVisCSS, groupHeadHTML } from "../tkvis.js";
+/* THE MARKET PANE, drawn as marks rather than as eight metric tiles. Separate
+   file for the same reason tkmetrics.js is: every export takes data and
+   returns HTML, no DOM and no fetch, so the pane can be rendered in a test.
+   Its server side is tkmarket.py behind /api/ticker/{sym}/market. */
+import {
+  priceBand, quoteBar, volumeBars, volScale, earningsChip, newsList,
+  feedErrors,
+} from "../tkmkt.js";
 /* THE SHARED VISUAL KIT, not a second one. `calendar.js` takes perf.daily()'s
    own row shape verbatim and `viz.js` owns the donut, the histogram and the
    ranked bar for every page in this dashboard. Both inject their own CSS on
@@ -95,6 +103,15 @@ const H = {
      this symbol, which names the STORE each attachment came from. */
   bank: {}, bankKind: "ladder", bankQ: "", bankPick: "", bankBusy: false,
   att: null, attWhy: "",
+
+  /* THE MARKET READ: /api/ticker/{sym}/market, which is implied volatility
+     and its rank, realised volatility and its rank, the earnings date and the
+     news. It is a SEPARATE call from the hub payload because it costs an
+     option chain and a news page and the hub row costs neither, and because a
+     symbol with no listed chain must still render the rest of this page. The
+     server answers it out of a 5-minute cache; this asks once per mount and
+     once a minute after that, and never faster than that cache. */
+  mkt: null, mktWhy: "", mktAt: 0, mktBusy: false,
 
   /* THE LAST DETACH, so it can be put back. See `rememberDetach`. It is a
      record of what was on screen a moment ago, never a cache anything else
@@ -180,6 +197,38 @@ async function loadPerf(sym, { force = false } = {}) {
   repaint();
 }
 
+/* The Market pane's own feed: tkmarket.py behind /api/ticker/{sym}/market.
+
+   IT NEVER TAKES THE PAGE DOWN. Every block in that payload carries its own
+   dash and its own reason, and a failure of the whole route leaves `mktWhy`
+   for the pane to render beside whatever else is on screen. The rest of the
+   ticker page does not read this object at all.
+
+   ONE MINUTE, matching the server's own 5-minute cache floor: the chain costs
+   a lookup on the 200/min TRADING host the live share ladders spend from, and
+   a ticker page must never be the reason a lot cannot be covered. */
+const MKT_TTL_MS = 60000;
+
+async function loadMarket(sym, { force = false } = {}) {
+  if (H.mktBusy) return;
+  if (!force && H.mkt && Date.now() - H.mktAt < MKT_TTL_MS) return;
+  H.mktBusy = true;
+  const acct = S.account;
+  try {
+    const r = await GET("/api/ticker/" + encodeURIComponent(sym) + "/market");
+    if (acct !== S.account || H.sym !== sym) return;
+    H.mkt = r; H.mktWhy = ""; H.mktAt = Date.now();
+  } catch (e) {
+    if (acct !== S.account || H.sym !== sym) return;
+    H.mktWhy = e.message || String(e);
+    H.mktAt = Date.now();
+  } finally {
+    H.mktBusy = false;
+  }
+  repaint();
+}
+
+
 /* What the ONE bank says is attached here, each row naming its own store.
 
    This is a SECOND opinion beside hub's strategy cards on purpose. hub knows
@@ -241,8 +290,10 @@ function startPoll(sym) {
           || S.view.sym !== sym) return;
       if (!document.hidden) {
         await loadHub(sym, { quiet: true });
-        // self-throttled to PERF_TTL_MS, so this is a no-op most ticks
+        // both self-throttled (PERF_TTL_MS, MKT_TTL_MS), so these are a no-op
+        // on most ticks
         loadPerf(sym);
+        if (!S.view.tab || S.view.tab === "live") loadMarket(sym);
       }
       again();
     }, HUB_POLL_MS);
@@ -309,32 +360,6 @@ function shortWhy(why) {
   const cut = s.indexOf(" -- ");
   const tail = cut >= 0 ? s.slice(cut + 4) : s;
   return tail.length > 58 ? tail.slice(0, 55).trimEnd() + "…" : tail;
-}
-
-/* A low / high band with the current price on it. Two of these carry the day
-   and the year at a glance, which is the one thing a price alone cannot say. */
-function rangeBar(label, r, price, why) {
-  if (!r || r.low == null || r.high == null || !(r.high > r.low)) {
-    return `<div><div class="tkx-rng-k">${esc(label)}</div>
-      <div class="tkx-why">${esc(why || "no range for this symbol")}</div></div>`;
-  }
-  const raw = price == null ? null : (price - r.low) / (r.high - r.low);
-  const f = raw == null ? null : Math.max(0, Math.min(1, raw));
-  /* A price OUTSIDE its own range is two sources disagreeing -- the quote is
-     live and the range comes from the daily bars, so a stale or split-adjusted
-     bar puts the marker off the end. Clamping it and saying nothing would draw
-     a confident marker on a band the price is not in, which is the quiet
-     version of a made-up number. */
-  const out = raw != null && (raw < 0 || raw > 1);
-  return `<div><div class="tkx-rng-k">${esc(label)}</div>
-    <div class="tkx-rng-t"><div class="tkx-rng-f" style="right:${
-      f == null ? 0 : (100 - f * 100).toFixed(2)}%"></div>
-      ${f == null ? "" : `<div class="tkx-rng-m" style="left:${(f * 100).toFixed(2)}%"></div>`}</div>
-    <div class="tkx-rng-e"><span>${px(r.low)}</span><span>${px(r.high)}</span></div>
-    ${out ? `<div class="tkx-why">the last price ${px(price)} is
-      <b>${raw < 0 ? "below" : "above"}</b> this range — the quote and the daily
-      bar disagree</div>` : ""}
-  </div>`;
 }
 
 /* Every warning that names this symbol.
@@ -536,39 +561,39 @@ function paintLegend() {
 function mountOverview(sym) {
   el("view").innerHTML = `
     <div id="tkWarn"></div>
-    ${panel("", `<div class="tkx-head" id="tkHead">
-        <div class="tkx-id"><div class="tkx-sym">${esc(sym)}</div>
-          <div class="tkx-name">loading…</div></div>
-      </div>`)}
-
     <div class="grid main">
       <div>
-        ${panel("Price", `<div id="chartHost"></div>
-          <div class="tip" id="tkLegend"></div>
+        ${/* ONE CARD FOR THE INSTRUMENT. The name, the price, the change, the
+              range band and the chart were two panels stacked on top of each
+              other and they are one object: what this thing is doing right
+              now. Merging them costs a panel and a panel title and gains the
+              price sitting on the chart it belongs to. */
+          panel("", `<div class="tkx-head" id="tkHead">
+            <div class="tkx-id"><div class="tkx-sym">${esc(sym)}</div>
+              <div class="tkx-name">loading…</div></div>
+          </div>
+          <div id="chartHost"></div>
           <div class="tip chart-trades" id="tkTradeCtl">
-            <label><input type="checkbox" id="tkShowTrades" checked> Show trades</label>
+            <label><input type="checkbox" id="tkShowTrades" checked> trades</label>
             <label title="Rows the ledger wrote to stay in step with Alpaca — a rebuilt ladder, a lot closed outside the bot. Bookkeeping, not real fills.">
-              <input type="checkbox" id="tkShowInferred"> include bookkeeping rows</label>
+              <input type="checkbox" id="tkShowInferred"> bookkeeping</label>
             <span id="tkMarkLegend"></span>
             <span id="tkTradesCount" style="margin-left:auto">—</span>
-          </div>`,
-          { sub: "the same bars the engines decide on, not a third-party widget" })}
+          </div>
+          <div class="tip" id="tkLegend"></div>`)}
       </div>
       <div>
-        ${panel("Market", `<div id="tkMkt"></div>`, { sub: "from Alpaca" })}
-        ${panel("What we hold", `<div id="tkHold"></div>`,
-                { sub: "Alpaca is the truth about positions" })}
+        ${panel("Market", `<div id="tkMkt" class="tkx-mk"></div>`)}
+        ${panel("What we hold", `<div id="tkHold"></div>`)}
       </div>
     </div>
 
     ${panel("Record", `<div id="tkOvRec"></div>`,
-      { sub: "realised is never shown on its own — the open book is beside it",
-        actions: `<button class="btn sm" data-go="ticker" data-sym="${esc(sym)}"
+      { actions: `<button class="btn sm" data-go="ticker" data-sym="${esc(sym)}"
           data-tab="history">Full metric set</button>` })}
 
     ${panel("Strategies on this ticker", `<div id="tkStratStrip"></div>`,
-      { sub: "the ladder and the options plays are peers here",
-        actions: `<button class="btn sm" id="tkGoStrat">Manage</button>` })}`;
+      { actions: `<button class="btn sm" id="tkGoStrat">Manage</button>` })}`;
 
   el("tkGoStrat").onclick = () => go({ kind: "ticker", sym, tab: "strategies" });
 
@@ -623,34 +648,32 @@ function paintOverview() {
         : unmeasured(mreason(d.change_pct))}</div>
     </div>
     <div class="tkx-rngs">
-      ${rangeBar("Day range", mk.day_range, price, mk.why)}
-      ${rangeBar("52-week range", mk.year_range, price, mk.why)}
+      ${priceBand(mk.day_range, mk.year_range, price, mk.why)}
     </div>`;
 
-  el("tkMkt").innerHTML = tileGrid([
-    tile({ label: "Bid", metric: mk.bid }),
-    tile({ label: "Ask", metric: mk.ask }),
-    tile({ label: "Spread", metric: mk.spread_pct, dp: 3, sub: "of the mid" }),
-    tile({ label: "Volume", metric: mk.volume, sub: "last session" }),
-    tile({ label: "ADV", metric: mk.adv, hint: mreason(mk.adv), sub: nsub(mk.adv, "session") }),
-    /* Volume against its own average, which is the one thing a raw volume
-       cannot say. Computed HERE and only when BOTH sides were measured -- a
-       ratio against an unmeasured average is a ratio against nothing, and
-       both of these really do go missing (`mk.why` names the case). */
-    tile({ label: "Volume vs ADV",
-           html: (measured(mk.volume) && measured(mk.adv) && Number(mv(mk.adv)))
-             ? `<span class="num">${(Number(mv(mk.volume))
-                 / Number(mv(mk.adv))).toFixed(2)}×</span>`
-             : unmeasured(measured(mk.adv)
-                 ? mreason(mk.volume) || "no volume for the last session"
-                 : mreason(mk.adv) || "no average to compare against"),
-           sub: "last session over the average" }),
-    tile({ label: "Sessions",
-           html: mk.sessions == null
-             ? unmeasured(mk.why || "no daily bars held")
-             : `<span class="num">${mk.sessions}</span>`,
-           sub: "daily bars held" }),
-  ], { cols: 2, cls: "plain" });
+  /* THE MARKET PANE. Eight metric tiles, eight labels and seven captions
+     became five marks: the quote as a shape, twenty sessions of volume,
+     implied and realised volatility rank on one track, the earnings state as
+     a chip, and the headlines. Every function is in tkmkt.js and returns HTML
+     from data, so the pane can be rendered in a test.
+
+     The QUOTE and the VOLUME are still hub's own numbers (`d.market`) -- the
+     marks are drawn from them and nothing here recomputes one, so the ticker
+     row and this pane cannot disagree. The VOLATILITY, the EARNINGS and the
+     NEWS come from the separate /market read, which may be absent, stale or
+     failed and says which. */
+  const M = H.mkt || {};
+  el("tkMkt").innerHTML =
+    quoteBar(mk.bid, mk.ask, mk.day_range)
+    + volumeBars((M.tape || {}).volume, mk.volume, mk.adv,
+                 (M.tape || {}).why || mk.why)
+    + volScale(M.iv, M.rv)
+    + `<div class="tkx-mk-chips">${earningsChip(M.earnings)}</div>`
+    + newsList(M.news)
+    + (H.mktWhy
+       ? `<div class="note warn tkx-mk-err"><b>The market read failed</b> — ${
+           esc(H.mktWhy)}</div>`
+       : feedErrors(M));
 
   el("tkHold").innerHTML = holdBlock(d);
 
@@ -678,9 +701,20 @@ function paintOverview() {
         t("profit_factor", "Profit factor", { signed: false, dp: 2 }),
         t("max_drawdown", "Max drawdown", { signed: false }),
       ], { cols: 3 })
+        /* THE CAVEATS ARE A CHIP HERE AND A BANNER ON HISTORY.
+
+           They used to be a 19-word paragraph under these six tiles, saying
+           what the figures are measured over. That sentence is still written
+           out in full on the History tab, where the full metric set it
+           qualifies lives; on Overview it is one chip carrying the count,
+           with every sentence on its tooltip and the tab it belongs to one
+           click away. Nothing is deleted and nothing is hidden -- the count
+           is on screen, so a reader can see there is something to read. */
         + (caveatsOf(P).length
-          ? `<div class="note warn" style="margin-top:14px">${
-              esc(caveatsOf(P)[0])}</div>` : "");
+          ? `<div class="tkx-mk-chips" style="margin-top:14px"><span
+              class="tkx-mk-chip warn" title="${esc(caveatsOf(P).join(" — "))}"
+              >${caveatsOf(P).length} caveat${
+                caveatsOf(P).length === 1 ? "" : "s"}</span></div>` : "");
     } else if (P || H.perfNone) {
       ovr.innerHTML = emptyState({
         title: "No record on this ticker yet",
@@ -1638,7 +1672,17 @@ function recCaveats(P) {
   return cav.map((c) => `<div class="note warn">${esc(c)}</div>`).join("");
 }
 
-/* The four groups, each with the sentence that says what it is measured on. */
+/* The four groups. THE SENTENCE THAT SAYS WHAT A GROUP IS MEASURED ON IS ON
+   HOVER, not stacked above the numbers.
+
+   Those three sentences were 57 words of explanation printed over a board of
+   31 figures, and they are the shape the owner named: "a shit ton of widgets
+   with a bunch of words". They are not warnings -- nothing in them says
+   anything is wrong -- so they move rather than stay. `equity_basis` is the
+   exception worth naming: it says WHICH CURVE the risk figures were measured
+   on, which changes what they mean, so it wins over the static note for that
+   group and rides on the same tooltip. The caveats, which DO say something is
+   wrong, are still a banner above all of this in `recCaveats`. */
 function recFull(P) {
   return METRIC_GROUPS.slice(1).map((g) => {
     const tiles = g.items.map((s) => {
@@ -1651,7 +1695,8 @@ function recFull(P) {
     });
     const note = g.id === "risk" && P && P.equity_basis
       ? P.equity_basis : g.note;
-    return groupHeadHTML(g.title, note) + tileGrid(tiles, { cols: 5 });
+    return `<div title="${esc(note || "")}">${groupHeadHTML(g.title, "")}</div>`
+      + tileGrid(tiles, { cols: 5 });
   }).join("");
 }
 
@@ -2469,6 +2514,7 @@ VIEWS.ticker = {
       // or the account invalidates it. The bank's shelf is not per account,
       // but which tickers an entry is on is, so `att` goes too.
       H.perf = null; H.perfWhy = ""; H.perfNone = false; H.perfAt = 0;
+      H.mkt = null; H.mktWhy = ""; H.mktAt = 0;
       H.att = null; H.attWhy = ""; H.bankPick = "";
       // the undo slot names ONE symbol on ONE account. Carrying it across
       // would offer to put SPY's play back on a page showing RAM.
@@ -2488,6 +2534,8 @@ VIEWS.ticker = {
     // the record and the strategy list are the two tabs that need them, and
     // both self-throttle, so asking here costs nothing on the other two
     if (v.tab === "history" || v.tab === "live") loadPerf(v.sym, { force: fresh });
+    // the Market pane lives on Overview and nowhere else
+    if (!v.tab || v.tab === "live") loadMarket(v.sym, { force: fresh });
     if (v.tab === "strategies") {
       loadPerf(v.sym, { force: fresh });
       loadAttached(v.sym);

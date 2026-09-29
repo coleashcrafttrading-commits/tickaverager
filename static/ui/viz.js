@@ -1,7 +1,7 @@
 /* ============================================================================
    viz.js -- THE CHART LIBRARY. Vanilla, no dependency, no build step.
 
-   Eight components, every one a pure function that returns an HTML STRING, so
+   Ten components, every one a pure function that returns an HTML STRING, so
    a view composes them the same way it composes core.js's tile() and panel().
    Nothing here knows what a ladder is, what an option is, or where a number
    came from; it takes values and reasons and draws them.
@@ -14,6 +14,8 @@
        histogram     the distribution of trade outcomes
        heatmap       correlation, day-of-week performance
        vbars         one signed bar per period (daily P/L)
+       dotscale      one value on a named track -- a mark where a sentence was
+       ratiobar      what is used against a ceiling, and "off" when there is none
 
    The P/L CALENDAR is in calendar.js, because it is a date grid rather than a
    chart and its input is perf.daily()'s rows verbatim.
@@ -1001,6 +1003,107 @@ export function heatmap(o) {
       were never measured and are dashes, not zeroes.</div>` : ""}</div>`;
 }
 
+
+/* ========================================================== the dot scale ==
+
+   dotscale({value, min, max, unit, dp, signed, tone, why, lo, hi, marks,
+             aria, cls, id})
+
+   ONE VALUE ON A NAMED TRACK. Added for round 6, whose whole job was to spend
+   a MARK where the page was spending a sentence. "Now $0 (0.00% below the
+   peak), worst ever -$29 (-0.02% at its deepest)" is two numbers and eight
+   words of scaffolding; the same fact is a track from the peak to the worst
+   with a dot on it, and the words become the track's two end labels.
+
+   `lo` / `hi` are what the ends are CALLED. `marks` are extra ticks
+   ({at, label, tone}) -- the deepest point, a cap, a threshold.
+
+   IT REFUSES AN UNMEASURED VALUE rather than parking the dot at one end: a
+   dot at the left of a drawdown track is a claim that the account is at its
+   peak, which is exactly the flat-line-along-the-bottom lie rule 1 exists to
+   stop. min === max is the same case -- there is no scale to be on. */
+export function dotscale(o) {
+  o = o || {};
+  const v = num(o.value), lo = num(o.min), hi = num(o.max);
+  const fmt = (x) => vfmt(x, { unit: o.unit, dp: o.dp, signed: o.signed });
+  const ends = `<span class="vds-e">${esc(o.lo === undefined
+      ? fmt(lo) : String(o.lo))}</span><span class="vds-e vds-e2">${
+      esc(o.hi === undefined ? fmt(hi) : String(o.hi))}</span>`;
+  if (v === null || lo === null || hi === null || lo === hi) {
+    const r = v === null ? why(o.value, o.why)
+      : (o.why || "the two ends of this scale are the same value, so there is "
+                + "no scale to sit on");
+    return `<div class="viz viz-dsc vds-none${o.cls ? " " + o.cls : ""}"${
+      o.id ? ` id="${esc(o.id)}"` : ""} title="${esc(r)}"${
+      o.aria ? ` aria-label="${esc(o.aria)}"` : ""}>
+      <span class="vds-track"></span><span class="vds-ends">${ends}</span></div>`;
+  }
+  const at = (x) => clamp((num(x) - lo) / (hi - lo), 0, 1) * 100;
+  const t = toneCls(o.tone) || toneCls(toneOf(v));
+  const ticks = (o.marks || []).map((m) => {
+    const p = num(m.at);
+    if (p === null) return "";
+    return `<i class="vds-m${m.tone ? " " + toneCls(m.tone) : ""}"
+      style="left:${at(p).toFixed(2)}%" title="${esc(
+        (m.label ? m.label + ": " : "") + fmt(p))}"></i>`;
+  }).join("");
+  return `<div class="viz viz-dsc${o.cls ? " " + o.cls : ""}"${
+    o.id ? ` id="${esc(o.id)}"` : ""}${
+    o.aria ? ` aria-label="${esc(o.aria)}"` : ""}>
+    <span class="vds-track">${ticks}<i class="vds-fill${t ? " " + t : ""}"
+      style="width:${at(v).toFixed(2)}%"></i><i class="vds-dot${
+      t ? " " + t : ""}" style="left:${at(v).toFixed(2)}%"
+      title="${esc(fmt(v))}"></i></span>
+    <span class="vds-ends">${ends}</span></div>`;
+}
+
+/* ========================================================== the ratio bar ==
+
+   ratiobar({value, cap, unit, dp, label, h, why, over, cls, id})
+
+   USED AGAINST A CEILING, as one bar and one percentage -- no sentence. The
+   page this was written for printed "12% used — $1,200 of $10,000" under
+   every guardrail field; the two dollar figures are what the bar IS, so they
+   move into its tooltip and the percentage stays as the mark.
+
+   A CAP OF 0 IS OFF, NOT FULL. That distinction is the whole reason this is
+   not a plain percentage: `0` in this repo's settings means "no limit", and a
+   bar drawn 100% full for a limit that does not exist is the most dangerous
+   picture on a risk page. `over` is drawn past the end rather than clipped,
+   because a cap that has already been passed is a fact worth seeing. */
+export function ratiobar(o) {
+  o = o || {};
+  const v = num(o.value), cap = num(o.cap);
+  const fmt = (x) => vfmt(x, { unit: o.unit, dp: o.dp });
+  const wrap = (body, cls, title) =>
+    `<div class="viz viz-rbr${cls ? " " + cls : ""}${o.cls ? " " + o.cls : ""}"${
+      o.id ? ` id="${esc(o.id)}"` : ""}${title ? ` title="${esc(title)}"` : ""}>${
+      body}</div>`;
+  if (cap === null || cap === 0) {
+    /* SAID, not implied. "off" is a measurement -- somebody set this to zero
+       -- and it is not the same as "we could not read it". */
+    return wrap(`<span class="vrb-track"></span><span class="vrb-t vrb-off">${
+      cap === 0 ? "off" : "—"}</span>`, "vrb-none",
+      cap === 0 ? (o.why || "this limit is set to 0, which turns it off — "
+                          + "nothing caps it")
+                : why(o.cap, "no ceiling was reported for this"));
+  }
+  if (v === null) {
+    return wrap(`<span class="vrb-track"></span><span class="vrb-t">—<span
+      class="vrb-cap"> / ${esc(fmt(cap))}</span></span>`, "vrb-none",
+      why(o.value, "nothing has measured what is being used against this"));
+  }
+  const frac = v / cap;
+  const pc = Math.round(frac * 100);
+  const t = frac > 0.9 ? "down" : frac > 0.7 ? "warn" : "up";
+  return wrap(`<span class="vrb-track"><i class="vrb-fill ${t}"
+      style="width:${clamp(frac, 0, 1) * 100}%"></i>${frac > 1
+      ? `<i class="vrb-over" title="past the cap"></i>` : ""}</span>
+    <span class="vrb-t"><b class="${t}">${pc}%</b><span class="vrb-cap"> ${
+      esc(fmt(v))} / ${esc(fmt(cap))}</span></span>`, "",
+    `${fmt(v)} of ${fmt(cap)}${o.label ? " — " + o.label : ""}`);
+}
+
 /* ================================================================ the CSS ==
    Injected once. Everything is a theme.css token; the only new tokens are the
    categorical ramp, which is eight steps of the ONE accent hue plus two
@@ -1165,6 +1268,48 @@ const CSS = `
     gap:var(--s2);}
   .viz-leg-l{max-width:12ch;}
 }
+
+/* ---- dotscale: one value on a named track ---- */
+.viz-dsc{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.vds-track{position:relative;display:block;height:6px;border-radius:99px;
+  background:var(--viz-track);}
+.vds-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;
+  background:var(--viz-c1);opacity:.55;}
+.vds-fill.up{background:var(--up);} .vds-fill.down{background:var(--down);}
+.vds-fill.flat{background:var(--viz-c6);}
+.vds-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;
+  transform:translate(-50%,-50%);background:var(--viz-c1);
+  box-shadow:0 0 0 2px var(--surface);}
+.vds-dot.up{background:var(--up);} .vds-dot.down{background:var(--down);}
+.vds-dot.flat{background:var(--viz-c6);}
+.vds-m{position:absolute;top:-2px;bottom:-2px;width:2px;border-radius:2px;
+  background:var(--viz-zero);transform:translateX(-50%);}
+.vds-m.down{background:var(--down);} .vds-m.up{background:var(--up);}
+.vds-ends{display:flex;justify-content:space-between;gap:var(--s2);
+  font-size:var(--fs-micro);color:var(--faint);font-variant-numeric:tabular-nums;}
+.vds-e2{text-align:right;}
+.viz-dsc.vds-none .vds-track{background:repeating-linear-gradient(90deg,
+  var(--viz-track) 0 4px,transparent 4px 8px);}
+
+/* ---- ratiobar: used against a ceiling ---- */
+.viz-rbr{display:flex;align-items:center;gap:var(--s2);min-width:0;}
+.vrb-track{position:relative;flex:1;min-width:38px;height:6px;border-radius:99px;
+  background:var(--viz-track);overflow:hidden;}
+.vrb-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;
+  background:var(--viz-c1);}
+.vrb-fill.up{background:var(--up);} .vrb-fill.warn{background:var(--warn);}
+.vrb-fill.down{background:var(--down);}
+.vrb-over{position:absolute;right:0;top:0;bottom:0;width:3px;background:var(--down);}
+.vrb-t{flex:none;font-size:var(--fs-micro);color:var(--faint);
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+.vrb-t b{font-weight:var(--w-semi);}
+.vrb-t b.up{color:var(--up);} .vrb-t b.warn{color:var(--warn);}
+.vrb-t b.down{color:var(--down);}
+.vrb-cap{color:var(--faint);opacity:.75;}
+.vrb-off{color:var(--down);font-weight:var(--w-semi);}
+.viz-rbr.vrb-none .vrb-track{background:repeating-linear-gradient(90deg,
+  var(--viz-track) 0 4px,transparent 4px 8px);}
+
 `;
 
 /* One <style> per document, added on first import. Guarded so the module is
