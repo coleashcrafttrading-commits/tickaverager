@@ -3455,6 +3455,7 @@ def _fill_tape(f: Fleet) -> list:
     retrying, and always returns whatever is already held rather than a
     misleading empty list.
     """
+    import json as _json            # local, as everywhere else in this file
     key = f.account_id
     now = time.time()
     with _FILLS_LOCK:
@@ -3474,7 +3475,7 @@ def _fill_tape(f: Fleet) -> list:
         fp = _fill_path(f)
         if fp.exists():
             try:
-                rows = [json.loads(ln) for ln in
+                rows = [_json.loads(ln) for ln in
                         fp.read_text(encoding="utf-8").splitlines() if ln.strip()]
             except Exception as e:
                 LOG.warning("fill tape file: %r", e)
@@ -3532,7 +3533,7 @@ def _fill_tape(f: Fleet) -> list:
             fp.parent.mkdir(parents=True, exist_ok=True)
             with fp.open("a", encoding="utf-8") as fh:
                 for r in fresh:
-                    fh.write(json.dumps(r, default=str) + chr(10))
+                    fh.write(_json.dumps(r, default=str) + chr(10))
         except Exception as e:
             LOG.warning("fill tape save: %r", e)
     with _FILLS_LOCK:
