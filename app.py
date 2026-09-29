@@ -806,6 +806,7 @@ def journal_backfill(body: dict = Body(default={}), f: Fleet = Depends(cur)):
     except Exception as e:
         raise HTTPException(502, "could not read Alpaca: %r" % (e,))
 
+    import agentctl                 # local, as in get_audit below
     rows, report = journal.backfill_closes(
         inv, sells, held, account=f.account_id)
     report["dry_run"] = dry
