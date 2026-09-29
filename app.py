@@ -3434,7 +3434,7 @@ _FILLS: dict = {}                      # account -> {rows, ids, at, fail_at}
 _FILLS_LOCK = threading.RLock()
 _FILLS_TTL = 120.0
 _FILLS_BACKOFF = 300.0                 # after a refusal, leave Alpaca alone
-_FILLS_PAGE_PAUSE = 0.25               # between pages of the FIRST full read
+_FILLS_PAGE_PAUSE = 0.5                # the seeder's pace, not the web path's
 
 
 def _fill_path(f: Fleet) -> Path:
@@ -3480,6 +3480,20 @@ def _fill_tape(f: Fleet) -> list:
                 LOG.warning("fill tape file: %r", e)
                 rows = []
     have = {str(r.get("id") or "") for r in rows}
+    if not have:
+        # THE WEB PROCESS NEVER BURSTS. Seeding the tape is 276 pages and
+        # Alpaca answers 429 well before the end -- measured twice, at 0.25s
+        # between pages too. That burst shares an API key with a live options
+        # worker, so it does not belong in a request handler at ANY pace. The
+        # seed is a one-off: `python seed_fills.py`. Until it has run, this
+        # returns nothing and every caller falls back to the strategy logs,
+        # which is the old behaviour and not a new failure.
+        with _FILLS_LOCK:
+            _FILLS[key] = {"rows": [], "at": time.time(), "ids": set(),
+                           "fail_at": 0.0, "unseeded": True}
+        LOG.info("fill tape: not seeded yet (run seed_fills.py); "
+                 "realised falls back to the strategy logs")
+        return []
 
     fresh: list = []
     try:
