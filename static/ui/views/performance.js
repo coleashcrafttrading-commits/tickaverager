@@ -271,26 +271,15 @@ function banners(st) {
       empty or stale. It is NOT a history with nothing in it. The bots are
       unaffected — this is display code.</span></div>`;
   }
-  const rc = (perf && perf.reconciliation) || {};
-  if (rc.checked === false) {
-    return `<div class="note warn"><b>The broker could not be read, so the open
-      side is unconfirmed.</b> ${esc(rc.why || "")} Alpaca decides what is still
-      held; until it answers, the open lots below are the journal's own count.</div>`;
-  }
-  if (rc.ok === false) {
-    return `<div class="note warn"><b>The journal and the broker disagree about
-      what is still open.</b> ${esc(rc.why || "")}
-      ${(rc.symbols || []).map(s => `<br><span class="faint">${esc(s.symbol)}:
-        journal ${s.journal_shares} share${s.journal_shares === 1 ? "" : "s"},
-        Alpaca ${s.broker_shares}${s.assumed_fifo
-          ? " — which lots survived is unknown, so the oldest are assumed to have gone first"
-          : ""}</span>`).join("")}
-      <br><span class="faint">Only what Alpaca holds is counted below${
-        rc.dropped_cost ? `, so ${money0(rc.dropped_cost)} of cost has left this
-        tab. Those lots were sold; a ladder journal records take-profits and
-        cannot record an exit it never saw, so what they lost is in the
-        account's P/L and not in the figure above` : ""}.</span></div>`;
-  }
+  /* NO RECONCILIATION BANNER. There was one here, and the owner was right
+     about it: "WHY DO WE HAVE THOSE IN THE JOURNAL THEN, I FLATTENED THEM AND
+     ALPACA SOLD THEM". A banner explaining that two records disagree is a
+     confession, not a feature -- and it was only needed because the page was
+     asking the LADDER'S LOG what the account made. It no longer does. Realised
+     comes from Alpaca's fill tape and the open side from Alpaca's positions,
+     so a gap in the journal changes no figure on this page and there is
+     nothing left to warn about. The journal keeps its real job below: which
+     lot, which rung, which reason. */
   if (st.marked !== true) {
     return `<div class="note warn"><b>No live prices in this snapshot.</b>
       Nothing still open can be valued, so <b>P/L is not available</b> for this
@@ -354,7 +343,9 @@ function render() {
     <div class="hero-row">
       <div><span class="hero-lk">Closed</span>
         <span class="hero-lv num">${sgn(st.realized)}</span>
-        <span class="hero-lx">${closes} lot${closes === 1 ? "" : "s"} closed</span></div>
+        <span class="hero-lx">${perf.realized_source === "Alpaca fills"
+          ? "every exit Alpaca filled"
+          : `${closes} lot${closes === 1 ? "" : "s"} closed`}</span></div>
       <div><span class="hero-lk">Open</span>
         <span class="hero-lv num">${flat ? sgn(0) : mk(st.unrealized)}</span>
         <span class="hero-lx">${flat

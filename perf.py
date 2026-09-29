@@ -239,6 +239,7 @@ class Ctx:
     def __init__(self, *, account: Optional[dict] = None,
                  activities: Optional[list] = None,
                  equity_points: Optional[list] = None,
+                 fills: Optional[list] = None,
                  journal_rows: Optional[list] = None,
                  option_positions: Optional[list] = None,
                  broker_positions: Optional[list] = None,
@@ -250,6 +251,9 @@ class Ctx:
         self.activities = None if activities is None else list(activities)
         self.equity_points = (None if equity_points is None else
                               [(float(t), float(v)) for t, v in equity_points])
+        #: Alpaca's own FILL activities. The record that has everything, and
+        #: therefore the one `reconcile` asks what the equities realised.
+        self.fills = fills
         self.journal_rows = None if journal_rows is None else list(journal_rows)
         self.option_positions = (None if option_positions is None
                                  else list(option_positions))
@@ -555,6 +559,105 @@ def rows_from_option_positions(positions: Optional[list]) -> list:
 
 
 # ============================================================ equity series
+def realized_from_fills(fills: list, *, options: bool = False,
+                        since: float = 0.0) -> dict:
+    """Realised P/L per symbol, from ALPACA'S OWN FILLS, on a running average
+    cost. This is ground truth #1 answering a money question.
+
+    WHY THIS REPLACED THE JOURNAL'S SUM. The ladder journal records what the
+    ladder did, and only while the ladder was the one doing it. Measured on
+    this account, 29 Sep 2026: Alpaca bought 39,960 MSTX shares and the journal
+    recorded 20,234 of them; it recorded 10,956 take-profit closes and not one
+    of the flatten sells. Its realised total therefore read +$8,882.86 on an
+    account whose equity trading actually made +$3,367.53 -- not a rounding
+    error but a wins-only figure, because a ladder with no stop closes winners
+    and the exits that took the losses were never its own.
+
+    That gap cannot be repaired by inference: a journal missing 19,726 buys
+    cannot be squared against the sells. So the number is taken from the
+    record that has everything. The journal keeps its job -- which lot, which
+    rung, which reason -- and stops being asked what the account made.
+
+    RUNNING AVERAGE COST, walked in time order: a buy adds to the basis, a sell
+    books (price - average) on the shares it takes and removes them at that
+    average. Re-entering a symbol after going flat starts a fresh basis, which
+    is what makes this correct over a window rather than only at the end. Where
+    a position ends flat, every cost method agrees and the total is simply
+    proceeds less cost -- which is the cross-check `test_perf` pins.
+
+    A SELL WITH NO BASIS is counted at zero cost and flagged, never dropped:
+    that is a short, or a fill whose buy is older than the history Alpaca
+    returned, and silently skipping it would understate what the account did.
+    """
+    rows = []
+    for f in fills:
+        s = str(f.get("symbol") or "")
+        if not s:
+            continue
+        is_opt = len(s) >= 15
+        if is_opt != bool(options):
+            continue
+        t = str(f.get("transaction_time") or "")
+        q = abs(_num(f.get("qty")) or 0.0)
+        px = _num(f.get("price"))
+        if not q or px is None:
+            continue
+        rows.append((t, s, str(f.get("side") or ""), q, float(px)))
+    rows.sort(key=lambda r: r[0])
+
+    pos: dict = {}
+    out: dict = {}
+    unbased: dict = {}
+    mult = 100.0 if options else 1.0
+    # `since` WINDOWS THE BOOKING, NOT THE BASIS. A lot bought in August and
+    # sold in September realised in September, and its cost is August's.
+    # Filtering the fills themselves would throw that basis away and count the
+    # whole proceeds as profit, so every fill is walked and only sells at or
+    # after the cutoff are BOOKED.
+    for t, s, side, q, px in rows:
+        inwin = (not since) or ((_iso_ts(t) or 0.0) >= since)
+        p = pos.setdefault(s, [0.0, 0.0])          # [shares, cost basis]
+        d = out.setdefault(s, {"realized": 0.0, "bought": 0.0, "sold": 0.0,
+                               "proceeds": 0.0, "cost": 0.0, "sells": 0,
+                               "buys": 0, "last": ""})
+        d["last"] = t
+        if side.startswith("buy"):
+            p[0] += q
+            p[1] += q * px * mult
+            d["bought"] += q
+            d["cost"] += q * px * mult
+            d["buys"] += 1
+        else:
+            take = min(q, p[0])
+            avg = (p[1] / p[0]) if p[0] > 0 else 0.0
+            if take < q:
+                unbased[s] = round(unbased.get(s, 0.0) + (q - take), 6)
+            if inwin:
+                d["realized"] += q * px * mult - take * avg
+            p[1] = max(0.0, p[1] - take * avg)
+            p[0] = max(0.0, p[0] - take)
+            d["sold"] += q
+            d["proceeds"] += q * px * mult
+            d["sells"] += 1
+    for s, d in out.items():
+        for k in ("realized", "proceeds", "cost"):
+            d[k] = round(d[k], 2)
+        for k in ("bought", "sold"):
+            d[k] = round(d[k], 6)
+        d["open_shares"] = round(pos.get(s, [0.0, 0.0])[0], 6)
+        if unbased.get(s):
+            d["why"] = ("%s share(s) were sold with no buy in the history "
+                        "Alpaca returned, and are counted at zero cost"
+                        % unbased[s])
+    return {
+        "by_symbol": out,
+        "total": round(sum(d["realized"] for d in out.values()), 2),
+        "symbols": len(out),
+        "fills": len(rows),
+        "unbased": unbased,
+    }
+
+
 def clean_equity(points: Optional[list],
                  created_at: Any = None) -> tuple:
     """[(t, equity)] with Alpaca's back-padding removed. Returns (points, why).
@@ -1272,8 +1375,29 @@ def reconcile(ctx: Ctx, rows: Optional[list] = None) -> dict:
     eq = ctx.equity()
     as_of = ctx.now
 
-    realized = sum(r["realized"] for r in rows) if rows else None
+    # REALISED COMES FROM THE FILL TAPE WHERE THERE IS ONE. The strategy logs
+    # record what a strategy did while it was the one doing it; Alpaca records
+    # everything. Measured here: the journal had 20,234 of the 39,960 MSTX
+    # shares Alpaca bought and none of the flatten sells, and read +$8,882.86
+    # against +$3,367.53 of actual equity trading. Options keep their ledger --
+    # a short option opens with a SELL, which average-cost-on-longs cannot
+    # book -- so the two halves come from the record that can answer for each.
+    log_realized = sum(r["realized"] for r in rows) if rows else None
     losses = [r for r in rows if r["realized"] < 0]
+    eq_fills = realized_from_fills(ctx.fills or []) if ctx.fills else None
+    opt_log = sum(r["realized"] for r in rows
+                  if str(r.get("kind") or "") == "option")
+    if eq_fills is not None:
+        realized = round(eq_fills["total"] + opt_log, 2)
+        realized_n = eq_fills["fills"] + len(
+            [r for r in rows if str(r.get("kind") or "") == "option"])
+        realized_src = "Alpaca fills (equities) + the options play ledger"
+        realized_why = None
+    else:
+        realized = log_realized
+        realized_n = len(rows)
+        realized_src = "journal.jsonl + the options play ledger"
+        realized_why = (WINS_ONLY_CAVEAT if (rows and not losses) else None)
     open_pl, open_n = None, 0
     if ctx.broker_positions is not None:
         vals = [_num(p.get("unrealized_pl")) for p in ctx.broker_positions]
@@ -1356,10 +1480,10 @@ def reconcile(ctx: Ctx, rows: Optional[list] = None) -> dict:
              "value": fund["value"], "n": fund["n"],
              "source": "Alpaca activities API",
              "why": fund["why"]},
-            {"key": "realized", "label": "Realised by the strategies' own logs",
-             "value": _r2(realized), "n": len(rows),
-             "source": "journal.jsonl + the options play ledger",
-             "why": (WINS_ONLY_CAVEAT if (rows and not losses) else None)},
+            {"key": "realized", "label": "Realised on closed trades",
+             "value": _r2(realized), "n": realized_n,
+             "source": realized_src,
+             "why": realized_why},
             {"key": "open", "label": "Open P/L at the broker's marks",
              "value": open_pl, "n": open_n,
              "source": "Alpaca positions",

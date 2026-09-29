@@ -714,6 +714,19 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
             LOG.warning("performance reconcile: %s", e)
     inv, reconciliation = journal.reconcile_inventory(inv, held, known=held_known)
 
+    # REALISED COMES FROM ALPACA, NOT FROM THE JOURNAL. The ladder's own log
+    # records what the ladder did while it was the one doing it -- measured
+    # here, 20,234 of the 39,960 MSTX shares Alpaca bought, and none of the
+    # flatten sells. Asking it what the account made gave +$8,882.86 against
+    # +$3,367.53 of real equity trading. The window bounds the BOOKING; the
+    # cost basis still walks in from before it.
+    since = (time.time() - days * 86400) if days else 0.0
+    fills = _fill_tape(f)
+    if symbol:
+        fills = [r for r in fills
+                 if str(r.get("symbol") or "").upper() == symbol.upper()]
+    real = perf.realized_from_fills(fills, since=since) if fills else None
+
     # The open book is what the booked figure hides, so it is valued here at
     # the same marks the engines trade on. A symbol the fleet no longer holds
     # has no mark; stats() lists those rather than pretending they are flat.
@@ -760,7 +773,10 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
         "symbol": symbol.upper() or "ALL",
         "days": days or None,
         "rows": len(rows),
-        "stats": journal.stats(rows, marks=marks, inventory=inv),
+        "stats": journal.stats(rows, marks=marks, inventory=inv,
+                               realized=(real["total"] if real else None),
+                               realized_n=(real["fills"] if real else 0)),
+        "realized_source": ("Alpaca fills" if real else "the ladder's journal"),
         "marks": marks,
         "equity": equity,
         "equity_base": equity_base,
@@ -3406,6 +3422,66 @@ _PERF_LOCK = threading.RLock()
 _PERF_BUILDING: set = set()
 
 _PERF_FEED_TTL = 300.0                 # activities and equity history
+
+# THE FILL TAPE, CACHED AND THEN ONLY EXTENDED. `perf.realized_from_fills`
+# needs every fill the account ever had -- 27,575 of them here, 276 pages at
+# Alpaca's 100-row cap -- and re-reading that on a 5-minute timer would make
+# the dashboard a load generator. The tape is APPEND-ONLY, so it is read in
+# full exactly once and afterwards paged newest-first only until a fill we
+# already hold appears. Steady state is one page.
+_FILLS: dict = {}                      # account -> {rows, ids, at}
+_FILLS_LOCK = threading.RLock()
+_FILLS_TTL = 120.0
+
+
+def _fill_tape(f: Fleet) -> list:
+    """Every FILL activity for this account, extended incrementally."""
+    key = f.account_id
+    now = time.time()
+    with _FILLS_LOCK:
+        hit = _FILLS.get(key)
+        if hit and now - hit["at"] < _FILLS_TTL:
+            return hit["rows"]
+    b = getattr(f, "broker", None)
+    if b is None:
+        return []
+    have = (_FILLS.get(key) or {}).get("ids") or set()
+    try:
+        if not have:
+            rows = b.activities("FILL", max_pages=2000) or []
+        else:
+            # newest-first until the tape overlaps what we already hold
+            fresh: list = []
+            token = ""
+            for _ in range(2000):
+                p_: dict = {"page_size": 100, "direction": "desc"}
+                if token:
+                    p_["page_token"] = token
+                page = b._trade("GET", "/account/activities/FILL",
+                                params=p_) or []
+                if not page:
+                    break
+                stop = False
+                for r in page:
+                    if str(r.get("id") or "") in have:
+                        stop = True
+                        break
+                    fresh.append(r)
+                if stop or len(page) < 100:
+                    break
+                token = page[-1].get("id", "")
+                if not token:
+                    break
+            rows = (_FILLS.get(key) or {}).get("rows", []) + fresh
+    except Exception as e:
+        LOG.warning("fill tape: %r", e)
+        return (_FILLS.get(key) or {}).get("rows", [])
+    with _FILLS_LOCK:
+        _FILLS[key] = {"rows": rows, "at": time.time(),
+                       "ids": {str(r.get("id") or "") for r in rows}}
+    return rows
+
+
 _PERF_FEED: dict = {}
 _PERF_FEED_LOCK = threading.RLock()
 
@@ -3490,6 +3566,7 @@ def _perf_ctx(f: Fleet) -> "perf.Ctx":
         account=dict(f.account or {}),
         activities=feeds["activities"],
         equity_points=feeds["equity_points"],
+        fills=_fill_tape(f),
         journal_rows=rows,
         option_positions=opt_rows,
         # The fleet's own position snapshot: it carries BOTH asset classes and

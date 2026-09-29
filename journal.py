@@ -724,7 +724,8 @@ def realized_sum(rows: list[dict]) -> float:
 
 
 def stats(rows: list[dict], marks: dict | None = None,
-          inventory: list[dict] | None = None) -> dict:
+          inventory: list[dict] | None = None,
+          realized: float | None = None, realized_n: int = 0) -> dict:
     """Performance, sliced the ways that actually inform a settings change.
 
     Note what is deliberately NOT here: a win rate. Every lot exits on its own
@@ -745,7 +746,11 @@ def stats(rows: list[dict], marks: dict | None = None,
              and not r.get("dry_run") and not is_bookkeeping(r)]
     bookkeeping = len([r for r in rows if is_bookkeeping(r)])
 
-    realized = sum(float(r.get("realized") or 0) for r in closes)
+    # THE CALLER MAY HAND IN A BETTER REALISED, and the route does: Alpaca's
+    # fill tape knows every exit, this log knows only the ones the ladder made
+    # itself. Summing `closes` is the fallback for a caller with no broker.
+    log_realized = sum(float(r.get("realized") or 0) for r in closes)
+    realized = log_realized if realized is None else float(realized)
     holds = [int(r.get("hold_seconds") or 0) for r in closes if r.get("hold_seconds")]
     deployed = sum(float(r.get("cost") or 0) for r in opens)
 
