@@ -137,6 +137,89 @@ check("and the total refuses", st["total_pl"], None)
 
 print()
 print("=" * 78)
+print("8. the journal is REPAIRED from Alpaca's fills, not annotated")
+print("=" * 78)
+# Two lots bought at 10 and 12, both sold in one flatten at 9. The journal
+# recorded neither close. Cost 22, proceeds 18, so the hole is -4.00.
+inv8 = [lot("F-1", "RAM", 1, 10.0, "2026-09-01T14:00:00+00:00"),
+        lot("F-2", "RAM", 1, 12.0, "2026-09-02T14:00:00+00:00")]
+sells8 = [{"symbol": "RAM", "qty": "2", "price": "9.00",
+           "transaction_time": "2026-09-03T18:00:00Z"}]
+rows, rep = journal.backfill_closes(inv8, sells8, {}, account="default")
+check("one close row per open lot", len(rows), 2)
+check("every row is a close", sorted({r["event"] for r in rows}), ["close"])
+check("the loss is booked in full", rep["realized"], -4.0)
+check("and it equals proceeds less cost",
+      rep["symbols"][0]["proceeds"] - rep["symbols"][0]["cost"], -4.0)
+check("both lots counted", rep["lots"], 2)
+check("nothing was skipped", rep["skipped"], [])
+check("every row says it was backfilled",
+      all(r.get("backfilled") is True for r in rows), True)
+check("every row names its source",
+      sorted({r["source"] for r in rows}), ["alpaca_activities_fill"])
+check("every row carries an exit basis",
+      all(r.get("exit_basis") for r in rows), True)
+check("no row is a dry run", any(r.get("dry_run") for r in rows), False)
+
+print()
+print("=" * 78)
+print("9. a symbol the broker STILL holds is never touched")
+print("=" * 78)
+rows, rep = journal.backfill_closes(inv8, sells8, {"RAM": 2}, account="default")
+check("no rows written", len(rows), 0)
+check("and it says why", "still holds" in rep["skipped"][0]["why"], True)
+check("realised untouched", rep["realized"], 0)
+
+print()
+print("=" * 78)
+print("10. too little fill history closes NOTHING, rather than guessing")
+print("=" * 78)
+short = [{"symbol": "RAM", "qty": "1", "price": "9.00",
+          "transaction_time": "2026-09-03T18:00:00Z"}]
+rows, rep = journal.backfill_closes(inv8, short, {}, account="default")
+check("no rows written", len(rows), 0)
+check("the lots stay open", rep["lots"], 0)
+check("and the reason names the gap",
+      "does not go back far enough" in rep["skipped"][0]["why"], True)
+
+print()
+print("=" * 78)
+print("11. the VWAP is taken over the TAIL of the tape, newest first")
+print("=" * 78)
+# 3 shares open; the tape has an old take-profit at 20 and a flatten at 9/9.
+inv11 = [lot("G-%d" % i, "RAM", 1, 10.0, "2026-09-0%dT14:00:00+00:00" % i)
+         for i in (1, 2, 3)]
+tape = [{"symbol": "RAM", "qty": "5", "price": "20.00",
+         "transaction_time": "2026-09-02T18:00:00Z"},
+        {"symbol": "RAM", "qty": "1", "price": "9.00",
+         "transaction_time": "2026-09-04T18:00:00Z"},
+        {"symbol": "RAM", "qty": "2", "price": "9.00",
+         "transaction_time": "2026-09-05T18:00:00Z"}]
+rows, rep = journal.backfill_closes(inv11, tape, {}, account="default")
+check("exactly the open quantity is consumed", rep["symbols"][0]["shares"], 3)
+check("the flatten price wins, not the old take-profit",
+      rep["symbols"][0]["vwap"], 9.0)
+check("so the loss is booked, not a phantom profit", rep["realized"], -3.0)
+
+print()
+print("=" * 78)
+print("12. after the backfill the book is EMPTY and P/L is realised in full")
+print("=" * 78)
+base = [{"event": "open", "lot_id": "F-1", "symbol": "RAM", "shares": 1,
+         "entry_price": 10.0, "ts": "2026-09-01T14:00:00+00:00", "cost": 10.0},
+        {"event": "open", "lot_id": "F-2", "symbol": "RAM", "shares": 1,
+         "entry_price": 12.0, "ts": "2026-09-02T14:00:00+00:00", "cost": 12.0}]
+check("before: two lots look open", len(journal.open_inventory(base)), 2)
+rows, _ = journal.backfill_closes(journal.open_inventory(base), sells8, {})
+after = base + rows
+check("after: the book is empty", len(journal.open_inventory(after)), 0)
+st = journal.stats(after, marks={}, inventory=journal.open_inventory(after))
+check("realised is the true figure", st["realized"], -4.0)
+check("open is zero, not a dash", st["unrealized"], 0.0)
+check("and P/L equals realised exactly", st["total_pl"], -4.0)
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:

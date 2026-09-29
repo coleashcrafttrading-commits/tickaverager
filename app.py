@@ -772,6 +772,59 @@ def performance(symbol: str = "", days: int = 0, f: Fleet = Depends(cur)):
     }
 
 
+BACKFILL_PHRASE = "REPAIR THE JOURNAL FROM ALPACA"
+
+
+@app.post("/api/a/{acct}/journal/backfill")
+@app.post("/api/journal/backfill")
+def journal_backfill(body: dict = Body(default={}), f: Fleet = Depends(cur)):
+    """Write the `close` rows the journal never got, out of Alpaca's own fills.
+
+    THE AUDITED PATH FOR A REPAIR, because CLAUDE.md forbids editing a running
+    engine's state by hand and this appends to the file three ladders are
+    writing to. Dry run by DEFAULT: without the exact confirm phrase it reads
+    everything, computes every row and writes none, so the preview and the
+    write are the same code and the preview cannot flatter the write.
+
+    It only ever closes lots for a symbol ALPACA NO LONGER HOLDS. A book that
+    is still open is never inferred at.
+    """
+    confirm = str(body.get("confirm") or "")
+    dry = confirm != BACKFILL_PHRASE
+    if not f.broker:
+        raise HTTPException(400, "no broker on this account")
+
+    base = journal.load(path=f.journal_path)
+    inv = journal.open_inventory(base)
+    try:
+        held = {str(p.get("symbol")): float(p.get("qty") or 0)
+                for p in (f.broker.positions() or [])
+                if len(str(p.get("symbol") or "")) < 15}
+        sells = [r for r in (f.broker.activities("FILL", max_pages=400) or [])
+                 if str(r.get("side", "")).startswith("sell")
+                 and len(str(r.get("symbol") or "")) < 15]
+    except Exception as e:
+        raise HTTPException(502, "could not read Alpaca: %r" % (e,))
+
+    rows, report = journal.backfill_closes(
+        inv, sells, held, account=f.account_id)
+    report["dry_run"] = dry
+    report["fills_read"] = len(sells)
+    report["open_lots_before"] = len(inv)
+
+    if not dry and rows:
+        for r in rows:
+            journal.append(r, path=f.journal_path)
+        after = journal.open_inventory(journal.load(path=f.journal_path))
+        report["open_lots_after"] = len(after)
+    agentctl.audit("journal_backfill", "assistant", report, ok=True,
+                   refused="" if not dry else
+                   "dry run -- confirm phrase not supplied")
+    return {"ok": True, "confirm_with": BACKFILL_PHRASE if dry else "",
+            "report": report,
+            "sample": rows[:3]}
+
+
 @app.get("/api/a/{acct}/journal")
 @app.get("/api/journal")
 def get_journal(symbol: str = "", days: int = 0, limit: int = 200, f: Fleet = Depends(cur)):
