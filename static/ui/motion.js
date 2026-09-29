@@ -127,14 +127,43 @@ export function formatLike(shape, value) {
 }
 
 /** May these two strings be eased into one another? The whole honesty rule
- *  in one function, so the test can hold it. */
+ *  in one function, so the test can hold it.
+ *
+ *  CROSSING A THOUSAND IS NOT A CHANGE OF SHAPE, and treating it as one was
+ *  the single worst thing this file did. `grouped` only records whether the
+ *  string HAPPENED to contain a comma, so "$999.12" -> "$1,002.44" read as
+ *  two different shapes and the most-watched figure on the dashboard -- the
+ *  account value going through a round thousand -- was the one figure that
+ *  snapped. It is measured either side of that boundary by the same
+ *  formatter; nothing about the currency mark, the sign, the suffix or the
+ *  decimals moved. So one crossing is allowed, and ONLY that one: the
+ *  ungrouped side must really be under a thousand and the grouped side at or
+ *  over it. "1002" -> "1,003" is not a crossing, it is two renderers
+ *  disagreeing about the same magnitude, and that still snaps.
+ *
+ *  The separators then go on for the WHOLE flight, in both directions, so a
+ *  figure falling out of the thousands shows "$1,001.20" on the way down
+ *  rather than growing a comma at the last frame. The published string is
+ *  still written byte for byte at the end -- `runTween` holds it -- so the
+ *  value that lands is the one the server sent, grouped its way. */
 export function tweenable(fromText, toText) {
   const a = parseNum(fromText), b = parseNum(toText);
   if (!a || !b) return null;
   if (a.pre !== b.pre || a.post !== b.post) return null;
-  if (a.decimals !== b.decimals || a.grouped !== b.grouped) return null;
+  if (a.decimals !== b.decimals) return null;
   if (a.value === b.value) return null;
-  return { from: a.value, to: b.value, shape: b };
+  let grouped = b.grouped;
+  if (a.grouped !== b.grouped) {
+    const bare = a.grouped ? b : a;
+    const comma = a.grouped ? a : b;
+    if (Math.abs(bare.value) >= 1000) return null;
+    if (Math.abs(comma.value) < 1000) return null;
+    grouped = true;
+  }
+  return {
+    from: a.value, to: b.value,
+    shape: { pre: b.pre, post: b.post, decimals: b.decimals, grouped },
+  };
 }
 
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);

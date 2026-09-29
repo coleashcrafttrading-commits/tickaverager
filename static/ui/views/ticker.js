@@ -2090,6 +2090,39 @@ function wireLadderForm(sym) {
   });
 }
 
+/* ===================================================== the next add, honestly
+   THE ONE NAKED DASH ON THE WHOLE DASHBOARD. Every leaf element on six routes
+   was walked looking for text of exactly an em dash and then for a `title` on
+   it or on three ancestors: 38 dashes, 37 carried a reason, and the one that
+   did not was this tile.
+
+   It could not carry one. `/api/ticker/<sym>` sends `next_add_at` as a raw
+   float and `engine.status()` writes 0.0 into it whenever `_rung_price()`
+   came back None -- there is no lot open, so there is no anchor to measure a
+   rung from -- or whenever the rung computed at or below a cent. core's px()
+   turns that 0 into a bare em dash with nothing attached, because a formatter
+   over a float has nowhere to put a reason. The sub-line underneath it says
+   "from last_fill $4.98", which states the RULE the rung is measured by and
+   is not the same thing as why there is no rung.
+
+   So the float is wrapped in the {value, unit, reason} envelope the rest of
+   this page already renders through `mnum`, and the reason is derived ONLY
+   from what this payload actually shows -- the lot count -- rather than from
+   a guess about the engine's internals. When there is no number the sub-line
+   carries the same reason in the open, so it is readable without a hover. */
+function nextAddMetric(s) {
+  const v = Number(s.next_add_at);
+  if (Number.isFinite(v) && v > 0) return { value: v, unit: "usd" };
+  return {
+    value: null,
+    unit: "usd",
+    reason: s.lot_count
+      ? "the engine sent no rung price on this tick, so there is nothing to "
+        + "add at yet"
+      : "no lot is open, so there is no anchor to measure the next rung from",
+  };
+}
+
 function paintLadder() {
   const s = S.ticker;
   if (!s || !el("tkStats")) return;
@@ -2107,10 +2140,19 @@ function paintLadder() {
            html: `<span class="num">${px(s.avg_price, 4)}</span>`,
            sub: s.in_sync ? "in sync with Alpaca"
                           : `<span class="warn">Alpaca holds ${qty(s.broker_qty)}</span>` }),
-    tile({ label: "Next add", html: `<span class="num">${px(s.next_add_at)}</span>`,
-           sub: s.anchor && s.anchor.price
-             ? `from ${s.anchor.kind === "last_open" ? "last open" : esc(s.anchor.kind)} ${px(s.anchor.price)}`
-             : "" }),
+    (() => {
+      const m = nextAddMetric(s);
+      const anchored = s.anchor && s.anchor.price
+        ? `from ${s.anchor.kind === "last_open" ? "last open" : esc(s.anchor.kind)} ${px(s.anchor.price)}`
+        : "";
+      return tile({
+        label: "Next add",
+        html: mnum(m, { unit: "usd", dp: 2 }),
+        /* no number means the sub-line is the REASON, not the rule: a rule
+           printed under a dash reads as though the number is about to appear */
+        sub: m.value === null ? esc(m.reason) : anchored,
+      });
+    })(),
     tile({ label: "Open P/L", html: sgn(A.unrealized_pl),
            sub: A.unrealized_plpc ? `${A.unrealized_plpc.toFixed(2)}% since entry` : "" }),
     tile({ label: "Realised today", html: sgn(s.pnl.realized_ladder),

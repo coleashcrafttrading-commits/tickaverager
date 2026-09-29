@@ -1698,6 +1698,7 @@ def _equity_history(ctx: Ctx, tf: str) -> dict:
         # show it.
         if hit and hit[2] is ctx.fleet and now - hit[0] < _SERIES_TTL:
             return hit[1]
+    import perf as _perf          # local, as everywhere else in this module
     b = getattr(ctx.fleet, "broker", None)
     if not b:
         out = {"points": [], "base": None,
@@ -1716,9 +1717,24 @@ def _equity_history(ctx: Ctx, tf: str) -> dict:
                 if v is None:
                     continue
                 pts.append((float(t), v))
+            # ONE CLEANING, SHARED WITH perf. Alpaca back-pads every window
+            # to its full length, so period=3M on a five-week-old account
+            # returns leading ZEROS, and period=all returned a point dated
+            # the day BEFORE this account existed. perf.clean_equity strips
+            # both and has since the day they were measured; hub did not, so
+            # the two modules walked different curves and could publish two
+            # drawdowns for one account. On this account they happen to agree
+            # (-8.6937% from both, measured 29 Sep 2026) only because the one
+            # dropped point sat at the base value and was never the peak -- a
+            # leading zero would have divided hub's percentage by 0 while
+            # perf's stayed right. Same curve, same answer, by construction.
+            pts, clean_why = _perf.clean_equity(
+                pts, (ctx.account or {}).get("created_at"))
             out = {"points": pts, "base": _num(raw.get("base_value")),
+                   "cleaned": clean_why or "",
                    "why": None if pts else
-                   "Alpaca returned no equity points for this window"}
+                   (clean_why or
+                    "Alpaca returned no equity points for this window")}
         except Exception as e:
             out = {"points": [], "base": None,
                    "why": "Alpaca's portfolio history refused this window (%s)"

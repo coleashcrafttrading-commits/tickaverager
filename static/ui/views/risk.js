@@ -19,8 +19,8 @@
                              HHI stated as "equivalent equal positions".
      HOW FAR HAVE I FALLEN   drawdown from the account's own high-water mark,
                              drawn off perf.daily()'s equity prints -- the
-                             ACCOUNT curve, not the strategy logs, because the
-                             logs are wins-only and cannot fall.
+                             ACCOUNT curve, not the strategy logs, because a
+                             log that records only take-profits cannot fall.
      WHAT CAPS ME            every guardrail as a gauge, sorted, with the one
                              that would stop the next order named. A cap set
                              to 0 is drawn OFF, never as 0% used.
@@ -250,8 +250,16 @@ function renderHero() {
     tile({ label: "Worst drawdown",
            metric: p ? p.max_drawdown : null, signed: true,
            sub: p ? mfmt(p.max_drawdown_pct, { unit: "pct" }) : "",
-           hint: "Measured on the ACCOUNT equity curve, not on the strategy "
-               + "logs — those are wins-only and cannot fall." }),
+           /* NO CLAIM ABOUT THE LOGS HERE. This used to end "those are
+              wins-only and cannot fall" as a flat constant, on every account
+              and every scenario -- the same sentence the owner caught in
+              perf.py, hard-coded where it could never be true or false about
+              the account being looked at. On a book with 41 closed losers it
+              said their logs could not fall. The BASIS is what this tile is
+              actually claiming, and the basis is true everywhere. */
+           hint: "Measured on the ACCOUNT equity curve — the only curve that "
+               + "includes what is still open and any exit no strategy log "
+               + "recorded." }),
     tile({ label: "Assignment exposure",
            html: asn.ok
              ? `<span class="num">${money0(asn.notional)}</span>`

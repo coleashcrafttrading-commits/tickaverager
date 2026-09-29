@@ -557,7 +557,7 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_chart
   test_engine_strategy
   test_entry_rule test_fractional test_greeks test_indicators test_latency
-  test_ledgertruth test_notes test_motion
+  test_layout test_ledgertruth test_notes test_motion
   test_optapi test_optbacktest test_optbank test_optbook test_optcal
   test_optdata test_optengine test_optexec test_optgates test_optgrade
   test_options test_options_api test_optquotes test_optrest

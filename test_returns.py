@@ -14,6 +14,14 @@ out in this file, and section 9 asserts it again on all six of mockperf.py's
 account shapes -- including the two where it must NOT be claimed, because a
 term is missing.
 
+Sections 11 and 12 do the same job for the SCORECARD -- five measures out of
+six with the holdings that lift each one and the ones that hold it back.
+Section 11 re-grades every score from the published bands rather than trusting
+it, and proves that where an attribution claims to be exact its rows add to the
+measure's own value. Section 12 TRANSPILES AND RUNS the radar, because its one
+rule is invisible in a screenshot: a score of 0 and a score nobody could
+measure are the same pixel unless the drawing separates them.
+
 WHAT THIS FILE WILL NOT DO. It does not pin a defect green. Nothing here
 asserts that something crashes, and nothing asserts a figure this file believes
 to be wrong. Where perf refuses to answer, the test asserts the REFUSAL AND ITS
@@ -492,6 +500,409 @@ check("10.12 the route places nothing",
       "perf_returns" in APPSRC and "submit" not in
       APPSRC.split("def perf_returns")[1].split("@app.get")[0], True)
 
+
+
+print()
+print("=" * 72)
+print("11. the scorecard: five measures, each able to refuse")
+print("=" * 72)
+
+SC = R["scorecard"]
+KEYS = ["return_on_funding", "capital_efficiency", "breadth", "drawdown",
+        "coverage"]
+check("11.1 five measures, in order", [m["key"] for m in SC["measures"]], KEYS)
+check("11.2 each is out of six", sorted({m["max"] for m in SC["measures"]}), [6])
+
+# THE BANDS ARE THE SCALE and they are published, so a reader can check the
+# score instead of believing it. Seven half-open bands, scores 0..6, each
+# starting where the last one ended.
+for m in SC["measures"]:
+    b = m["bands"]
+    ok = (len(b) == 7 and [x["score"] for x in b] == list(range(7))
+          and b[0]["lo"] is None and b[-1]["hi"] is None
+          and all(b[i]["hi"] == b[i + 1]["lo"] for i in range(6))
+          and all((x["label"] or "").strip() for x in b))
+    truthy("11.3 %-19s publishes a 0-6 scale that joins up" % m["key"], ok)
+
+# THE SCORE IS THE BAND THE VALUE FELL IN, and nothing else. Re-graded here
+# from the published numbers rather than trusted.
+for m in SC["measures"]:
+    v = m["value"]["value"]
+    if v is None:
+        continue
+    want = [x["score"] for x in m["bands"]
+            if (x["lo"] is None or v >= x["lo"])
+            and (x["hi"] is None or v < x["hi"])]
+    check("11.4 %-19s scores its own band" % m["key"],
+          m["score"]["value"], float(want[0]))
+    check("11.5 %-19s says which band that was" % m["key"],
+          m["band"]["score"], want[0])
+
+# GREEN AND RED MEAN MONEY MOVED. A coverage of 100% is not a profit, so the
+# payload tells the renderer which of these are money and which are not.
+check("11.6 the money measures are named",
+      [m["key"] for m in SC["measures"] if m["money"]],
+      ["return_on_funding", "capital_efficiency", "drawdown"])
+
+# ATTRIBUTION IS THE HALF THAT EARNS IT: the holdings that lift a score and
+# the ones that hold it back, each with its contribution.
+m1 = {m["key"]: m for m in SC["measures"]}["return_on_funding"]
+A1 = m1["attribution"]
+near("11.7 the funding return is the account over its funding",
+     m1["value"]["value"], (45210.75 - 45000.0) / 45000.0, 1e-6)
+check("11.8 RAM lifts it", [r["symbol"] for r in A1["lifts"]], ["RAM"])
+check("11.9 SPY and MSTX hold it back",
+      [r["symbol"] for r in A1["drags"]], ["SPY", "MSTX"])
+# THE DOLLARS ARE LIFTED, NOT RECOMPUTED. Same envelope, same reason, as the
+# holdings table two panels below -- if these were built a second way they
+# would drift, which is the defect perf.py exists to end.
+hold = {h["symbol"]: h for h in R["holdings"]}
+for r in A1["lifts"] + A1["drags"]:
+    check("11.10 %s's dollars are the holding's own" % r["symbol"],
+          r["value"], hold[r["symbol"]]["total"])
+
+# AND THEY ADD UP. Where the payload claims `exact`, the lifts, the drags and
+# the named remainder must come back to the measure's own value.
+for m in SC["measures"]:
+    a = m["attribution"]
+    if not a or not a["exact"]:
+        continue
+    tot = sum(r["effect"]["value"] for r in a["lifts"] + a["drags"])
+    if a["remainder"]:
+        tot += a["remainder"]["effect"]["value"]
+    near("11.11 %-19s attribution adds to the score" % m["key"],
+         tot, a["sums_to"], 1e-5)
+
+# The remainder is NAMED rather than spread over the holdings: fees, income
+# and the residual are facts about the account and belong to no ticker.
+truthy("11.12 the account-level remainder is named",
+       A1["remainder"] is not None)
+near("11.13 ... and it is the account less the holdings",
+     A1["remainder"]["value"]["value"],
+     round((45210.75 - 45000.0) - sum(h["total"]["value"] for h in R["holdings"]
+                                      if h["total"]["value"] is not None), 2))
+
+# A MEASURE WITH NO DATA SCORES NOTHING AND SAYS WHY. It is not a zero, and
+# this fixture has no equity curve at all.
+m4 = {m["key"]: m for m in SC["measures"]}["drawdown"]
+check("11.14 no equity curve means no drawdown score",
+      m4["score"]["value"], None)
+truthy("11.15 ... and it is not a zero either",
+       m4["value"]["value"] is None)
+truthy("11.16 ... with the curve named in the reason",
+       "equity" in (m4["score"]["reason"] or ""))
+check("11.17 ... and no band was claimed", m4["band"], None)
+check("11.18 the average counts only what answered", SC["scored"], 4)
+near("11.19 ... and it is the mean of those four",
+     SC["overall"]["value"],
+     round(sum(m["score"]["value"] for m in SC["measures"]
+               if m["score"]["value"] is not None) / 4.0, 2), 0.005)
+truthy("11.20 ... and it names what it left out",
+       "Worst fall in account equity" in (SC["overall"]["reason"] or ""))
+truthy("11.21 ... and is flagged thin for leaving it out",
+       SC["overall"]["thin"])
+
+# ONE NAME CARRYING EVERYTHING IS THE THING BREADTH MEASURES.
+solo = ctx_of(account={"equity": 51000.0}, activities=[act(60, 50000.0)],
+              journal_rows=[jrow("RAM", 1000.0, opened=T0 - 30 * DAY,
+                                 closed=T0 - 20 * DAY)],
+              option_positions=[], broker_positions=[])
+ms = {m["key"]: m for m in perf.returns(solo)["scorecard"]["measures"]}
+check("11.22 a one-name book cannot be scored for breadth",
+      ms["breadth"]["score"]["value"], None)
+truthy("11.23 ... and says there is no spread to measure",
+       "no spread across names" in (ms["breadth"]["score"]["reason"] or ""))
+
+# TWO NAMES CANNOT REACH SIX, and that is a fact about the book rather than
+# about the trading, so the ceiling is published with it.
+two = ctx_of(account={"equity": 51000.0}, activities=[act(60, 50000.0)],
+             journal_rows=[jrow("RAM", 950.0, opened=T0 - 30 * DAY,
+                                closed=T0 - 20 * DAY),
+                           jrow("MSTX", 50.0, opened=T0 - 30 * DAY,
+                                closed=T0 - 20 * DAY)],
+             option_positions=[], broker_positions=[])
+mb = {m["key"]: m for m in perf.returns(two)["scorecard"]["measures"]}["breadth"]
+truthy("11.24 a two-name book publishes its ceiling", mb["ceiling"] is not None)
+truthy("11.25 ... below six", mb["ceiling"]["score"] < 6)
+truthy("11.26 ... saying it is about the size of the book",
+       "SIZE of the book" in (mb["ceiling"]["why"] or ""))
+# RAM is 90% of the gross result, so the spread is 10% and the score is the
+# bottom band. A concentrated book is not scored on how well the one name did.
+near("11.27 ... and the spread is what is left outside the biggest name",
+     mb["value"]["value"], 0.05, 1e-6)
+check("11.28 ... which scores nothing", mb["score"]["value"], 0.0)
+
+# A CAPPED LIST NO LONGER ADDS UP, and the flag has to know it.
+many = ctx_of(
+    account={"equity": 51000.0}, activities=[act(60, 50000.0)],
+    journal_rows=[jrow("S%d" % i, 100.0 + i, opened=T0 - 30 * DAY,
+                       closed=T0 - 20 * DAY) for i in range(9)],
+    option_positions=[], broker_positions=[])
+mm = {m["key"]: m
+      for m in perf.returns(many)["scorecard"]["measures"]}["return_on_funding"]
+check("11.29 nine lifting rows are capped at six",
+      len(mm["attribution"]["lifts"]), 6)
+check("11.30 ... the rest are counted", mm["attribution"]["truncated"], 3)
+check("11.31 ... and the attribution stops claiming to be exact",
+      mm["attribution"]["exact"], False)
+truthy("11.32 ... saying so in words",
+       "no longer adds" in (mm["attribution"]["why"] or ""))
+
+# COVERAGE: a row nobody could value contributes EXACTLY NOTHING and is still
+# in the denominator. That is a measurement, so it is listed with its reason
+# rather than dropped.
+nobook = perf.returns(C3)["scorecard"]
+mc = {m["key"]: m for m in nobook["measures"]}["coverage"]
+truthy("11.33 an unread book leaves holdings unmeasured",
+       len(mc["attribution"]["drags"]) > 0)
+check("11.34 ... each contributing exactly nothing",
+      sorted({r["effect"]["value"] for r in mc["attribution"]["drags"]}), [0.0])
+truthy("11.35 ... with its own reason on it",
+       all((r["why"] or "").strip() for r in mc["attribution"]["drags"]))
+
+# A DENOMINATOR OF ZERO IS NOT THE SAME FACT AS AN UNREAD ONE. Deposits and
+# withdrawals that cancel ARE a measurement, and the refusal has to say which
+# of the two it is looking at.
+cancel = ctx_of(account={"equity": 400.0},
+                activities=[act(60, 50000.0), act(30, -50000.0, "CSW")],
+                journal_rows=[], option_positions=[], broker_positions=[])
+mz = {m["key"]: m
+      for m in perf.returns(cancel)["scorecard"]["measures"]}["return_on_funding"]
+check("11.40 funding that cancels cannot carry a return",
+      mz["score"]["value"], None)
+truthy("11.41 ... and says the deposits and withdrawals cancel",
+       "cancel" in (mz["score"]["reason"] or ""))
+
+# NOTHING READ AT ALL: every axis refuses, the average refuses, and not one
+# of them is a zero.
+none_sc = perf.returns(ctx_of())["scorecard"]
+check("11.36 nothing read scores nothing at all", none_sc["scored"], 0)
+check("11.37 ... and the average is a dash",
+      none_sc["overall"]["value"], None)
+truthy("11.38 ... with a reason",
+       bool((none_sc["overall"]["reason"] or "").strip()))
+check("11.39 ... and not one measure scored zero",
+      [m["key"] for m in none_sc["measures"]
+       if m["score"]["value"] == 0], [])
+
+# Section 8's audit already walks the scorecard, so a bare dash anywhere in it
+# fails there. This is the shape check the audit cannot make.
+for scen_m in SC["measures"]:
+    truthy("11.42 %-19s carries the scale it was judged against"
+           % scen_m["key"], bool((scen_m["basis"] or "").strip()))
+
+print()
+print("=" * 72)
+print("12. the radar itself, RUN against the real payload")
+print("=" * 72)
+
+# The components are transpiled and executed in Duktape, the same way
+# test_viz.py proves viz.js -- and for the same reason. The rule this section
+# exists for is invisible in a screenshot: a score of 0 and a score nobody
+# could measure are the same pixel on a radar unless the drawing separates
+# them. core.js's real formatters and the real viz.js are loaded beside it, so
+# `mfmt` and `hbar` here are the ones that ship. The lifting code is test_viz's
+# technique rather than its import: that file runs its own checks at import
+# time, so importing it would run a second suite inside this one.
+try:
+    import dukpy
+    HAVE_DUK = True
+except Exception as _e:                     # pragma: no cover -- no dukpy
+    HAVE_DUK = False
+    print("skip  dukpy is not installed, so the view is not executed: %r"
+          % (_e,))
+
+if HAVE_DUK:
+    import json
+    import re
+    from pathlib import Path
+
+    _UI = Path(os.path.dirname(os.path.abspath(__file__))) / "static" / "ui"
+
+    def _strip(src):
+        """ES module syntax out, bodies untouched."""
+        src = re.sub(r"^\s*import\s[\s\S]*?;\s*$", "", src, flags=re.M)
+        return src.replace("export ", "")
+
+    def _core():
+        """The REAL formatters and the REAL metric envelope, lifted out of
+        core.js. A second, prettier mfmt in a harness proves only that the
+        harness agrees with itself."""
+        src = (_UI / "core.js").read_text(encoding="utf-8")
+        a = src.index("export const $  =")
+        b = src.index("/* " + "-" * 64 + " api */")
+        c = src.index("export const isMetric =")
+        d = src.index("/* " + "-" * 63 + " sparkline */")
+        return (src[a:b] + "\n" + src[c:d]).replace("export ", "")
+
+    _SHIM = r"""
+if (!Object.assign) {
+  Object.assign = function (t) {
+    for (var i = 1; i < arguments.length; i++) {
+      var s = arguments[i] || {};
+      for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k)) t[k] = s[k];
+    }
+    return t;
+  };
+}
+if (!Number.isNaN) { Number.isNaN = function (v) { return v !== v; }; }
+if (!Array.prototype.find) {
+  Array.prototype.find = function (fn) {
+    for (var i = 0; i < this.length; i++) if (fn(this[i], i, this)) return this[i];
+    return undefined;
+  };
+}
+/* NO DOM. returns.js must be importable without one -- its CSS injector says
+   so itself -- and that is what lets this section run it at all. */
+var document = null;
+var window = {};
+var VIEWS = {};
+var S = {account: ""};
+"""
+
+    _JS = dukpy.JSInterpreter()
+    _JS.evaljs(dukpy.jsx_compile(_SHIM) + ";1;")
+    _JS.evaljs(dukpy.jsx_compile(_core()) + ";1;")
+    _JS.evaljs(dukpy.jsx_compile(
+        _strip((_UI / "viz.js").read_text(encoding="utf-8"))) + ";1;")
+    def _scorecard_block():
+        """The radar and its attribution, LIFTED OUT of returns.js.
+
+        The whole file is too much for the Babel that ships inside dukpy --
+        it overflows its own stack compiling it -- so the section under test
+        is cut out by its own banner comments and compiled alone. It is the
+        shipped source, character for character, and the names below are
+        asserted so that a rename cannot quietly leave this section compiling
+        an empty string and passing.
+        """
+        src = (_UI / "views" / "returns.js").read_text(encoding="utf-8")
+        a0 = src.index("/* ============================================="
+                       "================= the radar")
+        b0 = src.index("/* ================================================"
+                       "================ the notes")
+        blk = src[a0:b0]
+        # `prose` lives at the bottom of the file with the basis list and
+        # the attribution calls it, so it comes along -- the real one and
+        # not a paraphrase of it.
+        p0 = src.index("const prose = (s) =>")
+        blk += "\n" + src[p0:src.index("\n", p0)]
+        for name in ("radar", "pips", "scRow", "bandScale",
+                     "attribution", "renderScorecard", "prose"):
+            assert re.search(r"\b(const|function) %s\b" % name, blk), \
+                ("returns.js no longer defines %s in the scorecard block"
+                 % name)
+        return blk.replace("export ", "")
+
+    _JS.evaljs(dukpy.jsx_compile(_scorecard_block()) + ";1;")
+
+    def js(expr):
+        return _JS.evaljs(dukpy.jsx_compile("(" + expr + ")"))
+
+    def load(name, payload):
+        _JS.evaljs(dukpy.jsx_compile(
+            "var %s = %s;1;" % (name, json.dumps(payload))))
+
+    # An account with an equity curve, so every one of the five answers.
+    _curve = [(T0 - (40 - i) * DAY,
+               45000.0 + i * 5.0 - (900.0 if 12 <= i <= 18 else 0.0))
+              for i in range(41)]
+    _curve[-1] = (T0, 45210.75)
+    C6 = ctx_of(account={"equity": 45210.75}, activities=acts,
+                equity_points=_curve, journal_rows=rows_j, option_positions=[],
+                broker_positions=book, ledger_present=True)
+    SC6 = perf.returns(C6)["scorecard"]
+    check("12.1 with a curve, every axis answers", SC6["scored"], 5)
+
+    load("FULL", SC6)
+    load("PART", SC)
+
+    full = js("radar(FULL.measures, FULL.measures[0].key, FULL.max)")
+    part = js("radar(PART.measures, PART.measures[0].key, PART.max)")
+
+    check("12.2 five measured axes plot five points",
+          full.count('class="sc-dot"'), 5)
+    check("12.3 ... and the web between them is drawn",
+          full.count('class="sc-web"'), 1)
+    # THE POINT OF THE WHOLE COMPONENT.
+    check("12.4 an unmeasured axis plots no point",
+          part.count('class="sc-dot"'), 4)
+    check("12.5 ... and the web is not drawn at all",
+          part.count('class="sc-web"'), 0)
+    truthy("12.6 ... its spoke is marked absent", 'sc-ax gone' in part)
+    truthy("12.7 ... its label carries a dash, not a zero",
+           "Drawdown —" in part)
+    truthy("12.8 ... and its tooltip says it was not measured",
+           "not measured" in part)
+    # A POINT AT THE CENTRE IS A SCORE OF ZERO, and that is why an axis
+    # nobody measured may not have one. Both halves are asserted, because the
+    # second half alone would pass on a component that never drew a dot at
+    # all. The centre of this viewBox is 132,120, and `two` is the fixture
+    # from section 11 whose breadth genuinely scores 0.
+    load("ZERO", perf.returns(two)["scorecard"])
+    flat = lambda h: re.sub(r"\s+", " ", h)
+    zero = js("radar(ZERO.measures, ZERO.measures[0].key, ZERO.max)")
+    truthy("12.9 a score of ZERO is drawn at the centre",
+           'cx="132.0" cy="120.0"' in flat(zero))
+    check("12.9 ... and an unmeasured axis draws nothing there",
+          flat(part).count('cx="132.0" cy="120.0"'), 0)
+    # Every ring is a value the chart reaches, and it says which.
+    for _k in ("2", "4", "6"):
+        truthy("12.10 the ring scale names %s" % _k,
+               '>' + _k + '</text>' in full)
+
+    # The score cells, and what an unmeasured one draws instead of six empties
+    # and a zero.
+    pip_ok = js("pips(PART.measures[0])")
+    pip_no = js("pips(PART.measures[3])")
+    truthy("12.11 a measured score draws filled cells", 'sc-pip on' in pip_ok)
+    truthy("12.12 an unmeasured score draws none", 'sc-pip on' not in pip_no)
+    truthy("12.13 ... and prints a dash with its reason",
+           'class="unmeasured"' in pip_no and "equity curve" in pip_no)
+
+    # The band scale of the selected measure: exactly one lit, and the label
+    # under it names the band in the measure's own units.
+    scale = js("bandScale(PART.measures[0])")
+    check("12.14 exactly one band is lit", scale.count("sc-sb on"), 1)
+    truthy("12.15 ... and the label names the values it sits between",
+           "%" in scale and "of 6" in scale)
+    scale_no = js("bandScale(PART.measures[3])")
+    check("12.16 an unmeasured measure lights no band",
+          scale_no.count("sc-sb on"), 0)
+    truthy("12.17 ... and prints a dash with its reason",
+           'class="unmeasured"' in scale_no)
+
+    # THE ATTRIBUTION. Who lifts it, who holds it back, in one diverging bar.
+    att = js("attribution(PART.measures[0])")
+    truthy("12.18 the lifting holding is listed", ">RAM<" in att)
+    truthy("12.19 the holdings that hold it back are listed",
+           ">SPY<" in att and ">MSTX<" in att)
+    truthy("12.20 the account-level remainder is listed and named",
+           "Not attributable to any holding" in att)
+    truthy("12.21 the bars diverge around zero", "viz-hb-z" in att)
+    # A measure whose contributions cannot add up says so under the chart.
+    att_b = js("attribution(PART.measures[2])")
+    truthy("12.22 an inexact attribution says it does not add to the score",
+           "do not add to the score" in att_b)
+    # And one with nothing behind it draws the empty state, with the reason.
+    att_none = js("attribution(PART.measures[3])")
+    truthy("12.23 a measure with no attribution draws its reason",
+           "viz-blank" in att_none and "equity" in att_none)
+
+    # The ranked list is the layout below 560px, so every score has to be
+    # readable in it without the drawing.
+    row = js("scRow(PART.measures[0], PART.measures[0].key)")
+    truthy("12.24 the list row names the measure",
+           "Return on the money put in" in row)
+    truthy("12.25 ... its band", "%" in row)
+    truthy("12.26 ... and marks the selected one", 'sc-row on' in row)
+    row_no = js("scRow(PART.measures[3], PART.measures[0].key)")
+    truthy("12.27 an unmeasured row carries its reason, not a zero",
+           'class="unmeasured"' in row_no and "sc-pip on" not in row_no)
+
+    # The CSS that makes the list the whole component on a phone.
+    truthy("12.28 the drawing is dropped below 560px",
+           "@media (max-width: 560px)" in VIEW
+           and ".sc-rad{display:none;}" in VIEW)
 
 print()
 print("=" * 72)

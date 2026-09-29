@@ -84,12 +84,13 @@ const CSS = `
    flex-wrap here is for. */
 .sc-title { flex-wrap: wrap; }
 .sc-title > b { flex: 0 0 auto; white-space: nowrap;
-                font-size: 13.5px; letter-spacing: .01em; color: var(--text); }
+                font-size: var(--fs-md); letter-spacing: .01em;
+                color: var(--text); }
 .sc-read { min-height: 18px; }
 .sc-ctl { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .sc-plot { position: relative; }
 .sc-note { display: flex; flex-direction: column; gap: 3px;
-           font-size: 11.5px; line-height: 1.45; color: var(--faint);
+           font-size: var(--fs-xs); line-height: 1.45; color: var(--faint);
            border-left: 2px solid var(--hairline2); padding-left: 9px; }
 /* At 400px the two segmented groups do not fit on one row: measured, the
    "Candle" button was clipped to "Candl" and "All" fell off the end of the
@@ -104,7 +105,7 @@ const CSS = `
   .sc-ctl { width: 100%; display: grid; grid-template-columns: 1fr; gap: 6px; }
   .sc-ctl .seg { display: flex; width: 100%; }
   .sc-ctl .seg-b { flex: 1 1 0; min-width: 0; padding: 6px 4px;
-                   font-size: 11.5px; text-align: center; }
+                   font-size: var(--fs-xs); text-align: center; }
 }`;
 
 function installCss() {

@@ -304,7 +304,6 @@ check("a currency mark appearing refuses",
       js('tweenable("252.00", "$252.00")'), None)
 check("a suffix appearing refuses", js('tweenable("16.9", "16.9%")'), None)
 check("more decimals refuses", js('tweenable("$4.10", "$4.1000")'), None)
-check("grouping appearing refuses", js('tweenable("$999", "$1,004")'), None)
 check("an unchanged value refuses", js('tweenable("$252.00", "$252.00")'), None)
 check("the same shape, a different value, is allowed",
       js('JSON.stringify([tweenable("$94,388.10","$94,512.30").from,'
@@ -312,6 +311,54 @@ check("the same shape, a different value, is allowed",
       "[94388.1,94512.3]")
 check("a negative percent easing further negative is allowed",
       js('tweenable("-16.90%","-18.20%").to'), -18.2)
+
+# =========================================================================
+print()
+print("4b. a thousands boundary is not a change of shape")
+# -------------------------------------------------------------------------
+# MEASURED in the browser last round: tweenable("$259.12", "$988.44") returned
+# a plan and eased, and tweenable("$999.12", "$1,002.44") returned null and
+# SNAPPED -- because `grouped` records only whether the string happened to
+# contain a comma. The account value crossing a round thousand is the
+# most-watched transition on this dashboard and it was the one that jumped.
+check("crossing 1,000 upwards eases",
+      js('JSON.stringify([tweenable("$999.12","$1,002.44").from,'
+         ' tweenable("$999.12","$1,002.44").to])'),
+      "[999.12,1002.44]")
+check("crossing 1,000 downwards eases",
+      js('JSON.stringify([tweenable("$1,002.44","$999.12").from,'
+         ' tweenable("$1,002.44","$999.12").to])'),
+      "[1002.44,999.12]")
+check("the figure below the boundary was already fine, and still is",
+      js('tweenable("$259.12","$988.44").to'), 988.44)
+# the separators go on for the WHOLE flight, both ways, so the comma does not
+# appear or vanish at one frame in the middle
+check("an upward crossing groups every frame over a thousand",
+      [f for f in tween_frames(js, "$999.12", "$1,002.44")
+       if float(f.replace("$", "").replace(",", "")) >= 1000 and "," not in f],
+      [])
+check("a downward crossing groups every frame over a thousand",
+      [f for f in tween_frames(js, "$1,002.44", "$999.12")
+       if float(f.replace("$", "").replace(",", "")) >= 1000 and "," not in f],
+      [])
+check("and the last frame is still the string it was given",
+      tween_frames(js, "$1,002.44", "$999.12", at=(220,))[0], "$999.12")
+check("a million boundary is the same crossing",
+      js('tweenable("$999,999.00","$1,000,004.00").to'), 1000004)
+# ONE crossing, and only a real one. Two renderers disagreeing about the same
+# magnitude is not a figure moving, and easing it would hide the disagreement.
+check("1002 -> 1,003 is not a crossing, it is two formatters disagreeing",
+      js('tweenable("1002", "1,003")'), None)
+check("1,002 -> 1003 refuses for the same reason",
+      js('tweenable("1,002", "1003")'), None)
+check("a crossing still cannot change the currency mark",
+      js('tweenable("999.12", "$1,002.44")'), None)
+check("a crossing still cannot change the decimals",
+      js('tweenable("$999.1", "$1,002.44")'), None)
+check("a crossing still cannot flip the sign, which lives in the prefix",
+      js('tweenable("+$999.12", "-$1,002.44")'), None)
+check("a dash on either side still refuses, crossing or not",
+      js('tweenable("\\u2014", "$1,002.44")'), None)
 
 # =========================================================================
 print()
@@ -516,6 +563,80 @@ check("tween frames are written to nodeValue, which is not a childList change",
       "nodeValue =" in src, True)
 long_lines = [i + 1 for i, ln in enumerate(src.splitlines()) if len(ln) > 88]
 check("no line over 88 characters", long_lines, [])
+
+# =========================================================================
+print()
+print("10. ONE TYPE SCALE, and it is written down in tokens")
+# -------------------------------------------------------------------------
+# This lives beside the movement layer for the same reason section 8 does:
+# theme.css is the dial file motion.js reads its durations out of, and the
+# two stylesheets are where a figure gets its size before this file ever
+# touches it. MEASURED in a browser at 1280x900 over every leaf text node in
+# #view, the rail and the header on the Portfolio room: ELEVEN distinct font
+# sizes and SIX weights, among them 9.5px, 11.5px and 13.5px, and a 600
+# sitting beside a 620. Half a pixel is not a step. It reads as the same size
+# rendered badly, and it only ever exists because a rule needed a value the
+# scale did not have. So the scale is nine whole-pixel tokens and four
+# weights, and the test below is that NOTHING WRITES A SIZE OR A WEIGHT DOWN
+# any more -- which is the only form of this that a text check can prove and
+# the only form that stops the eleventh size coming back.
+#
+# It cannot prove what renders; the browser pass does that, and it measured
+# EIGHT sizes (10/11/12/13/15/18/22/28) and FOUR weights (400/540/620/700)
+# after this change, identical in light and dark.
+theme_scale = dict(re.findall(r"(--fs-[a-z0-9]+):\s*([^;]+);", theme))
+check("the scale is nine steps", len(theme_scale) >= 9, True)
+half_px = sorted({v.strip() for k, v in theme_scale.items()
+                  if re.match(r"^\d+\.\d+px$", v.strip())})
+check("not one step is a fraction of a pixel", half_px, [])
+weights = dict(re.findall(r"(--w-[a-z]+):\s*(\d+)", theme))
+check("four weights and no more", sorted(weights.values()),
+      ["400", "540", "620", "700"])
+check("regular IS 400 -- the weight unstyled text already inherits, so a "
+      "token and a default cannot sit a tenth of a stroke apart",
+      weights.get("--w-reg"), "400")
+
+# The two stylesheets may not write a literal size or weight. The single
+# documented exception is 16px on a form control under the mobile media
+# query: that is Safari's zoom threshold, a browser constant, not type.
+for name, text in (("theme.css", theme), ("app.css", appcss)):
+    lits = [m.group(0) for m in re.finditer(r"font-size:\s*[\d.]+px", text)]
+    if name == "app.css":
+        lits = [x for x in lits if x.replace(" ", "") != "font-size:16px"]
+    check("%s writes no literal font-size" % name, lits, [])
+    check("%s writes no literal font-weight" % name,
+          re.findall(r"font-weight:\s*\d+", text), [])
+check("the one literal left in app.css says why it is there",
+      "Safari's zoom threshold" in appcss, True)
+check("--fs-base is kept as a NAME, not deleted: assistant.js builds a `font:`"
+      " shorthand out of it and an undefined var drops the whole declaration",
+      bool(re.search(r"--fs-base:\s*var\(--fs-md\)", theme)), True)
+
+# =========================================================================
+print()
+print("11. the Next add tile is an envelope, not a bare formatter")
+# -------------------------------------------------------------------------
+# The dash is the one thing this file refuses to animate, on the grounds that
+# "the reason it is a dash is the point" -- so a dash carrying no reason is
+# exactly the failure that refusal exists to protect against. MEASURED: every
+# leaf element on six routes was walked for text of exactly an em dash and
+# then for a `title` on it or on three ancestors. 38 dashes, 37 carried a
+# reason. The one that did not was NEXT ADD on the ticker Ladder tab, and it
+# structurally could not: `px(s.next_add_at)` is a formatter over a raw float
+# from /api/ticker/<sym>, and a float has nowhere to put a reason.
+TICKER = UI / "views" / "ticker.js"
+tk = TICKER.read_text(encoding="utf-8")
+check("the bare formatter over the raw float is gone",
+      "px(s.next_add_at)" in tk, False)
+check("there is a metric envelope for it instead",
+      "function nextAddMetric(s)" in tk, True)
+check("it renders through mnum, which is what puts the reason on the dash",
+      bool(re.search(r"html:\s*mnum\(m,", tk)), True)
+check("a missing rung is null, never 0 -- a zero here would be a price",
+      bool(re.search(r"value:\s*null", tk)), True)
+check("and it carries a reason with it", "reason:" in tk, True)
+# The browser pass re-walked the same six routes afterwards: 44 dashes, 0
+# without a reason.
 
 print()
 if FAIL:

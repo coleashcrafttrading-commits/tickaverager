@@ -73,9 +73,14 @@ renderers. `unit: "pct"` is a FRACTION (0.5 means 50%).
     account_pl(ctx)     -> the headline, today, and the funding it netted
     returns(ctx)        -> THE RETURNS ROOM: the decomposition that sums to
                            the headline, the detailed per-holding table with a
-                           cash-flow IRR, the liquidated section and the
-                           contributors. It re-derives nothing -- every term is
-                           reconcile()'s or per_ticker()'s.
+                           cash-flow IRR, the liquidated section, the
+                           contributors and the SCORECARD. It re-derives
+                           nothing -- every term is reconcile()'s or
+                           per_ticker()'s.
+    scorecard(ctx, ...) -> five measures out of six, each DERIVED from a figure
+                           the payload already carries, each able to refuse
+                           with a reason, and each attributed to the holdings
+                           that lift it and the ones that hold it back.
     metrics(rows, equity_series=...) -> the NinjaTrader/TradingView set
     per_ticker(rows)    -> [the same shape, one per symbol]
     portfolio(rows, equity_series) -> the same shape for the whole account
@@ -1930,6 +1935,501 @@ def contributors(holdings: list, rows: list, *, as_of: float) -> dict:
     }
 
 
+# ================================================================ the scorecard
+# FIVE MEASURES OUT OF SIX, AND THE ATTRIBUTION IS THE HALF THAT EARNS IT.
+#
+# Every score below is DERIVED from a figure this module already publishes --
+# the reconciliation's own funding step, `totals`, `per_ticker()`'s money
+# through `_holding_row`, and `drawdown_from()` on the same equity curve
+# `metrics()` uses. Nothing here reads an input of its own and nothing here
+# invents one.
+#
+# A MEASURE WITH NOTHING BEHIND IT SCORES NOTHING. `score` is a metric envelope
+# exactly like every other number in this file, so an axis nobody could measure
+# arrives as {"value": null, "reason": ...} and the page can draw it as ABSENT
+# rather than as a point at the centre. On a radar a zero and an absence are the
+# same pixel unless the payload separates them, and on this dashboard that is
+# the cardinal sin.
+#
+# THE BANDS ARE A CHOSEN SCALE, NOT A MEASUREMENT. They are published on every
+# measure, with the measured value beside them, so the reader can see what the
+# score was compared against and can ignore it and read the number instead.
+
+#: Out of six. The number is a convention and nothing in the arithmetic needs
+#: it; the bands below are what a score actually means.
+SCORE_MAX = 6
+
+#: At most this many names on each side of an attribution list. Beyond it the
+#: list stops being a reading and becomes the table that is already below it;
+#: what was left out is COUNTED rather than dropped silently.
+ATTR_LIMIT = 6
+
+SCORECARD_BASIS = (
+    "Five measures, each scored out of %d. Every score is DERIVED from a "
+    "figure published elsewhere in this same payload -- the funding step of "
+    "the reconciliation, the totals row, each holding's own money out of "
+    "per_ticker(), and the account's equity curve. THE BANDS ARE A CHOSEN "
+    "SCALE AND NOT A MEASUREMENT: they are published on every measure, and "
+    "the measured value is published beside the score so it can be read "
+    "without them. A measure with nothing behind it scores NOTHING and says "
+    "why -- that is not a zero, and an axis drawn at the centre would be "
+    "claiming the account was measured and failed." % SCORE_MAX)
+
+
+def _bandset(edges: list) -> list:
+    """Six ascending thresholds -> seven half-open bands, worst first.
+
+    Every measure below is expressed so that HIGHER IS BETTER, the drawdown
+    included -- its value is negative or zero, so "closer to zero" and "higher"
+    are the same direction. One direction means one grader and no second
+    convention to get backwards.
+    """
+    out, lo = [], None
+    for i, e in enumerate(edges):
+        out.append({"score": i, "lo": lo, "hi": float(e)})
+        lo = float(e)
+    out.append({"score": SCORE_MAX, "lo": lo, "hi": None})
+    return out
+
+
+def _band_label(b: dict, fmt, top: Optional[str] = None,
+                bottom: Optional[str] = None) -> str:
+    """One band in the MEASURE's own units, which is what makes a score out of
+    six checkable. The two open-ended bands may name themselves instead:
+    "100.0% or better" is a nonsense on a measure that stops at 100%."""
+    lo, hi = b["lo"], b["hi"]
+    if lo is None:
+        return bottom or ("below %s" % fmt(hi))
+    if hi is None:
+        return top or ("%s or better" % fmt(lo))
+    return "%s to %s" % (fmt(lo), fmt(hi))
+
+
+def _pct_plain(x: float) -> str:
+    """A fraction as a PROPORTION, with no sign on it. A breadth of 70% is not
+    a gain of 70%, and `_pct_words`' leading + says that it is."""
+    return "%.1f%%" % (x * 100.0)
+
+
+def _grade(value: float, bands: list) -> dict:
+    for b in bands:
+        if ((b["lo"] is None or value >= b["lo"])
+                and (b["hi"] is None or value < b["hi"])):
+            return b
+    return bands[-1]
+
+
+def _attr_rows(items: list, as_of: float) -> tuple:
+    """(lifts, drags, truncated) -- sorted by effect, capped, counted.
+
+    `items` are {symbol, value (a metric LIFTED off the holding), effect (a
+    float, signed in the score's own direction), why}. A row whose effect is
+    exactly 0.0 is a DRAG here and not a lift: it sits in its measure's
+    denominator and adds nothing to the numerator, which is a measurement
+    rather than an absence, so it is listed with that sentence.
+    """
+    def row(it):
+        return {"symbol": it["symbol"], "value": it["value"],
+                "effect": metric(round(it["effect"], 6), it.get("n") or 0,
+                                 "pct", reason=it.get("why"),
+                                 thin=bool(it.get("why")), as_of=as_of),
+                "why": it.get("why")}
+    lifts = sorted([i for i in items if i["effect"] > 0],
+                   key=lambda i: -i["effect"])
+    drags = sorted([i for i in items if i["effect"] <= 0],
+                   key=lambda i: i["effect"])
+    cut = len(lifts[ATTR_LIMIT:]) + len(drags[ATTR_LIMIT:])
+    return ([row(i) for i in lifts[:ATTR_LIMIT]],
+            [row(i) for i in drags[:ATTR_LIMIT]], cut)
+
+
+def _attribution(items: list, as_of: float, *, basis: str, exact: bool,
+                 sums_to: Optional[float] = None,
+                 remainder: Optional[dict] = None,
+                 unattributed: Optional[list] = None,
+                 why: Optional[str] = None) -> dict:
+    """Which holdings lift a measure and which hold it back.
+
+    `exact` says the lifts, the drags and the remainder add to the measure's
+    own value. Where they cannot -- a drawdown has no per-holding split, and a
+    distance from an even share does not add to a largest share -- it is False
+    and `why` says so, because an attribution that quietly does not add up is
+    the same lie as a term that quietly does not.
+    """
+    lifts, drags, cut = _attr_rows(items, as_of)
+    if cut and exact:
+        # A CAPPED LIST NO LONGER ADDS UP, and the flag has to know it. Claiming
+        # `exact` over six of nine rows is the same defect as a bridge whose
+        # bars do not reach its total -- it is just further down the page.
+        exact = False
+        why = ((why + " ") if why else "") + (
+            "%d row(s) beyond the %d shown on each side are not drawn, so "
+            "what is drawn no longer adds to the score. The full book is in "
+            "the holdings table." % (cut, ATTR_LIMIT))
+    return {"lifts": lifts, "drags": drags, "truncated": cut,
+            "remainder": remainder, "unattributed": list(unattributed or []),
+            "exact": bool(exact), "sums_to": sums_to, "basis": basis,
+            "why": why, "n": len(items)}
+
+
+def _measure(key: str, label: str, short: str, value: dict, edges: list, fmt,
+             *, basis: str, as_of: float, money: bool,
+             attribution: Optional[dict] = None,
+             ceiling: Optional[dict] = None,
+             absent: Optional[str] = None,
+             top_label: Optional[str] = None,
+             bottom_label: Optional[str] = None) -> dict:
+    """One axis: the measured value, the score, and what it was compared with.
+
+    The score REFUSES wherever the value did and carries the VALUE's own
+    reason. It never invents a second one, and it is never a zero: a zero here
+    is a measured failure and this is not one.
+    """
+    bands = _bandset(edges)
+    for b in bands:
+        b["label"] = _band_label(b, fmt, top=top_label, bottom=bottom_label)
+    v = value["value"]
+    n = int(value.get("n") or 0)
+    # `money` is for the RENDERER and it is theme.css's rule 3, not a taste:
+    # green and red mean money moved and nothing else. A coverage of 100% is
+    # not a profit and must not paint green, so the payload says which of these
+    # measures is money and which is a proportion.
+    if v is None:
+        reason = (value.get("reason") or absent
+                  or ("%s was not measured on this account" % label))
+        return {"key": key, "label": label, "short": short, "value": value,
+                "score": dash(n, "count", reason, as_of=as_of),
+                "max": SCORE_MAX, "band": None, "bands": bands,
+                "ceiling": ceiling, "basis": basis, "attribution": attribution,
+                "money": bool(money), "measured": False}
+    band = _grade(float(v), bands)
+    return {"key": key, "label": label, "short": short, "value": value,
+            "score": metric(band["score"], n, "count",
+                            reason=value.get("reason"),
+                            thin=bool(value.get("thin")), as_of=as_of),
+            "max": SCORE_MAX, "band": band, "bands": bands,
+            "ceiling": ceiling, "basis": basis, "attribution": attribution,
+            "money": bool(money), "measured": True}
+
+
+def scorecard(ctx: Ctx, *, holdings: list, breakdown: dict, totals: dict,
+              recon: dict, rows: list, as_of: float) -> dict:
+    """THE RADAR: five derived measures, each able to refuse, each attributed.
+
+    Nothing here recomputes a money figure. Every attribution row's `value` is
+    the holding's own envelope out of `_holding_row` (which is
+    `per_ticker()`'s), and the account-level inputs are `reconcile()`'s funding
+    step, `breakdown["total"]`, `totals["return_pct"]`, `totals["deployed"]`
+    and the equity curve `metrics()` already reads through `drawdown_from()`.
+    """
+    step = {s["key"]: s for s in recon["steps"]}
+    fund = step["funding"]
+    acct_total = breakdown["total"]
+    measured_h = [h for h in holdings if h["total"]["value"] is not None]
+    unmeasured_h = [h for h in holdings if h["total"]["value"] is None]
+    sum_h = round(sum(h["total"]["value"] for h in measured_h), 2)
+    pctf = _pct_words
+
+    # ---------------------------------------------- 1. return against funding
+    base = abs(fund["value"]) if fund["value"] is not None else None
+    if acct_total["value"] is None:
+        m1_val = dash(int(acct_total.get("n") or 0), "pct",
+                      acct_total.get("reason")
+                      or ("the account's own profit and loss is not "
+                          "measurable, so it cannot be expressed against the "
+                          "money put in"), as_of=as_of)
+    elif not base:
+        # TWO DIFFERENT ZEROS, and they are not the same fact. An account with
+        # no funding row at all has a cost basis nobody recorded -- which is
+        # unknown, and is the guard `reconcile()` already carries. An account
+        # whose deposits and withdrawals cancel HAS been measured, and its
+        # measurement is a denominator of zero.
+        m1_val = dash(int(fund["n"] or 0), "pct",
+                      ("net funding on this account is exactly zero -- the "
+                       "deposits and the withdrawals cancel -- so there is no "
+                       "capital base left to express a return against"
+                       if fund["n"] else
+                       (fund["why"] or
+                        "no deposit or withdrawal is in Alpaca's activity "
+                        "history, so there is no capital base to express a "
+                        "return against. A cost basis nobody recorded is "
+                        "unknown, not zero.")), as_of=as_of)
+    else:
+        m1_val = metric(round(acct_total["value"] / base, 6),
+                        int(fund["n"] or 0), "pct", as_of=as_of)
+    m1_attr = None
+    if base:
+        items = [{"symbol": h["symbol"], "value": h["total"],
+                  "effect": h["total"]["value"] / base,
+                  "n": h["trades"] + h["open_positions"]}
+                 for h in measured_h]
+        rem = None
+        if acct_total["value"] is not None:
+            r = round(acct_total["value"] - sum_h, 2)
+            rem = {"label": "Not attributable to any holding",
+                   "value": metric(r, len(rows), "usd", as_of=as_of),
+                   "effect": metric(round(r / base, 6), len(rows), "pct",
+                                    as_of=as_of),
+                   "why": ("fees, dividends and interest, and the unexplained "
+                           "residual, are facts about the ACCOUNT and belong "
+                           "to no holding -- so they are named here rather "
+                           "than spread across the names above")}
+        m1_attr = _attribution(
+            items, as_of, exact=True,
+            sums_to=m1_val["value"], remainder=rem,
+            unattributed=[h["symbol"] for h in unmeasured_h],
+            basis="each holding's TOTAL gain -- realised plus what its open "
+                  "lots are worth -- over the same net funding the score is "
+                  "measured against. The holdings and the remainder add to "
+                  "the score's own value exactly.",
+            why=("%d holding(s) carry no measurable total and are in neither "
+                 "list" % len(unmeasured_h)) if unmeasured_h else None)
+    m1 = _measure(
+        "return_on_funding", "Return on the money put in", "Funding",
+        m1_val, [0.0, 0.02, 0.05, 0.10, 0.20, 0.40], pctf,
+        basis="The account's own profit and loss -- equity less net funding -- "
+              "over that funding. It is the only return on this page measured "
+              "against money the account actually had rather than against "
+              "turnover. IT IS NOT ANNUALISED: it is the whole life of the "
+              "account so far, so a young account scores low for being young.",
+        as_of=as_of, money=True, attribution=m1_attr)
+
+    # --------------------------------------------------- 2. capital efficiency
+    dep = totals["deployed"]["value"]
+    m2_val = totals["return_pct"]
+    m2_attr = None
+    if dep:
+        items = [{"symbol": h["symbol"], "value": h["total"],
+                  "effect": h["total"]["value"] / dep,
+                  "n": h["trades"] + h["open_positions"]}
+                 for h in measured_h]
+        rem = None
+        if totals["total"]["value"] is not None:
+            r = round(totals["total"]["value"] - sum_h, 2)
+            rem = {"label": "Held at the broker under no row above",
+                   "value": metric(r, len(holdings), "usd", as_of=as_of),
+                   "effect": metric(round(r / dep, 6), len(holdings), "pct",
+                                    as_of=as_of),
+                   "why": ("the TOTAL row's gains are the ACCOUNT's own "
+                           "realised and open figures, so anything the broker "
+                           "holds that no row above claims lands here rather "
+                           "than vanishing out of the measure")}
+        m2_attr = _attribution(
+            items, as_of, exact=True,
+            sums_to=m2_val["value"], remainder=rem,
+            unattributed=[h["symbol"] for h in unmeasured_h],
+            basis="each holding's total gain over the WHOLE book's capital "
+                  "deployed, so the rows are comparable with one another and "
+                  "add to the score's own value. " + DEPLOYED_BASIS)
+    m2 = _measure(
+        "capital_efficiency", "Return per dollar deployed", "Efficiency",
+        m2_val, [0.0, 0.005, 0.01, 0.02, 0.05, 0.10], pctf,
+        basis="Total gains over capital deployed. READ THE DENOMINATOR: "
+              + DEPLOYED_BASIS,
+        as_of=as_of, money=True, attribution=m2_attr)
+
+    # ------------------------------------------------------------- 3. breadth
+    gross = sum(abs(h["total"]["value"]) for h in measured_h)
+    n_h = len(measured_h)
+    ceiling = None
+    if n_h < 2:
+        m3_val = dash(n_h, "pct",
+                      ("only %d holding on this account carries a measurable "
+                       "result, so there is no spread across names to measure"
+                       % n_h) if n_h else
+                      ("no holding on this account carries a measurable "
+                       "result, so there is no spread across names to "
+                       "measure"), as_of=as_of)
+    elif not gross:
+        m3_val = dash(n_h, "pct",
+                      "every holding's total gain is exactly zero, so there "
+                      "is no result for one name to be carrying", as_of=as_of)
+    else:
+        top = max(abs(h["total"]["value"]) / gross for h in measured_h)
+        m3_val = metric(round(1.0 - top, 6), n_h, "pct", as_of=as_of)
+    m3_edges = [0.10, 0.25, 0.40, 0.50, 0.60, 0.70]
+    if n_h >= 2:
+        best = _grade(1.0 - 1.0 / n_h, _bandset(m3_edges))["score"]
+        if best < SCORE_MAX:
+            ceiling = {
+                "score": best,
+                "why": ("%d name(s) here carry a measurable result, so the "
+                        "most even book possible on this account leaves %s "
+                        "outside its largest name and cannot score above %d "
+                        "of %d. That ceiling is a fact about the SIZE of the "
+                        "book and not about how it traded."
+                        % (n_h, _pct_plain(1.0 - 1.0 / n_h), best,
+                                            SCORE_MAX))}
+    m3_attr = None
+    if n_h >= 2 and gross:
+        even = 1.0 / n_h
+        items = [{"symbol": h["symbol"], "value": h["total"],
+                  "effect": even - (abs(h["total"]["value"]) / gross),
+                  "n": h["trades"] + h["open_positions"]}
+                 for h in measured_h]
+        m3_attr = _attribution(
+            items, as_of, exact=False, sums_to=None,
+            unattributed=[h["symbol"] for h in unmeasured_h],
+            basis="each name's distance from an EVEN share of the book's "
+                  "gross result (%s across %d names). Carrying more than an "
+                  "even share is what concentration IS, so such a name holds "
+                  "the score back; one carrying less spreads the book and "
+                  "lifts it. A loser concentrates exactly as hard as a "
+                  "winner: the shares are measured on the SIZE of a result "
+                  "and not on its sign." % (_pct_plain(even), n_h),
+            why="these contributions do not add to the score. The score is "
+                "measured on the LARGEST share alone, and a distance from an "
+                "even share cannot sum to a maximum.")
+    m3 = _measure(
+        "breadth", "How many names carry it", "Breadth",
+        m3_val, m3_edges, _pct_plain,
+        basis="How much of the book's gross result sits OUTSIDE its single "
+              "biggest name. A book where one ticker is everything scores "
+              "nothing here whatever that ticker made, because one name's "
+              "result is a sample of one.",
+        as_of=as_of, money=False, attribution=m3_attr, ceiling=ceiling)
+
+    # ------------------------------------------------------------ 4. drawdown
+    pts, pts_why = clean_equity(ctx.equity_points,
+                                ctx.account.get("created_at"))
+    dd = drawdown_from(pts)
+    m4_val = dd["max_pct"]
+    notes = [pts_why] if pts_why else []
+    if m4_val["value"] is not None and len(pts) < MIN_DAILY_POINTS:
+        # A CURVE THAT NEVER FELL OVER THREE PRINTS IS NOT A CLEAN RECORD, it
+        # is three prints. The reading stands -- it is what that curve did --
+        # but a top band awarded on it is a statement about the sample, so the
+        # score carries the point count rather than looking like a long
+        # untroubled history.
+        notes.append("measured over only %d equity print(s). A drawdown "
+                     "nobody had time to have is not the same as one the "
+                     "account avoided." % len(pts))
+    if m4_val["value"] is None:
+        m4_val = dash(m4_val["n"], "pct",
+                      ". ".join([m4_val["reason"]
+                                 or "no drawdown was measured"] + notes),
+                      as_of=as_of)
+    elif notes:
+        m4_val = metric(m4_val["value"], m4_val["n"], "pct", thin=True,
+                        reason=". ".join(notes), as_of=as_of)
+    peak = max([v for _t, v in pts], default=0.0)
+    m4_attr = None
+    if peak:
+        items = [{"symbol": h["symbol"], "value": h["unrealized"],
+                  "effect": h["unrealized"]["value"] / peak,
+                  "n": h["open_positions"]}
+                 for h in holdings
+                 if h["open_positions"] and h["unrealized"]["value"] is not None]
+        if items:
+            m4_attr = _attribution(
+                items, as_of, exact=False, sums_to=None,
+                basis="the open unrealised P/L of every position still held, "
+                      "against the same peak equity the percentage above is "
+                      "measured against.",
+                why="A DRAWDOWN IS A PROPERTY OF THE ACCOUNT'S EQUITY CURVE "
+                    "THROUGH TIME, and no holding here has a curve of its "
+                    "own, so this is not a decomposition of the fall and does "
+                    "not add up to it. It answers the next question instead "
+                    "-- who is underwater at the broker's marks right now -- "
+                    "and it is labelled rather than dressed up as the split.")
+    m4 = _measure(
+        "drawdown", "Worst fall in account equity", "Drawdown",
+        m4_val, [-0.30, -0.20, -0.12, -0.07, -0.04, -0.015], pctf,
+        basis="Peak to trough on Alpaca's own equity curve for this account, "
+              "as a fraction of the peak it fell from -- the same curve and "
+              "the same arithmetic the portfolio metrics use. A curve that "
+              "never fell measures 0.0%, which is a reading and not an "
+              "absence.",
+        as_of=as_of, money=True, attribution=m4_attr,
+        absent="Alpaca's equity history for this account was not read, so no "
+               "drawdown has been measured on it. That is not a drawdown of "
+               "zero.")
+
+    # ------------------------------------------------------------ 5. coverage
+    n_all = len(holdings)
+    if not n_all:
+        m5_val = dash(0, "pct",
+                      "this account holds nothing and has closed nothing, so "
+                      "there is no book to measure coverage over", as_of=as_of)
+    else:
+        m5_val = metric(round(len(measured_h) / float(n_all), 6), n_all, "pct",
+                        as_of=as_of)
+    m5_attr = None
+    if n_all:
+        each = 1.0 / n_all
+        items = ([{"symbol": h["symbol"], "value": h["total"], "effect": each,
+                   "n": h["trades"] + h["open_positions"]}
+                  for h in measured_h]
+                 + [{"symbol": h["symbol"], "value": h["total"], "effect": 0.0,
+                     "n": h["trades"] + h["open_positions"],
+                     "why": (h["total"].get("reason")
+                             or "nothing measured a total gain for this row")}
+                    for h in unmeasured_h])
+        m5_attr = _attribution(
+            items, as_of, exact=True, sums_to=m5_val["value"],
+            basis="one row in %d for every holding whose total gain could be "
+                  "measured. A row nobody could value contributes exactly "
+                  "nothing while still standing in the denominator -- which is "
+                  "measured and not missing -- so it is listed with the reason "
+                  "it could not be valued rather than quietly dropped."
+                  % n_all)
+    m5 = _measure(
+        "coverage", "How much of the book is measured", "Coverage",
+        m5_val, [0.0001, 0.25, 0.50, 0.75, 0.90, 1.0], _pct_plain,
+        basis="The share of this account's holdings whose total gain this "
+              "page could actually measure. It scores the DATA and not the "
+              "trading, and it is on the radar because every other axis is "
+              "only as good as this one: four confident scores over half a "
+              "book are four numbers about half a book.",
+        as_of=as_of, money=False, attribution=m5_attr,
+        top_label="every holding measured",
+        bottom_label="not one holding measured")
+
+    measures = [m1, m2, m3, m4, m5]
+    got = [m for m in measures if m["score"]["value"] is not None]
+    absent_names = [m["label"] for m in measures if m["score"]["value"] is None]
+    # A GRADE NEEDS A MAJORITY OF ITS MEASURES. Averaging whatever happened to
+    # survive turns one lucky axis into a verdict on the account: measured on
+    # an account that has never traded, four measures refused, drawdown scored
+    # 6/6 on a flat curve, and the panel headlined a 6 -- the best possible
+    # grade, on nothing. The refusal is louder than a thin flag because the
+    # number it replaces is the largest glyph in the room.
+    if got and len(got) * 2 > len(measures):
+        overall = metric(
+            round(sum(m["score"]["value"] for m in got) / float(len(got)), 2),
+            len(got), "count",
+            reason=("%d of the %d measures had nothing behind them and are "
+                    "not in this average: %s"
+                    % (len(absent_names), len(measures),
+                       "; ".join(absent_names))) if absent_names else None,
+            thin=bool(absent_names), as_of=as_of)
+    elif got:
+        overall = dash(len(got), "count",
+                       "only %d of the %d measures could be scored (%s had "
+                       "nothing behind them), and an average of %s is a "
+                       "statement about %s, not about this account"
+                       % (len(got), len(measures), "; ".join(absent_names),
+                          "one measure" if len(got) == 1
+                          else "%d measures" % len(got),
+                          got[0]["label"] if len(got) == 1 else "a minority"),
+                       as_of=as_of)
+    else:
+        overall = dash(0, "count",
+                       "not one of the five measures had anything behind it "
+                       "on this account, so there is no average to take",
+                       as_of=as_of)
+    return {
+        "as_of": as_of,
+        "max": SCORE_MAX,
+        "measures": measures,
+        "overall": overall,
+        "scored": len(got),
+        "of": len(measures),
+        "absent": absent_names,
+        "basis": SCORECARD_BASIS,
+    }
+
+
 def returns(ctx: Ctx, *, rows: Optional[list] = None,
             by_ticker: Optional[list] = None,
             recon: Optional[dict] = None) -> dict:
@@ -2159,6 +2659,13 @@ def returns(ctx: Ctx, *, rows: Optional[list] = None,
         "liquidated": liquidated,
         "totals": totals,
         "contributors": contributors(holdings, rows, as_of=as_of),
+        # THE RADAR. Five derived measures over the objects already built
+        # above -- it is handed them rather than rebuilding any of them, for
+        # the same reason `report()` hands this function the walk: two
+        # arithmetics for one number is the defect this file exists to end.
+        "scorecard": scorecard(ctx, holdings=holdings, breakdown=breakdown,
+                               totals=totals, recon=recon, rows=rows,
+                               as_of=as_of),
         "irr_basis": IRR_BASIS,
         "deployed_basis": DEPLOYED_BASIS,
         "counts": {"holdings": len(holdings), "open": len(open_rows),

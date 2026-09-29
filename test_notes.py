@@ -243,6 +243,161 @@ check("no nullish coalescing in options.js", "??" in o_nc, False)
 check("no optional chaining in options.js", bool(re.search(r"\?\.", o_nc)), False)
 
 
+
+# ================================================ 7. one sentence, said ONCE
+print("7. the Strategies shelf: a sentence may not be rendered seventeen times")
+
+# MEASURED last round, Strategies room, 1280x900, scenario banktriple:
+# `#view .note` was 27 down an 8,181px page, and deduplicating the TEXT left
+# THREE sentences -- one rendered 17 times, one 9 times, one once. That is one
+# piece of information and twenty-four pieces of noise, and it was the largest
+# surviving instance of what the owner called tacky.
+#
+# The fix is not deletion. A strategy that cannot go on a ticker is a real
+# constraint and the reader needs it. The sentence is said ONCE, in the key
+# above the grid, with the count of cards it covers; each of those cards
+# carries the MARK and the sentence on hover. A reason carried by a SINGLE card
+# is not a repetition and keeps its paragraph in full, in the colour it had.
+#
+# This section RUNS the rule rather than paraphrasing it. strategies.js keeps
+# the decision in a marked block that is deliberately pure ES5 -- no DOM, no
+# template literals, no imports -- so it can be sliced out and executed in
+# Duktape over the REAL shelf `bank.entries()` returns. The view itself cannot
+# be run here: Duktape's Babel overflows its C stack on a file of template
+# literals, which is the same reason test_btview.py checks btread.js and not
+# views/backtest.js.
+
+import json as _j                                              # noqa: E402
+
+import dukpy                                                   # noqa: E402
+
+import bank                                                    # noqa: E402
+
+STRAT = VIEWS / "strategies.js"
+s = src(STRAT)
+
+OPEN = "/* ---- gate-rule 8< ----"
+CLOSE = "/* ---- >8 gate-rule ---- */"
+check("the gate rule is marked open, once", s.count(OPEN), 1)
+check("...and marked closed, once", s.count(CLOSE), 1)
+
+RULE = s.split(OPEN, 1)[1].split("\n", 1)[1].split(CLOSE, 1)[0]
+
+# It has to STAY runnable. Any one of these would make the block unexecutable
+# here, which would quietly turn this whole section into a check of nothing.
+for bad, label in ((r"`", "template literals"), (r"=>", "arrow functions"),
+                   (r"\bdocument\b", "the DOM"), (r"\besc\(", "the view's esc()"),
+                   (r"\bconst\b|\blet\b", "block scoping"),
+                   (r"\?\?", "nullish coalescing"), (r"\?\.", "optional chaining")):
+    check("the sliced rule is free of %s" % label, bool(re.search(bad, RULE)), False)
+check("...and it is the four functions this section runs",
+      sorted(re.findall(r"^function (\w+)", RULE, flags=re.M)),
+      ["gateKey", "gateOf", "gateSolo", "gateTally"])
+
+
+def gate_run(shown):
+    """gateTally over `shown`, then, per card, whether that card renders its
+    sentence in FULL. The shipped functions, executed, not described."""
+    js = RULE + ("\nvar SHOWN = %s;\n" % _j.dumps(shown)) + """
+var tally = gateTally(SHOWN), out = [], i, g;
+for (i = 0; i < SHOWN.length; i += 1) {
+  g = gateOf(SHOWN[i]);
+  out.push(g ? [gateKey(g), gateSolo(g, tally) ? 1 : 0, g.mark] : null);
+}
+JSON.stringify({tally: tally, cards: out});
+"""
+    return _j.loads(dukpy.evaljs(js))
+
+
+def gate_paragraphs(shown):
+    """{sentence: how many cards print it as a paragraph}, and the raw run."""
+    r = gate_run(shown)
+    n = {}
+    for row in r["cards"]:
+        if row and row[1]:
+            n[row[0]] = n.get(row[0], 0) + 1
+    return n, r
+
+
+SHELF_ROWS = bank.entries()
+check("the shelf this runs over is the real one", len(SHELF_ROWS) > 200, True)
+
+# `fshow` starts at 36, so the FIRST paint of this room is the first 36 rows --
+# the exact screen that measured 27 notes.
+FIRST = SHELF_ROWS[:36]
+
+for label, shown in (("first paint, 36 cards", FIRST),
+                     ("two pages, 72 cards", SHELF_ROWS[:72]),
+                     ("the whole shelf", SHELF_ROWS)):
+    n, r = gate_paragraphs(shown)
+    worst = max(n.values()) if n else 0
+    # THE CONTRACT: no single `.note` sentence may render more than twice on
+    # one route. The rule is stricter than the contract -- a repeated sentence
+    # is a paragraph ZERO times and a key row once -- so what is asserted is
+    # the number it actually produces, not the ceiling it is allowed.
+    check("%s: no sentence is a paragraph more than once" % label, worst <= 1, True)
+    check("%s: ...so the ceiling of two is never reached" % label, worst <= 2, True)
+    check("%s: every gated card still carries a mark" % label,
+          all(row is None or row[2] in ("cannot attach", "records only")
+              for row in r["cards"]), True)
+
+# The 27 that were measured, rerun: three sentences, of which exactly one is
+# carried by a single card and therefore exactly one survives as a paragraph.
+n36, r36 = gate_paragraphs(FIRST)
+check("the first paint still has three distinct gate sentences",
+      len(r36["tally"]), 3)
+check("...of which exactly one is still a paragraph", sum(n36.values()), 1)
+check("...and the other 26 are marks",
+      sum(1 for row in r36["cards"] if row and not row[1]), 26)
+
+# THE LEVEL-4 REFUSAL is the one carried by a single card. It says this account
+# cannot trade the thing at all, so a rule that quietened it would be the purge
+# eating a warning. Held on that row alone AND on the first paint.
+lvl4 = [r for r in SHELF_ROWS
+        if str(r["attach"].get("why") or "").startswith("needs Alpaca options level 4")]
+check("the level-4 refusal is on the real shelf", bool(lvl4), True)
+if lvl4:
+    check("a reason carried by one card is printed in full on it",
+          gate_run([lvl4[0]])["cards"][0][1], 1)
+    check("...and it is the sentence still printed on the first paint",
+          [row[0] for row in r36["cards"] if row and row[1]][0].startswith(
+              "Cannot go on a ticker. needs Alpaca options level 4"), True)
+
+# NOTHING GOT QUIETER. The surviving paragraph keeps the class it had, and a
+# refusal keeps the amber one.
+check("a refusal is still the amber strip", 'note: "note warn cat-why"' in s, True)
+check("a records-only sentence is still the plain strip",
+      'note: "note cat-why"' in s, True)
+
+# The card may emit exactly TWO `.note`s: the server's own error string, which
+# is per-entry and so cannot repeat as a constant, and the gate paragraph,
+# which is behind `solo`. A third is a new way to grow the stack back.
+cardsrc = s.split("function shelfCardHTML", 1)[1].split("\n/* =====", 1)[0]
+check("the card emits two note strips and no more",
+      len(re.findall(r'class="(?:\$\{g\.note\}|note bad cat-why)"', cardsrc)), 2)
+check("...the gate one only when the sentence is this card's own",
+      bool(re.search(r"\$\{g && solo \?", cardsrc)), True)
+check("...and the other is the server's string, not a sentence of ours",
+      'class="note bad cat-why">${esc(r.error)}' in cardsrc, True)
+
+# The key is a LEGEND, not a banner. `.note` is the class for something wrong;
+# a key to marks that are on screen is not that, and giving it one would put a
+# grey strip back at the top of the room -- which is where this started.
+keysrc = s.split("function gateKeyHTML", 1)[1].split("function shelfCardHTML", 1)[0]
+check("the key renders no `.note` of any kind",
+      bool(re.search(r'class="[^"]*\bnote\b', keysrc)), False)
+check("the key is built from the rows on screen and their own tally",
+      bool(re.search(r"function gateKeyHTML\(shown, tally\)", s))
+      and "tally[k]" in keysrc, True)
+check("...and that tally is rebuilt on every filter, search and show-more",
+      s.count("GATES = gateTally(shown)"), 1)
+check("...over the shown slice, never over the whole 259-row shelf",
+      bool(re.search(r"gateTally\(SHELF\b", s)), False)
+
+# One sentence, one place in the source. Two copies drift apart.
+for lead in ("Cannot go on a ticker.", r"Records only \u2014 nothing trades it."):
+    check("the sentence %r is written once" % lead[:24], s.count(lead), 1)
+
 print()
 if FAIL:
     print("%d CHECK(S) FAILED" % FAIL)

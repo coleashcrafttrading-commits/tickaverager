@@ -22,9 +22,14 @@
       moved, and nothing else in this file is allowed to use them. That is
       what lets a green figure be read at a glance instead of scanned for.
 
-   4. HIERARCHY COMES FROM TYPE AND SPACE. A real scale (--fs-*), three
-      weights, and a spacing scale that everything snaps to. Borders are a
-      last resort: a hairline separates, it does not box.
+   4. HIERARCHY COMES FROM TYPE AND SPACE. ONE scale (--fs-*, nine steps,
+      every one a whole pixel), FOUR weights (--w-*), and a spacing scale
+      that everything snaps to. No rule anywhere may write a size or a weight
+      that is not one of those tokens -- a half-pixel step is not a step, it
+      is the nearest off-ramp taken by someone who needed a value the scale
+      did not have, and eleven sizes on one screen is what that looks like
+      after a year. Borders are a last resort: a hairline separates, it does
+      not box.
 
    5. AN UNMEASURED NUMBER LOOKS DIFFERENT FROM A ZERO. `.unmeasured` is a
       dashed-underline dash that carries its reason on hover, and `.thin-num`
@@ -69,19 +74,51 @@
   --font: "Inter", ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
 
-  /* A real scale. Every size on screen is one of these nine. */
+  /* ---------------------------------------------------------- THE SCALE
+     NINE STEPS, ALL WHOLE PIXELS, AND NOTHING ELSE MAY BE WRITTEN DOWN.
+
+     Measured over every leaf text node in #view, the rail and the header on
+     the Portfolio room at 1280x900: ELEVEN distinct sizes were on screen,
+     among them 9.5px, 11.5px and 13.5px. Half a pixel is not a step -- it
+     does not read as a different size, it reads as the same size rendered
+     badly, and it exists only because someone needed a value that was not on
+     the scale and took the nearest off-ramp. There is no off-ramp now: a
+     rule that wants a size picks one of these nine, and if none of them is
+     right the answer is a different WEIGHT or more SPACE, not a new size.
+
+     Each step has one job, which is what stops a tenth being added:
+        micro  the uppercase key over a figure, chips, table headings
+        xs     the sub-line under a figure
+        sm     controls, dense table cells, tooltips
+        md     body text, and the default the document inherits
+        lg     a panel's title
+        xl     a page title, a tile figure on a narrow screen
+        2xl    a tile figure
+        3xl    a big tile figure, the empty-state glyph
+        4xl    the one hero figure a room is allowed
+     ------------------------------------------------------------------- */
   --fs-micro: 10px;
   --fs-xs:    11px;
   --fs-sm:    12px;
   --fs-md:    13px;
-  --fs-base:  13.5px;
   --fs-lg:    15px;
   --fs-xl:    18px;
   --fs-2xl:   22px;
   --fs-3xl:   28px;
   --fs-4xl:   36px;
+  /* --fs-base WAS the 13.5px off-ramp and is now body text. It stays as a
+     name because rules outside this file resolve it (assistant.js builds a
+     `font:` shorthand out of it, and a shorthand with an undefined var in it
+     drops the whole declaration -- the panel would lose its type, not just
+     its size). Point it at the scale rather than deleting it. */
+  --fs-base:  var(--fs-md);
 
-  --w-reg: 450; --w-med: 540; --w-semi: 620; --w-bold: 700;
+  /* FOUR WEIGHTS. --w-reg was 450, which put a 450 beside the 400 that every
+     unstyled run of text inherits -- two weights doing one job, a tenth of a
+     stroke apart, and 600 sat beside 620 the same way. Regular IS 400 now,
+     so text that names the token and text that names nothing are the same
+     weight, which is the only way "four weights" can stay true. */
+  --w-reg: 400; --w-med: 540; --w-semi: 620; --w-bold: 700;
   --lh-tight: 1.15; --lh: 1.55;
   --track-tight: -0.02em;      /* display figures */
   --track-caps:   0.085em;     /* the small uppercase labels */
@@ -176,7 +213,7 @@
 }
 
 /* ============================================================== the room */
-body { font-size: var(--fs-base); }
+body { font-size: var(--fs-md); }
 body::before {
   background:
     radial-gradient(1100px 620px at 4% -8%,  var(--haze-a), transparent 62%),
@@ -319,7 +356,8 @@ body::before {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .acct-eq { font-size: var(--fs-md); font-weight: var(--w-semi); flex: none; }
-.acct-cv { color: var(--faint); flex: none; font-size: 10px; margin-left: 2px; }
+.acct-cv { color: var(--faint); flex: none; font-size: var(--fs-micro);
+           margin-left: 2px; }
 
 .acct-pop {
   position: absolute; left: var(--s3); right: var(--s3); top: calc(100% - 4px);
@@ -434,7 +472,7 @@ body::before {
 }
 .rail-foot .kbd { margin-left: auto; }
 .kbd {
-  font: inherit; font-size: 9.5px; font-weight: var(--w-semi);
+  font: inherit; font-size: var(--fs-micro); font-weight: var(--w-semi);
   padding: 2px 5px; border-radius: 5px; color: var(--faint);
   background: var(--surface-2); border: 1px solid var(--hairline);
 }
@@ -557,15 +595,35 @@ body::before {
 
 /* ---- the section panel -------------------------------------------------- */
 .panel { margin-bottom: var(--s5); }
+/* A PANEL HEADER WRAPS; ITS TITLE IS NEVER CRUSHED TO NOTHING.
+   This row was `flex` with no wrap, a title block that could shrink to zero
+   (`min-width: 0`) and an actions block that could not shrink at all
+   (`flex: none`). Between those three the actions always won outright.
+   Measured on RAM -> Ladder at 400x860: the actions block ran left=41
+   right=643 inside a 400px viewport, so its right 243px -- including the
+   whole of the only button in it -- sat outside the window with no scrolling
+   ancestor and no way to click it; the title "DCA ladder" was squeezed to
+   width=0 at x=29 and painted straight over the actions in the same vertical
+   band (366-413); and the subtitle, also at width 0, unravelled into one word
+   per line for nine lines. At 1280 the same header was fine, which is what a
+   no-wrap flex row always looks like: correct until it is not.
+
+   Now the header wraps. The title keeps a real basis so it takes a whole row
+   of its own rather than collapsing, and the actions may shrink onto that
+   next row and wrap inside themselves. `margin-left: auto` still right-aligns
+   them whenever both do fit on one line, so nothing changes at desktop
+   width. */
 .panel-h {
   display: flex; align-items: flex-start; gap: var(--s3);
   padding: var(--s3) var(--s4) 0;
+  flex-wrap: wrap;
 }
-.panel-tt { min-width: 0; }
+.panel-tt { min-width: 0; flex: 1 1 200px; }
 .panel-t { margin: 0; font-size: var(--fs-md); font-weight: var(--w-semi); }
 .panel-sub { color: var(--faint); font-size: var(--fs-xs); margin-top: 2px; }
 .panel-x { margin-left: auto; display: flex; align-items: center;
-           gap: var(--s2); flex: none; }
+           gap: var(--s2); flex: 0 1 auto; min-width: 0; max-width: 100%;
+           flex-wrap: wrap; }
 .panel-b { padding: var(--s3) var(--s4) var(--s4); }
 .panel-b.flush { padding: var(--s3) 0 0; }
 .panel-h + .panel-b { padding-top: var(--s3); }
@@ -579,11 +637,20 @@ body::before {
 .dt .empty { font-style: normal; color: var(--faint); padding: 30px 18px; }
 
 /* ---- the segmented control (the same .seg app.css already draws) -------- */
+/* This sheet loads after app.css, so `overflow: hidden` here was the LAST
+   word on the subject and it cancelled the self-scroll app.css gives this
+   control -- the shorthand writes overflow-x as well. A segmented control
+   fits its column or scrolls inside itself; it never clips a button into a
+   place the page cannot reach. See the long note beside .seg in app.css for
+   the measurement that produced this rule. */
 .seg {
-  border-radius: var(--radius-pill); overflow: hidden;
+  border-radius: var(--radius-pill);
+  max-width: 100%; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; flex: none;
   border: 1px solid var(--hairline); background: var(--bg-3); padding: 2px;
   display: inline-flex; gap: 2px;
 }
+.seg::-webkit-scrollbar { display: none; }
 .seg-b {
   border: 0 !important; border-radius: var(--radius-pill);
   font-size: var(--fs-sm); font-weight: var(--w-med); padding: 5px 13px;
@@ -606,7 +673,11 @@ body::before {
   background: var(--surface-2); color: var(--muted);
   border: 1px solid var(--hairline);
 }
-.chip.sm { padding: 1px 5px; font-size: 9.5px; }
+/* .sm is a chip with less AIR in it, not a chip in a tenth size: 9.5px
+   beside the 10px of every other chip was half a pixel of difference
+   nobody could see and one more value off the scale. The padding is what
+   makes it small. */
+.chip.sm { padding: 1px 5px; font-size: var(--fs-micro); }
 .chip-s { font-weight: var(--w-reg); opacity: .8; }
 /* armed is the only chip that gets the danger colour, because it is the only
    one that means real orders leave this machine */
@@ -769,7 +840,8 @@ th { background: transparent; }
 /* The running commit, in the rail. Quiet by design -- it is not information
    you need until the moment you are asking "did that deploy land", and then
    it is the only thing you need. */
-.build { font-family: var(--mono, ui-monospace, monospace); font-size: 10px;
+.build { font-family: var(--mono, ui-monospace, monospace);
+         font-size: var(--fs-micro);
          color: var(--faint); letter-spacing: .04em; opacity: .8;
          padding: 1px 5px; border: 1px solid var(--hairline);
          border-radius: var(--radius-pill); }

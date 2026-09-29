@@ -32,10 +32,12 @@
    so every time and the server's own answer is printed back.
 
    A number nobody measured is a dash with its reason. `trades.ok === false`
-   on a row is rendered as a sentence on the card -- there are 231 banked
-   option STRUCTURES and no engine sends one, so attaching one records the
-   ticker's chosen options strategy and orders nothing. That gap is on screen
-   rather than implied.
+   on a row is a MARK on the card and a sentence in the key above the grid --
+   there are 231 banked option STRUCTURES and no engine sends one, so
+   attaching one records the ticker's chosen options strategy and orders
+   nothing. That gap is on screen rather than implied, and it is on screen
+   ONCE: see `gateOf` below for why a sentence carried by sixteen cards is one
+   fact and fifteen pieces of noise.
    ========================================================================= */
 "use strict";
 import {
@@ -122,6 +124,66 @@ const bkindOf = (k) => BKIND[k] || (k
   : { label: "unknown", why: "the bank could not say what kind this is -- "
         + "usually because the id on the ticker is not on the shelf" });
 
+/* ------------------------------------------------------- the gate marks
+   Two of the shelf's gates are facts about a WHOLE KIND rather than about a
+   card. Every coded strategy is backtester-only; every banked option structure
+   is recorded and not traded. Rendered per card they came out as one sentence
+   and sixteen copies of it -- 27 grey and amber paragraphs down an 8,181px
+   page, which is exactly what "it doesnt look smooth" looks like. A sentence
+   repeated seventeen times is ONE piece of information and sixteen pieces of
+   noise.
+
+   So the sentence is said ONCE, in the key above the grid, with the count of
+   cards it covers; each of those cards carries the MARK, and the mark's
+   tooltip is the sentence. A reason that belongs to ONE card -- the level-4
+   refusal on a single option structure -- is not a repetition, so it keeps its
+   paragraph. Collapsing something said once does not remove noise, it removes
+   the fact.
+
+   The decision is data, not markup, and test_notes.py slices the block between
+   the markers below and RUNS it over the real shelf. Keep it pure: no DOM, no
+   imports, no template literals, no `??` and no `?.`. */
+/* ---- gate-rule 8< ---- sliced and executed by test_notes.py section 7 ---- */
+function gateOf(r) {
+  var a = (r && r.attach) || { ok: true };
+  var t = (r && r.trades) || { ok: true };
+  /* attach first, and trades only when attach is fine: a strategy that cannot
+     go on a ticker at all is not also told it would have recorded nothing. */
+  if (a.ok === false) {
+    return { mark: "cannot attach", cls: "pill warn", note: "note warn cat-why",
+             lead: "Cannot go on a ticker.", why: String(a.why || "") };
+  }
+  if (t.ok === false) {
+    return { mark: "records only", cls: "pill", note: "note cat-why",
+             lead: "Records only \u2014 nothing trades it.",
+             why: String(t.why || "") };
+  }
+  return null;
+}
+
+function gateKey(g) { return g ? g.lead + " " + g.why : ""; }
+
+/* How many of the cards ABOUT TO BE RENDERED carry each sentence -- counted
+   over the shown slice and nothing else. A key counted over the whole 259-row
+   shelf would print a number the page beneath it does not show. */
+function gateTally(rows) {
+  var out = {}, i, g, k;
+  for (i = 0; i < (rows || []).length; i += 1) {
+    g = gateOf(rows[i]);
+    if (!g) { continue; }
+    k = gateKey(g);
+    out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+
+/* A sentence carried by ONE card on this screen is that card's own fact and
+   stays on it, in full, in the colour it had. */
+function gateSolo(g, tally) {
+  return !!g && (((tally || {})[gateKey(g)]) || 0) < 2;
+}
+/* ---- >8 gate-rule ---- */
+
 /* ------------------------------------------------------------ the reads */
 let CAT_ROWS = [];        // /api/hub/strategies -> strategies[]   (the money)
 let CAT_TICKERS = [];     // /api/hub/tickers    -> tickers[]
@@ -141,6 +203,10 @@ let fkind = "";           // "" = every kind
 let forigin = "";         // "" = standard AND personal
 let fattached = false;    // only what is on a ticker
 let fshow = 36;           // how many cards are rendered; "show more" raises it
+/* gateTally() over the cards currently on screen. Recomputed by renderShelf on
+   every filter, search and "show more", because which sentence is a repetition
+   is a property of what is rendered, not of the shelf. */
+let GATES = {};
 
 /* `/api/hub/*` goes through app._perf_positions(), which is on the 200/min
    TRADING budget and cached for 20 s. The ladders need that budget to place
@@ -470,6 +536,10 @@ function renderShelf() {
   }
   const hits = SHELF.filter(matchesShelf);
   const shown = hits.slice(0, fshow);
+  /* BEFORE the cards are built: each card asks GATES whether its sentence is
+     a repetition on this screen, so the tally has to be the one for this
+     screen and not the one for the last filter. */
+  GATES = gateTally(shown);
   const mine = SHELF.filter((r) => r.origin === "personal").length;
 
   const counts = {};
@@ -503,7 +573,8 @@ function renderShelf() {
       ${hits.length > shown.length
         ? ` Showing the first <b>${shown.length}</b>.` : ""}</div>
     ${hits.length
-      ? `<div class="cat-grid">${shown.map(shelfCardHTML).join("")}</div>
+      ? `${gateKeyHTML(shown, GATES)}
+         <div class="cat-grid">${shown.map(shelfCardHTML).join("")}</div>
          ${hits.length > shown.length
            ? `<div class="sh-more"><button class="btn" id="shMore">Show
                ${Math.min(36, hits.length - shown.length)} more</button></div>`
@@ -561,12 +632,40 @@ function wireShelf(host) {
   });
 }
 
+/* The key that stands above the grid: one row per sentence that MORE THAN ONE
+   card carries, the mark it corresponds to, and how many of the cards below
+   carry it. Built from the same `shown` rows the grid is, so the count is a
+   measurement of this screen. Deliberately not a `.note`: a key to marks that
+   are on screen is a legend, and the strips are for things that are wrong. */
+function gateKeyHTML(shown, tally) {
+  const seen = [];
+  const rows = [];
+  for (const r of shown) {
+    const g = gateOf(r);
+    if (!g || gateSolo(g, tally)) continue;
+    const k = gateKey(g);
+    if (seen.indexOf(k) >= 0) continue;
+    seen.push(k);
+    rows.push(`<div class="cat-key-r">
+      <span class="${g.cls}">${esc(g.mark)}</span>
+      <span class="cat-key-n">${tally[k]} below</span>
+      <span class="cat-key-w"><b>${esc(g.lead)}</b> ${esc(g.why)}</span>
+    </div>`);
+  }
+  return rows.length
+    ? `<div class="cat-key"><div class="cat-key-h">What the marks mean</div>
+        ${rows.join("")}</div>`
+    : "";
+}
+
 function shelfCardHTML(r) {
   const k = bkindOf(r.kind);
   const syms = r.tickers || [];
   const nset = (r.params_schema || []).length;
   const canAttach = r.attach && r.attach.ok !== false;
-  const trades = r.trades || { ok: true };
+  /* The mark, and whether this card is the only one on screen carrying it. */
+  const g = gateOf(r);
+  const solo = gateSolo(g, GATES);
   return `<section class="cat-card${r.origin === "personal" ? " mine" : ""}"
       data-eid="${esc(r.id)}">
     <header class="cat-h">
@@ -579,6 +678,8 @@ function shelfCardHTML(r) {
              editable">mine</span>`
           : `<span class="pill" title="shipped or researched; copy it to edit
              it">standard</span>`}
+        ${g ? `<span class="${g.cls} cat-mark" title="${
+          esc(g.lead + " " + g.why)}">${esc(g.mark)}</span>` : ""}
       </div>
       <div class="cat-id mono">${esc(r.id)}</div>
     </header>
@@ -589,10 +690,8 @@ function shelfCardHTML(r) {
         + "does."}</p>
 
     ${r.error ? `<div class="note bad cat-why">${esc(r.error)}</div>` : ""}
-    ${!canAttach ? `<div class="note warn cat-why"><b>Cannot go on a
-      ticker.</b> ${esc(r.attach.why || "")}</div>` : ""}
-    ${canAttach && trades.ok === false ? `<div class="note cat-why"><b>Records
-      only — nothing trades it.</b> ${esc(trades.why || "")}</div>` : ""}
+    ${g && solo ? `<div class="${g.note}"><b>${esc(g.lead)}</b>
+      ${esc(g.why)}</div>` : ""}
 
     <div class="cat-sec">
       <div class="cat-sec-h">On ${syms.length || "no"} ticker${
@@ -1621,6 +1720,23 @@ function ensureCatStyles() {
     "color:var(--muted);white-space:nowrap}",
     ".sh-count{font-size:11.5px;color:var(--faint);margin:12px 0}",
     ".sh-more{display:flex;justify-content:center;margin-top:18px}",
+    /* the key to the card marks -- a legend, not a banner: quiet surface, no
+       amber fill, and it only exists while a mark below it repeats. */
+    ".cat-key{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;",
+    "padding:11px 13px;border:1px solid var(--hairline);",
+    "border-radius:var(--r-md);background:var(--surface-2)}",
+    ".cat-key-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;",
+    "color:var(--faint);font-weight:650}",
+    ".cat-key-r{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;",
+    "font-size:11.5px;line-height:1.55}",
+    ".cat-key-r .pill{flex:none;align-self:center}",
+    ".cat-key-n{color:var(--faint);white-space:nowrap;flex:none}",
+    ".cat-key-w{color:var(--muted);flex:1 1 260px;min-width:0}",
+    ".cat-key-w b{color:var(--text)}",
+    /* A MARK, not a label. Dashed so the two gate marks read as one family
+       beside the solid kind and origin pills -- the reader should be able to
+       find "which of these is gated" without reading a word. */
+    ".cat-mark{cursor:help;border-style:dashed}",
     /* cards */
     ".cat-grid{display:grid;gap:16px;",
     "grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}",

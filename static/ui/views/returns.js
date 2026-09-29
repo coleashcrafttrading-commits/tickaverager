@@ -25,6 +25,8 @@
 
    ---------------------------------------------------------------- the rooms
      THE BRIDGE          the five terms, and the sum checked against the total
+     THE SCORECARD       five derived measures out of six, with the holdings
+                         that lift each one and the ones that hold it back
      THE DISPERSION      every holding as one dot on one axis of return
      CONTRIBUTORS        highest and lowest, per ticker and per strategy
      THE DETAILED TABLE  shares, price, value, cost, unrealised, realised,
@@ -34,8 +36,8 @@
                          which is the finding, not a tidy result
 
    ------------------------------------------------------------- the visuals
-   Three components are written here rather than in viz.js: `waterfall`,
-   `dotstrip` and `sumbar`. They are not in the shared library because five
+   Four components are written here rather than in viz.js: `waterfall`,
+   `dotstrip`, `sumbar` and `radar`. They are not in the shared library because five
    agents edit this repo at once and adding to viz.js while others are reading
    it is the easiest merge collision in the tree. If a second page ever wants
    one, it moves -- until then it lives beside its only caller.
@@ -61,6 +63,10 @@ import { hbar, vizEmpty, vfmt, num, why } from "../viz.js";
 let D = null;             // the last good /api/perf/returns payload
 let ERR = "";             // the last failure, kept on screen
 let forAccount = "";
+/* THE SELECTED RADAR AXIS. It survives a re-render and a poll, because an
+   attribution the reader opened is not something a 30-second refresh may
+   close underneath them. */
+let SEL = "";
 let at = 0;
 let busy = false;
 
@@ -83,6 +89,7 @@ VIEWS.returns = {
       <div id="rtNotes"></div>
       <div id="rtBridge"></div>
       <div id="rtTiles"></div>
+      <div id="rtScore"></div>
       <div id="rtDisp"></div>
       ${/* The detailed table is TEN columns wide and it goes full-bleed.
             Measured at 1280px inside `.grid main`'s left column: the table
@@ -130,6 +137,7 @@ function render() {
   renderNotes();
   renderBridge();
   renderTiles();
+  renderScorecard();
   renderDispersion();
   renderContributors();
   renderStrategies();
@@ -365,6 +373,275 @@ function dotstrip(o) {
       returned nothing.</div>` : ""}</div>`;
 }
 
+/* ============================================================== the radar
+   THE SCORECARD: five measures out of six, and the attribution under it.
+
+   Simply Wall St's snowflake, on this account's arithmetic -- and the half
+   that makes it worth drawing is the second half: selecting an axis lists the
+   holdings that LIFT that score and the ones that HOLD IT BACK, each with its
+   own contribution, straight off `per_ticker()` through the holdings table
+   below. A number with no attribution behind it is a verdict; a number with
+   one is a reading.
+
+   AN UNMEASURED AXIS IS NOT DRAWN AT ALL, and that is the whole reason the
+   component is written by hand. A radar plots every axis from the centre, so
+   a score of 0 and a score nobody could measure are the SAME PIXEL unless
+   something stops it: here a measure that refused has no dot, its spoke is
+   dashed, its label carries an em dash, and the connecting web is not drawn
+   at all -- a line through a missing vertex would place that vertex
+   somewhere, which is the invention this page exists to prevent.
+
+   SVG, with a SQUARE-ISH viewBox that is never stretched, so the text inside
+   it is real text and the dots are circles -- viz.js's rule 3 bites only on a
+   preserveAspectRatio="none" box, which this is not. The width is capped the
+   way `donut()` caps its ring, so the labels stay ~9px whatever the panel
+   does, and below 560px the drawing is dropped entirely for the ranked list
+   beside it: five axes at 400px is five slivers and an unreadable pentagon,
+   and the list is the same five scores with room for their names. */
+const SC_POL = (cx, cy, r, deg) => {
+  const a = ((deg - 90) * Math.PI) / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+};
+
+/* radarTitle / radar -- the drawing.
+   THE PIECES ARE BUILT INTO NAMED STRINGS rather than nested inside one
+   template, which reads better and is also what lets test_returns.py
+   section 12 compile this function at all: the Babel that ships inside
+   dukpy overflows its own stack on a deeply nested template literal, and
+   a component that cannot be executed offline cannot be proved to draw
+   an unmeasured axis differently from a zero one. */
+function radarTitle(m, s, max) {
+  if (s === null) return m.label + " — not measured. " + why(m.score);
+  const band = m.band ? " (" + m.band.label + ")" : "";
+  const at = measured(m.value)
+    ? ", measured at " + mfmt(m.value, { signed: !!m.money }) : "";
+  return m.label + ": " + mfmt(m.score, { unit: "count" }) + " of " + max
+    + band + at;
+}
+
+function radar(ms, sel, max) {
+  const n = (ms || []).length;
+  if (n < 3) {
+    return vizEmpty({ h: 220, title: "A radar needs at least three axes",
+                      body: "this payload carries " + n });
+  }
+  const CX = 132, CY = 120, R = 78;
+  const at = (i, r) => SC_POL(CX, CY, r, (360 / n) * i);
+  const xy = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+  const ring = (r) => ms.map((m, i) => xy(at(i, r))).join(" ");
+
+  let rings = "";
+  for (let k = 1; k <= max; k++) {
+    const cls = k === max ? "sc-ring out" : "sc-ring";
+    rings += `<polygon class="${cls}" points="${ring((R * k) / max)}"/>`;
+  }
+  /* THE RING NUMBERS NAME WHAT THE RINGS ARE. An unlabelled web of pentagons
+     is decoration; 2, 4 and 6 up the top spoke make it a scale. */
+  let ticks = "";
+  [2, 4, 6].forEach((k) => {
+    if (k > max) return;
+    const y = (CY - (R * k) / max + 3).toFixed(1);
+    ticks += `<text class="sc-tick" x="${CX - 4}" y="${y}"
+      text-anchor="end">${k}</text>`;
+  });
+
+  const every = ms.every((m) => num(m.score) !== null);
+  const hull = every
+    ? ms.map((m, i) => xy(at(i, (R * num(m.score)) / max))).join(" ") : "";
+  const web = every ? `<polygon class="sc-web" points="${hull}"/>` : "";
+
+  const axes = ms.map((m, i) => {
+    const s = num(m.score);
+    const lp = at(i, R + 15);
+    const dx = lp[0] - CX;
+    const anchor = Math.abs(dx) < 8 ? "middle" : (dx > 0 ? "start" : "end");
+    const ly = (lp[1] + (lp[1] < CY ? -1 : 9)).toFixed(1);
+    const rim = at(i, R);
+    const t = radarTitle(m, s, max);
+    const hit = [xy([CX, CY]), xy(at(i - 0.5, R + 22)),
+                 xy(at(i + 0.5, R + 22))].join(" ");
+    const spoke = `<line class="sc-spoke" x1="${CX}" y1="${CY}"
+      x2="${rim[0].toFixed(1)}" y2="${rim[1].toFixed(1)}"/>`;
+    const dot = s === null ? "" : `<circle class="sc-dot"
+      cx="${at(i, (R * s) / max)[0].toFixed(1)}"
+      cy="${at(i, (R * s) / max)[1].toFixed(1)}" r="3.4"/>`;
+    const tail = s === null ? " —" : "";
+    const label = `<text class="sc-al" x="${lp[0].toFixed(1)}" y="${ly}"
+      text-anchor="${anchor}">${esc(m.short)}${tail}</text>`;
+    const cls = "sc-ax" + (s === null ? " gone" : "")
+      + (m.key === sel ? " on" : "");
+    return `<g class="${cls}" data-sc="${esc(m.key)}" tabindex="0"
+      role="button" aria-label="${esc(t)}"><title>${esc(t)}</title>
+      <polygon class="sc-hit" points="${hit}"/>${spoke}${dot}${label}</g>`;
+  }).join("");
+
+  const aria = "five measures, each scored out of " + max;
+  return `<svg class="sc-radar" viewBox="0 0 264 250" role="img"
+    aria-label="${aria}">${rings}${ticks}${web}${axes}</svg>`;
+}
+
+/* pips(m) -- the score as six cells and a figure. The cells make "3 of 6"
+   legible without reading it, and the figure comes out of core.js's mnum, so
+   a measure that refused prints ITS OWN dash and its own sentence here rather
+   than a zero score with six empty cells beside it. */
+function pips(m) {
+  const s = num(m.score);
+  const max = m.max || 6;
+  let cells = "";
+  for (let k = 1; k <= max; k++) {
+    cells += `<i class="sc-pip${s !== null && k <= s ? " on" : ""}"></i>`;
+  }
+  /* A SCORE WITH A CAVEAT ON IT KEEPS THE CAVEAT. perf.py puts the value's
+     own reason on the score envelope -- a drawdown of 0.0% over three equity
+     prints is a top band and a statement about the sample -- and dropping it
+     here would leave six filled cells saying nothing about what is behind
+     them. */
+  const t = s === null ? why(m.score)
+    : m.label + ": " + mfmt(m.score, { unit: "count" }) + " of " + max
+      + (m.band ? " — " + m.band.label : "")
+      + (mreason(m.score) ? " — " + mreason(m.score) : "");
+  return `<span class="sc-pips" title="${esc(t)}">${cells}<b>${
+    mnum(m.score, { unit: "count" })}<em>/${max}</em></b></span>`;
+}
+
+function scRow(m, sel) {
+  const s = num(m.score);
+  const on = m.key === sel;
+  const sub = s === null ? why(m.score) : (m.band ? m.band.label : "");
+  return `<button type="button" class="sc-row${on ? " on" : ""}${
+    s === null ? " gone" : ""}" data-sc="${esc(m.key)}"
+    aria-pressed="${on ? "true" : "false"}">
+    <span class="sc-rl"><b>${esc(m.label)}</b><i title="${esc(sub)}">${
+      esc(sub)}</i></span>
+    <span class="sc-rr"><span class="sc-rv">${
+      mnum(m.value, { signed: !!m.money })}</span>${pips(m)}</span></button>`;
+}
+
+/* The band scale of the SELECTED measure, as seven cells with the measured
+   band lit. Every one of them names a value in the measure's own units, which
+   is the difference between a score out of six and a score out of six that
+   can be checked. */
+function bandScale(m) {
+  const cur = m.band ? m.band.score : null;
+  const cells = (m.bands || []).map((b) => `<i class="sc-sb${
+    cur === b.score ? " on" : ""}" title="${esc(b.score + " of "
+    + (m.max || 6) + ": " + b.label)}"></i>`).join("");
+  return `<div class="sc-scale">${cells}</div>
+    <div class="sc-scale-l">${cur === null
+      ? `<span class="unmeasured" title="${esc(why(m.score))}">—</span> of ${
+          m.max || 6}`
+      : esc(mfmt(m.score, { unit: "count" }) + " of " + (m.max || 6) + " — "
+            + (m.band ? m.band.label : ""))}</div>`;
+}
+
+/* attrRow(r, m, exact, color) -- one holding's line in the attribution.
+   THE WORDING FOLLOWS THE ARITHMETIC. "X of this measure" is a claim that the
+   rows are shares of it, which is only true where the payload says `exact`;
+   on the two measures that cannot be decomposed the same sentence would be a
+   quiet lie, so it reads "toward" instead and the note under the chart says
+   why. */
+function attrRow(r, m, exact, color) {
+  const dollars = mfmt(r.value, { signed: true });
+  const reason = mreason(r.effect) || mreason(r.value) || r.why || "";
+  const verb = exact ? " of this measure, on " : " toward this measure, on ";
+  return {
+    label: r.symbol || r.label,
+    value: r.effect,
+    color: color,
+    sub: dollars,
+    why: reason,
+    title: (r.symbol || r.label) + ": " + mfmt(r.effect, { signed: !!m.money })
+      + verb + dollars + (reason ? " — " + reason : ""),
+  };
+}
+
+/* attribution(m) -- who lifts it and who holds it back.
+   ONE BAR CHART, DIVERGING, because that is what `hbar` already does when the
+   data has both signs, and lifts above drags with the account-level remainder
+   between them in its own colour -- it is not a holding and must not be
+   ranked as one. */
+function attribution(m) {
+  const a = m && m.attribution;
+  if (!m) return "";
+  const head = `<div class="sc-ah"><b>${esc(m.label)}</b></div>
+    ${bandScale(m)}
+    <div class="sc-abasis">${prose(m.basis)}</div>`;
+  if (!a) {
+    return `<div class="sc-attr">${head}${vizEmpty({ h: 110,
+      title: "Nothing stands behind this measure",
+      body: why(m.score, "no holding could be placed behind it") })}</div>`;
+  }
+  const rem = a.remainder
+    ? [attrRow(Object.assign({}, a.remainder, { symbol: a.remainder.label }),
+               m, a.exact, "var(--viz-c6)")] : [];
+  const rows = (a.lifts || []).map((r) => attrRow(r, m, a.exact))
+    .concat(rem)
+    .concat((a.drags || []).map((r) => attrRow(r, m, a.exact)));
+  return `<div class="sc-attr">${head}
+    ${hbar({ rows, unit: "pct", sort: false, signed: !!m.money,
+             empty: "No holding stands behind this measure" })}
+    <div class="sc-anote">${prose(a.basis)}</div>
+    ${a.exact ? "" : `<div class="viz-note">${prose(a.why || "these "
+      + "contributions do not add to the score.")}</div>`}
+    ${(a.unattributed || []).length ? `<div class="viz-note">${
+      esc(a.unattributed.join(", "))} ${a.unattributed.length === 1
+        ? "is" : "are"} in neither list: nothing measured a total gain for ${
+      a.unattributed.length === 1 ? "it" : "them"}, and a row at zero would
+      claim ${a.unattributed.length === 1 ? "it" : "they"} contributed
+      nothing.</div>` : ""}
+    ${a.truncated ? `<div class="viz-note">${a.truncated} further row(s) are
+      not drawn here; the full table is below.</div>` : ""}
+    ${m.ceiling ? `<div class="viz-note">${prose(m.ceiling.why)}</div>` : ""}
+  </div>`;
+}
+
+function renderScorecard() {
+  const host = el("rtScore");
+  if (!host || !D) return;
+  const sc = D.scorecard;
+  if (!sc || !(sc.measures || []).length) { host.innerHTML = ""; return; }
+  const ms = sc.measures;
+  /* THE FIRST AXIS THAT ANSWERED, not simply the first. On an account whose
+     funding was never read the first measure is a refusal, and opening the
+     panel on a refusal teaches the reader nothing about the four axes that
+     did measure. The refusals are still one click away and still say why. */
+  if (!ms.some((m) => m.key === SEL)) {
+    SEL = (ms.find((m) => measured(m.score)) || ms[0]).key;
+  }
+  const cur = ms.find((m) => m.key === SEL);
+  const gone = ms.filter((m) => !measured(m.score));
+  host.innerHTML = panel("Five measures, out of " + sc.max, `
+    <div class="sc-wrap">
+      <div class="sc-rad">${radar(ms, SEL, sc.max)}</div>
+      <div class="sc-list">${ms.map((m) => scRow(m, SEL)).join("")}</div>
+    </div>
+    ${gone.length ? `<div class="viz-note">${gone.length} of ${ms.length}
+      ${gone.length === 1 ? "axis is" : "axes are"} not plotted — ${
+      esc(gone.map((m) => m.label).join(", "))} — and the web between the
+      points is not drawn, because a line through a vertex nobody measured
+      would put that vertex somewhere. A point at the centre would be a score
+      of nothing, which is a different claim.</div>` : ""}
+    ${attribution(cur)}`,
+    { sub: "Each axis is scored against a stated scale, and the measured "
+         + "value is beside it. Pick one to see which holdings lift it and "
+         + "which hold it back.",
+      actions: `<div class="sc-ov">${mnum(sc.overall, { unit: "count" })}<i>of ${
+        sc.max} across ${sc.scored} measure${sc.scored === 1 ? "" : "s"}</i></div>`,
+      cls: "rt-score" });
+  host.querySelectorAll("[data-sc]").forEach((b) => {
+    const pick = () => {
+      const k = b.getAttribute("data-sc");
+      if (k === SEL) return;
+      SEL = k;
+      renderScorecard();
+    };
+    b.addEventListener("click", pick);
+    b.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+    });
+  });
+}
+
 /* ================================================================ the notes
    ONLY ISSUES AND WARNINGS. The owner's instruction is verbatim: "only have
    issues or warnings posted". Nothing informational is emitted here -- the
@@ -581,8 +858,12 @@ function renderTable() {
     { label: "Cost basis", num: true, title: "What the OPEN position cost." },
     { label: "Unrealised", num: true },
     { label: "Realised", num: true,
-      title: "What the strategies' own logs have booked. On this account it "
-           + "is wins-only: the ladder has no stop loss." },
+      /* The basis, not a claim about the account. "On this account it is
+         wins-only" was a constant here too, printed over a column that on a
+         book with 41 closed losers shows every one of them. */
+      title: "What the strategies' own logs have booked. A log only ever "
+           + "records the exits it saw, so this is not the whole story of "
+           + "what a ticker did." },
     { label: "Total", num: true, title: "Realised plus open." },
     { label: "Return", num: true,
       title: "Total gain over the capital deployed — the open cost plus every "
@@ -673,6 +954,8 @@ function renderBasis() {
   host.innerHTML = panel("How these are measured", `
     <dl class="rt-basis">
       <dt>The decomposition</dt><dd>${prose(D.breakdown.why)}</dd>
+      ${D.scorecard ? `<dt>The five measures</dt><dd>${
+        prose(D.scorecard.basis)}</dd>` : ""}
       <dt>Annualised (IRR)</dt><dd>${prose(D.irr_basis)}</dd>
       <dt>Capital deployed</dt><dd>${prose(D.deployed_basis)}</dd>
       <dt>The TOTAL row</dt><dd>${prose(D.totals.why)}</dd>
@@ -770,6 +1053,86 @@ const CSS = `
   font-weight:var(--w-med);}
 .rt-basis dd{margin:0;font-size:var(--fs-xs);color:var(--muted);
   line-height:1.6;}
+
+/* ---- the scorecard radar ---- */
+.rt-score .panel-x{align-self:center;}
+.sc-ov{text-align:right;font-size:var(--fs-xl);font-weight:var(--w-semi);
+  font-variant-numeric:tabular-nums;line-height:1.1;color:var(--text);}
+.sc-ov i{display:block;font-style:normal;font-size:var(--fs-micro);
+  color:var(--faint);font-weight:var(--w-reg);letter-spacing:.02em;}
+.sc-wrap{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:center;}
+.sc-rad{flex:none;width:264px;max-width:100%;}
+.sc-radar{display:block;width:100%;height:auto;overflow:visible;}
+.sc-ring{fill:none;stroke:var(--viz-grid);stroke-width:1;}
+.sc-ring.out{stroke:var(--hairline2);}
+.sc-tick{fill:var(--faint);font-size:8px;font-variant-numeric:tabular-nums;}
+.sc-spoke{stroke:var(--hairline2);stroke-width:1;}
+.sc-web{fill:var(--viz-c1);fill-opacity:.17;stroke:var(--viz-c1);
+  stroke-width:1.5;stroke-linejoin:round;}
+.sc-dot{fill:var(--viz-c1);stroke:var(--bg-2);stroke-width:1.5;}
+.sc-al{fill:var(--muted);font-size:9px;font-weight:var(--w-semi);}
+.sc-hit{fill:transparent;cursor:pointer;}
+.sc-ax:hover .sc-al,.sc-ax.on .sc-al{fill:var(--text);}
+.sc-ax.on .sc-spoke{stroke:var(--viz-c1);}
+.sc-ax.on .sc-dot{r:5;}
+.sc-ax:focus{outline:none;}
+.sc-ax:focus-visible .sc-al{fill:var(--text);text-decoration:underline;}
+/* AN AXIS NOBODY MEASURED. No dot, a dashed spoke and an em dash on the label
+   -- never a point at the centre, which would be a measured score of nothing.
+   The web is dropped entirely in that case; see radar() above. */
+.sc-ax.gone .sc-spoke{stroke:var(--viz-grid);stroke-dasharray:3 3;}
+.sc-ax.gone .sc-al{fill:var(--faint);}
+
+/* ---- the ranked list, which is also the layout below 560px ---- */
+.sc-list{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.sc-row{display:flex;align-items:center;gap:var(--s3);width:100%;
+  text-align:left;background:transparent;border:1px solid transparent;
+  border-radius:var(--r-md);padding:6px var(--s3);cursor:pointer;
+  color:inherit;font:inherit;}
+.sc-row:hover{background:var(--bg-3);}
+.sc-row.on{background:var(--bg-3);border-color:var(--hairline2);}
+.sc-rl{flex:1 1 auto;min-width:0;}
+.sc-rl b{display:block;font-size:var(--fs-sm);font-weight:var(--w-med);
+  color:var(--text);}
+.sc-rl i{display:block;font-style:normal;font-size:var(--fs-micro);
+  color:var(--faint);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;}
+.sc-row.gone .sc-rl b{color:var(--muted);}
+.sc-rr{flex:none;display:flex;flex-direction:column;align-items:flex-end;
+  gap:3px;}
+.sc-rv{font-size:var(--fs-sm);font-variant-numeric:tabular-nums;}
+.sc-pips{display:inline-flex;align-items:center;gap:2px;}
+.sc-pip{width:7px;height:7px;border-radius:2px;background:var(--viz-track);}
+.sc-pip.on{background:var(--viz-c1);}
+.sc-pips b{margin-left:5px;font-size:var(--fs-micro);color:var(--muted);
+  font-weight:var(--w-med);font-variant-numeric:tabular-nums;}
+.sc-pips b em{font-style:normal;color:var(--faint);}
+
+/* ---- the attribution ---- */
+.sc-attr{margin-top:var(--s4);padding-top:var(--s3);
+  border-top:1px dashed var(--hairline2);}
+.sc-ah b{font-size:var(--fs-sm);color:var(--text);font-weight:var(--w-semi);}
+.sc-scale{display:flex;gap:2px;margin:var(--s2) 0 4px;}
+.sc-sb{flex:1 1 0;height:6px;border-radius:2px;background:var(--viz-track);}
+.sc-sb.on{background:var(--viz-c1);}
+.sc-scale-l{font-size:var(--fs-micro);color:var(--faint);
+  font-variant-numeric:tabular-nums;}
+.sc-abasis{font-size:var(--fs-xs);color:var(--muted);line-height:1.6;
+  margin:var(--s3) 0;}
+.sc-anote{margin-top:var(--s2);font-size:var(--fs-micro);color:var(--faint);
+  line-height:1.5;}
+
+@media (max-width: 560px){
+  /* FIVE AXES AT 400px IS FIVE SLIVERS. The list beside it is the same five
+     scores with room for their names, so the drawing goes and the list
+     stays -- it was never a fallback, it is the other half of the same
+     component. */
+  .sc-rad{display:none;}
+  .sc-ov{text-align:left;}
+  /* A REASON IS NOT A TOOLTIP ON A PHONE. At this width the row's sentence
+     wraps instead of being clipped with a title nobody can hover. */
+  .sc-rl i{white-space:normal;}
+}
 
 @media (max-width: 720px){
   .wf-r{grid-template-columns:minmax(76px,34%) 1fr minmax(66px,auto);
