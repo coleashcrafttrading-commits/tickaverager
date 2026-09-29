@@ -16,8 +16,11 @@ with `app.js` booting against those same fixtures. That is all this file adds:
     mockserver has no fixtures for: /api/ticker/<sym>, its trades and orders,
     /api/bars, /api/ticks, /api/presets, /api/search, /api/inspect/<sym>.
   * everything else falls through to `mockserver.Handler`, so /api/hub/*,
-    /api/accounts and /api/overview are the same objects, from the same code,
-    that mockserver already serves. There is no second copy of them here.
+    /api/accounts, /api/overview, /api/perf/*, /api/bank/*, /api/assistant/*
+    and /api/optlab/ticker/* are the same objects, from the same code, that
+    mockserver already serves. There is no second copy of them here, and a
+    route added there is served here the same minute -- which is the point of
+    inheriting the handler rather than listing the paths twice.
 
 -------------------------------------------------------------------- the trap
 A harness that disagrees with the real route hides bugs instead of finding

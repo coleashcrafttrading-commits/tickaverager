@@ -1,17 +1,35 @@
 /* ============================================================================
-   options.js -- the Options tab: the board, the shelf, and what the sweep
+   options.js -- the Options tab: the record, the shelf, and what the sweep
    actually proved.
 
-   THIS PAGE CAN ARM, and this paragraph used to say the opposite. It read
-   "nothing on this page is armed and nothing on it can trade", which was true
-   until the Plays room landed and stopped being true in the same commit
-   without anybody moving the line. Exactly what is true now: the Plays room
-   writes the arm file, and it can send ONE kind of order -- a CLOSING one,
-   through /api/optlab/plays/close, which test_optboard.py asserts is the only
-   write in this namespace that reaches the broker. /plays/cycle is built
-   dry_run=True whatever the arm says, so it prices, records, and sends
-   nothing. Every other room here only reads. The Board's own "armed: false"
-   is still a constant on the server and it is a fact about the BOARD.
+   THIS PAGE READS AND DOES NOTHING ELSE, and that sentence has now been
+   true, then false, then true again, so it carries its own history: it was
+   written when the tab only read, it was falsified the day the Plays room
+   landed and wrote the arm file, and the Plays room is gone as of 28 Sep
+   2026. There is no POST left in this file. Grep it: the only fetches are
+   GETs on /api/optlab/*.
+
+   WHERE THE TWO DELETED ROOMS WENT, because the owner deleted them by
+   description rather than by name -- "we have a lot of waste with 'plays' and
+   'data' on the options ... 'put this play on that ticker' is the dumbest
+   thing I have ever seen, I should be able to have a simple pane on the
+   ticker that says 'options strategy' and from the dropdown I can choose
+   one":
+
+     Plays  was a control room that listed every ticker's assignment in one
+            table, which is a conglomerate of pages that already exist. Every
+            one of its controls -- attach, detach, enable, arm, disarm, close
+            -- is now on the TICKER's own Options pane (tickeropts.js), where
+            the symbol is already on screen and the P/L beside it is that
+            symbol's. Nothing about the playbook changed: the same routes are
+            called from a different place, and optplaybook's worker, arm file
+            and ledger are untouched.
+     Data   was the volatility board, one card per watched ticker. The facts
+            are per ticker and they now live on the ticker, in the same pane,
+            read from the SAME /api/optlab/board cache -- so no measurement
+            moved and no extra call was added. The watchlist itself is still
+            the recorder's, at /api/optlab/board and /api/optlab/watch, which
+            this file no longer calls.
 
    LIVE POSITIONS ARE NOT HERE. They live on the engine's own page
    at /options (optapi.py + static/options.html), which is the stack that
@@ -19,8 +37,8 @@
    removed, and nothing was lost with it. Everything below reads
    /api/optlab/* -- the research and evidence side.
 
-   Five rooms, and each one exists because a number that matters has nowhere
-   else to live:
+   Three rooms, and each one exists because a question that matters is
+   answered nowhere else:
 
      Overview    THE LANDING ROOM. What the playbook has actually done: what
                  needs acting on, why a play did not open, realized and open
@@ -28,29 +46,6 @@
                  against its ceiling, and assignment exposure gross and net of
                  its hedge. Its own header, down at mountPerf, says why it is
                  first and why each number on it is there.
-     Plays       the control room -- the two plays, the tickers they are on,
-                 the arm switch, and the one closing order this file can send.
-     Board       once the landing room, and it replaced the live chain. One card
-                 per watched ticker: spot, IV, IV rank with the number of
-                 sessions of recorded history behind it, realised vol, VRP,
-                 term slope, skew, liquidity grade, earnings and ex-dividend
-                 proximity, the next expiry, and a regime badge that carries
-                 the sentence justifying it. Every number says WHO SUPPLIED
-                 IT -- a filled badge for one Alpaca published, a hollow one
-                 for one nobody serves and we solved here -- because the
-                 owner asked why we compute so much and the only honest
-                 answer is per number. A fact that never formed is a dashed
-                 empty cell with the reason on hover, never a zero: on a
-                 volatility board those two look identical and only one of
-                 them is information.
-
-                 IV RANK IS THE ONE THAT MOSTLY REFUSES, on purpose. It needs
-                 a year of daily implied volatility that no endpoint serves,
-                 the recorder holds days rather than a year, and "IV rank 40"
-                 off six days is a lie with a decimal point on it. So the
-                 rank is absent with its day count until there is enough, and
-                 marked thin until there is a year.
-
      Strategies  231 documents, 174 of which this level-3 account may actually
                  send. The other 57 stay on the shelf, visibly blocked with
                  the reason, because a bank that hides what it cannot do
@@ -75,14 +70,6 @@
                  not solve keeps its quotes and says WHY: a dropped contract
                  looks like a contract that does not exist, and a blank cell
                  reads as a zero.
-     Strategies  231 documents, 174 of which this level-3 account may actually
-                 send. The other 57 stay on the shelf, visibly blocked with
-                 the reason, because a bank that hides what it cannot do
-                 teaches nothing.
-     Backtest    the sweep, with the fill rate and the spread robustness in
-                 the table beside the profit instead of behind a tooltip.
-                 Those two numbers decide whether a result is real, and hiding
-                 them is how a curve fit gets deployed.
 
    This module only reads, and there is no write route left for it to call.
    That is on purpose: the limit-price sign on a multi-leg order is the most
@@ -108,42 +95,6 @@
        different page from "nothing has traded" and is drawn differently.
        UNITS: "pct" is a FRACTION (0.643 is 64.3%), "usd" is dollars for the
        WHOLE position and never per share.
-
-     GET /api/optlab/board                                       (scoped)
-       {armed: false, status:{level, headline, detail},
-        watchlist:{count, enabled, share_fleet, conflicts, disjoint},
-        rows:[{symbol, tier, cadence_s, enabled, why, added_at,
-               shares_conflict, conflict_reason, measured, as_of,
-               regime, regime_reason, missing, stale, errors,
-               trading_calls, data_calls,
-               facts:{<name>:{value, unit, source, as_of, age_s,
-                              quality, reason, computed, note}}}],
-        regimes:{<regime>: n}, registry:[optfacts.registry() rows],
-        refreshed_at, age_s, stale, refreshing, seconds,
-        cost:{trading_calls, data_calls, budget_stopped, errors, cost_note},
-        min_refresh_s, ttl_s, budget}
-       NEVER BLOCKS. The server measures on a background thread, so the first
-       answer after a restart carries the watchlist with `measured` false and
-       `refreshing` true -- which this file renders as "measuring", because
-       "we are watching eight names and have not measured them yet" and "we
-       are watching nothing" are different answers.
-       `facts` is optfacts' CLOSED VOCABULARY and `registry` describes it:
-       `computed` on a registry row says whether anybody serves that fact at
-       all, `source` on a fact says who supplied it this time. The two are
-       different questions and the drawer shows both.
-       UNITS ARE PER FACT AND ARE NOT THE `unit` STRING. See FACT_FMT.
-
-     POST /api/optlab/board/refresh                              (scoped)
-       Same body. Rate-limited SERVER-SIDE to one forced refresh every
-       `min_refresh_s`; a 429 here is the limiter working, because the expiry
-       registry is on the 200/min trading host the live share ladders spend
-       from. The page shows the refusal rather than swallowing it.
-
-     POST /api/optlab/watch  {symbol, action, why?, tier?}       (scoped)
-       action is add | remove | enable | disable. `why` is REQUIRED on an add
-       and the server refuses without it. 409 when the symbol is one the
-       share ladder trades -- an assignment there would sell shares its lot
-       ledger believes it owns.
 
      GET /api/optlab/expirations/{sym}?min_dte&max_dte   (account-scoped)
        {symbol, now, expirations:[{expiry, dte, expired, tradable,
@@ -180,9 +131,14 @@
         grades:{A,B,C,D}, graded:[...], graded_total, cross_market, note}
    ========================================================================= */
 "use strict";
+/* GET and nothing else. POST, ask and toast left with the Plays room, and
+   dropping them from the import is the part that keeps the header's "this
+   module only reads" honest: a name still in scope is a write one edit away,
+   and the last time that sentence went stale nobody noticed for a fortnight.
+   test_optview.py section 11 asserts both the absent call and the absent
+   import. */
 import {
-  VIEWS, GET, POST, SHARED_API, ask, el, esc, card, stat, tableHTML, toast,
-  money, sgn,
+  VIEWS, GET, SHARED_API, el, esc, card, stat, tableHTML, money, sgn,
 } from "../core.js";
 
 /* Two of the five routes are machine-wide rather than account-scoped, the way
@@ -217,20 +173,31 @@ for (const p of ["/api/optlab/bank", "/api/optlab/sweep"]) {
    activeTab below lights Board for anyone arriving on an old bookmark. */
 const TABS = [
   ["perf", "Overview"],
-  ["plays", "Plays"],
-  ["data", "Data"],
   ["strategies", "Strategies"],
   ["backtest", "Backtest"],
 ];
 
 const SUB = {
   perf: "what these plays have actually done -- booked, open, and the mix behind it",
-  plays: "the two plays, the tickers they are on, and what is open right now",
-  data: "the tickers we watch, and what we actually know about each one",
-  board: "the tickers we watch, and what we actually know about each one",
   chain: "Alpaca's quotes; the IV and the greeks are solved here",
   strategies: "every structure on the shelf, and what this account may send",
   backtest: "what survived a second market and a doubled spread",
+};
+
+/* The two deleted rooms, by their old hash. A bookmark, a link in a chat or
+   the browser's own history still lands on a real page carrying the sentence
+   that says where the room went -- which is the whole reason this is a note
+   on the Overview rather than a silent redirect. A person who typed
+   #/options/plays wants the plays; being dropped on a report with no
+   explanation reads as the page being broken. */
+const GONE = {
+  plays: "The Plays room is gone. A ticker's option strategies, their state, "
+    + "their P/L, the arm switch and the close button are on that TICKER's "
+    + "own Options pane -- open the ticker and choose Options. Nothing about "
+    + "the playbook changed: same routes, same worker, same arm file.",
+  data: "The Data room is gone. What was measured per ticker is on that "
+    + "TICKER's own Options pane, off the same board cache. The 231 "
+    + "structures are in the one strategy bank on the Strategies page.",
 };
 
 VIEWS.options = {
@@ -238,29 +205,24 @@ VIEWS.options = {
   sub: (ov, v) => SUB[v.tab || "perf"] || SUB.perf,
   tabs: TABS,
 
-  /* An old link to #/options/chain still renders the chain, and lights Board
-     -- the tab it now lives behind -- rather than leaving the bar with
-     nothing highlighted at all. core.js's MOVED map cannot do this one: it
-     rewrites a whole view, and the chain is still a real page in this one. */
-  activeTab: (v) => (v.tab === "chain" ? "data"
-                     : v.tab === "board" ? "data" : (v.tab || "perf")),
+  /* An old link to #/options/chain still renders the chain, and lights the
+     Overview -- the only room left that is not the chain -- rather than
+     leaving the tab bar with nothing highlighted at all. core.js's MOVED map
+     cannot do the chain: it rewrites a whole view, and the chain is still a
+     real page in this one. */
+  activeTab: (v) => (TABS.some((t) => t[0] === v.tab) ? v.tab : "perf"),
 
   mount(v) {
     /* Every timer this view starts is stamped with the mount that started it
        and dies when a newer one exists. See every(). */
     MOUNT += 1;
     ensureStyle();
-    const t = v.tab || "plays";
+    const t = v.tab || "perf";
     if (t === "strategies") return mountStrategies();
     if (t === "backtest") return mountBacktest();
     if (t === "chain") return mountChain();
-    /* "board" is the old name for the data room. An existing bookmark or a
-       link in a chat still lands somewhere real rather than on a blank view. */
-    if (t === "data" || t === "board") return mountBoard();
-    if (t === "plays") return mountPlays();
-    /* The Overview is the landing room: see its own header below for why the
-       report opens and the control room is one click away. */
-    return mountPerf();
+    /* "board" was the data room's first name and is still in bookmarks. */
+    return mountPerf(GONE[t === "board" ? "data" : t] || "");
   },
 
   /* No paint(). The fleet poll runs every two seconds and repainting a
@@ -394,113 +356,22 @@ const CSS = `
 .o-blab { display: flex; justify-content: space-between; gap: 10px;
           color: var(--muted); margin-bottom: 3px; font-size: 12px; }
 
-/* ---- the board ---------------------------------------------------------
-   Cards, not a table. Eleven numbers plus a badge and two buttons do not fit
-   a table row at 400px without a sideways scroll, and a board you have to
-   scroll sideways to read is not a five-second answer. The cells are an
-   auto-fill grid, so the same markup is four columns on a phone and eight on
-   a desktop, with no second layout to keep in step. */
-.b-honest { display: flex; flex-direction: column; gap: 3px;
-            border: 1px solid var(--hairline2);
-            border-left: 3px solid var(--up); background: var(--surface);
-            border-radius: var(--radius-sm); padding: 11px 14px;
-            margin-bottom: 14px; font-size: 12.5px; line-height: 1.55; }
-.b-honest b { font-size: 13px; }
-.b-honest span { color: var(--muted); }
-/* If this page ever renders armed, it must not look like the calm one. */
-.b-honest.hot { border-left-color: var(--down); }
-
-/* Two rows, not one. .stats is an auto-fit grid at minmax(186px, 1fr), so
-   putting it in a flex row beside the controls collapses it to a single
-   column of tall tiles and pushes the first ticker below the fold. */
-.b-head { margin-bottom: 4px; }
-.b-stats { margin-bottom: 13px; }
-.b-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.b-tools .o-chips { margin-right: auto; }
-.b-legend { font-size: 11px; color: var(--faint); margin: 10px 0 14px;
-            display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
-            line-height: 1.7; }
-.b-dash { color: var(--faint); }
-
-.b-rows { display: grid; gap: 10px; }
-.b-row { border: 1px solid var(--hairline); border-radius: var(--radius-sm);
-         background: var(--surface); padding: 11px 13px; min-width: 0; }
-.b-row.off { opacity: .62; }
-.b-top { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; }
-.b-spacer { flex: 1 1 8px; }
-.b-sym { appearance: none; border: 0; background: transparent; font: inherit;
-         color: var(--text); font-weight: 700; font-size: 14px;
-         letter-spacing: .02em; cursor: pointer; padding: 0 2px 0 0; }
-.b-caret { color: var(--faint); font-size: 10px; }
-.b-age { font-size: 11px; color: var(--faint); }
-
-.b-cells { display: grid; gap: 6px 10px; margin-top: 9px;
-           grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
-.b-cell { min-width: 0; display: flex; flex-direction: column; gap: 1px;
-          padding: 5px 7px; border-radius: 6px; background: var(--surface-2); }
-/* A fact that never formed is a DASHED OUTLINE with no fill. It must not
-   read as a cell that happens to hold a small number. */
-.b-cell.none { background: transparent; border: 1px dashed var(--hairline); }
-.b-cell.thin { box-shadow: inset 2px 0 0 0 var(--warn); }
-.b-cell.stale { box-shadow: inset 2px 0 0 0 var(--down); }
-.b-lab { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
-         color: var(--faint); white-space: nowrap; overflow: hidden;
-         text-overflow: ellipsis; }
-.b-val { font-size: 13px; font-weight: 620; display: flex; gap: 4px;
-         align-items: baseline; min-width: 0; }
-.b-unit { font-size: 9.5px; font-weight: 500; color: var(--faint);
-          margin-left: 2px; }
-
-/* PROVENANCE. Filled accent = Alpaca's number, hollow outline = one we
-   computed. It is a FILL and not a letter colour because the two have to be
-   separable at arm's length: the owner asked why we compute so much, and the
-   answer has to be visible without reading. */
-.b-src { font-size: 8.5px; font-weight: 700; line-height: 1; padding: 2px 3px;
-         border-radius: 3px; letter-spacing: .02em; }
-.b-src.s-alpaca { background: var(--accent-dim); color: var(--accent); }
-.b-src.s-computed { background: transparent; color: var(--faint);
-                    border: 1px solid var(--hairline2); }
-.b-src.s-mixed { background: rgba(255, 192, 97, .16); color: var(--warn); }
-.b-src.s-recorded, .b-src.s-calendar { background: var(--hairline);
-                                       color: var(--muted); }
-
-.b-why { margin-top: 8px; font-size: 11.5px; color: var(--muted);
-         line-height: 1.5; }
-.b-drawer { margin-top: 11px; padding-top: 11px;
-            border-top: 1px solid var(--hairline); }
-.b-note { font-size: 12px; color: var(--muted); line-height: 1.55;
-          margin: 0 0 9px; }
-.b-note.bad { color: var(--down); }
-/* app.css right-aligns every table cell, which is right for a ledger and
-   wrong for six columns of prose: the reasons ended up ragged-left against
-   the page edge and unreadable. Only the value column is a number. */
-.b-drawer th, .b-drawer td { text-align: left; }
-.b-drawer th:nth-child(2), .b-drawer td:nth-child(2) { text-align: right; }
-.b-drawer td:nth-child(3), .b-drawer td:nth-child(4) { white-space: nowrap; }
-.b-reason { color: var(--faint); font-size: 11.5px; white-space: normal;
-            min-width: 180px; }
-.b-add { margin-top: 14px; padding: 12px 13px; background: var(--surface);
-         border: 1px solid var(--hairline2); border-radius: var(--radius-sm); }
-@media (max-width: 560px) {
-  .b-cells { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
-  .b-tools { width: 100%; }
-  .b-tools .o-chips { flex: 1 1 100%; }
-  /* The two per-row buttons wrap onto their own line on a phone. Kept, but
-     quieter: they are housekeeping, and the facts are the page. */
-  .b-row .row-btns .btn { font-size: 11px; padding: 3px 9px; }
-}
-
 .o-back { appearance: none; border: 0; background: transparent; cursor: pointer;
           color: var(--accent); font: inherit; font-size: 12.5px; padding: 0;
           margin-bottom: 12px; }
 .o-mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .o-budget { font-size: 11px; color: var(--faint); }
 
-/* ---- the plays room ----------------------------------------------------
-   Theme tokens only, so both themes follow for free. The one thing here that
-   is not decoration is .pl-state: armed, disarmed and FROZEN have to be
-   distinguishable across a room, and colour alone does not do that, so each
-   also carries its own word in bold and its own left rail weight. */
+/* ---- the arm state strip, and the tiles under it -----------------------
+   .pl-state is the one thing here that is not decoration: armed, disarmed
+   and FROZEN have to be distinguishable across a room, and colour alone does
+   not do that, so each also carries its own word in bold and its own left
+   rail weight. It outlived the Plays room it was written for -- the Overview
+   repeats the arm state at the top of the report, and the ticker's own
+   Options pane draws the same strip from its own file. The pl- prefix is
+   kept rather than renamed so the two files' CSS cannot drift apart -- a
+   backtick in here would end the template literal, which is why there is
+   none. */
 .pl-state { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
             padding: 12px 14px; border-radius: var(--radius-sm);
             border: 1px solid var(--hairline); margin-bottom: 12px;
@@ -517,49 +388,8 @@ const CSS = `
                   background: color-mix(in srgb, var(--down) 12%, transparent); }
 .pl-state.froze b { color: var(--down); }
 
-.pl-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .pl-stats { display: grid; gap: 10px; margin-bottom: 10px;
             grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-
-.pl-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-          margin-bottom: 12px; }
-.pl-add input, .pl-add select { background: var(--surface-2); color: var(--text);
-          border: 1px solid var(--hairline); border-radius: var(--radius-sm);
-          padding: 6px 9px; font: inherit; font-size: 12.5px; }
-
-.pl-row { border: 1px solid var(--hairline); border-radius: var(--radius-sm);
-          padding: 10px 12px; margin-bottom: 8px; background: var(--surface); }
-.pl-row.off { opacity: .55; }
-.pl-row-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.pl-sym { font-size: 14px; letter-spacing: .02em; }
-.pl-play { color: var(--muted); font-size: 12px; }
-.pl-row-btns { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
-
-.pl-fields { display: grid; gap: 8px; margin-top: 10px;
-             grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
-.pl-f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.pl-f span { font-size: 10.5px; color: var(--faint); text-transform: uppercase;
-             letter-spacing: .05em; }
-.pl-f input, .pl-f select { background: var(--surface-2); color: var(--text);
-             border: 1px solid var(--hairline); border-radius: 8px;
-             padding: 5px 7px; font: inherit; font-size: 12.5px; width: 100%;
-             min-width: 0; font-variant-numeric: tabular-nums; }
-
-.pl-why { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
-
-.pl-b { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
-        padding: 2px 7px; border-radius: var(--radius-pill);
-        border: 1px solid var(--hairline2); white-space: nowrap; }
-.pl-b.on   { color: var(--up);
-             background: color-mix(in srgb, var(--up) 14%, transparent); }
-.pl-b.off  { color: var(--faint); }
-.pl-b.up   { color: var(--up);
-             background: color-mix(in srgb, var(--up) 14%, transparent); }
-.pl-b.dn   { color: var(--down);
-             background: color-mix(in srgb, var(--down) 14%, transparent); }
-.pl-b.flat { color: var(--muted); }
-.pl-b.open { color: var(--accent-2);
-             background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
 
 /* A wide table on a narrow screen scrolls in its OWN container, so the page
    body never scrolls sideways. */
@@ -587,9 +417,6 @@ const CSS = `
 .ov-meter i.full { background: var(--down); }
 
 @media (max-width: 560px) {
-  .pl-row-btns { margin-left: 0; width: 100%; }
-  .pl-row-btns .btn { font-size: 11px; padding: 3px 9px; }
-  .pl-add input, .pl-add select { flex: 1 1 auto; }
   .pl-state b { font-size: 14px; }
 }
 `;
@@ -724,551 +551,6 @@ const LS = {
   get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private */ } },
 };
-
-/* ================================================================= board */
-/* THE LANDING ROOM. "Are we watching the right tickers, and what do we know
-   about each one" -- answerable in five seconds, with nothing on screen that
-   the backend did not actually measure.
-
-   Everything here reads /api/optlab/board, which is a join of optwatch (which
-   names are on the board, and why each one is) and optfacts (the closed
-   vocabulary of facts, each with its source, its age and, when it is absent,
-   the reason). This file adds no opinion to either: a second idea about what
-   an IV rank means, living in display code, is how two answers to the same
-   question come to disagree. It formats, it explains, and it refuses to draw
-   a number nobody measured. */
-
-const REGIME = {
-  rich_vol: ["Premium rich", "good"],
-  cheap_vol: ["Premium cheap", "acc"],
-  neutral: ["Neutral", ""],
-  event_risk: ["Event risk", "warn"],
-  unusable: ["Not usable", "bad"],
-  off: ["Disabled", ""],
-  unmeasured: ["Measuring…", ""],
-};
-
-/* WHICH FACTS GET A CELL ON THE CARD, in reading order. The rest are in the
-   drawer. This is the five-second answer, so it stops at eleven. */
-const CARD_FACTS = [
-  ["spot", "Spot"],
-  ["iv", "IV"],
-  ["iv_rank", "IV rank"],
-  ["realized_vol_20", "Realised"],
-  ["vrp", "VRP"],
-  ["term_slope", "Term /30d"],
-  ["skew_25d", "Skew 25d"],
-  ["liquidity_grade", "Liquidity"],
-  ["earnings_in_days", "Earnings"],
-  ["ex_div_in_days", "Ex-div"],
-  ["next_expiry", "Next expiry"],
-];
-
-/* FORMATTING IS BY FACT NAME, NEVER BY THE `unit` STRING, and that is not
-   fussiness. optfacts labels both `iv_rank` and `atm_spread_pct` "pct", and
-   they are in different units: a rank is already 0-100 while a spread is a
-   FRACTION of mid, 0.026 for 2.6%. This repo has shipped that exact bug once
-   -- an uncloseable 54.5% wing printed as 0.5% because a fraction was read as
-   a percentage -- so the conversion lives per name, next to the name, where
-   it can be checked against optfacts.py line by line. */
-const FACT_FMT = {
-  spot: (v) => dol(v),
-  iv: (v) => ivTxt(v),                     // ratio -> percent
-  iv_rank: (v) => n2(v, 0),                // already 0-100
-  iv_percentile: (v) => n2(v, 0),          // already 0-100
-  iv_rank_days: (v) => n0(v),
-  realized_vol_20: (v) => ivTxt(v),
-  parkinson_vol_20: (v) => ivTxt(v),
-  vrp: (v) => volPts(v),                   // vol POINTS, signed
-  vrp_ratio: (v) => has(v) ? Number(v).toFixed(2) + "×" : DASH,
-  term_slope: (v) => volPts(v),            // per 30 days
-  skew_25d: (v) => volPts(v),
-  put_skew: (v) => volPts(v),
-  liquidity_grade: (v) => v ? esc(String(v)) : DASH,
-  atm_spread_pct: (v) => fracPc1(v),       // a FRACTION of mid. See above.
-  open_interest_atm: (v) => n0(v),
-  earnings_in_days: (v) => days(v),
-  ex_div_in_days: (v) => days(v),
-  dte_to_next: (v) => days(v),
-  next_expiry: (v) => v ? esc(String(v).slice(5)) : DASH,
-  greeks_source: (v) => v ? esc(String(v)) : DASH,
-  chain_rows: (v) => n0(v),
-};
-
-/* Volatility points, signed, AND CARRYING THE UNIT. A VRP of 0.031 is
-   "+3.1 pts" and never "0.03": three hundredths of nothing named is the
-   number nobody reads, and beside an IV printed as 18.4% an unlabelled 3.1
-   reads as another percentage of the same thing, which it is not. */
-const volPts = (v) => has(v)
-  ? (Number(v) >= 0 ? "+" : "") + (Number(v) * 100).toFixed(1)
-    + `<span class="b-unit">pts</span>` : DASH;
-const days = (v) => has(v) ? Number(v) + "d" : DASH;
-
-const factText = (name, f) => {
-  if (!f || f.value == null) return DASH;
-  const fn = FACT_FMT[name];
-  return fn ? fn(f.value) : esc(String(f.value));
-};
-
-/* PROVENANCE, AT A GLANCE. The owner asked why we compute so much, so the
-   answer is on every number rather than in a paragraph somewhere: A means
-   Alpaca published it and we passed it through, C means nobody serves it and
-   we solved it here, M means the reading was assembled from rows of both
-   kinds -- which is what a near-dated chain genuinely is. No badge means the
-   fact never formed, and then the cell is a dash with a reason on hover. */
-const SRC = { alpaca: ["A", "Alpaca published this; we did not recompute it"],
-              computed: ["C", "Nobody serves this — solved in the dashboard"],
-              mixed: ["M", "Part published by Alpaca, part solved here"],
-              recorded: ["R", "From our own recorded history"],
-              calendar: ["K", "From the event calendar"] };
-
-function srcBadge(f) {
-  if (!f || f.value == null) return "";
-  const hit = SRC[f.source];
-  if (!hit) return "";
-  return `<span class="b-src s-${esc(f.source)}" title="${esc(hit[1])}"
-    >${hit[0]}</span>`;
-}
-
-/* IV RANK NEVER APPEARS WITHOUT ITS DAY COUNT. It is the one number on this
-   board with no endpoint behind it, and the one most easily lied about: a
-   rank is a statement about a year, and the same "62" means something
-   entirely different off 94 sessions than off 252. So the confidence is
-   printed beside the value rather than hidden in a tooltip, and the cell
-   stays marked `thin` until a full year backs it. A bare rank is the lie. */
-function rankTail(name, facts) {
-  if (name !== "iv_rank" || !facts) return "";
-  const d = facts.iv_rank_days;
-  if (!d || d.value == null) return "";
-  return `<span class="b-unit" title="sessions of recorded IV history behind
-    this rank">${n0(d.value)}d</span>`;
-}
-
-/* Every cell that has no number says WHY in its tooltip, and a cell whose
-   number is thin or stale is marked rather than presented as clean. */
-function factCell(name, label, f, facts) {
-  const bad = !f || f.value == null;
-  const q = (f && f.quality) || "missing";
-  const tip = bad ? ((f && f.reason) || "not measured")
-    : [(f.reason || ""), q === "ok" ? "" : q].filter(Boolean).join(" · ");
-  const cls = bad ? " none" : q === "thin" ? " thin" : q === "stale"
-    ? " stale" : "";
-  return `<div class="b-cell${cls}" title="${esc(tip)}">
-    <span class="b-lab">${esc(label)}</span>
-    <span class="b-val">${factText(name, f)}${srcBadge(f)}${rankTail(name,
-      facts)}</span></div>`;
-}
-
-const agoEpoch = (sec) => {
-  if (!has(sec)) return "";
-  const s = Math.max(0, Math.round(Date.now() / 1000 - Number(sec)));
-  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago`
-    : `${(s / 3600).toFixed(1)}h ago`;
-};
-
-/* setTimeout with the same mount-token guard every() uses. Without it the
-   "come back for the measurement" retry outlives the tab that started it,
-   and seven visits to Board mean seven retries racing each other -- the
-   identical bug every() was written for, on a different timer. */
-function later(ms, fn) {
-  const mine = MOUNT;
-  setTimeout(() => { if (mine === MOUNT) fn(); }, ms);
-}
-
-let BD = null;
-
-function mountBoard() {
-  BD = {
-    data: null,
-    err: "",
-    busy: false,
-    filter: LS.get("ta-opt-regime", "") || "",
-    sort: LS.get("ta-opt-sort", "regime") || "regime",
-    open: {},          // symbol -> the detail drawer is open
-    adding: false,
-  };
-  el("view").innerHTML = `
-    <div id="obHonest"></div>
-    <div id="obHead"></div>
-    <div id="obBody">${loading("the board")}</div>`;
-  /* Slow on purpose. These facts move on the scale of a session -- an IV
-     rank, a realised vol, days to an earnings print -- and the server
-     refreshes at its own TTL anyway, so a faster poll would only redraw the
-     same numbers while spending the shared trading budget. */
-  every(30000, "obBody", () => loadBoard({ quiet: true }));
-  loadBoard();
-}
-
-async function loadBoard({ quiet = false } = {}) {
-  if (!BD || BD.busy) return;
-  BD.busy = true;
-  if (!quiet && !BD.data) put("obBody", loading("the board"));
-  try {
-    BD.data = await GET("/api/optlab/board");
-    BD.err = "";
-  } catch (e) {
-    BD.err = e.message || String(e);
-  } finally {
-    BD.busy = false;
-  }
-  paintBoard();
-  /* The server measures on a background thread, so the first answer after a
-     restart is honestly empty. Come back for it rather than making the
-     operator press Refresh to see a board that is already being built. */
-  if (BD.data && BD.data.refreshing) later(2500, () => loadBoard({ quiet: true }));
-}
-
-async function boardRefresh() {
-  const b = el("obGo");
-  if (b) { b.disabled = true; b.textContent = "Measuring…"; }
-  try {
-    BD.data = await POST("/api/optlab/board/refresh", {});
-    BD.err = "";
-  } catch (e) {
-    /* A 429 here is the rate limiter doing its job, not a fault: the expiry
-       registry is on the 200/min host the live share ladders spend from. Say
-       so where the operator is looking instead of in a console. */
-    BD.err = e.message || String(e);
-  }
-  paintBoard();
-  if (BD.data && BD.data.refreshing) later(2000, () => loadBoard({ quiet: true }));
-}
-
-/* Said in words, not "addd". Pausing and removing are different acts and
-   the confirmation has to say which one happened -- a paused ticker keeps
-   its row and the sentence that put it there. */
-const DID = {
-  add: (s) => `${s} is on the board. It will be measured on the next refresh.`,
-  remove: (s) => `${s} is off the board.`,
-  enable: (s) => `${s} resumed — data is being gathered on it again.`,
-  disable: (s) => `${s} paused. Its row stays, with the reason it was added.`,
-};
-
-async function watchAct(symbol, action, extra) {
-  const body = Object.assign({ symbol, action }, extra || {});
-  try {
-    const r = await POST("/api/optlab/watch", body);
-    const say = DID[action] || ((x) => `${x} ${action}`);
-    toast(esc(say(symbol)), "ok");
-    if (r && r.watchlist) BD.adding = false;
-  } catch (e) {
-    toast(esc(e.message || String(e)), "err", 9000);
-    return false;
-  }
-  await loadBoard({ quiet: true });
-  return true;
-}
-
-function paintBoard() {
-  if (!BD) return;
-  const d = BD.data;
-  paintHonest(d);
-  paintBoardHead(d);
-  if (BD.err && !d) return void put("obBody", errNote({ message: BD.err }));
-  if (!d) return void put("obBody", loading("the board"));
-  const rows = boardRows(d);
-  const body = rows.length
-    ? rows.map((r) => rowCard(r, d)).join("")
-    : `<div class="note"><b>Nothing matches that filter.</b>
-       <span class="faint">${d.rows.length} ticker(s) are on the
-       board.</span></div>`;
-  if (!put("obBody", `<div class="b-rows">${body}</div>` + addForm()))
-    return;
-  wireBoard();
-}
-
-/* The one line that must never overstate what this page is. It is a constant
-   on the server too -- `armed` is a fact about the code, not a reading -- and
-   it is drawn before anything else on the page for the same reason. */
-const HONEST = ["Nothing is armed. No option is being traded.",
-  "This is the data layer: the tickers we watch and the facts we can "
-  + "measure about them. There is no options position, no order path behind "
-  + "this page and no arm switch on it. Every route it calls is a read."];
-
-function paintHonest(d) {
-  const s = (d && d.status) || {};
-  /* The fallback is the same two sentences, not a shorter version of them.
-     When the board cannot be fetched the page has LESS information, not
-     less obligation, and a one-line "Nothing is armed." beside a red error
-     reads as a system that half-knows what it is doing. */
-  put("obHonest", `<div class="b-honest ${d && d.armed ? "hot" : ""}">
-    <b>${esc(s.headline || HONEST[0])}</b>
-    <span>${esc(s.detail || HONEST[1])}</span></div>`);
-}
-
-function paintBoardHead(d) {
-  if (!d) return void put("obHead", "");
-  const w = d.watchlist || {};
-  const cost = d.cost || {};
-  const when = d.refreshing ? "measuring now…"
-    : d.refreshed_at ? `${ago(d.refreshed_at)}${d.stale ? " · stale" : ""}`
-      : "not yet";
-  /* The trading number alone in the big type, because it is the only one
-     that is scarce: it comes out of the same 200/min the live share ladders
-     spend from. The data host is 10,000/min and ours, so it is a footnote. */
-  const spend = has(cost.trading_calls) ? `${cost.trading_calls} trading`
-    : "—";
-  const spendSub = has(cost.trading_calls)
-    ? `+ ${cost.data_calls || 0} market-data · shared 200/min host`
-    : "nothing measured yet";
-  const on = w.enabled != null ? w.enabled : "—";
-  const all = w.count != null ? w.count : "—";
-  const stats = [
-    stat("Watched", `${on} / ${all}`, "enabled / on the board"),
-    stat("Last refresh", when, d.seconds ? `took ${d.seconds}s` : ""),
-    stat("That cost", spend, spendSub),
-  ].join("");
-  const err = BD.err ? `<div class="note bad" style="margin-top:10px">
-    <b>${esc(BD.err)}</b><br><span class="faint">Nothing was sent and no
-    position changed — this page has no order path.</span></div>` : "";
-  put("obHead", `<div class="b-head">
-    <div class="stats b-stats">${stats}</div>
-    <div class="b-tools">${regimeChips(d)}${sortChips()}
-      <button class="btn sm" id="obAdd">Add ticker</button>
-      <button class="btn sm primary" id="obGo">Refresh</button></div>
-    </div>${conflictNote(w)}${budgetNote(d)}${err}${legend()}`);
-}
-
-function legend() {
-  return `<div class="b-legend"><span class="b-src s-alpaca">A</span>
-    Alpaca published it <span class="b-src s-computed">C</span> we computed it
-    <span class="b-src s-mixed">M</span> both, on one chain ·
-    <span class="b-dash">—</span> not measured, with the reason on hover</div>`;
-}
-
-function conflictNote(w) {
-  const bad = (w && w.conflicts) || {};
-  const names = Object.keys(bad);
-  if (!names.length) return "";
-  return `<div class="note bad"><b>${names.length} watched ticker(s) are also
-    traded by the share ladder: ${esc(names.join(", "))}.</b>
-    <span class="faint">${esc(bad[names[0]] || "")} Nothing may ever be armed
-    on these — an assignment would sell shares the ladder's own ledger
-    believes it owns.</span></div>`;
-}
-
-function budgetNote(d) {
-  const stop = (d.cost && d.cost.budget_stopped) || [];
-  const errs = (d.cost && d.cost.errors) || [];
-  let out = "";
-  if (stop.length) {
-    out += `<div class="note warn"><b>The trading-API budget stopped open
-      interest on ${esc(stop.join(", "))}.</b> <span class="faint">Those rows
-      carry the fact as absent rather than as zero. The 200/min host is shared
-      with the live share ladders.</span></div>`;
-  }
-  if (errs.length) {
-    out += `<div class="note warn"><b>${errs.length} measurement(s) failed on
-      the last refresh.</b> <span class="faint">${esc(errs[0])}</span></div>`;
-  }
-  return out;
-}
-
-function regimeChips(d) {
-  const counts = d.regimes || {};
-  const keys = Object.keys(counts).sort();
-  const total = d.rows ? d.rows.length : 0;
-  const one = (k, label, n) => `<button class="o-chip
-    ${BD.filter === k ? "on" : ""}" data-reg="${esc(k)}">${esc(label)}
-    <span class="faint">${n}</span></button>`;
-  return `<div class="o-chips">${one("", "All", total)}${keys.map((k) =>
-    one(k, (REGIME[k] || [k])[0], counts[k])).join("")}</div>`;
-}
-
-/* Worst first, because the rows worth looking at are the ones that cannot be
-   used and the ones with an event in the window. A board sorted
-   alphabetically buries the row that needs a decision -- which is why this
-   is the default and A-Z is the option, not the other way round. */
-const REGIME_ORDER = { unusable: 0, event_risk: 1, rich_vol: 2, cheap_vol: 3,
-                       neutral: 4, unmeasured: 5, off: 6 };
-
-function boardRows(d) {
-  const rows = (d.rows || []).slice();
-  const byName = (a, b) => String(a.symbol).localeCompare(String(b.symbol));
-  if (BD.sort === "az") rows.sort(byName);
-  else {
-    rows.sort((a, b) => {
-      const ra = REGIME_ORDER[a.regime] != null ? REGIME_ORDER[a.regime] : 9;
-      const rb = REGIME_ORDER[b.regime] != null ? REGIME_ORDER[b.regime] : 9;
-      return ra - rb || byName(a, b);
-    });
-  }
-  return BD.filter ? rows.filter((r) => r.regime === BD.filter) : rows;
-}
-
-function sortChips() {
-  const one = (k, label) => `<button class="o-chip
-    ${BD.sort === k ? "on" : ""}" data-sort="${k}">${label}</button>`;
-  return `<div class="o-chips">${one("regime", "Worst first")}
-    ${one("az", "A–Z")}</div>`;
-}
-
-function rowCard(r, d) {
-  const sym = String(r.symbol || "");
-  const facts = r.facts || {};
-  const cells = CARD_FACTS.map(([k, lab]) =>
-    factCell(k, lab, facts[k], facts)).join("");
-  const open = !!BD.open[sym];
-  return `<div class="b-row ${r.enabled === false ? "off" : ""}">
-    ${rowTop(r, sym, open)}
-    <div class="b-cells">${cells}</div>
-    <div class="b-why">${esc(r.regime_reason || "")}</div>
-    ${open ? drawer(r, d) : ""}</div>`;
-}
-
-/* Split out of rowCard, and not only for length: the header is the part a
-   reader scans down the page, so it is one function to change when the
-   five-second answer changes. */
-function rowTop(r, sym, open) {
-  const reg = REGIME[r.regime] || [r.regime || "unknown", ""];
-  const clash = r.shares_conflict
-    ? `<span class="o-tag bad" title="${esc(r.conflict_reason || "")}"
-       >share ladder</span>` : "";
-  const age = r.measured === false ? ""
-    : `<span class="b-age">${esc(agoEpoch(r.as_of))}</span>`;
-  return `<div class="b-top">
-    <button class="b-sym" data-open="${esc(sym)}">${esc(sym)}
-      <span class="b-caret">${open ? "▾" : "▸"}</span></button>
-    <span class="o-tag ${reg[1]}" title="${esc(r.regime_reason || "")}"
-      >${esc(reg[0])}</span>
-    ${clash}<span class="o-tag">tier ${esc(r.tier || "?")}</span>
-    ${age}<span class="b-spacer"></span>${rowButtons(r)}</div>`;
-}
-
-function rowButtons(r) {
-  const sym = esc(String(r.symbol || ""));
-  const on = r.enabled !== false;
-  return `<span class="row-btns">
-    <button class="btn sm" data-watch="${on ? "disable" : "enable"}"
-      data-sym="${sym}">${on ? "Pause" : "Resume"}</button>
-    <button class="btn sm" data-watch="remove" data-sym="${sym}">Remove</button>
-    </span>`;
-}
-
-/* THE DRAWER IS WHERE THE OWNER'S QUESTION IS ANSWERED IN FULL. One line per
-   fact: what it is, what it says, who supplied it, how old it is, and -- from
-   the server's own registry -- whether anybody serves it at all. Nothing here
-   is written in this file; `computed` and `note` come straight off
-   optfacts.registry(), so the page cannot drift from the module. */
-function drawer(r, d) {
-  const reg = {};
-  for (const x of (d.registry || [])) reg[x.name] = x;
-  const names = Object.keys(r.facts || {}).sort();
-  const rows = names.map((n) => factRow(n, r.facts[n], reg[n]));
-  const why = r.why ? `<p class="b-note"><b>Why it is watched.</b>
-    ${esc(r.why)}${r.added_at ? ` <span class="faint">(added
-    ${esc(String(r.added_at).slice(0, 10))})</span>` : ""}</p>` : "";
-  const errs = (r.errors || []).length
-    ? `<p class="b-note bad">${esc((r.errors || []).join(" · "))}</p>` : "";
-  const cost = `<p class="b-note faint">This row cost
-    ${n0(r.trading_calls)} trading-API call(s) and ${n0(r.data_calls)} on the
-    market-data host at the last refresh.</p>`;
-  return `<div class="b-drawer">${why}${errs}
-    ${tableHTML(["Fact", "Value", "Source", "Age", "Served?", "Reason"], rows,
-      "This ticker has no facts yet.")}
-    ${cost}</div>`;
-}
-
-/* tableHTML joins pre-built rows, so this returns a <tr>, not cells. */
-function factRow(name, f, spec) {
-  const served = !spec ? DASH
-    : spec.computed ? `<span class="faint">nobody — we compute it</span>`
-      : `<span class="faint">Alpaca serves it</span>`;
-  const src = f.source ? `${srcBadge(f)} ${esc(f.source)}`
-    : `<span class="faint">—</span>`;
-  const note = esc(f.reason || (spec ? spec.note : "") || "");
-  return `<tr><td><code class="o-mono">${esc(name)}</code></td>
-    <td class="num"><b>${factText(name, f)}</b></td><td>${src}</td>
-    <td class="num">${esc(agoEpoch(f.as_of) || "—")}</td>
-    <td>${served}</td><td class="b-reason">${note}</td></tr>`;
-}
-
-function addForm() {
-  if (!BD.adding) return "";
-  /* `why` is required, and the server refuses without it. That is optwatch's
-     rule and it is a good one: six months from now the only defensible reason
-     to keep or prune a name is the sentence that put it there. */
-  return `<div class="b-add">
-    <div class="o-bar">
-      <label class="f o-w-sym"><span>Ticker</span>
-        <input id="obSym" maxlength="8" autocomplete="off"
-               spellcheck="false"></label>
-      <label class="f"><span>Tier</span>
-        <select id="obTier"><option value="A">A — every 60s</option>
-        <option value="B" selected>B — every 5m</option>
-        <option value="C">C — every 15m</option></select></label>
-      <label class="f" style="flex:1 1 260px"><span>Why it is worth the data
-        budget</span><input id="obWhy" autocomplete="off"></label>
-      <button class="btn sm primary" id="obSave">Add</button>
-      <button class="btn sm" id="obCancel">Cancel</button>
-    </div>
-    <div class="faint">A ticker the share ladder trades is refused: an
-      assignment would sell shares its lot ledger believes it owns.</div>
-  </div>`;
-}
-
-function wireBoard() {
-  const v = el("view");
-  if (!v) return;
-  v.querySelectorAll("[data-open]").forEach((b) => {
-    b.onclick = () => {
-      const s = b.dataset.open;
-      BD.open[s] = !BD.open[s];
-      paintBoard();
-    };
-  });
-  v.querySelectorAll("[data-watch]").forEach((b) => {
-    b.onclick = async () => {
-      const act = b.dataset.watch;
-      const sym = b.dataset.sym;
-      if (act === "remove") {
-        const yes = await ask({
-          title: `Remove ${sym} from the board?`,
-          body: `<p>It stops being watched and its reason for being on the
-                 board is forgotten. <b>Pause</b> keeps both and only stops
-                 gathering data.</p>`,
-          ok: "Remove", danger: true,
-        });
-        if (!yes) return;
-      }
-      b.disabled = true;
-      await watchAct(sym, act);
-    };
-  });
-  const add = el("obAdd");
-  if (add) add.onclick = () => { BD.adding = !BD.adding; paintBoard(); };
-  const go = el("obGo");
-  if (go) go.onclick = () => boardRefresh();
-  const save = el("obSave");
-  if (save) {
-    save.onclick = async () => {
-      const sym = (el("obSym").value || "").trim().toUpperCase();
-      const why = (el("obWhy").value || "").trim();
-      if (!sym) return void toast("A ticker is required.", "err");
-      if (!why) return void toast("A reason is required — the server refuses "
-        + "a row with no provenance.", "err");
-      save.disabled = true;
-      await watchAct(sym, "add", { why, tier: el("obTier").value });
-      save.disabled = false;
-    };
-  }
-  const cancel = el("obCancel");
-  if (cancel) cancel.onclick = () => { BD.adding = false; paintBoard(); };
-  v.querySelectorAll("[data-reg]").forEach((b) => {
-    b.onclick = () => {
-      BD.filter = b.dataset.reg;
-      LS.set("ta-opt-regime", BD.filter);
-      paintBoard();
-    };
-  });
-  v.querySelectorAll("[data-sort]").forEach((b) => {
-    b.onclick = () => {
-      BD.sort = b.dataset.sort;
-      LS.set("ta-opt-sort", BD.sort);
-      paintBoard();
-    };
-  });
-}
 
 /* ================================================================= chain */
 /* Underlyings worth one tap. Anything else is typed: an allowlist here would
@@ -2192,530 +1474,6 @@ function gradedRows(graded) {
   return out;
 }
 
-/* =================================================================== plays
-   THE LANDING ROOM. It replaced the data board, on the owner's instruction:
-   "please put the updated working system on the frontend dashboard in place of
-   the board that is current so that i can see this system working with
-   everything i need".
-
-   So this page has to answer, in the order a person actually asks:
-
-     1. Is it armed, and is anything stopping it?   -> the strip, first line
-     2. What is on, on which tickers, at what size? -> the assignments table
-     3. What is open right now and where is it?     -> the positions table
-     4. What does it think this minute, and why?    -> Preview
-     5. Why has nothing fired?                      -> the reason on every row
-
-   Two plays exist and only two, by instruction. Everything editable is edited
-   HERE -- the dropdown assigns a play to a ticker, contracts is a field, and
-   the delta, DTE, target and stop are fields on the same row.
-
-   THE HONEST-STATE RULES this page keeps, because they are the ones that make
-   a trading dashboard safe to read:
-
-     * ARMED IS THE LOUDEST THING ON THE PAGE, in both directions. "Armed"
-       must never be mistakable for "disarmed", and a disarmed system must not
-       look broken -- disarmed is the correct resting state.
-     * A NUMBER NOBODY MEASURED RENDERS AS A DASH, never as 0. A mark of 0.00
-       on a live spread and "we could not price it" are different facts and the
-       second one is the one that matters.
-     * FROZEN OUTRANKS ARMED and is drawn as such. An armed playbook with
-       state/FROZEN present opens nothing, and a strip that said only "ARMED"
-       would be lying.
-     * EVERY REFUSAL CARRIES ITS SENTENCE. "waiting" tells a person nothing;
-       "after the 15:30 ET entry cutoff (now 20:48 ET)" tells them everything,
-       and it is the backend's own words rather than this page's guess.
-     * DISARM IS ALWAYS AVAILABLE. It is never behind a confirm, never rate
-       limited, and its note says plainly that open positions stay managed --
-       because a stop button that also stopped the exits would be the thing
-       that caused an assignment.
-   ---------------------------------------------------------------------- */
-function playsHost() {
-  return `
-  <div id="pl-strip">${loading("the playbook")}</div>
-  <div id="pl-assign"></div>
-  <div id="pl-open"></div>
-  <div id="pl-preview"></div>`;
-}
-
-/* The two plays' fields, in the order they are shown. Labels are the owner's
-   language, not the code's: he says "delta", "a month out", "profit", "stop".
-   `pc` marks a value stored as a FRACTION and shown as a PERCENT -- 0.50 in
-   the file is "50%" on screen, and mixing those up is how a 50% target becomes
-   a 0.5% one. */
-const PL_FIELDS = {
-  "index-put-credit-spread": [
-    ["contracts", "Contracts", 0],
-    ["short_delta", "Short delta", 2],
-    ["strikes_below", "Long strikes below", 0],
-    ["target_dte", "Days out", 0],
-    ["profit_pct", "Take profit", "pc"],
-    ["stop_pct", "Stop", "pc"],
-    ["entry_after_et", "Entry from (ET)", "t"],
-    ["entry_before_et", "Entry until (ET)", "t"],
-  ],
-  "swing-atm-hourly": [
-    ["contracts", "Contracts", 0],
-    ["target_dte", "Days out", 0],
-    ["profit_pct", "Take profit", "pc"],
-    ["stop_pct", "Stop", "pc"],
-    ["direction", "Direction", "sel"],
-  ],
-};
-
-const PL_DIRS = ["both", "calls", "puts"];
-
-const plFieldVal = (eff, key, kind) => {
-  const v = eff ? eff[key] : null;
-  if (v == null) return "";
-  if (kind === "pc") return (Number(v) * 100).toFixed(0);
-  return String(v);
-};
-
-/* A signal badge. `null` direction is a real answer and the common one, so it
-   gets a neutral badge and its sentence, not an empty cell. */
-const plSigBadge = (s) => {
-  if (!s) return DASH;
-  if (s.direction === "up") return `<span class="pl-b up">CALLS</span>`;
-  if (s.direction === "down") return `<span class="pl-b dn">PUTS</span>`;
-  return `<span class="pl-b flat">no cross</span>`;
-};
-
-function plStrip(b) {
-  const arm = b.arm || {};
-  const armed = !!arm.armed;
-  const fz = b.frozen;
-  const caps = b.caps || {};
-  const risk = b.open_risk;
-  const nOpen = (b.positions || []).length;
-  const lc = b.last_cycle;
-
-  /* FROZEN first, then armed. The order is the precedence. */
-  let head;
-  if (fz) {
-    head = `<div class="pl-state froze">
-      <b>FROZEN</b>
-      <span>${esc(String(fz))} — nothing opens, whatever the arm says.
-      Open positions are still managed.</span></div>`;
-  } else if (armed) {
-    head = `<div class="pl-state on">
-      <b>ARMED</b>
-      <span>opening is live for ${esc((arm.keys || []).join(", ") || "?")}
-      until ${esc(String(arm.expires || "?").replace("T", " ").slice(0, 16))}
-      — ${esc(arm.reason || "no reason recorded")}</span></div>`;
-  } else {
-    head = `<div class="pl-state off">
-      <b>DISARMED</b>
-      <span>${esc(arm.why_not || "opening is off")}. Everything below is still
-      measured and priced every cycle — nothing is sent.</span></div>`;
-  }
-
-  const btns = `<div class="pl-acts">
-    ${armed
-      ? `<button class="btn danger" id="pl-disarm">Disarm</button>`
-      : `<button class="btn primary" id="pl-arm-all">Arm everything…</button>`}
-    <button class="btn" id="pl-preview-btn">Preview now</button>
-    <button class="btn" id="pl-seed">Assign the named set</button>
-  </div>`;
-
-  const cycle = lc
-    ? `${ago(new Date(lc.finished * 1000).toISOString())}, took
-       ${n2(lc.seconds, 1)}s, ${n0(lc.trading_calls)} trading calls
-       ${(lc.errors || []).length
-          ? `<span class="bad">· ${(lc.errors || []).length} error(s)</span>`
-          : ""}`
-    : `<span class="faint">no cycle has run in this process yet</span>`;
-
-  return card("The playbook", `
-    ${head}
-    ${btns}
-    <div class="pl-stats">
-      ${stat("Open positions", n0(nOpen))}
-      ${stat("Risk on the book", mny(risk))}
-      ${stat("Assignments", n0((b.assignments || []).length))}
-      ${stat("Close shorts at",
-        (caps.close_short_at_dte == null ? "?" : caps.close_short_at_dte)
-        + " DTE")}
-    </div>
-    <div class="note">Last cycle: ${cycle}.
-      ${lc && lc.market_open === false
-        ? `Market is closed — ${esc(lc.market_why || "")}. Reconciliation and
-           management still run; nothing new is proposed.` : ""}</div>`);
-}
-
-function plAssignTable(b) {
-  const rows = b.assignments || [];
-  const plays = b.plays || [];
-  const sigs = b._sigs || {};
-
-  const opts = plays.map((p) =>
-    `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join("");
-
-  const add = `<div class="pl-add">
-    <input id="pl-new-sym" placeholder="TICKER" maxlength="8" size="7">
-    <select id="pl-new-play">${opts}</select>
-    <input id="pl-new-ct" type="number" min="1" max="100" placeholder="qty" size="4">
-    <button class="btn primary" id="pl-add">Put this play on that ticker</button>
-  </div>`;
-
-  if (!rows.length) {
-    return card("Plays on tickers", `${add}
-      <div class="note">Nothing is assigned, so nothing can trade. Use
-      <b>Assign the named set</b> above for SPY and QQQ on the spread and the
-      seven large caps on the swing, or add one here.</div>`);
-  }
-
-  const body = rows.map((r) => {
-    const eff = r.effective || {};
-    const kind = (plays.find((p) => p.id === r.play) || {}).kind;
-    const fields = PL_FIELDS[r.play] || [];
-    const sig = kind === "long_single" ? sigs[r.symbol] : null;
-    const openN = r.open_count || 0;
-
-    const inputs = fields.map(([key, label, dp]) => {
-      const v = plFieldVal(eff, key, dp);
-      if (dp === "sel") {
-        return `<label class="pl-f"><span>${esc(label)}</span>
-          <select data-k="${esc(key)}">${PL_DIRS.map((d) =>
-            `<option value="${d}"${d === v ? " selected" : ""}>${d}</option>`
-          ).join("")}</select></label>`;
-      }
-      const attrs = dp === "t"
-        ? `type="text" size="5" placeholder="HH:MM"`
-        : `type="number" step="${dp === 2 ? "0.01" : "1"}" ${
-            dp === "pc" ? 'min="5" max="500"' : 'min="0"'}`;
-      return `<label class="pl-f"><span>${esc(label)}${
-        dp === "pc" ? " %" : ""}</span>
-        <input ${attrs} data-k="${esc(key)}" data-pc="${dp === "pc" ? 1 : 0}"
-               value="${esc(v)}"></label>`;
-    }).join("");
-
-    return `<div class="pl-row${r.enabled ? "" : " off"}"
-                 data-sym="${esc(r.symbol)}" data-play="${esc(r.play)}">
-      <div class="pl-row-h">
-        <b class="pl-sym">${esc(r.symbol)}</b>
-        <span class="pl-play">${esc((plays.find((p) => p.id === r.play) || {}).label || r.play)}</span>
-        ${r.armed ? `<span class="pl-b on">armed</span>`
-                  : `<span class="pl-b off" title="${esc(r.arm_why || "")}">not armed</span>`}
-        ${r.enabled ? "" : `<span class="pl-b flat">disabled</span>`}
-        ${openN ? `<span class="pl-b open">${openN} open</span>` : ""}
-        ${sig ? plSigBadge(sig) : ""}
-        <span class="pl-row-btns">
-          <button class="btn sm" data-a="save">Save</button>
-          <button class="btn sm" data-a="toggle">${r.enabled ? "Disable" : "Enable"}</button>
-          <button class="btn sm" data-a="arm">${r.armed ? "Disarm" : "Arm"}</button>
-          <button class="btn sm danger" data-a="remove">Remove</button>
-        </span>
-      </div>
-      <div class="pl-fields">${inputs}</div>
-      ${sig ? `<div class="pl-why">1-hour bar ${esc(sig.bar_id || "?")}:
-                 ${esc(sig.reason || "")}</div>` : ""}
-      ${r.arm_why && !r.armed
-        ? `<div class="pl-why faint">${esc(r.arm_why)}</div>` : ""}
-    </div>`;
-  }).join("");
-
-  return card("Plays on tickers", `${add}
-    <div class="note">Change a number and press <b>Save</b> on that row. A field
-    left at the play's default follows the default if it ever changes; a field
-    you set here stays set. Assigning does not arm.</div>
-    ${body}`);
-}
-
-function plOpenTable(b) {
-  const pos = b.positions || [];
-  if (!pos.length) {
-    return card("Open positions", `<div class="note">Nothing is open. Positions
-      appear here the moment an entry is confirmed by the broker, with their
-      take-profit and stop prices.</div>`);
-  }
-  const rows = pos.map((p) => {
-    const legs = (p.legs || []).map((l) =>
-      `${l.side === "sell" ? "−" : "+"}${n2(l.strike, 0)}${
-        (l.right || "?")[0].toUpperCase()}`).join(" / ");
-    const plCls = p.pl == null ? "" : (p.pl >= 0 ? "good" : "bad");
-    return `<tr>
-      <td><b>${esc(p.symbol)}</b>${p.adopted
-        ? ` <span class="pl-b flat" title="a broker position this system did not open: guarded and closed before expiry, never traded on our thresholds">adopted</span>`
-        : ""}</td>
-      <td class="faint sm">${esc(p.play)}</td>
-      <td>${esc(legs)}</td>
-      <td>${n0(p.contracts)}${p.requested && p.contracts !== p.requested
-        ? ` <span class="bad sm" title="broker confirms ${p.contracts} of ${p.requested} requested">of ${n0(p.requested)}</span>` : ""}</td>
-      <td>${esc(p.expiry)}<span class="faint sm"> ${p.dte == null ? "" : p.dte + "d"}</span></td>
-      <td>${n2(p.entry_net == null ? null : Math.abs(p.entry_net))}</td>
-      <td>${n2(p.mark)}</td>
-      <td class="${plCls}">${pnl(p.pl)}</td>
-      <td class="${plCls}">${p.pl_pct == null ? DASH : fracPc1(p.pl_pct)}</td>
-      <td>${n2(p.target_px)}</td>
-      <td>${n2(p.stop_px)}</td>
-      <td>${esc(p.state)}${p.rest_refused
-        ? ` <span class="pl-b flat" title="${esc(p.rest_refused)}">no resting exit — the loop owns the target</span>`
-        : (p.rest_order_id ? ` <span class="pl-b on" title="a GTC limit is resting at the target">rested</span>` : "")}</td>
-      <td><button class="btn sm danger" data-close="${esc(p.id)}">Close</button></td>
-    </tr>`;
-  }).join("");
-  return card("Open positions", `
-    <div class="pl-scroll"><table class="t">
-      <thead><tr><th>Symbol</th><th>Play</th><th>Legs</th><th>Ct</th>
-        <th>Expiry</th><th>Entry</th><th>Mark</th><th>P/L</th><th>%</th>
-        <th>Target</th><th>Stop</th><th>State</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
-    <div class="note">Entry, mark, target and stop are per share — multiply by
-      100 for one contract. A dash in Mark means no two-sided quote this cycle,
-      which is why no threshold fired: a mark built off a one-sided book is how
-      a stop goes off at a price nobody would trade.</div>`);
-}
-
-function plPreview(cy) {
-  if (!cy) return "";
-  const ps = cy.proposals || [];
-  if (!ps.length) {
-    return card("Preview", `<div class="note">
-      ${cy.market_open === false
-        ? `The market is closed — ${esc(cy.market_why || "")}. Nothing is
-           proposed while it is shut; reconciliation and management still ran.`
-        : `No assignment produced a proposal.`}</div>`);
-  }
-  const rows = ps.map((p) => {
-    const s = p.structure;
-    const legs = s ? (s.legs || []).map((l) =>
-      `${l.side === "sell" ? "sell" : "buy"} ${n2(l.strike, 0)}${
-        (l.right || "?")[0].toUpperCase()}`).join(" / ") : DASH;
-    return `<tr>
-      <td><b>${esc(p.symbol)}</b></td>
-      <td class="${p.ok ? "good" : "faint"}">${p.ok ? "would open" : "no"}</td>
-      <td>${legs}</td>
-      <td>${s ? esc(s.expiry) : DASH}</td>
-      <td>${s ? n0(s.contracts) : DASH}</td>
-      <td>${s ? mny(s.net) : DASH}</td>
-      <td>${s ? mny(s.max_loss) : DASH}</td>
-      <td class="sm">${esc(p.reason || "")}</td>
-    </tr>`;
-  }).join("");
-  return card("Preview — what it would do right now", `
-    <div class="pl-scroll"><table class="t">
-      <thead><tr><th>Symbol</th><th></th><th>Legs</th><th>Expiry</th><th>Ct</th>
-        <th>Net</th><th>Risk</th><th>Reason</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
-    <div class="note">This was a preview: the order bodies were recorded and
-      nothing was sent, whatever the arm says. <b>Net</b> is positive for a
-      credit received and negative for a debit paid. <b>Risk</b> is the real
-      worst case — wing width less credit for a spread, the whole premium for a
-      long option.</div>`);
-}
-
-/* ---------------------------------------------------------------- actions */
-/* Arming is ADDITIVE unless `replace` is set. One row's Arm adds that key to
-   the set; it does not become the set. The first version replaced it, so
-   arming a second ticker silently disarmed the first -- the opposite of what
-   an Arm button on one row of nine should do. */
-async function plArm(keys, label, opts) {
-  const replace = !!(opts && opts.replace);
-  const reason = await ask(
-    `Arming ${label}. Why? (it goes in the audit log)`, "");
-  if (reason == null || !String(reason).trim()) {
-    toast("Not armed — a reason is required.");
-    return false;
-  }
-  const days = await ask("Arm for how many days? (max 30)", "7");
-  if (days == null) return false;
-  try {
-    const r = await POST("/api/optlab/plays/arm", {
-      keys, reason: String(reason).trim(), days: Number(days) || 7,
-      by: "dashboard", replace,
-    });
-    const now = ((r.arm || {}).keys || []).join(", ");
-    toast(r.warning ? r.warning
-          : `Armed ${label}. Now armed: ${now || "nothing"}.`);
-    return true;
-  } catch (e) {
-    toast(e.message || String(e));
-    return false;
-  }
-}
-
-function plFieldsOf(row) {
-  /* Read every field on one assignment row back into the sparse params shape
-     the API takes. A percent field is divided by 100 here and nowhere else. */
-  const out = {};
-  row.querySelectorAll("[data-k]").forEach((el2) => {
-    const k = el2.getAttribute("data-k");
-    /* No ?? here: test_optview parses THIS view through the Babel that
-       ships inside dukpy, which does not accept nullish coalescing.
-       Other views use it freely because nothing parses them. */
-    const raw = String(el2.value == null ? "" : el2.value).trim();
-    if (raw === "") return;
-    if (el2.tagName === "SELECT") { out[k] = raw; return; }
-    if (el2.getAttribute("data-pc") === "1") {
-      const v = Number(raw);
-      if (Number.isFinite(v)) out[k] = v / 100;
-      return;
-    }
-    const v = Number(raw);
-    out[k] = Number.isFinite(v) ? v : raw;
-  });
-  return out;
-}
-
-function mountPlays() {
-  const host = el("view");
-  host.innerHTML = playsHost();
-  let board = null;
-
-  const paint = () => {
-    if (!board) return;
-    put("pl-strip", plStrip(board));
-    put("pl-assign", plAssignTable(board));
-    put("pl-open", plOpenTable(board));
-  };
-
-  const load = async () => {
-    try {
-      const b = await GET("/api/optlab/plays");
-      /* Signals are a second, cheaper call on the market-data host. A failure
-         there must not blank the page -- the assignments and positions are
-         the point and they do not depend on it. */
-      b._sigs = {};
-      try {
-        const s = await GET("/api/optlab/plays/signals");
-        for (const row of (s.signals || [])) b._sigs[row.symbol] = row;
-      } catch (e) { /* leave the badges as dashes */ }
-      board = b;
-      paint();
-    } catch (e) {
-      put("pl-strip", errNote(e));
-    }
-  };
-
-  /* One delegated listener for the whole page. Rows are re-rendered on every
-     refresh, so per-button listeners would be re-bound constantly and the ones
-     on replaced nodes would leak. */
-  host.addEventListener("click", async (ev) => {
-    const t = ev.target;
-    if (!(t instanceof HTMLElement)) return;
-
-    if (t.id === "pl-disarm") {
-      try {
-        const r = await POST("/api/optlab/plays/disarm", {});
-        toast(r.note || "Disarmed.");
-      } catch (e) { toast(e.message || String(e)); }
-      return load();
-    }
-    if (t.id === "pl-arm-all") {
-      if (await plArm(["*"], "every assigned play", { replace: true })) load();
-      return;
-    }
-    if (t.id === "pl-seed") {
-      try {
-        const r = await POST("/api/optlab/plays/seed", {});
-        toast(`Assigned ${(r.assignments || []).length} play(s). Nothing armed.`);
-      } catch (e) { toast(e.message || String(e)); }
-      return load();
-    }
-    if (t.id === "pl-add") {
-      const sym = String(el("pl-new-sym").value || "").trim().toUpperCase();
-      const play = String(el("pl-new-play").value || "");
-      const ct = String(el("pl-new-ct").value || "").trim();
-      if (!sym) { toast("A ticker is required."); return; }
-      try {
-        await POST("/api/optlab/plays/assign", {
-          symbol: sym, play,
-          contracts: ct === "" ? null : Number(ct), by: "dashboard",
-        });
-        el("pl-new-sym").value = "";
-        el("pl-new-ct").value = "";
-        toast(`${play} is on ${sym}. It is not armed.`);
-      } catch (e) { toast(e.message || String(e)); }
-      return load();
-    }
-    if (t.id === "pl-preview-btn") {
-      t.disabled = true;
-      t.textContent = "Pricing…";
-      try {
-        const r = await POST("/api/optlab/plays/cycle", {});
-        put("pl-preview", plPreview(r.cycle));
-        await load();
-      } catch (e) {
-        put("pl-preview", errNote(e));
-      } finally {
-        t.disabled = false;
-        t.textContent = "Preview now";
-      }
-      return;
-    }
-
-    const closeId = t.getAttribute("data-close");
-    if (closeId) {
-      const ok = await ask(
-        `Close ${closeId} now, at the market if it must? Type CLOSE.`, "");
-      if (String(ok || "").trim().toUpperCase() !== "CLOSE") {
-        toast("Left open.");
-        return;
-      }
-      try {
-        const r = await POST("/api/optlab/plays/close",
-                             { id: closeId, reason: "closed from the dashboard" });
-        toast(r.result || "Sent.");
-      } catch (e) { toast(e.message || String(e)); }
-      return load();
-    }
-
-    const act = t.getAttribute("data-a");
-    if (!act) return;
-    const row = t.closest(".pl-row");
-    if (!row) return;
-    const symbol = row.getAttribute("data-sym");
-    const play = row.getAttribute("data-play");
-    const key = `${symbol}:${play}`;
-    const rec = (board.assignments || []).find(
-      (r) => r.symbol === symbol && r.play === play) || {};
-
-    try {
-      if (act === "save") {
-        await POST("/api/optlab/plays/assign", {
-          symbol, play, params: plFieldsOf(row),
-          enabled: !!rec.enabled, by: "dashboard",
-        });
-        toast(`Saved ${key}.`);
-      } else if (act === "toggle") {
-        await POST("/api/optlab/plays/enable",
-                   { symbol, play, enabled: !rec.enabled });
-        toast(`${key} ${rec.enabled ? "disabled" : "enabled"}.`);
-      } else if (act === "arm") {
-        if (rec.armed) {
-          /* Disarm THIS key only; the rest of the set stays armed. The server
-             answers 409 when everything is armed with "*", because a named key
-             cannot be subtracted from "*" without silently freezing the set --
-             the toast passes that sentence straight through rather than
-             guessing at what the person meant. */
-          const r = await POST("/api/optlab/plays/disarm", { keys: [key] });
-          toast(r.note || `Disarmed ${key}.`);
-        } else {
-          await plArm([key], key);
-        }
-      } else if (act === "remove") {
-        const ok = await ask(`Take ${play} off ${symbol}? Type REMOVE.`, "");
-        if (String(ok || "").trim().toUpperCase() !== "REMOVE") {
-          toast("Kept.");
-          return;
-        }
-        const r = await POST("/api/optlab/plays/unassign", { symbol, play });
-        toast(r.note || `Removed ${key}.`);
-      }
-    } catch (e) {
-      toast(e.message || String(e));
-    }
-    load();
-  });
-
-  load();
-  /* Ten seconds. The ledger is a local file and the route spends no trading
-     calls, so this is cheap -- but the marks only change when the WORKER
-     cycles, so polling faster than it would show the same numbers. */
-  every(10000, "pl-strip", load);
-}
-
 /* ==================================================== the overview room
    "an options performance overview with metrics and calculations ... there
    isnt anything really there right now" -- the owner, 28 Sep 2026.
@@ -3103,8 +1861,9 @@ function ovBreak(rows, head, title, sub) {
   return card(title, table, `<span class="faint">${esc(sub)}</span>`);
 }
 
-function ovHost() {
+function ovHost(moved) {
   return `
+  ${moved ? `<div class="note">${esc(moved)}</div>` : ""}
   <div id="ov-head">${loading("the options record")}</div>
   <div id="ov-attn"></div>
   <div id="ov-why"></div>
@@ -3120,8 +1879,12 @@ function ovHost() {
   <div id="ov-tickers"></div>`;
 }
 
-function mountPerf() {
-  el("view").innerHTML = ovHost();
+/* `moved` is the sentence for somebody who followed a link to a room that no
+   longer exists. It is written ONCE, synchronously, above the report and
+   never repainted: the 15-second poll must not keep re-asserting it after the
+   person has read it and moved on. */
+function mountPerf(moved) {
+  el("view").innerHTML = ovHost(moved || "");
 
   const BLOCKS = ["ov-why", "ov-pl", "ov-record", "ov-exits", "ov-capital",
                   "ov-assign", "ov-hold", "ov-plays", "ov-tickers"];

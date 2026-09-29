@@ -90,12 +90,31 @@ class FakeEngine:
 
 
 class FakeBroker:
-    def __init__(self, *, equity=10000.0, history=None, option_rows=()):
+    def __init__(self, *, equity=10000.0, history=None, option_rows=(),
+                 funding=9000.0):
         self.base = "https://paper-api.alpaca.markets"
         self._hist = history
         self._opts = list(option_rows)
         self.equity = equity
+        # THE FUNDED COST BASIS. All-time P/L is equity less NET FUNDING now,
+        # never equity less portfolio_history's base_value -- base_value is the
+        # start of whichever window was asked for, which is how one number
+        # became three on three pages. A fake with no activities therefore has
+        # no cost basis, and the page correctly shows a dash; give it one so
+        # the real path is what gets tested.
+        self._funding = funding
         self.calls = []
+
+    def activities(self, activity_type="", date="", **kw):
+        self.calls.append(("GET", "/activities:%s" % activity_type))
+        # ONE type only. Returning the same deposit for both JNLC and CSD
+        # double-counts the funding, which is what a real account never does
+        # and what makes the cost basis silently wrong.
+        if activity_type == "JNLC" and self._funding:
+            return [{"activity_type": activity_type, "net_amount":
+                     "%.2f" % self._funding, "date": "2026-01-01",
+                     "id": "fund-1"}]
+        return []
 
     def _req(self, method, url, path, **kw):
         self.calls.append((method, path))

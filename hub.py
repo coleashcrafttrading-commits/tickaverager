@@ -256,6 +256,9 @@ class Ctx:
                     if p.get("symbol")}
         return {s: p for s, p in self.positions.items() if is_option(s)}
 
+    def net_funding(self) -> Optional[float]:
+        return _net_funding(self)
+
     def broker_book(self) -> dict:
         """Every position, keyed the way a claim is keyed."""
         book = dict(self.share_positions())
@@ -1139,11 +1142,24 @@ def portfolio(ctx: Ctx) -> dict:
         made = _num(f.made_today())
     except Exception:
         made = None
-    try:
-        base = _num(f.base_value())
-    except Exception:
-        base = None
-    total_pl = (eq - base) if (eq is not None and base) else None
+    # THE HEADLINE IS EQUITY LESS NET FUNDING, and never equity less
+    # base_value. base_value is the start of WHATEVER WINDOW you asked for --
+    # measured on this account: 1D -> 53,166.00, 1M -> 51,134.83, 3M and all ->
+    # 50,000.00. Three pages asking three windows and every one of them calling
+    # the answer "all time" is exactly how one number became three, which is
+    # the complaint that started this work. Funding does not move when the
+    # window does.
+    total_pl, total_pl_why = None, None
+    _fund = ctx.net_funding()
+    if eq is None:
+        total_pl_why = "Alpaca's account snapshot has not been read"
+    elif _fund is None:
+        total_pl_why = ("the account's funding could not be read from Alpaca's "
+                        "activities, so all-time P/L is unknown rather than "
+                        "guessed from a chart window")
+    else:
+        total_pl = eq - _fund
+    base = None
 
     warn_local = []
     if eq is None:
@@ -1230,9 +1246,7 @@ def portfolio(ctx: Ctx) -> dict:
                                reason=realized_why,
                                thin=realized is not None and not realized_n),
             "total": metric(_r2(total_pl), 1 if total_pl is not None else 0,
-                            "usd", reason=None if total_pl is not None else
-                            "Alpaca's base value for this account is not known",
-                            as_of=as_of),
+                            "usd", reason=total_pl_why, as_of=as_of),
             "today": metric(_r2(made), 1 if made is not None else 0, "usd",
                             reason=None if made is not None else
                             "yesterday's closing equity is not known",
@@ -1272,6 +1286,48 @@ def portfolio(ctx: Ctx) -> dict:
         },
         "warnings": ctx.warnings + warn_local,
     }
+
+
+_FUNDING_CACHE: dict = {}
+_FUNDING_TTL = 300.0
+
+
+def _net_funding(ctx: "Ctx") -> Optional[float]:
+    """Net cash the OWNER put in, from Alpaca's own activity log.
+
+    THE COST BASIS IS FUNDING, NEVER portfolio_history's base_value. base_value
+    is the first point of whichever WINDOW was asked for -- measured on this
+    account: 1D gave 53,166.00, 1M gave 51,134.83, 3M and all gave 50,000.00.
+    Three pages asking three windows and each calling its answer "all time" is
+    exactly how one number became three. Funding does not move when the window
+    does.
+
+    Cached for five minutes and keyed by account, because this sits on the
+    dashboard poll and the activities endpoint is on the 200/min trading host
+    the live share ladders spend from.
+    """
+    b = getattr(ctx.fleet, "broker", None)
+    if b is None:
+        return None
+    key = str(getattr(ctx.fleet, "account_id", "default"))
+    hit = _FUNDING_CACHE.get(key)
+    if hit and (ctx.now - hit[0]) < _FUNDING_TTL:
+        return hit[1]
+    try:
+        import perf as _perf
+        acts = []
+        for kind in _perf.CASH_FUNDING_TYPES:
+            try:
+                acts.extend(b.activities(activity_type=kind) or [])
+            except Exception:
+                # One unsupported activity type is a 422 on some accounts and
+                # must not blank the whole cost basis.
+                continue
+        val = _perf.net_funding(acts).get("value")
+    except Exception:
+        return None
+    _FUNDING_CACHE[key] = (ctx.now, val)
+    return val
 
 
 def _symbol_union(ctx: Ctx, strategies_: list) -> list:

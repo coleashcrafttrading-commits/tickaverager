@@ -42,6 +42,13 @@ os.environ.setdefault("TICKAVERAGER_JOURNAL",
                       os.path.join(tempfile.gettempdir(),
                                    "optlife_scratch.jsonl"))
 
+# THE EXEC LOG TOO. optexec.EXEC_LOG defaults into state/, and this suite
+# builds Executors, so it appended synthetic order bodies straight into the
+# LIVE audit trail -- measured at +1,295 bytes a run, in the one file that is
+# supposed to prove what the account actually sent.
+os.environ.setdefault("TICKAVERAGER_STATE",
+                      tempfile.mkdtemp(prefix="optlife-state-"))
+
 import optbank
 import optbook
 import optexec

@@ -228,7 +228,7 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* overflow-x hidden: a table wider than the screen scrolls inside its own
    card (.tw), never by dragging the whole page sideways */
 .scroll { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; }
-.page { padding: var(--gutter); max-width: 1440px; }
+.page { padding: var(--gutter); max-width: 1440px; margin-inline: auto; }
 
 /* ============================== cards ============================== */
 .card {

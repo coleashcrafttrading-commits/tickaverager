@@ -9,6 +9,23 @@ They do not prove the unwind makes money -- that is the step-3 backtest.
 """
 from __future__ import annotations
 
+import os as _os
+import tempfile as _tempfile
+
+# THIS TEST WRITES, so it points every state path at a scratch file BEFORE the
+# repo modules import. Measured: run without this, test_unwind appended 1,166
+# bytes of fabricated `basket_close_sent` rows for a symbol named "T" straight
+# into state/journal.jsonl -- the append-only file perf.py reads for realised
+# P/L -- and 317 of them had accumulated there over three weeks. The operating
+# rules say to run the suite with TICKAVERAGER_JOURNAL set, but safety that
+# depends on remembering an environment variable is not safety.
+_os.environ.setdefault(
+    "TICKAVERAGER_JOURNAL",
+    _os.path.join(_tempfile.gettempdir(), "tickaverager_test_journal.jsonl"))
+_os.environ.setdefault(
+    "TICKAVERAGER_STATE",
+    _tempfile.mkdtemp(prefix="tickaverager-test-state-"))
+
 import sys
 import time
 

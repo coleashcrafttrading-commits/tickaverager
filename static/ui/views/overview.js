@@ -240,7 +240,7 @@ const SUB = {
   },
   strategies: () => "the ladder and every options play, as peers",
   orders: () => "what Alpaca holds and what is working there",
-  history: () => "booked and still open, from the trade journal",
+  history: () => "closed trades and open inventory, from the trade journal",
 };
 
 VIEWS.overview = {
@@ -492,13 +492,17 @@ function paintTiles() {
            sub: "uninvested at Alpaca" }),
     tile({ label: "Invested", metric: P.invested, dp: 0,
            sub: `${c.positions_open || 0} position(s), both asset classes` }),
-    /* Booked NEVER stands alone. A ladder with no stop loss books only
-       winners, so this figure rises in a straight line while the open half
-       goes the other way -- they are shown together or not at all. */
-    tile({ label: "Booked by strategies", metric: P.pl.realized, signed: true,
-           dp: 0,
-           sub: `open beside it ${mnum(P.pl.open, { signed: true, dp: 0 })}`,
-           hint: P.pl.basis.realized }),
+    /* NOT "booked". That tile is gone: on this account the figure is
+       WINS-ONLY -- the ladder has no stop loss, so a losing lot is never
+       closed and never books, and the journal carries 322 realised rows with
+       zero losses. A tile labelled with a number that can only go up is not a
+       performance measure. What replaces it is the number that cannot lie:
+       what the account is worth against what was put into it. The realised /
+       open decomposition lives in the Returns breakdown below, where it has
+       to sum to the total. */
+    tile({ label: "Open P/L", metric: P.pl.open, signed: true, dp: 0,
+           sub: `on ${c.positions_open || 0} position(s) held now`,
+           hint: P.pl.basis.open }),
     tile({ label: "Strategies active",
            html: `${c.strategies_active == null
              ? unmeasured("the strategy list was not read")
@@ -739,7 +743,7 @@ function paintTickers() {
     ["value", "Held", true, "market value at the broker"],
     ["open", "Open P/L", true, "Alpaca's own mark on what is held"],
     ["strategies", "Strategies", false, "zero or many; none is legitimate"],
-    ["booked", "Ladder booked", true,
+    ["booked", "Ladder realised", true,
      "the SHARE LADDER's journal only — an options play's realised P/L is on "
      + "its own card and the two are never added"],
     ["spread", "Spread", true, "of the mid, right now"],

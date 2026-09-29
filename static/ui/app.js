@@ -855,12 +855,18 @@ function paintKpis(view, v, ov) {
     <div><div class="kpi-k">Account value</div>
          <div class="kpi-v num">${money(p.account_value)}</div></div>
     <div><div class="kpi-k">P/L today</div><div class="kpi-v num">${sgn(todayPl)}</div>
-         <div class="kpi-sub num">${sgn(p.realized_today)} booked · ${
-           sgn(uToday)} open</div></div>
+         <div class="kpi-sub num">since yesterday's close</div></div>
     <div><div class="kpi-k">P/L all time</div><div class="kpi-v num">${
            sgn(p.total_pl)}</div>
-         <div class="kpi-sub num">${sgn(p.realized_total)} booked · ${
-           sgn(uTotal)} open</div></div>`;
+         <div class="kpi-sub num">equity less what you funded</div></div>`;
+  /* NO "booked" SUB-LINE. It used to read "<realised> booked - <open> open"
+     under both figures, and booked is WINS-ONLY on this account: the ladder has
+     no stop loss, so a losing lot is never closed and never books. Measured on
+     the journal -- 322 realised rows, zero losses. Putting that number under
+     the headline made the account look like it was making money it had not
+     made, which is the owner's complaint verbatim. The decomposition still
+     exists, on the Portfolio page, where realised and open are shown as parts
+     of a total that has to add up. */
 }
 
 /* ---------------------------------------------------------------- render */

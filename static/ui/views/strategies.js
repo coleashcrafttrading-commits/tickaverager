@@ -1,73 +1,61 @@
 /* ============================================================================
-   Strategies -- the CATALOGUE, and the builder that makes new ones.
+   Strategies -- ONE BANK, what it is attached to, and the builder.
 
-   Two things live in this file and they are two different jobs:
+   Three things live in this file and they are three different jobs:
 
-   1. THE CATALOGUE (VIEWS.strategies, the page). Every strategy on this
-      account as a peer row off /api/hub/strategies -- the DCA ladder, the
-      index put credit spread, the hourly swing, and whatever is appended to
-      hub.PROVIDERS next. What it does in one sentence, which tickers it runs
-      on, its state in ONE vocabulary, its measured results, and its settings.
-      Attaching a strategy to a ticker and detaching it are one control here.
+   1. THE BANK (VIEWS.strategies, the page). Every strategy there is, whatever
+      store it came from, off `/api/bank/entries` -- the three ladder presets,
+      the indicator documents, the coded strategies, the 231 researched option
+      structures and the tailored plays, in ONE id space (`<store>:<slug>`)
+      with ONE attach call. STANDARD and PERSONAL sit side by side with a
+      filter between them, personal first, because "I want the standard ones
+      but also the ones I made" is a filter, not two rooms.
 
-      This is the shape the owner asked for: "I want the ladder strategy to
-      just be a strategy like how options or other strategies are." Nothing in
-      the catalogue spells `ladder` except the one constant that says what the
-      ladder IS, so demoting it was a change of structure and not of wording.
+      Until this pass the page listed the THREE strategies hub knows about and
+      the ticker dropdown read `/api/presets`, which lists three coded presets
+      and nothing else -- so 256 of the 259 things on the shelf could not be
+      put on a ticker from anywhere in this dashboard. That was the bug.
 
-   2. THE BUILDER and the STRATEGY BANK (the BUILDER export, below). Build a
-      strategy document by clicking rather than by writing JSON, and the shared
-      shelf it is saved to. views/research.js hosts it as a tab and this page
-      hosts it as its second tab -- one module, two doors, no second copy.
+   2. WHAT IS ON YOUR TICKERS, grouped by ticker rather than by strategy, off
+      `/api/bank/attached`. A ticker carries SEVERAL: a ladder preset, an
+      indicator document driving it, any number of plays and any number of
+      option structures, each row naming the store the fact came from. When
+      two stores disagree the row says which said what instead of picking one.
 
-   A strategy is a document, and the document is the single source of truth:
-   the builder edits it, the JSON pane shows it, the backtester runs it and the
-   engine trades it. There is no second representation to drift out of sync.
+   3. THE BUILDER and the legacy two-kind shelf (the BUILDER export, below,
+      untouched by this pass). views/research.js hosts it as a tab and this
+      page hosts it as its second tab -- one module, two doors.
 
-   Rules are a tree. A group (all / any / none) holds conditions and other
-   groups, which is exactly the shape strategy.py evaluates, so what you see is
-   literally what runs.
+   ------------------------------------------------------------------- rules
+   NOTHING ON THIS PAGE ARMS. Attaching creates a ladder stopped and in dry
+   run, or assigns a play without touching the arm file; the confirmation says
+   so every time and the server's own answer is printed back.
+
+   A number nobody measured is a dash with its reason. `trades.ok === false`
+   on a row is rendered as a sentence on the card -- there are 231 banked
+   option STRUCTURES and no engine sends one, so attaching one records the
+   ticker's chosen options strategy and orders nothing. That gap is on screen
+   rather than implied.
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, GET, POST, act, ask, toast, el, esc, card, tableHTML, go, dur,
+  S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc, card, tableHTML, go, dur,
+  panel, segmented, wireSegmented, emptyState, hashFor,
 } from "../core.js";
 import { preset as btPreset } from "./backtest.js";
-/* The catalogue renders hub's metric envelope and hub's settings schemas
+/* The bank renders hub's metric envelope and the stores' settings schemas
    through the SAME form library the ladder's own settings go through, so an
-   options play and a ladder rung are edited by one set of controls. */
+   option structure and a ladder rung are edited by one set of controls. */
 import {
-  ensureFieldStyles, metricTile, metricValue, schemaFormHTML, schemaPatch,
-  fmtSchemaVal, impactBadge, moneyKeys, applyVisibility, applySearch,
-  readValues, GOVERNORS,
+  ensureFieldStyles, metricTile, metricValue, schemaFieldHTML, schemaFormHTML,
+  schemaPatch, fmtSchemaVal, impactBadge, moneyKeys, applyVisibility,
+  applySearch, readValues, GOVERNORS, fieldByKey,
 } from "../fields.js";
 
-/* ==========================================================================
-   THE CATALOGUE -- every strategy there is, the ladder among them.
-
-   This is the structural change the owner asked for, rendered. Until now the
-   dashboard had a ladder with an options tab bolted beside it: a ticker WAS a
-   ladder config, "armed" meant two different things on two pages, and there
-   was no screen on which the ladder was one entry rather than the subject.
-
-   /api/hub/strategies returns one row per strategy from hub.PROVIDERS, and
-   this page renders that list without knowing what is in it. The ladder is
-   the first row only because the list is sorted by value; a fourth kind
-   appended to hub.PROVIDERS appears here with no edit to this file. That is
-   the test of whether the ladder has actually been demoted: nothing below
-   spells `ladder` except the one place that says what the ladder IS.
-
-   Every number comes through fields.js's metric renderer, so a figure nobody
-   measured is a dash with its reason and never a zero.
-   ========================================================================== */
-
-/* One sentence per strategy, from CLAUDE.md rather than from imagination.
-
-   hub.py gives an id, a label and a kind, and deliberately gives no prose --
-   it is a calculation module. So the sentences live here, keyed by id, and an
-   id with no sentence SAYS it has none. Writing a plausible description from
-   the id would be the worst outcome: a strategy nobody documented would read
-   exactly like one somebody did. */
+/* One sentence per HUB strategy, from CLAUDE.md rather than from imagination.
+   hub.py gives an id, a label and a kind and deliberately gives no prose, so
+   the sentences live here keyed by id, and an id with no sentence SAYS it has
+   none. A bank entry carries its own `summary` and never needs this. */
 const BLURB = {
   ladder:
     "Buys a rung every time price moves a set distance against the last fill, "
@@ -84,10 +72,8 @@ const BLURB = {
 };
 const blurbOf = (id) => BLURB[id] || "";
 
-/* The one vocabulary. `state` used to be two words that disagreed on screen --
-   "armed" meant `not dry_run` in the shell and `PLAYS_ARMED` in the options
-   tab. hub.py now hands one word out of one list, and this is where it is
-   turned into something to look at. */
+/* The one state vocabulary. hub.py hands one word out of one list and this is
+   where it becomes something to look at. */
 const STATE = {
   live:    { t: "live",    cls: "st-live",
              why: "This strategy is running and may transmit orders." },
@@ -118,78 +104,115 @@ const stateOf = (s) => STATE[String(s || "off")]
 
 const KIND = { shares: "shares", options: "options" };
 
-let CAT_ROWS = [];        // /api/hub/strategies -> strategies[]
-let CAT_TICKERS = [];     // /api/hub/tickers -> tickers[]
+/* The four stores, in the words the owner uses for them. `kind` comes off the
+   row; this file never decides what something is. */
+const BKIND = {
+  ladder:            { label: "Ladder",    why: "a share ladder preset: the rung, the target, the filter" },
+  indicator:         { label: "Indicator", why: "a document of indicators and rules, or real Python with an on_bar" },
+  option:            { label: "Option",    why: "a banked option structure: the legs and the rules around them" },
+  "option-tailored": { label: "Tailored",  why: "an options PLAY: a structure plus the engine that trades it" },
+};
+/* A kind this page has not met renders AS THE SERVER SPELLED IT, and one the
+   row does not carry at all says so -- a bare "?" beside a strategy reads as a
+   rendering bug rather than as the fact it is: the bank does not know what
+   this attachment is. */
+const bkindOf = (k) => BKIND[k] || (k
+  ? { label: String(k), why: "a kind this page has not met; shown as the "
+        + "server spelled it" }
+  : { label: "unknown", why: "the bank could not say what kind this is -- "
+        + "usually because the id on the ticker is not on the shelf" });
+
+/* ------------------------------------------------------------ the reads */
+let CAT_ROWS = [];        // /api/hub/strategies -> strategies[]   (the money)
+let CAT_TICKERS = [];     // /api/hub/tickers    -> tickers[]
 let CAT_WARN = [];
-let CAT_AT = 0;           // epoch ms of the last successful load
 let CAT_ERR = "";
-let CAT_Q = "";           // the catalogue's own search box
+let SHELF = [];           // /api/bank/entries   -> entries[]      (all 259)
+let SHELF_ERR = "";
+let SHELF_KINDS = [];
+let ATTACHED = [];        // /api/bank/attached  -> attached[]
+let ATTACHED_ERR = "";
+let CAT_AT = 0;           // epoch ms of the last completed load
 let catBusy = false;
 
-/* `/api/hub/strategies` and `/api/hub/tickers` both go through
-   app._perf_positions(), which is on the 200/min TRADING budget and cached for
-   20 s. The ladders need that budget to place orders, so the page refuses to
-   poll faster than the cache can answer differently. */
+/* filters over the shelf */
+let fq = "";              // free text
+let fkind = "";           // "" = every kind
+let forigin = "";         // "" = standard AND personal
+let fattached = false;    // only what is on a ticker
+let fshow = 36;           // how many cards are rendered; "show more" raises it
+
+/* `/api/hub/*` goes through app._perf_positions(), which is on the 200/min
+   TRADING budget and cached for 20 s. The ladders need that budget to place
+   orders, so the page refuses to poll faster than the cache can answer
+   differently. `/api/bank/entries` is 259 rows and ~257 KB -- it is read once
+   per mount and on an explicit Refresh, never on the 2 s paint. */
 const CAT_MIN_MS = 20000;
 
 async function loadCatalogue(force = false) {
   if (catBusy) return;
   if (!force && CAT_AT && Date.now() - CAT_AT < CAT_MIN_MS) return;
   catBusy = true;
-  try {
-    /* /portfolio is read as well as /strategies, and only for its WARNINGS.
+  /* Four reads, each settled on its own. One failing source must not blank
+     the other three: a shelf that disappears because the options ledger 404'd
+     is a shelf nobody can use during the incident that matters. */
+  const jobs = [
+    ["strategies", "/api/hub/strategies"],
+    ["tickers", "/api/hub/tickers"],
+    ["portfolio", "/api/hub/portfolio"],
+    ["entries", "/api/bank/entries"],
+    ["attached", "/api/bank/attached"],
+  ];
+  const got = await Promise.all(jobs.map(async ([k, url]) => {
+    try { return [k, await GET(url), ""]; }
+    catch (e) { return [k, null, e.message || String(e)]; }
+  }));
+  const by = {};
+  for (const [k, d, err] of got) by[k] = { d, err };
 
-       `ctx.warnings` is filled by hub.portfolio() and by nothing else, so the
-       `side_disagreement` case -- the ledger says long and the broker says
-       short -- is invisible on /strategies and /tickers. Measured against the
-       `hubclash` scenario: both answered 200 with `warnings: []` while the
-       account was in exactly that state. A page about strategies that cannot
-       say "this strategy's ledger disagrees with Alpaca" is the wrong page to
-       leave that on.
+  if (by.strategies.d) { CAT_ROWS = by.strategies.d.strategies || []; CAT_ERR = ""; }
+  else CAT_ERR = by.strategies.err;
+  if (by.tickers.d) CAT_TICKERS = by.tickers.d.tickers || [];
+  /* `ctx.warnings` is filled by hub.portfolio() and by nothing else, so the
+     `side_disagreement` case -- the ledger says long and the broker says
+     short -- is invisible on /strategies and /tickers. A page about strategies
+     that cannot say "this strategy's ledger disagrees with Alpaca" is the
+     wrong page to leave that on. */
+  CAT_WARN = (by.portfolio.d && by.portfolio.d.warnings)
+    || (by.strategies.d && by.strategies.d.warnings) || [];
+  if (by.entries.d) {
+    SHELF = by.entries.d.entries || [];
+    SHELF_KINDS = by.entries.d.kinds || [];
+    SHELF_ERR = "";
+  } else SHELF_ERR = by.entries.err;
+  if (by.attached.d) { ATTACHED = by.attached.d.attached || []; ATTACHED_ERR = ""; }
+  else ATTACHED_ERR = by.attached.err;
 
-       All three are on the 20 s cached trading budget together, which is why
-       they go out as one batch behind one CAT_MIN_MS gate. */
-    const [s, t, pf] = await Promise.all([
-      GET("/api/hub/strategies"),
-      GET("/api/hub/tickers"),
-      GET("/api/hub/portfolio").catch((e) => ({ warnings: [] })),
-    ]);
-    CAT_ROWS = s.strategies || [];
-    CAT_TICKERS = t.tickers || [];
-    const seen = new Set();
-    CAT_WARN = (pf.warnings || []).concat(s.warnings || [], t.warnings || [])
-      .filter((w) => {
-        const key = (w && w.code) + "|" + (w && w.text);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    CAT_ERR = "";
-    CAT_AT = Date.now();
-  } catch (e) {
-    CAT_ERR = e.message;
-  } finally {
-    catBusy = false;
-  }
-  renderCatalogue();
+  CAT_AT = Date.now();
+  catBusy = false;
+  render();
 }
 
 VIEWS.strategies = {
   title: () => "Strategies",
   sub: (ov, v) => ((v.tab || "catalogue") === "builder"
     ? "build a strategy document by clicking, and the shared bank it is saved to"
-    : "every strategy on this account, the ladder among them"),
-  tabs: [["catalogue", "Catalogue"], ["builder", "Builder"]],
+    : "one bank — standard and personal — and what it is attached to"),
+  /* The tab id stays `catalogue` so every link and bookmark that already
+     points at it still resolves; only the word on the tab changed. */
+  tabs: [["catalogue", "Bank"], ["builder", "Builder"]],
 
   mount(v) {
     if ((v.tab || "catalogue") === "builder") return BUILDER.mount(v);
     ensureFieldStyles();
     ensureCatStyles();
-    CAT_ERR = "";
+    CAT_ERR = ""; SHELF_ERR = ""; ATTACHED_ERR = "";
     CAT_AT = 0;
+    fshow = 36;
     el("view").innerHTML = `
       <div id="catHead"></div>
-      <div id="catBody"><div class="faint">Reading the strategies…</div></div>`;
+      <div id="catOn"></div>
+      <div id="catShelf"><div class="faint">Reading the bank…</div></div>`;
     loadCatalogue(true);
   },
 
@@ -202,17 +225,48 @@ VIEWS.strategies = {
   },
 };
 
-/* ------------------------------------------------------------- the header */
-function catHeadHTML() {
+function render() {
+  renderHead();
+  renderOnTickers();
+  renderShelf();
+}
+
+/* ============================================================= the header
+   What is actually running, and what it is worth. This is hub's answer, not
+   the bank's -- the bank is a shelf and knows nothing about money. */
+function renderHead() {
+  const host = el("catHead");
+  if (!host) return;
+  if (CAT_ERR) {
+    /* A FAILED READ MUST NOT LEAVE THE TOTALS ON SCREEN. The first version
+       kept the last good rows and swapped only the card list for the error,
+       so a 502 left "Value held $23,148.00" above the words "could not read
+       the strategies" -- a number from a read that no longer answers,
+       presented as this account's position. */
+    host.innerHTML = panel("Running on this account", `
+      <div class="note bad" style="margin:0"><b>Could not read the live
+        strategies.</b> ${esc(CAT_ERR)}<br>
+        ${CAT_AT
+          ? `The figures that were here came from a read
+             <b>${Math.round((Date.now() - CAT_AT) / 1000)}s</b> ago and are not
+             shown, because a total nobody can refresh is not a total.`
+          : `Nothing has been read yet.`}
+        <br>The bank below is a separate read and is unaffected.</div>`,
+      { actions: `<button class="btn sm" id="catRefresh">Try again</button>` });
+    wireRefresh();
+    return;
+  }
   const rows = CAT_ROWS;
   const live = rows.filter((r) => ["live", "armed"].includes(r.state)).length;
   const syms = new Set();
   for (const r of rows) for (const t of (r.tickers || [])) syms.add(t);
+
   /* SUMS of metrics, and a sum is only honest while every part of it has a
      number. One strategy that could not price itself makes the total a
      partial, and it says so rather than quietly reporting the rest. */
   const sum = (key) => {
-    let total = 0, have = 0, missing = [];
+    let total = 0, have = 0;
+    const missing = [];
     for (const r of rows) {
       const v = metricValue(r[key]);
       if (v === null) { missing.push(r.label || r.id); continue; }
@@ -235,286 +289,845 @@ function catHeadHTML() {
       ).join("")}</div>`
     : "";
 
-  return card("This account's strategies", `
+  host.innerHTML = panel("Running on this account", `
     <div class="mrow">
-      ${metricTile("Strategies", { value: rows.length, n: rows.length, unit: "count" })}
       ${metricTile("Live or armed", { value: live, n: rows.length, unit: "count" })}
       ${metricTile("Tickers covered", { value: syms.size, n: syms.size, unit: "count" })}
       ${metricTile("Value held", sum("value"))}
       ${metricTile("Open P/L", sum("open_pl"), { signed: true })}
       ${metricTile("Realised", sum("realized_pl"), { signed: true })}
       ${metricTile("At risk", sum("at_risk"))}
+      ${metricTile("On the shelf",
+        SHELF_ERR
+          ? { value: null, n: 0, unit: "count", reason: SHELF_ERR }
+          : { value: SHELF.length, n: SHELF.length, unit: "count" })}
     </div>
     ${warn}
-    <div class="tip" style="margin-bottom:0">Every row below is a peer. The
-      ladder is one of them, listed by how much of the account it holds and by
-      nothing else — a strategy appended to <code>hub.PROVIDERS</code> appears
-      here with no change to this page. <b>Open P/L and Realised are not added
-      together anywhere</b>: they come from three different origins and
-      reconciling them on screen would invent a number nobody measured.</div>`,
-    `<input id="catQ" class="cat-q" placeholder="Search strategies and tickers"
-       value="${esc(CAT_Q)}" spellcheck="false" autocomplete="off">
-     <button class="btn sm" id="catRefresh">Refresh</button>`);
+    <div class="tip" style="margin-bottom:0"><b>Open P/L and Realised are not
+      added together anywhere</b>: they come from different origins and
+      reconciling them on screen would invent a number nobody measured. The
+      account's own profit and loss — equity less what was paid in — is on
+      <a href="${hashFor({ kind: "overview", tab: "history" })}">Portfolio →
+      History</a>.</div>`,
+    { sub: "hub's own figures: what is attached, and what it is worth",
+      actions: `<button class="btn sm" id="catRefresh">Refresh</button>` });
+  wireRefresh();
 }
 
-/* -------------------------------------------------------------- the cards */
-function matchRow(r, q) {
-  const terms = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+function wireRefresh() {
+  const b = el("catRefresh");
+  if (b) b.onclick = () => act(() => loadCatalogue(true));
+}
+
+/* ====================================================== on your tickers
+   Grouped BY TICKER, because "can I put several strategies on one ticker" is
+   a question about a ticker. Every row names the store the fact came from, so
+   a ladder whose settings match no preset reads as "custom", an option
+   structure reads as recorded-but-not-traded, and neither is dressed up as
+   the other. */
+function attachedBySymbol() {
+  const out = {};
+  for (const a of ATTACHED) {
+    const s = String(a.symbol || "").toUpperCase();
+    if (!s) continue;
+    (out[s] = out[s] || []).push(a);
+  }
+  return out;
+}
+
+const shelfById = (id) => SHELF.find((r) => r.id === id) || null;
+const rowById = (id) => CAT_ROWS.find((r) => r.id === id) || null;
+
+/* A bank id maps to a HUB strategy id only for the kinds hub knows about --
+   the ladder (whatever preset or document is driving it) and the tailored
+   plays. A banked option STRUCTURE has no hub strategy, and saying it had one
+   would be inventing a strategy that does not run. */
+function hubIdFor(a) {
+  const store = String(a.id || "").split(":")[0];
+  if (store === "preset" || store === "doc") return "ladder";
+  if (store === "play") return String(a.id).slice(5);
+  return "";
+}
+
+function renderOnTickers() {
+  const host = el("catOn");
+  if (!host) return;
+  if (ATTACHED_ERR) {
+    host.innerHTML = panel("On your tickers", `
+      <div class="note bad" style="margin:0"><b>Could not read what is
+        attached.</b> ${esc(ATTACHED_ERR)}<br>Nothing is listed rather than
+        listing it stale — a page that is quietly out of date about which
+        strategy owns a ticker is worse than one that says it does not
+        know.</div>`);
+    return;
+  }
+  const bySym = attachedBySymbol();
+  const syms = Object.keys(bySym).sort();
+  if (!syms.length) {
+    host.innerHTML = panel("On your tickers", emptyState({
+      title: "Nothing is attached yet",
+      body: "No ticker on this account carries a strategy. Pick one from the "
+          + "bank below and attach it — attaching never arms.",
+    }));
+    return;
+  }
+  const body = `<div class="on-grid">${syms.map((sym) => {
+    const rows = bySym[sym];
+    return `<section class="on-card">
+      <header class="on-h">
+        <button class="lnk on-sym" data-go="ticker" data-sym="${esc(sym)}"
+          >${esc(sym)}</button>
+        <span class="faint">${rows.length} strateg${rows.length === 1 ? "y" : "ies"}</span>
+        <span style="flex:1"></span>
+        <button class="btn sm" data-addto="${esc(sym)}">+ add</button>
+      </header>
+      ${rows.map((a) => onRowHTML(sym, a)).join("")}
+    </section>`;
+  }).join("")}</div>
+  <div class="tip">A ticker may carry SEVERAL: its ladder, an indicator
+    document driving that ladder, any number of tailored plays and any number
+    of banked option structures. The ladder is the one exception and it says so
+    — a ticker has exactly one engine config, so attaching a second ladder
+    strategy replaces the first and the answer names what it replaced.</div>`;
+  host.innerHTML = panel("On your tickers", body, {
+    sub: `${syms.length} ticker${syms.length === 1 ? "" : "s"} carrying `
+       + `${ATTACHED.length} attachment${ATTACHED.length === 1 ? "" : "s"}`,
+  });
+  host.querySelectorAll("[data-addto]").forEach((b) => {
+    b.onclick = () => { fattached = false; focusShelfFor(b.dataset.addto); };
+  });
+  host.querySelectorAll("[data-openatt]").forEach((b) => {
+    b.onclick = () => openAttachment(b.dataset.openatt, b.dataset.sym);
+  });
+}
+
+function onRowHTML(sym, a) {
+  const st = stateOf(a.state);
+  const nSet = Object.keys(a.settings || {}).length;
+  const kind = bkindOf(a.kind);
+  const dead = a.trades && a.trades.ok === false;
+  return `<div class="on-row">
+    <button class="lnk on-name" data-openatt="${esc(a.id || "")}"
+      data-sym="${esc(sym)}">${esc(a.name || a.id || "unnamed")}</button>
+    <span class="pill${a.kind === "ladder" ? " acc" : ""}"
+      title="${esc(kind.why)}">${esc(kind.label)}</span>
+    ${a.origin === "personal"
+      ? `<span class="pill mine" title="you made this one">mine</span>` : ""}
+    <span class="st ${st.cls}" title="${esc(st.why)}">${esc(st.t)}</span>
+    ${a.enabled === false
+      ? `<span class="pill" title="attached but switched off">off</span>` : ""}
+    <span style="flex:1"></span>
+    <span class="faint on-src" title="${esc(a.source || "")}">${
+      nSet ? `${nSet} setting${nSet === 1 ? "" : "s"}` : "no overrides"}</span>
+    ${dead ? `<span class="pill warn" title="${esc(a.trades.why || "")}"
+      >records only</span>` : ""}
+    ${a.why ? `<div class="on-why">${esc(a.why)}</div>` : ""}
+  </div>`;
+}
+
+/* Jump to the shelf with the ticker pre-chosen. Not a modal: the shelf IS the
+   picker, and sending someone to a second list of the same 259 rows is how a
+   dashboard grows two catalogues. */
+let addingTo = "";
+function focusShelfFor(sym) {
+  addingTo = String(sym || "").toUpperCase();
+  renderShelf();
+  const h = el("catShelf");
+  if (h) h.scrollIntoView({ behavior: "smooth", block: "start" });
+  const q = el("shQ");
+  if (q) q.focus();
+}
+
+/* ================================================================ the shelf */
+function matchesShelf(r) {
+  if (fkind && r.kind !== fkind) return false;
+  if (forigin && r.origin !== forigin) return false;
+  if (fattached && !(r.tickers || []).length) return false;
+  const terms = String(fq || "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return true;
-  const hay = [r.id, r.label, r.kind, r.state, blurbOf(r.id)]
+  const hay = [r.id, r.name, r.slug, r.summary, r.kind, r.origin]
     .concat(r.tickers || []).join(" ").toLowerCase();
   return terms.every((w) => hay.indexOf(w) >= 0);
 }
 
-function renderCatalogue() {
-  const head = el("catHead");
-  const body = el("catBody");
-  if (!head || !body) return;
-  /* A FAILED READ MUST NOT LEAVE THE TOTALS ON SCREEN.
-
-     The first version kept the last good CAT_ROWS and only swapped the card
-     list for the error, so a 502 left "Value held $23,148.00" sitting above
-     the words "could not read the strategies" -- a number from a read that no
-     longer answers, presented as this account's position. Measured against the
-     `hubfail` scenario. On an error the header IS the error, and it says how
-     old the last good read was so the figures can be gone without the page
-     pretending nothing was ever there. */
-  if (CAT_ERR) {
-    head.innerHTML = card("This account's strategies", `
-      <div class="note bad" style="margin:0"><b>Could not read the
-        strategies.</b> ${esc(CAT_ERR)}<br>
-        ${CAT_AT
-          ? `The figures that were here came from a read
-             <b>${Math.round((Date.now() - CAT_AT) / 1000)}s</b> ago and are not
-             shown, because a total nobody can refresh is not a total.`
-          : `Nothing has been read yet.`}
-        <br>No strategy is listed below rather than listing them stale — a
-        strategy list that is quietly out of date is worse than none.</div>`,
-      `<button class="btn sm" id="catRefresh">Try again</button>`);
-    const rb0 = el("catRefresh");
-    if (rb0) rb0.onclick = () => act(() => loadCatalogue(true));
-    renderCards();
+function renderShelf() {
+  const host = el("catShelf");
+  if (!host) return;
+  if (SHELF_ERR) {
+    host.innerHTML = panel("The bank", `
+      <div class="note bad" style="margin:0"><b>Could not read the bank.</b>
+        ${esc(SHELF_ERR)}<br>No strategy is listed rather than listing them
+        stale.</div>`,
+      { actions: `<button class="btn sm" id="shRetry">Try again</button>` });
+    const b = el("shRetry");
+    if (b) b.onclick = () => act(() => loadCatalogue(true));
     return;
   }
-  head.innerHTML = catHeadHTML();
-  const q = el("catQ");
+  if (!SHELF.length) {
+    host.innerHTML = panel("The bank",
+      `<div class="faint">Reading the shelf…</div>`);
+    return;
+  }
+  const hits = SHELF.filter(matchesShelf);
+  const shown = hits.slice(0, fshow);
+  const mine = SHELF.filter((r) => r.origin === "personal").length;
+
+  const counts = {};
+  for (const r of SHELF) counts[r.kind] = (counts[r.kind] || 0) + 1;
+  const kindOpts = [["", `All ${SHELF.length}`]].concat(
+    (SHELF_KINDS.length ? SHELF_KINDS : Object.keys(counts)).map((k) =>
+      [k, `${bkindOf(k).label} ${counts[k] || 0}`, bkindOf(k).why]));
+
+  const body = `
+    <div class="sh-bar">
+      <input id="shQ" class="cat-q" placeholder="Search 259 strategies — try “condor”, “ladder”, “SPY”"
+             value="${esc(fq)}" spellcheck="false" autocomplete="off">
+      ${segmented({ id: "shOrigin", value: forigin, size: "sm", label: "origin",
+        options: [["", "Everything"],
+                  ["personal", `Mine ${mine}`, "the ones you or Claude built here"],
+                  ["standard", "Standard", "the shipped and researched shelf"]] })}
+      <label class="sh-chk"><input type="checkbox" id="shAtt"${
+        fattached ? " checked" : ""}> on a ticker</label>
+      <span style="flex:1"></span>
+      <button class="btn sm primary" id="shNew">New strategy</button>
+    </div>
+    ${segmented({ id: "shKind", value: fkind, size: "sm", label: "kind",
+      options: kindOpts })}
+    ${addingTo ? `<div class="note" style="margin:12px 0 0">Adding to
+      <b>${esc(addingTo)}</b> — pick a strategy below and it will be offered
+      with ${esc(addingTo)} already ticked.
+      <button class="lnk" id="shClearAdd">clear</button></div>` : ""}
+    <div class="sh-count">${hits.length === SHELF.length
+      ? `All <b>${SHELF.length}</b> strategies.`
+      : `<b>${hits.length}</b> of ${SHELF.length} match.`}
+      ${hits.length > shown.length
+        ? ` Showing the first <b>${shown.length}</b>.` : ""}</div>
+    ${hits.length
+      ? `<div class="cat-grid">${shown.map(shelfCardHTML).join("")}</div>
+         ${hits.length > shown.length
+           ? `<div class="sh-more"><button class="btn" id="shMore">Show
+               ${Math.min(36, hits.length - shown.length)} more</button></div>`
+           : ""}`
+      : emptyState({
+          title: "Nothing matches that",
+          body: `${SHELF.length} strategies are on the shelf. Clear the filters `
+              + `to see them.`,
+          action: `<button class="btn" id="shClear">Clear filters</button>`,
+        })}`;
+
+  host.innerHTML = panel("The bank", body, {
+    sub: "every strategy there is — three ladder presets, the indicator "
+       + "documents, 231 researched option structures and the tailored plays, "
+       + "in one id space",
+  });
+  wireShelf(host);
+}
+
+function wireShelf(host) {
+  const q = el("shQ");
   if (q) {
-    q.oninput = () => { CAT_Q = q.value; renderCards(); };
-    /* the header is rebuilt on every load, so the cursor has to be put back
-       or typing a filter loses a character every poll */
-    if (document.activeElement === q) q.setSelectionRange(q.value.length, q.value.length);
+    q.oninput = () => { fq = q.value; fshow = 36; renderShelf();
+                        const n = el("shQ");
+                        if (n) { n.focus();
+                                 n.setSelectionRange(n.value.length, n.value.length); } };
   }
-  const rb = el("catRefresh");
-  if (rb) rb.onclick = () => act(() => loadCatalogue(true));
-  renderCards();
+  wireSegmented("shOrigin", (v) => { forigin = v; fshow = 36; renderShelf(); });
+  wireSegmented("shKind", (v) => { fkind = v; fshow = 36; renderShelf(); });
+  const a = el("shAtt");
+  if (a) a.onchange = () => { fattached = a.checked; fshow = 36; renderShelf(); };
+  const m = el("shMore");
+  if (m) m.onclick = () => { fshow += 36; renderShelf(); };
+  const c = el("shClear");
+  if (c) c.onclick = () => { fq = ""; fkind = ""; forigin = ""; fattached = false;
+                             fshow = 36; renderShelf(); };
+  const ca = el("shClearAdd");
+  if (ca) ca.onclick = () => { addingTo = ""; renderShelf(); };
+  const nw = el("shNew");
+  if (nw) nw.onclick = newStrategyFlow;
+  host.querySelectorAll("[data-attach]").forEach((b) => {
+    b.onclick = () => attachFlow(b.dataset.attach);
+  });
+  host.querySelectorAll("[data-copy]").forEach((b) => {
+    b.onclick = () => copyFlow(b.dataset.copy);
+  });
+  host.querySelectorAll("[data-edit]").forEach((b) => {
+    b.onclick = () => editFlow(b.dataset.edit);
+  });
+  host.querySelectorAll("[data-del]").forEach((b) => {
+    b.onclick = () => deleteFlow(b.dataset.del);
+  });
+  host.querySelectorAll("[data-openatt]").forEach((b) => {
+    b.onclick = () => openAttachment(b.dataset.openatt, b.dataset.sym);
+  });
 }
 
-function renderCards() {
-  const body = el("catBody");
-  if (!body) return;
-  /* the header already carries the error and the age of the last good read;
-     printing the same sentence twice is not twice as honest */
-  if (CAT_ERR) { body.innerHTML = ""; return; }
-  if (!CAT_ROWS.length) {
-    body.innerHTML = `<div class="faint">Reading the strategies…</div>`;
-    return;
-  }
-  const rows = CAT_ROWS.filter((r) => matchRow(r, CAT_Q));
-  if (!rows.length) {
-    body.innerHTML = `<div class="note">Nothing matches
-      “${esc(CAT_Q)}”. ${CAT_ROWS.length} strateg${CAT_ROWS.length === 1
-        ? "y is" : "ies are"} registered.</div>`;
-    return;
-  }
-  body.innerHTML = `<div class="cat-grid">${rows.map(cardHTML).join("")}</div>`;
-  wireCards(body);
-}
-
-function cardHTML(r) {
-  const st = stateOf(r.state);
-  const blurb = blurbOf(r.id);
+function shelfCardHTML(r) {
+  const k = bkindOf(r.kind);
   const syms = r.tickers || [];
-  const nset = (r.settings_schema || []).length;
-  return `<section class="cat-card" data-sid="${esc(r.id)}">
+  const nset = (r.params_schema || []).length;
+  const canAttach = r.attach && r.attach.ok !== false;
+  const trades = r.trades || { ok: true };
+  return `<section class="cat-card${r.origin === "personal" ? " mine" : ""}"
+      data-eid="${esc(r.id)}">
     <header class="cat-h">
       <div class="cat-h-t">
-        <span class="cat-name">${esc(r.label || r.id)}</span>
-        <span class="pill${r.kind === "options" ? "" : " acc"}"
-          >${esc(KIND[r.kind] || r.kind || "—")}</span>
-        <span class="st ${st.cls}" title="${esc(st.why)}">${esc(st.t)}</span>
+        <span class="cat-name">${esc(r.name || r.slug)}</span>
+        <span class="pill${r.kind === "ladder" ? " acc" : ""}"
+          title="${esc(k.why)}">${esc(k.label)}</span>
+        ${r.origin === "personal"
+          ? `<span class="pill mine" title="you or Claude built this one; it is
+             editable">mine</span>`
+          : `<span class="pill" title="shipped or researched; copy it to edit
+             it">standard</span>`}
       </div>
       <div class="cat-id mono">${esc(r.id)}</div>
     </header>
 
-    <p class="cat-blurb${blurb ? "" : " none"}">${blurb
-      ? esc(blurb)
-      : "No description. This strategy is registered in <code>hub.PROVIDERS</code> "
-        + "and nothing in the dashboard says what it does."}</p>
+    <p class="cat-blurb${r.summary ? "" : " none"}">${r.summary
+      ? esc(r.summary)
+      : "No summary. This entry is on the shelf and nothing in it says what it "
+        + "does."}</p>
 
-    ${r.why ? `<div class="note warn cat-why">${esc(r.why)}</div>` : ""}
-
-    <div class="mrow tight">
-      ${metricTile("Value", r.value)}
-      ${metricTile("Open P/L", r.open_pl, { signed: true })}
-      ${metricTile("Realised", r.realized_pl, { signed: true })}
-      ${metricTile("At risk", r.at_risk)}
-      ${metricTile("Positions", r.positions)}
-      ${metricTile("Share of strategies", shareOfStrategies(r))}
-    </div>
+    ${r.error ? `<div class="note bad cat-why">${esc(r.error)}</div>` : ""}
+    ${!canAttach ? `<div class="note warn cat-why"><b>Cannot go on a
+      ticker.</b> ${esc(r.attach.why || "")}</div>` : ""}
+    ${canAttach && trades.ok === false ? `<div class="note cat-why"><b>Records
+      only — nothing trades it.</b> ${esc(trades.why || "")}</div>` : ""}
 
     <div class="cat-sec">
-      <div class="cat-sec-h">Runs on
-        <span class="faint">${syms.length || "no"} ticker${
-          syms.length === 1 ? "" : "s"}</span></div>
+      <div class="cat-sec-h">On ${syms.length || "no"} ticker${
+        syms.length === 1 ? "" : "s"}${r.tickers === null
+          ? ` <span class="warn">(not read)</span>` : ""}</div>
       <div class="chips">
-        ${syms.map((s) => `<button class="chip" data-open="${esc(r.id)}"
+        ${syms.map((s) => `<button class="cat-chip" data-openatt="${esc(r.id)}"
             data-sym="${esc(s)}" title="Settings and detach for ${esc(s)}"
             >${esc(s)}<span class="chip-x">⋯</span></button>`).join("")
-          || `<span class="faint">Nothing is attached. It holds no position and
-              opens nothing.</span>`}
-        <button class="chip add" data-attach="${esc(r.id)}">+ attach a ticker</button>
+          || `<span class="faint">Not attached. It holds no position and opens
+              nothing.</span>`}
+        ${canAttach
+          ? `<button class="cat-chip add" data-attach="${esc(r.id)}"
+              >+ attach to ticker${addingTo ? ` ${esc(addingTo)}` : "s"}</button>`
+          : ""}
       </div>
     </div>
 
     <footer class="cat-f">
       <span class="faint">${nset
         ? `${nset} setting${nset === 1 ? "" : "s"}, per ticker`
-        : "no settings this page may change"}</span>
+        : esc(r.params_reason || "no settings")}</span>
       <span style="flex:1"></span>
-      ${r.kind === "options"
-        ? `<button class="btn sm" data-goto="options">Options desk</button>` : ""}
+      ${r.origin === "personal"
+        ? `${r.kind === "ladder"
+             ? `<button class="btn sm" data-edit="${esc(r.id)}">Edit</button>` : ""}
+           <button class="btn sm danger" data-del="${esc(r.id)}">Delete</button>`
+        : `<button class="btn sm" data-copy="${esc(r.id)}"
+            title="duplicate it as a personal entry you can edit">Copy to mine</button>`}
     </footer>
   </section>`;
 }
 
-function wireCards(root) {
-  root.querySelectorAll("[data-open]").forEach((b) => {
-    b.onclick = () => openAttached(b.dataset.open, b.dataset.sym);
-  });
-  root.querySelectorAll("[data-attach]").forEach((b) => {
-    b.onclick = () => attachFlow(b.dataset.attach);
-  });
-  root.querySelectorAll("[data-goto]").forEach((b) => {
-    b.onclick = () => go({ kind: b.dataset.goto });
-  });
-}
-
-const rowById = (id) => CAT_ROWS.find((r) => r.id === id) || null;
-
-/* hub fills `share_of_value` in portfolio() and NOT in strategies() -- on this
-   route every row carries "not aggregated yet", which is true and useless.
-   So the share is computed here against a denominator this page can actually
-   see, and the label and the reason both say which denominator that is. It is
-   NOT share of account value: cash, and anything no strategy claims, are not
-   in it. That number is the Portfolio page's and it stays there. */
-function shareOfStrategies(r) {
-  const mine = metricValue(r.value);
-  let whole = 0, have = 0, blind = 0;
-  for (const x of CAT_ROWS) {
-    const v = metricValue(x.value);
-    if (v === null) { blind += 1; continue; }
-    whole += v; have += 1;
-  }
-  if (mine === null || !whole) {
-    return { value: null, n: 0, unit: "pct",
-             reason: mine === null
-               ? "this strategy holds nothing the broker confirms"
-               : "no strategy on this account holds anything to be a share of" };
-  }
-  return {
-    value: mine / whole, n: have, unit: "pct", thin: blind > 0,
-    reason: "of what the " + have + " priced strateg"
-      + (have === 1 ? "y holds" : "ies hold")
-      + (blind ? ", with " + blind + " that could not price itself left out"
-               : "")
-      + ". Cash and anything no strategy claims are not in the denominator -- "
-      + "share of account value is on Portfolio.",
-  };
-}
-
-/* ------------------------------------------------------------- attaching */
-/* One control for every kind, because that is the whole point of hub's seam:
-   the same POST attaches a ladder and assigns an options play. What differs is
-   only what the confirmation has to warn about, and that comes off the row. */
-async function attachFlow(sid) {
-  const r = rowById(sid);
+/* ========================================================= attaching ==== */
+/* ONE control for every kind, because that is the whole point of the bank's
+   seam: the same POST attaches a ladder preset, an indicator document, a
+   tailored play and a banked option structure. What differs is only what the
+   confirmation has to warn about, and that comes off the row. */
+async function attachFlow(eid) {
+  const r = shelfById(eid);
   if (!r) return;
+  if (r.attach && r.attach.ok === false) {
+    await ask({ title: `${esc(r.name)} cannot be attached`, ok: "OK",
+      body: `${esc(r.attach.why || "")}<br><br>This is the server's own
+        refusal, printed as it came.` });
+    return;
+  }
   const already = new Set(r.tickers || []);
-  const choices = CAT_TICKERS.map((t) => t.symbol).filter((s) => !already.has(s));
-  const sym = await askSymbol(r, choices);
-  if (!sym) return;
+  const picked = await askTickers(r, already);
+  if (!picked || !picked.length) return;
+
+  const trades = r.trades || { ok: true };
+  const isLadder = r.kind === "ladder";
+  const clash = isLadder ? picked.filter((s) => ladderOn(s)) : [];
   const ok = await ask({
-    title: `Attach ${esc(r.label || r.id)} to ${esc(sym)}?`,
-    ok: "Attach",
-    body: `<b>${esc(r.label || r.id)}</b> starts deciding for <b>${esc(sym)}</b>
-      on its own settings.<br><br>
-      <b>Attaching never arms.</b> ${r.kind === "shares"
-        ? `The ladder is created <b>stopped and in dry run</b>. Nothing opens
+    title: `Attach ${esc(r.name)} to ${picked.length} ticker${
+      picked.length === 1 ? "" : "s"}?`,
+    ok: `Attach to ${picked.join(", ")}`,
+    danger: clash.length > 0,
+    body: `<b>${esc(r.name)}</b> starts deciding for
+      <b>${esc(picked.join(", "))}</b> on its own settings.<br><br>
+      <b>Attaching never arms.</b> ${isLadder
+        ? `A ladder is created <b>stopped and in dry run</b>. Nothing opens
            until you start it and arm it from the ticker page.`
-        : `The play is assigned but <code>state/options/PLAYS_ARMED</code> is not
-           touched, and the arm gates opening and nothing else.`}<br><br>
-      Detaching is on the same chip and it sends no order either — the server
-      refuses a detach while the strategy still holds something, and says so.`,
+        : r.kind === "option-tailored"
+          ? `The play is assigned and <code>state/options/PLAYS_ARMED</code> is
+             not touched — the arm gates opening and nothing else.`
+          : `Nothing is ordered by this at all.`}
+      ${trades.ok === false
+        ? `<br><br><b class="warn">Nothing trades this yet.</b>
+           ${esc(trades.why || "")}`
+        : ""}
+      ${clash.length
+        ? `<br><br><b class="down">${clash.join(", ")} already ${
+            clash.length === 1 ? "carries a ladder strategy"
+                              : "carry ladder strategies"}.</b>
+           A ticker has exactly one engine config, so this REPLACES it. The
+           answer will name what it replaced.`
+        : ""}
+      <br><br>Detaching is on the same chip and sends no order either — the
+      server refuses a detach while the strategy still holds something, and
+      says so.`,
   });
   if (!ok) return;
-  await act(async () => {
-    const res = await POST(`/api/hub/ticker/${encodeURIComponent(sym)}/strategy`,
-                           { strategy: sid, action: "attach", by: "dashboard" });
-    toast(res.already
-      ? `${esc(sym)} already had <b>${esc(r.label || r.id)}</b> on it.`
-      : `<b>${esc(r.label || r.id)}</b> attached to <b>${esc(sym)}</b>. `
-        + `Nothing is armed.`, "ok", 8000);
-    await loadCatalogue(true);
-  });
+
+  /* One POST per ticker, sequential and each reported on its own. A loop that
+     fired them in parallel and reported "attached" once would hide the ticker
+     the server refused. */
+  const done = [], failed = [], replaced = [];
+  for (const sym of picked) {
+    /* What was on that ticker BEFORE, read off this page's own copy. The
+       server names `replaced` only when the id it displaced is on the shelf,
+       and the case that most needs naming is exactly the other one -- a ticker
+       whose engine points at a preset the bank cannot find. The confirmation
+       promised the answer would say what it replaced, so it has to, from
+       whichever of the two knows. */
+    const was = isLadder
+      ? ATTACHED.find((a) => String(a.symbol).toUpperCase() === sym
+                        && isLadderRow(a) && a.id !== eid)
+      : null;
+    try {
+      const res = await POST("/api/bank/attach",
+                             { symbol: sym, id: eid, by: "dashboard" });
+      done.push(sym);
+      const gone = (res && res.replaced) || (was ? (was.name || was.id) : "");
+      if (gone) replaced.push(`${sym}: ${gone}`);
+    } catch (e) {
+      failed.push(`${sym}: ${e.message || e}`);
+    }
+  }
+  if (done.length) {
+    toast(`<b>${esc(r.name)}</b> attached to <b>${esc(done.join(", "))}</b>. `
+        + `Nothing is armed.${replaced.length
+            ? ` Replaced ${esc(replaced.join("; "))}.` : ""}`, "ok", 9000);
+  }
+  if (failed.length) {
+    await ask({ title: `${failed.length} of ${picked.length} were refused`,
+      ok: "OK",
+      body: `<div class="att-diff">${failed.map((f) =>
+        `<div>${esc(f)}</div>`).join("")}</div>
+        ${done.length ? `<br>${done.join(", ")} went on.` : ""}` });
+  }
+  addingTo = "";
+  await loadCatalogue(true);
 }
 
-/* A datalist rather than a select: the watchlist is a suggestion, not a
-   restriction -- a ticker the account does not hold yet is a legitimate
-   thing to attach a strategy to, and hub validates the symbol anyway. */
-function askSymbol(r, choices) {
+/* A LADDER IS A STORE, NOT A LABEL. Keying this on `a.kind === "ladder"`
+   missed the case that matters most: a ticker whose engine names a preset that
+   is NOT on the shelf comes back with no kind at all (bank.attached cannot
+   look it up), so MSTX -- carrying `preset:scout` -- was offered a second
+   ladder with no "this replaces it" warning, and found out only from the
+   server's answer afterwards. The store prefix on the id is the fact that
+   survives a missing shelf row. */
+const LADDER_STORES = ["preset", "doc"];
+const isLadderRow = (a) => a.kind === "ladder"
+  || LADDER_STORES.indexOf(String(a.id || "").split(":")[0]) >= 0;
+const ladderOn = (sym) => ATTACHED.some((a) =>
+  String(a.symbol).toUpperCase() === String(sym).toUpperCase()
+  && isLadderRow(a));
+
+/* MULTIPLE TICKERS IN ONE GO -- his own words. A checkbox for every ticker on
+   the account plus a free-text box, because a ticker the account does not hold
+   yet is a legitimate thing to attach a strategy to and the server validates
+   the symbol anyway. */
+function askTickers(r, already) {
+  const known = CAT_TICKERS.map((t) => t.symbol);
   return new Promise((resolve) => {
     const v = document.createElement("div");
     v.className = "veil";
     v.innerHTML = `<div class="modal">
-      <h3>Attach ${esc(r.label || r.id)}</h3>
+      <h3>Attach ${esc(r.name)}</h3>
       <div class="body">
-        <label class="f"><span>Ticker</span>
-          <input id="atSym" list="atList" autocomplete="off" spellcheck="false"
+        <div class="tk-list">${known.length
+          ? known.map((s) => `<label class="tk-opt${
+              already.has(s) ? " on" : ""}">
+              <input type="checkbox" value="${esc(s)}"${
+                already.has(s) ? " checked disabled" : ""}${
+                addingTo === s ? " checked" : ""}>
+              <b>${esc(s)}</b>${already.has(s)
+                ? `<span class="faint">already has it</span>` : ""}</label>`).join("")
+          : `<div class="faint">No ticker is on this account yet.</div>`}</div>
+        <label class="f" style="margin-top:12px"><span>Or another symbol</span>
+          <input id="atSym" autocomplete="off" spellcheck="false"
                  placeholder="SPY" maxlength="12"></label>
-        <datalist id="atList">${choices.map((s) =>
-          `<option value="${esc(s)}">`).join("")}</datalist>
-        <div class="tip" style="margin-top:8px">${choices.length
-          ? `${choices.length} ticker${choices.length === 1 ? "" : "s"} on this
-             account do not have it yet. A symbol that is not on the list is
-             allowed — the server validates it.`
-          : `Every ticker on this account already has it. A new symbol is
-             allowed; the server validates it.`}</div>
+        <div class="tip" style="margin-top:8px">Tick as many as you like. Each
+          one is a separate call and each answer is reported on its own — a
+          ticker the server refuses will not be hidden behind the ones that
+          worked.</div>
       </div>
       <div class="acts">
         <button class="btn" id="atNo">Cancel</button>
         <button class="btn primary" id="atYes">Continue</button>
       </div></div>`;
     document.body.appendChild(v);
-    const i = v.querySelector("#atSym");
-    const done = (val) => { v.remove(); document.removeEventListener("keydown", k); resolve(val); };
-    function k(e) { if (e.key === "Escape") done(""); }
-    i.focus();
-    i.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go2(); } };
-    const go2 = () => done((i.value || "").trim().toUpperCase());
-    v.querySelector("#atYes").onclick = go2;
-    v.querySelector("#atNo").onclick = () => done("");
-    v.addEventListener("click", (e) => { if (e.target === v) done(""); });
+    const done = (val) => { v.remove(); document.removeEventListener("keydown", k);
+                            resolve(val); };
+    function k(e) { if (e.key === "Escape") done(null); }
+    const collect = () => {
+      const out = [...v.querySelectorAll(".tk-list input:checked")]
+        .filter((x) => !x.disabled).map((x) => x.value);
+      const extra = (v.querySelector("#atSym").value || "").trim().toUpperCase();
+      if (extra && out.indexOf(extra) < 0) out.push(extra);
+      done(out);
+    };
+    v.querySelector("#atSym").onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); collect(); }
+    };
+    v.querySelector("#atYes").onclick = collect;
+    v.querySelector("#atNo").onclick = () => done(null);
+    v.addEventListener("click", (e) => { if (e.target === v) done(null); });
     document.addEventListener("keydown", k);
+    const first = v.querySelector(".tk-list input:not([disabled])")
+               || v.querySelector("#atSym");
+    if (first) first.focus();
   });
 }
 
-/* ------------------------------------------- one ticker on one strategy */
-let ATT = null;           // { sid, sym, card, schema, values, err }
+/* ==================================================== building your own === */
+/* Its own modal rather than core's `ask`: `ask` reads a checkbox and a
+   confirmation word and nothing else, and reading a radio group AFTER the veil
+   has left the DOM returns nothing at all. That bug is one line away in every
+   "just use ask" version of this, so the choice is read while the modal is
+   still on screen. */
+function askKind() {
+  const opts = [
+    ["ladder", "A ladder",
+     "The rung, the target, the filter and the sessions — the share ladder's "
+     + "own settings, saved under a name you can put on any ticker."],
+    ["indicator", "An indicator strategy",
+     "Indicators and a rule tree, built by clicking. It opens the Builder tab, "
+     + "which writes to this same bank."],
+    ["option", "An option structure",
+     "Start from one of the 231 banked structures and copy it — the legs are "
+     + "the hard part and the shelf already has them."],
+  ];
+  return new Promise((resolve) => {
+    const v = document.createElement("div");
+    v.className = "veil";
+    v.innerHTML = `<div class="modal">
+      <h3>Build a strategy</h3>
+      <div class="body"><div class="nw-opts">${opts.map(([id, t, s], i) =>
+        `<label class="nw-opt"><input type="radio" name="nwk" value="${id}"${
+          i ? "" : " checked"}>
+          <div><b>${esc(t)}</b><span>${esc(s)}</span></div></label>`).join("")}
+      </div></div>
+      <div class="acts">
+        <button class="btn" id="nkNo">Cancel</button>
+        <button class="btn primary" id="nkYes">Continue</button>
+      </div></div>`;
+    document.body.appendChild(v);
+    const done = (x) => { v.remove(); document.removeEventListener("keydown", k);
+                          resolve(x); };
+    function k(e) { if (e.key === "Escape") done(""); }
+    document.addEventListener("keydown", k);
+    v.querySelector("#nkYes").onclick = () => {
+      const r = v.querySelector("input[name=nwk]:checked");
+      done(r ? r.value : "");
+    };
+    v.querySelector("#nkNo").onclick = () => done("");
+    v.addEventListener("click", (e) => { if (e.target === v) done(""); });
+  });
+}
+
+async function newStrategyFlow() {
+  const want = await askKind();
+  if (!want) return;
+  if (want === "indicator") { go({ kind: "strategies", tab: "builder" }); return; }
+  if (want === "option") {
+    fkind = "option"; forigin = "standard"; fq = ""; fshow = 36;
+    renderShelf();
+    toast("Pick a structure and press <b>Copy to mine</b> — then its numbers "
+        + "are yours to turn.", "", 9000);
+    return;
+  }
+  await ladderForm(null);
+}
+
+/* The ladder form, for a new personal preset or for editing one. The schema
+   comes from the entry being edited, or from `preset:basic` -- the shipped
+   default -- so the fields are the engine's own keys and not a list typed
+   here that could drift from it. */
+async function ladderForm(entry) {
+  const base = entry || shelfById("preset:basic")
+            || SHELF.find((r) => r.kind === "ladder");
+  if (!base) {
+    await ask({ title: "No ladder to start from", ok: "OK",
+      body: "The shelf has no ladder preset to take a field list from, so "
+          + "there is nothing to prefill a form with." });
+    return;
+  }
+  let schema = base.params_schema || [];
+  /* The SCHEMA's own defaults first, then whatever the document actually
+     carries on top. Seeding from the document alone would leave a key the
+     document happens not to spell out as a blank box, and a blank box on a
+     ladder form is not "the default" -- schemaPatch drops it, so the saved
+     preset would silently be missing a setting the engine needs. */
+  let values = {};
+  for (const row of schema) values[row.key] = row.default;
+  try {
+    const d = await GET(`/api/bank/entry/${encodeURIComponent(base.id)}`);
+    const doc = (d.entry && d.entry.doc) || {};
+    schema = (d.entry && d.entry.params_schema) || schema;
+    for (const row of schema) {
+      if (values[row.key] === undefined) values[row.key] = row.default;
+    }
+    const got = doc.settings || doc;
+    for (const [k, v] of Object.entries(got || {})) {
+      if (values[k] !== undefined) values[k] = v;
+    }
+  } catch (e) {
+    /* the shelf row's schema still carries every key and its default, so the
+       form is complete; only the entry's own stored values are missing */
+  }
+  const editing = !!entry;
+  const v = document.createElement("div");
+  v.className = "veil";
+  v.innerHTML = `<div class="modal wide">
+    <h3>${editing ? `Edit ${esc(entry.name)}` : "New ladder strategy"}</h3>
+    <div class="body">
+      <label class="f"><span>Name</span>
+        <input id="nlName" maxlength="60" value="${esc(editing ? entry.name : "")}"
+               placeholder="My tight ladder" spellcheck="false"></label>
+      <label class="f"><span>What it does, in one sentence</span>
+        <input id="nlSum" maxlength="200" value="${esc(editing ? entry.summary : "")}"
+               placeholder="A $0.05 rung on a 1-minute bar, target $0.08, no flip."
+               spellcheck="false"></label>
+      <div class="att-q" style="margin-top:14px">
+        <input id="nlQ" class="cat-q" placeholder="Search these settings"
+               spellcheck="false" autocomplete="off">
+        <span class="faint">${schema.length} setting${
+          schema.length === 1 ? "" : "s"}, the engine's own keys</span>
+      </div>
+      <form id="nlForm" class="att-form">${bankFormHTML(schema, values, "")}</form>
+      <div class="tip">Saving writes a PERSONAL entry to the bank. It is not
+        attached to anything and nothing is armed — it becomes a card you can
+        put on tickers like any other.</div>
+    </div>
+    <div class="acts">
+      <button class="btn" id="nlNo">Cancel</button>
+      <button class="btn primary" id="nlYes">${
+        editing ? "Save changes" : "Save to the bank"}</button>
+    </div></div>`;
+  document.body.appendChild(v);
+  const close = () => { v.remove(); document.removeEventListener("keydown", k); };
+  function k(e) { if (e.key === "Escape") close(); }
+  document.addEventListener("keydown", k);
+  v.addEventListener("click", (e) => { if (e.target === v) close(); });
+  v.querySelector("#nlNo").onclick = close;
+  const q = v.querySelector("#nlQ");
+  q.oninput = () => applySearch(v.querySelector("#nlForm"), q.value);
+  v.querySelector("#nlName").focus();
+
+  v.querySelector("#nlYes").onclick = async () => {
+    const name = (v.querySelector("#nlName").value || "").trim();
+    if (!name) { toast("A name is required.", "err"); return; }
+    const settings = bankFormPatch(v.querySelector("#nlForm"), schema);
+    const doc = { kind: "ladder", name,
+                  summary: (v.querySelector("#nlSum").value || "").trim(),
+                  settings, by: "dashboard" };
+    if (editing) doc.id = entry.id;
+    const b = v.querySelector("#nlYes");
+    b.disabled = true; b.textContent = "Saving…";
+    try {
+      const res = await POST("/api/bank/entry", doc);
+      close();
+      toast(`<b>${esc(name)}</b> saved to the bank as
+        <code>${esc((res.entry || {}).id || "")}</code>. It is attached to
+        nothing.`, "ok", 9000);
+      forigin = "personal"; fkind = ""; fq = ""; fshow = 36;
+      await loadCatalogue(true);
+    } catch (e) {
+      b.disabled = false; b.textContent = editing ? "Save changes" : "Save to the bank";
+      await ask({ title: "Not saved", ok: "OK", body: esc(e.message) });
+    }
+  };
+}
+
+async function editFlow(eid) {
+  const r = shelfById(eid);
+  if (r) await ladderForm(r);
+}
+
+async function copyFlow(eid) {
+  const r = shelfById(eid);
+  if (!r) return;
+  const name = await askText({
+    title: `Copy ${esc(r.name)}`,
+    label: "Name for your copy",
+    value: `${r.name} (mine)`,
+    body: `The standard shelf has to keep saying what it always said, so a
+      standard entry is never edited in place. This makes a PERSONAL copy whose
+      numbers are yours to turn.`,
+    ok: "Make a copy",
+  });
+  if (!name) return;
+  await act(async () => {
+    const res = await POST("/api/bank/entry/copy",
+                           { id: eid, name, by: "dashboard" });
+    toast(`Copied to <code>${esc((res.entry || {}).id || "")}</code>.`, "ok");
+    forigin = "personal"; fq = ""; fshow = 36;
+    await loadCatalogue(true);
+  });
+}
+
+async function deleteFlow(eid) {
+  const r = shelfById(eid);
+  if (!r) return;
+  const on = r.tickers || [];
+  const ok = await ask({
+    title: `Delete ${esc(r.name)}?`, danger: true, ok: "Delete",
+    requireWord: on.length ? "DELETE" : "",
+    body: `The entry is removed from the bank.<br><br>
+      <b>Nothing is sold, cancelled or detached by this.</b> ${on.length
+        ? `<b class="down">It is on ${esc(on.join(", "))} right now</b> and the
+           server refuses while a ticker is still using it — it will say so.`
+        : `It is not on any ticker.`}`,
+  });
+  if (!ok) return;
+  try {
+    await DEL(`/api/bank/entry/${encodeURIComponent(eid)}`);
+    toast(`<b>${esc(r.name)}</b> deleted.`, "ok");
+    await loadCatalogue(true);
+  } catch (e) {
+    await ask({ title: "Not deleted", ok: "OK", body: esc(e.message) });
+  }
+}
+
+/* A one-line text prompt. `ask` has no text field and adding one to core.js is
+   the shell agent's call, so this stays here. */
+function askText(o) {
+  return new Promise((resolve) => {
+    const v = document.createElement("div");
+    v.className = "veil";
+    v.innerHTML = `<div class="modal">
+      <h3>${o.title || ""}</h3>
+      <div class="body">
+        ${o.body ? `<div class="tip" style="margin-top:0">${o.body}</div>` : ""}
+        <label class="f"><span>${esc(o.label || "")}</span>
+          <input id="axT" maxlength="80" value="${esc(o.value || "")}"
+                 spellcheck="false" autocomplete="off"></label>
+      </div>
+      <div class="acts">
+        <button class="btn" id="axNo">Cancel</button>
+        <button class="btn primary" id="axYes">${esc(o.ok || "OK")}</button>
+      </div></div>`;
+    document.body.appendChild(v);
+    const i = v.querySelector("#axT");
+    const done = (x) => { v.remove(); document.removeEventListener("keydown", k);
+                          resolve(x); };
+    function k(e) { if (e.key === "Escape") done(""); }
+    document.addEventListener("keydown", k);
+    const go2 = () => done((i.value || "").trim());
+    i.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go2(); } };
+    v.querySelector("#axYes").onclick = go2;
+    v.querySelector("#axNo").onclick = () => done("");
+    v.addEventListener("click", (e) => { if (e.target === v) done(""); });
+    i.focus(); i.select();
+  });
+}
+
+/* ------------------------------------------------- the bank's own schema
+   bank.py's rows are a SUPERSET of hub's settings_schema: the type words are
+   `int` / `float` / `enum` where fields.js understands `number` and a select.
+   Normalising here rather than teaching fields.js a fifth vocabulary keeps one
+   control set and stops a float arriving at the server as the string "0.1". */
+function normSchema(schema) {
+  return (schema || []).map((r) => {
+    const t = String(r.type || "");
+    const type = (t === "int" || t === "float") ? "number"
+               : (t === "enum" ? "text" : t);
+    return { ...r, type };
+  });
+}
+
+function bankFormHTML(schema, values, query) {
+  const rows = normSchema(schema);
+  /* A key fields.js already knows renders as its own documented control (a
+     real select for side_mode, the step and floor for shares_per_lot). A key
+     it does not know, but which declares choices, gets a select built here
+     rather than a text box you can typo into. */
+  const custom = rows.filter((r) => !fieldByKey(r.key) && r.choices);
+  if (!custom.length) return schemaFormHTML(rows, values, { query });
+  return rows.map((r) => {
+    const v = (values || {})[r.key];
+    if (fieldByKey(r.key) || !r.choices) {
+      return schemaFieldHTML(r, v);
+    }
+    const cur = v === undefined || v === null ? r.default : v;
+    return `<div class="fld" data-k="${esc(r.key)}" data-impact="unknown">
+      <div class="fld-h"><span class="fld-l">${esc(r.label || r.key)}</span>
+        ${impactBadge(r.key)}</div>
+      <select name="${esc(r.key)}">${r.choices.map((c) =>
+        `<option value="${esc(c)}"${String(c) === String(cur) ? " selected" : ""}
+          >${esc(c)}</option>`).join("")}</select>
+      <div class="hint">${esc(r.note || "")} Default
+        <b>${esc(fmtSchemaVal(r.default))}</b>.</div></div>`;
+  }).join("");
+}
+
+const bankFormPatch = (form, schema) => schemaPatch(form, normSchema(schema));
+
+/* ============================== one ticker on one strategy ============== */
+let ATT = null;           // { eid, sid, sym, card, schema, values, err }
 let attQ = "";
 
-async function openAttached(sid, sym) {
-  const r = rowById(sid);
-  paintSheet({ title: `${sym} · ${r ? (r.label || r.id) : sid}`,
+/* The row on a ticker, opened. For a ladder or a play hub knows the strategy
+   and can hand back its live settings, so the full editor opens. For a banked
+   option STRUCTURE hub knows nothing -- there is no engine behind it -- so the
+   pane says what the attachment records and offers a detach, rather than
+   showing an editor that would write to nothing. */
+async function openAttachment(eid, sym) {
+  const a = ATTACHED.find((x) =>
+    String(x.symbol).toUpperCase() === String(sym).toUpperCase()
+    && x.id === eid) || { id: eid, symbol: sym };
+  const entry = shelfById(eid);
+  const sid = hubIdFor(a);
+  if (!sid) return openRecordOnly(a, entry);
+  return openAttached(sid, String(sym).toUpperCase(), eid,
+                      entry ? entry.name : (a.name || eid));
+}
+
+function openRecordOnly(a, entry) {
+  const st = stateOf(a.state);
+  const kv = Object.entries(a.settings || {});
+  paintSheet({
+    title: `${a.symbol} · ${(entry && entry.name) || a.name || a.id}`,
+    sub: `<span class="st ${st.cls}">${esc(st.t)}</span>
+          <span class="faint">${esc(a.source || "")}</span>`,
+    body: `
+      <div class="note warn"><b>Recorded, not traded.</b>
+        ${esc((a.trades && a.trades.why)
+          || "no engine sends a banked option structure; attaching one records "
+           + "the ticker's chosen options strategy and orders nothing")}</div>
+      ${entry && entry.summary
+        ? `<p class="cat-blurb">${esc(entry.summary)}</p>` : ""}
+      ${kv.length
+        ? `<div class="att-kv">${kv.map(([k, v]) =>
+            `<div><span class="faint">${esc(k)}</span>
+              <b>${esc(fmtSchemaVal(v))}</b></div>`).join("")}</div>`
+        : `<div class="tip">No overrides are stored on this attachment.</div>`}
+      <div class="tip">It was written to <code>${esc(a.source || "the bank")}</code>.
+        Detaching removes that record; it sends no order, because there was
+        never an order.</div>`,
+    foot: `<button class="btn danger" id="attDetach">Detach</button>
+      <span style="flex:1"></span>
+      <button class="btn" data-bkclose>Close</button>`,
+  });
+  wireFoot();
+  const b = el("attDetach");
+  if (b) b.onclick = () => bankDetach(a.symbol, a.id,
+                                      (entry && entry.name) || a.id, false);
+}
+
+async function openAttached(sid, sym, eid, label) {
+  paintSheet({ title: `${sym} · ${label}`,
                body: `<div class="bk-faint">Reading ${esc(sym)}…</div>` });
   ATT = null; attQ = "";
   let d;
@@ -543,8 +1156,8 @@ async function openAttached(sid, sym) {
       valueErr = e.message;
     }
   }
-  ATT = { sid, sym, card: cardRow, schema, values, valueErr,
-          label: r ? (r.label || r.id) : sid, kind: r ? r.kind : "" };
+  ATT = { sid, eid, sym, card: cardRow, schema, values, valueErr,
+          label, kind: cardRow ? cardRow.kind : "" };
   renderAttached();
 }
 
@@ -553,14 +1166,11 @@ async function openAttached(sid, sym) {
    word straight through, so a ladder card says "running" where the row says
    "live" -- the same two-words-for-one-idea the hub was built to end, one
    level down. Rather than render the engine's word beside hub's, the pill is
-   derived from the card's explicit booleans, which are unambiguous.
-
-   Reported upstream; when hub normalises `for_ticker`'s state this collapses
-   to stateOf(c.state) and nothing else here changes. */
+   derived from the card's explicit booleans, which are unambiguous. */
 function attState(a) {
   const c = a.card;
   if (!c) return stateOf("off");
-  if (a.kind !== "shares") return stateOf(c.state);
+  if (a.sid !== "ladder") return stateOf(c.state);
   if (c.halted) return stateOf("halted");
   if (!c.running) return stateOf("stopped");
   return stateOf(c.armed ? "armed" : "dry");
@@ -618,7 +1228,11 @@ function renderAttached() {
   if (el("attTicker")) {
     el("attTicker").onclick = () => { closeSheet(); go({ kind: "ticker", sym: a.sym }); };
   }
-  if (el("attDetach")) el("attDetach").onclick = () => detachFlow(a);
+  if (el("attDetach")) {
+    el("attDetach").onclick = () => bankDetach(
+      a.sym, a.eid, a.label,
+      a.sid === "ladder" && Number(a.card && a.card.lots) > 0);
+  }
   if (el("attSave")) el("attSave").onclick = () => saveAttached(a);
   const q = el("attQ");
   if (q) {
@@ -696,7 +1310,7 @@ function attFactsHTML(a) {
   const c = a.card;
   const kv = [];
   const add = (k, v) => { if (v !== undefined && v !== null && v !== "") kv.push([k, v]); };
-  if (a.kind === "shares") {
+  if (a.sid === "ladder") {
     add("Lots", `${c.lots == null ? "—" : c.lots}/${c.max_lots == null ? "—" : c.max_lots}`);
     add("Shares", c.shares);
     add("Average", c.avg_price == null ? null : "$" + Number(c.avg_price).toFixed(2));
@@ -779,27 +1393,35 @@ async function saveAttached(a) {
   }
 }
 
-async function detachFlow(a) {
-  const holding = a.kind === "shares" && Number(a.card && a.card.lots) > 0;
+/* ONE detach for every kind, through the bank, which delegates to whichever
+   subsystem owns the record. Routing a ladder through hub and an option
+   structure through the bank would be two ways to do one thing, and they
+   would drift. */
+async function bankDetach(sym, eid, label, holding) {
+  const kind = String(eid || "").split(":")[0];
   const ok = await ask({
-    title: `Detach ${esc(a.label)} from ${esc(a.sym)}?`,
+    title: `Detach ${esc(label)} from ${esc(sym)}?`,
     danger: true, ok: "Detach", requireWord: holding ? "DETACH" : "",
-    body: `${esc(a.label)} stops deciding for <b>${esc(a.sym)}</b>.<br><br>
-      <b>Nothing is sold and nothing is cancelled by this.</b> ${a.kind === "shares"
+    body: `${esc(label)} stops deciding for <b>${esc(sym)}</b>.<br><br>
+      <b>Nothing is sold and nothing is cancelled by this.</b> ${
+        kind === "preset" || kind === "doc"
         ? `The lots ledger is kept. The server <b>refuses</b> while the ladder
            still holds lots or has orders resting — flatten first, or it will
            tell you exactly what is in the way.`
-        : `Open structures stay open and keep their resting exits; they simply
-           stop being this play's to manage, which means they are adopted:
-           monitored and closed before expiry, never for profit or loss.`}
-      ${holding ? `<br><br><b class="down">${esc(a.sym)} is holding
-        ${esc(String(a.card.lots))} lot(s) right now.</b>` : ""}`,
+        : kind === "play"
+          ? `Open structures stay open and keep their resting exits; they simply
+             stop being this play's to manage, which means they are adopted:
+             monitored and closed before expiry, never for profit or loss.`
+          : `This attachment is a RECORD — no engine ever sent it — so removing
+             it removes a record and nothing else.`}
+      ${holding ? `<br><br><b class="down">${esc(sym)} is holding lots right
+        now.</b>` : ""}`,
   });
   if (!ok) return;
   try {
-    await POST(`/api/hub/ticker/${encodeURIComponent(a.sym)}/strategy`,
-               { strategy: a.sid, action: "detach", by: "dashboard" });
-    toast(`<b>${esc(a.label)}</b> detached from <b>${esc(a.sym)}</b>.`, "ok");
+    await POST("/api/bank/attach",
+               { symbol: sym, id: eid, action: "detach", by: "dashboard" });
+    toast(`<b>${esc(label)}</b> detached from <b>${esc(sym)}</b>.`, "ok");
     closeSheet();
     await loadCatalogue(true);
   } catch (e) {
@@ -809,27 +1431,43 @@ async function detachFlow(a) {
 
 /* --------------------------------------------------------------- styles */
 /* Injected rather than added to app.css for the same reason fields.js injects
-   its own: app.css is the shell agent's file. Tokens only. */
+   its own: app.css is the shell agent's file. Tokens only.
+
+   `.cat-chip` is deliberately NOT `.chip`: theme.css owns `.chip` as the state
+   pill, and this file used to redefine it as a button -- so every core `chip()`
+   rendered on this page came out in the wrong material. One class, one
+   meaning. */
 function ensureCatStyles() {
   if (document.getElementById("catCSS")) return;
   const s = document.createElement("style");
   s.id = "catCSS";
   s.textContent = [
-    ".cat-q{width:210px;max-width:46vw;font-size:12px;padding:6px 10px}",
+    ".cat-q{flex:1;min-width:190px;font-size:12px;padding:7px 11px}",
     ".mrow{display:grid;gap:18px 22px;",
     "grid-template-columns:repeat(auto-fit,minmax(132px,1fr));margin:2px 0 14px}",
     ".mrow.tight{gap:14px 18px;margin:12px 0}",
     ".mrow.tight .mtile-v{font-size:16px}",
     ".cat-warn{margin:0 0 12px}",
+    /* the shelf toolbar */
+    ".sh-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;",
+    "margin-bottom:10px}",
+    ".sh-chk{display:flex;gap:6px;align-items:center;font-size:12px;",
+    "color:var(--muted);white-space:nowrap}",
+    ".sh-count{font-size:11.5px;color:var(--faint);margin:12px 0}",
+    ".sh-more{display:flex;justify-content:center;margin-top:18px}",
+    /* cards */
     ".cat-grid{display:grid;gap:16px;",
-    "grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}",
+    "grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}",
     ".cat-card{background:var(--surface);border:1px solid var(--hairline);",
     "border-radius:var(--radius);padding:18px 20px 14px;display:flex;",
     "flex-direction:column;min-width:0}",
+    ".cat-card.mine{border-color:var(--accent-line)}",
     ".cat-h{display:flex;flex-direction:column;gap:2px}",
     ".cat-h-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
-    ".cat-name{font-size:16.5px;font-weight:650;letter-spacing:-.015em}",
+    ".cat-name{font-size:15.5px;font-weight:650;letter-spacing:-.015em}",
     ".cat-id{font-size:11px;color:var(--faint)}",
+    ".pill.mine{color:var(--accent-2);border-color:var(--accent-line)}",
+    ".pill.warn{color:var(--warn);border-color:var(--warn)}",
     ".st{font-size:10px;letter-spacing:.07em;text-transform:uppercase;",
     "font-weight:700;padding:2px 8px;border-radius:var(--radius-pill);",
     "border:1px solid currentColor;cursor:help;white-space:nowrap}",
@@ -843,15 +1481,44 @@ function ensureCatStyles() {
     ".cat-sec-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;",
     "color:var(--faint);font-weight:650;margin-bottom:9px}",
     ".chips{display:flex;flex-wrap:wrap;gap:7px;align-items:center}",
-    ".chip{font:inherit;font-size:12px;font-weight:600;padding:5px 11px;",
+    ".cat-chip{font:inherit;font-size:12px;font-weight:600;padding:5px 11px;",
     "border-radius:var(--radius-pill);border:1px solid var(--hairline2);",
     "background:var(--surface-2);color:var(--text);cursor:pointer;",
     "display:inline-flex;gap:6px;align-items:center}",
-    ".chip:hover{border-color:var(--accent);color:var(--accent)}",
+    ".cat-chip:hover{border-color:var(--accent);color:var(--accent)}",
     ".chip-x{color:var(--faint);font-size:11px}",
-    ".chip.add{border-style:dashed;color:var(--accent);background:transparent}",
-    ".cat-f{display:flex;align-items:center;gap:10px;margin-top:14px;",
-    "padding-top:11px;border-top:1px solid var(--hairline);font-size:11.5px}",
+    ".cat-chip.add{border-style:dashed;color:var(--accent);background:transparent}",
+    ".cat-f{display:flex;align-items:center;gap:8px;margin-top:14px;",
+    "padding-top:11px;border-top:1px solid var(--hairline);font-size:11.5px;",
+    "flex-wrap:wrap}",
+    /* on your tickers */
+    ".on-grid{display:grid;gap:14px;",
+    "grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}",
+    ".on-card{background:var(--surface-2);border:1px solid var(--hairline);",
+    "border-radius:var(--r-md);padding:13px 15px 10px}",
+    ".on-h{display:flex;align-items:center;gap:9px;margin-bottom:9px;",
+    "font-size:12px}",
+    ".on-sym{font-size:15px;font-weight:700;letter-spacing:-.01em}",
+    ".on-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap;",
+    "padding:7px 0;border-top:1px solid var(--hairline);font-size:12px}",
+    ".on-name{font-weight:600;text-align:left}",
+    ".on-src{font-size:11px}",
+    ".on-why{flex:0 0 100%;font-size:11px;color:var(--warn);line-height:1.5}",
+    /* the ticker picker + the new-strategy chooser */
+    ".tk-list{display:grid;gap:6px;grid-template-columns:repeat(auto-fit,",
+    "minmax(120px,1fr));max-height:230px;overflow:auto}",
+    ".tk-opt{display:flex;gap:7px;align-items:center;font-size:12.5px;",
+    "padding:6px 9px;border-radius:var(--r-xs);background:var(--surface-2);",
+    "cursor:pointer}",
+    ".tk-opt.on{opacity:.55;cursor:default}",
+    ".tk-opt .faint{font-size:10.5px}",
+    ".nw-opts{display:flex;flex-direction:column;gap:9px}",
+    ".nw-opt{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;",
+    "border-radius:var(--r-sm);background:var(--surface-2);cursor:pointer}",
+    ".nw-opt span{display:block;font-size:11.5px;color:var(--muted);",
+    "line-height:1.55;margin-top:3px}",
+    ".modal.wide{max-width:760px;width:94vw}",
+    /* the attachment sheet */
     ".att-kv{display:grid;gap:8px 18px;",
     "grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}",
     ".att-kv>div{display:flex;flex-direction:column;gap:1px;font-size:12.5px}",
@@ -861,11 +1528,11 @@ function ensureCatStyles() {
     ".att-diff{display:flex;flex-direction:column;gap:6px;font-size:12.5px}",
     ".att-diff code{color:var(--accent)}",
     "@media (max-width:560px){.cat-grid{grid-template-columns:1fr}",
+    ".on-grid{grid-template-columns:1fr}",
     ".cat-q{width:100%}.cat-card{padding:15px 15px 12px}}",
   ].join("");
   document.head.appendChild(s);
 }
-
 
 
 /* =========================================================== the builder */

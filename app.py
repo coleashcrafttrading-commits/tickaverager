@@ -43,6 +43,8 @@ Routes
   GET/POST /api/risk/bank             tested risk profiles + leaderboard
   GET    /api/agents/{id}/runs         that agent's run history
 
+  GET    /api/bank/entries            THE one shelf: every strategy, every store
+  GET/POST /api/bank/attach           attach or detach one entry on one ticker
   GET    /api/optlab/bank              the options strategy shelf
   GET    /api/optlab/bank/{slug}       one strategy, with its gates
   GET    /api/optlab/expirations/{sym} listed expiries, dead ones marked
@@ -52,6 +54,7 @@ Routes
   POST   /api/optlab/board/refresh     force a measurement (rate-limited)
   POST   /api/optlab/watch             add/remove/enable/disable a symbol
   GET    /api/optlab/perf              options performance, every metric measured
+  GET    /api/optlab/ticker/{sym}      ONE ticker's options: strategies, P/L, arm
 
   /api/options/* and the /options page belong to optapi.py's router, which is
   the engine that trades. Nothing in THIS file registers a path under it.
@@ -86,6 +89,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 import accounts                                           # noqa: E402
 import hub                                                # noqa: E402
 import journal                                            # noqa: E402
+import perf                                               # noqa: E402
 import scheduler                                          # noqa: E402
 from broker import AlpacaError                            # noqa: E402
 from qty import qty, qnum                                 # noqa: E402
@@ -1156,8 +1160,156 @@ def indicators_custom_delete(key: str):
 # One shelf for both kinds of strategy -- the clicked documents and the coded
 # ones -- because a strategy Claude writes lands in the same place as a
 # strategy built by hand, and neither is any use if the dashboard cannot see it.
+# ---------------------------------------------------------------- the ONE bank
+# Four stores (ladder presets, indicator documents, 231 researched option
+# structures and the two tailored plays) behind one registry with one id space,
+# and ONE attach call for all of them. These are declared BEFORE
+# /api/bank/{kind}/{slug} on purpose: an entry id is "<store>:<slug>", so
+# /api/bank/entry/preset:basic would otherwise match the legacy two-segment
+# route with kind="entry" and 404 on a strategy that is right there.
+#
+# THIS IS THE SINGLE SOURCE THE TICKER DROPDOWN READS. /api/presets shows the
+# three coded presets and nothing else, which is why a strategy on the shelf
+# did not appear when the dropdown was opened on a ticker.
+#
+# Nothing here places an order and nothing here arms.
+@app.get("/api/a/{acct}/bank/entries")
+@app.get("/api/bank/entries")
+def bank_entries(kind: str = "", origin: str = "", symbol: str = "",
+                 q: str = "", attachable: bool = False,
+                 f: Fleet = Depends(cur)):
+    """Every strategy, whatever store it lives in.
+
+    `tickers` on each row is what it is attached to on THIS account; filter by
+    `symbol` for the dropdown on one ticker, by `kind` for one pane.
+    """
+    import bank
+    ctx = _hub_ctx(f, options=False)
+    try:
+        rows = bank.entries(ctx, kind=kind, origin=origin, symbol=symbol, q=q,
+                            attachable_only=attachable)
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "account": ctx.account_id, "as_of": ctx.now,
+            "kinds": list(bank.BANK_KINDS), "origins": list(bank.ORIGINS),
+            "count": len(rows), "entries": rows, "warnings": ctx.warnings}
+
+
+@app.get("/api/a/{acct}/bank/attached")
+@app.get("/api/bank/attached")
+def bank_attached(symbol: str = "", f: Fleet = Depends(cur)):
+    """What is attached to every ticker (or to one), each row naming the store
+    the fact came from -- so a ticker and the bank disagreeing is visible."""
+    import bank
+    ctx = _hub_ctx(f, options=False)
+    try:
+        return {"ok": True, "account": ctx.account_id,
+                "attached": bank.attached(ctx, symbol)}
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/a/{acct}/bank/attach")
+@app.post("/api/bank/attach")
+def bank_attach(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Attach or detach ONE bank entry on ONE ticker. Every kind, one call.
+
+        {"symbol": "RAM", "id": "preset:ladder_v3", "settings": {...}}
+        {"symbol": "SPY", "id": "play:index-put-credit-spread",
+         "action": "detach"}
+
+    ATTACHING NEVER ARMS: a ladder arrives stopped and in dry run, a play is
+    assigned and the arm file is untouched.
+    """
+    import bank
+    settings = body.get("settings")
+    if settings is not None and not isinstance(settings, dict):
+        raise HTTPException(400, "settings must be an object.")
+    sym = str(body.get("symbol") or "")
+    eid = str(body.get("id") or body.get("strategy") or "")
+    action = str(body.get("action") or "attach").lower()
+    ctx = _hub_ctx(f, options=False)
+    try:
+        if action == "detach":
+            return bank.detach(ctx, sym, eid, by=str(body.get("by") or "dashboard"),
+                               force=bool(body.get("force")))
+        if action != "attach":
+            raise HTTPException(400, "action must be attach or detach")
+        return bank.attach(ctx, sym, eid, settings,
+                           by=str(body.get("by") or "dashboard"),
+                           enabled=bool(body.get("enabled", True)),
+                           force=bool(body.get("force")))
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/a/{acct}/bank/entry")
+@app.post("/api/bank/entry")
+def bank_save_entry(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Create or replace a PERSONAL entry -- the write the chat assistant calls.
+
+    The body is `bank.save`'s document: a `kind` (ladder / indicator / code /
+    option), a `name`, and that kind's own body. A standard entry is never
+    overwritten; copy it first.
+    """
+    import bank
+    try:
+        return {"ok": True, "entry": bank.save(dict(body or {}),
+                                               by=str(body.get("by") or "dashboard"))}
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"could not save: {e}")
+
+
+@app.post("/api/a/{acct}/bank/entry/copy")
+@app.post("/api/bank/entry/copy")
+def bank_copy_entry(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Duplicate any entry as a personal one you can edit. Declared before
+    /bank/entry/{entry_id} so "copy" is never read as an id."""
+    import bank
+    try:
+        return {"ok": True, "entry": bank.copy(
+            str(body.get("id") or ""), str(body.get("name") or ""),
+            by=str(body.get("by") or "dashboard"))}
+    except bank.BankError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/a/{acct}/bank/entry/{entry_id}")
+@app.get("/api/bank/entry/{entry_id}")
+def bank_get_entry(entry_id: str, f: Fleet = Depends(cur)):
+    """One entry, with the raw document behind it under `doc`."""
+    import bank
+    try:
+        return {"ok": True, "entry": bank.get(entry_id,
+                                              _hub_ctx(f, options=False))}
+    except bank.BankError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/a/{acct}/bank/entry/{entry_id}")
+@app.delete("/api/bank/entry/{entry_id}")
+def bank_delete_entry(entry_id: str, force: bool = False,
+                      f: Fleet = Depends(cur)):
+    """Delete a personal entry. Refused while a ticker is still using it."""
+    import bank
+    try:
+        return bank.delete(entry_id, ctx=_hub_ctx(f, options=False), force=force)
+    except bank.BankError as e:
+        raise HTTPException(409, str(e))
+
+
 @app.get("/api/bank")
 def bank_list():
+    """The legacy two-kind shelf (documents and coded strategies).
+
+    Kept as it was for the Strategies page. /api/bank/entries is the whole
+    shelf -- presets, documents, code, the 231 option structures and the
+    tailored plays -- and is what a ticker dropdown should read.
+    """
     import bank
     return {"ok": True, "strategies": bank.listing()}
 
@@ -2926,6 +3078,82 @@ def optlab_perf(f: Fleet = Depends(cur)):
     return payload
 
 
+
+# ------------------------------------------------- one ticker's options pane
+# ADDED 28 Sep 2026 WITH THE DELETION OF THE PLAYS AND DATA ROOMS. The owner's
+# instruction was to stop showing every ticker's options in one cross-joined
+# table -- "the plays are just a conglomerate of all the tickers when i can
+# just go to them myself and see it" -- so this is the same facts keyed by the
+# symbol somebody is already looking at.
+#
+# A GET, and only a GET. The pane's writes are the routes that already exist
+# and are already audited: /api/optlab/plays/{assign,unassign,enable,arm,
+# disarm,close} and /api/bank/attach. Nothing new can start or stop a
+# strategy, which is the rule test_optboard.py section 0 enforces over this
+# whole namespace.
+@app.get("/api/a/{acct}/optlab/ticker/{sym}")
+@app.get("/api/optlab/ticker/{sym}")
+def optlab_ticker(sym: str, f: Fleet = Depends(cur)):
+    """Everything about ONE ticker's options: strategies, positions, P/L, arm.
+
+    Four stores in one read and no trading call of its own. The broker
+    positions come from the same cached snapshot the Overview marks against --
+    `_perf_positions` -- so the ticker page and the Overview cannot report
+    different unrealized P/L for the same contract, and the ticker page cannot
+    become a second consumer of the 200/min trading budget.
+
+    The volatility facts are READ OUT OF THE BOARD CACHE and never measured
+    here. A refresh spends the same budget on a background thread, and a page
+    somebody opens per ticker is exactly the wrong place to start one.
+    """
+    symbol = str(sym or "").strip().upper()
+    pb = _playbook(f)
+    pb.refresh_stores()
+
+    attached, shelf = [], []
+    try:
+        import bank
+        ctx = _hub_ctx(f, options=False)
+        attached = bank.attached(ctx, symbol)
+        # The shelf, filtered to what can go on a ticker's options dropdown.
+        # The unfiltered call is 259 rows and ~257 KB; this one is the two
+        # tailored plays plus the banked structures, and the dropdown filters
+        # again by text.
+        shelf = bank.entries(ctx, kind="option") + bank.entries(
+            ctx, kind="option-tailored")
+    except Exception as e:                                   # noqa: BLE001
+        # The pane is still worth serving without the bank: the ledger, the
+        # arm file and the play store are all still readable, and a page that
+        # 500s because a strategy shelf would not load hides the open position
+        # it was opened to look at.
+        logging.getLogger("app").exception("bank for %s", symbol)
+        attached, shelf = [], []
+
+    row, meta = None, {}
+    with _OPT_LOCK:
+        cached = dict(_BOARD.get(f.account_id) or {})
+    for r in cached.get("rows") or []:
+        if str(r.get("symbol") or "").upper() == symbol:
+            row = r
+            break
+    if cached:
+        age = _board_age(cached, _opt_now())
+        meta = {"age_s": None if age is None else round(age, 1),
+                "stale": age is None or age > OPT_BOARD_TTL,
+                "refreshing": bool(_BOARD_BUSY.get(f.account_id))}
+
+    import optticker
+    try:
+        out = optticker.report(symbol, playbook=pb, attached=attached,
+                               shelf=shelf,
+                               broker_positions=_perf_positions(f),
+                               board_row=row, board_meta=meta)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    out["account"] = (f.account or {}).get("account_number", "")
+    return out
+
+
 # =================================================================== the hub
 # The strategy-agnostic model. `hub.py` holds every calculation; these routes
 # take the snapshots (the broker client lives here, never there) and hand them
@@ -3045,6 +3273,290 @@ def hub_ticker_strategy(sym: str, body: dict = Body(...), f: Fleet = Depends(cur
         raise HTTPException(400, str(e))
     except KeyError as e:
         raise HTTPException(404, str(e))
+
+
+# ================================================================ performance
+# perf.py holds every calculation; these routes take the snapshots and hand
+# them over, the same split hub.py uses. READ-ONLY, and nothing here may ever
+# place an order -- the same rule /api/hub and /api/optlab live under.
+#
+# ONE expensive path, cached, and everything else is a slice of it. CLAUDE.md
+# measured why that matters: journal.load() over the VM's 21 MB / 39,946-row
+# journal costs 5.9-6.5 s, the dashboard polls every 2 s, and a handler slower
+# than the poll interval queues rather than caching. So the whole report is
+# built once per _PERF_TTL, under a lock so two pollers cannot build it twice,
+# and a request arriving mid-build is served the STALE copy immediately rather
+# than joining that queue. The payload says how old it is; a number with no age
+# on it is how a stale page passes for a live one.
+_PERF_TTL = 60.0
+_PERF_CACHE: dict = {}
+_PERF_LOCK = threading.RLock()
+_PERF_BUILDING: set = set()
+
+_PERF_FEED_TTL = 300.0                 # activities and equity history
+_PERF_FEED: dict = {}
+_PERF_FEED_LOCK = threading.RLock()
+
+
+def _perf_feeds(f: Fleet) -> dict:
+    """Alpaca's activity history and equity curve, cached.
+
+    Both are ALL-TIME reads that move at most a few rows a day, and both are on
+    the 200/min trading budget the live ladders spend from. A None is "nobody
+    looked", and perf.py renders that as a dash with the reason -- never as an
+    account that was never funded, which would put the headline out by the
+    whole size of the deposit.
+    """
+    key = f.account_id
+    now = time.time()
+    with _PERF_FEED_LOCK:
+        hit = _PERF_FEED.get(key)
+        if hit and now - hit[0] < _PERF_FEED_TTL:
+            return hit[1]
+    out: dict = {"activities": None, "equity_points": None, "errors": []}
+    b = getattr(f, "broker", None)
+    if b is not None:
+        acts: list = []
+        got = False
+        for kind in perf.ACTIVITY_TYPES:
+            try:
+                acts.extend(b.activities(kind, max_pages=10) or [])
+                got = True
+            except AlpacaError as e:
+                # A 422 is Alpaca saying that activity type does not exist on
+                # this API version -- measured: SSO, SSP and OPXRC all answer
+                # that way. That is not a failure to read the account, so it
+                # must not blank the funding figure. A 4xx on a type that DOES
+                # exist would, and the difference is worth keeping.
+                if e.status != 422:
+                    out["errors"].append("%s: %s" % (kind, e))
+            except Exception as e:
+                out["errors"].append("%s: %r" % (kind, e))
+        if got:
+            out["activities"] = acts
+        try:
+            raw = b.portfolio_history("all", "1D", extended=True) or {}
+            ts = raw.get("timestamp") or []
+            eq = raw.get("equity") or []
+            out["equity_points"] = [
+                (float(t), float(eq[i])) for i, t in enumerate(ts)
+                if i < len(eq) and eq[i] is not None]
+        except Exception as e:
+            out["errors"].append("portfolio_history: %r" % (e,))
+    with _PERF_FEED_LOCK:
+        _PERF_FEED[key] = (now, out)
+    return out
+
+
+def _perf_ctx(f: Fleet) -> "perf.Ctx":
+    """One read context. Every snapshot taken here, no fetching inside perf."""
+    feeds = _perf_feeds(f)
+    rows = None
+    first_at = None
+    try:
+        rows = (journal.load(path=f.journal_path) if getattr(f, "journal_path", None)
+                else journal.load())
+        if rows:
+            first_at = perf._iso_ts(rows[0].get("ts"))
+    except Exception as e:
+        logging.getLogger("app").warning("perf journal: %r", e)
+
+    # The options play ledger, opened READ-ONLY. hub.py does the same and for
+    # the same reason: a reporting path able to append to a trading store is
+    # one bad line away from doing it.
+    led_path = Path(f.state_dir) / "options" / "play_ledger.jsonl"
+    opt_rows = None
+    present = led_path.exists()
+    if present:
+        try:
+            import optplaybook as _pb
+            opt_rows = _pb.ReadOnlyLedger(led_path).positions()
+        except Exception as e:
+            logging.getLogger("app").warning("perf options ledger: %r", e)
+
+    ctx = perf.Ctx(
+        account=dict(f.account or {}),
+        activities=feeds["activities"],
+        equity_points=feeds["equity_points"],
+        journal_rows=rows,
+        option_positions=opt_rows,
+        # The fleet's own position snapshot: it carries BOTH asset classes and
+        # is already paid for, so these marks cost no extra request.
+        broker_positions=list((f.positions or {}).values()),
+        account_id=f.account_id, label=f.label,
+        journal_first_at=first_at, ledger_present=present)
+    for e in feeds["errors"]:
+        ctx.warn("alpaca_read",
+                 "an Alpaca read failed (%s); anything it fed is a dash rather "
+                 "than a zero" % e)
+    if rows is None:
+        ctx.warn("journal_unreadable",
+                 "the trade journal could not be read, so nothing realised is "
+                 "counted here")
+    return ctx
+
+
+def _perf_report(f: Fleet) -> dict:
+    """The cached report. See _PERF_TTL above for why it is cached at all."""
+    key = f.account_id
+    now = time.time()
+    with _PERF_LOCK:
+        hit = _PERF_CACHE.get(key)
+        if hit and now - hit[0] < _PERF_TTL:
+            return dict(hit[1], cache_age_s=round(now - hit[0], 1), stale=False)
+        if key in _PERF_BUILDING and hit:
+            # somebody else is already paying for it: hand back what we have
+            # rather than queueing behind a handler slower than the poll
+            return dict(hit[1], cache_age_s=round(now - hit[0], 1), stale=True)
+        _PERF_BUILDING.add(key)
+    try:
+        payload = perf.report(_perf_ctx(f))
+    except Exception as e:
+        logging.getLogger("app").exception("perf report")
+        raise HTTPException(500, "the performance report could not be built: "
+                                 "%s: %s" % (e.__class__.__name__, e))
+    finally:
+        with _PERF_LOCK:
+            _PERF_BUILDING.discard(key)
+    with _PERF_LOCK:
+        _PERF_CACHE[key] = (time.time(), payload)
+    return dict(payload, cache_age_s=0.0, stale=False)
+
+
+@app.get("/api/a/{acct}/perf/report")
+@app.get("/api/perf/report")
+def perf_report(f: Fleet = Depends(cur)):
+    """Everything: the headline, the reconciliation, the metrics, the calendar."""
+    return _perf_report(f)
+
+
+@app.get("/api/a/{acct}/perf/account")
+@app.get("/api/perf/account")
+def perf_account(f: Fleet = Depends(cur)):
+    """THE HEADLINE: equity less net funding.
+
+    This is the number that replaces "P/L all time", and it is the only one on
+    the page that means THE ACCOUNT. It does not move when a chart window does.
+    """
+    r = _perf_report(f)
+    return {"ok": True, "cache_age_s": r.get("cache_age_s"),
+            "stale": r.get("stale"), **r["headline"]}
+
+
+@app.get("/api/a/{acct}/perf/reconcile")
+@app.get("/api/perf/reconcile")
+def perf_reconcile(f: Fleet = Depends(cur)):
+    """The walk from funding to equity, with its residual named, not hidden."""
+    r = _perf_report(f)
+    return {"ok": True, "cache_age_s": r.get("cache_age_s"),
+            "stale": r.get("stale"), **r["reconciliation"]}
+
+
+@app.get("/api/a/{acct}/perf/metrics")
+@app.get("/api/perf/metrics")
+def perf_metrics(symbol: str = "", f: Fleet = Depends(cur)):
+    """The metric set for the portfolio, or for one ticker. THE SAME SHAPE.
+
+    One component renders both, which is the whole point of per_ticker and
+    portfolio returning the same dict.
+    """
+    r = _perf_report(f)
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return {"ok": True, "scope": "portfolio",
+                "cache_age_s": r.get("cache_age_s"), "stale": r.get("stale"),
+                "metrics": r["portfolio"], "by_ticker": r["by_ticker"]}
+    row = next((t for t in r["by_ticker"] if t["symbol"] == sym), None)
+    if row is None:
+        raise HTTPException(404, "%s has no closed trade and nothing open on "
+                                 "this account." % sym)
+    return {"ok": True, "scope": "ticker", "symbol": sym,
+            "cache_age_s": r.get("cache_age_s"), "stale": r.get("stale"),
+            "metrics": row}
+
+
+@app.get("/api/a/{acct}/perf/daily")
+@app.get("/api/perf/daily")
+def perf_daily(f: Fleet = Depends(cur)):
+    """One row per calendar day, for the P/L calendar heat grid."""
+    r = _perf_report(f)
+    return {"ok": True, "cache_age_s": r.get("cache_age_s"),
+            "stale": r.get("stale"), "days": r["daily"],
+            "basis": r["daily_basis"]}
+
+
+# ================================================================= assistant
+# The per-page chat panel. THREE routes, and only the middle one can change
+# anything -- and only by the id of a proposal this process built and the
+# person confirmed on screen.
+#
+# Nothing here arms, sizes, cancels or places anything: `assistant.TOOLS` is
+# the whole surface and `test_assistant.py` section 1 asserts that no tool in
+# it is named for any of those. The account is taken from the route, never
+# from the body, so a proposal built on one account can never be applied on
+# another (assistant.Proposals.take refuses a mismatch).
+# `/status`, `/ask` and `/apply` are ALIASES. `mockai.py` published a PROPOSED
+# contract under those names while this route did not exist yet and said so in
+# its own payload; serving them here means anything built against that proposal
+# reaches the real implementation instead of a 404. The BODY is assistant.py's
+# shape, not mockai's -- there is one contract and this is it. There is no
+# `/thread`: the panel holds the conversation, and a server-side thread nobody
+# writes would be an empty promise.
+@app.get("/api/a/{acct}/assistant")
+@app.get("/api/assistant")
+@app.get("/api/a/{acct}/assistant/status")
+@app.get("/api/assistant/status")
+def assistant_status(f: Fleet = Depends(cur)):
+    """What the panel asks for when it opens: whether a model is reachable,
+    the tool catalogue, the commands that work WITHOUT one, and the list of
+    things this assistant will never do."""
+    import assistant
+    return {**assistant.status(_hub_ctx(f, options=False)),
+            "account": f.account_id}
+
+
+@app.post("/api/a/{acct}/assistant/chat")
+@app.post("/api/assistant/chat")
+@app.post("/api/a/{acct}/assistant/ask")
+@app.post("/api/assistant/ask")
+def assistant_chat(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """One turn. NEVER executes a write -- it returns proposals to confirm.
+
+        {"message": "put the v3 ladder on RAM",
+         "page": {"view": "ticker", "symbol": "RAM"},
+         "history": [{"role": "user", "text": "..."}]}
+    """
+    import assistant
+    ctx = _hub_ctx(f, options=False)
+    try:
+        return assistant.chat(ctx, message=str(body.get("message") or ""),
+                              page=body.get("page"),
+                              history=body.get("history"))
+    except assistant.Refusal as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/a/{acct}/assistant/act")
+@app.post("/api/assistant/act")
+@app.post("/api/a/{acct}/assistant/apply")
+@app.post("/api/assistant/apply")
+def assistant_act(body: dict = Body(...), f: Fleet = Depends(cur)):
+    """Run ONE proposal the person confirmed, by its id. Audited as
+    `assistant`. A 409 means the proposal expired or was already used."""
+    import assistant
+    ctx = _hub_ctx(f, options=False)
+    try:
+        # `action_id` is the proposed contract's name for the same field.
+        pid = body.get("id") or body.get("proposal_id") or body.get("action_id")
+        return assistant.act(ctx, proposal_id=str(pid or ""),
+                             by=str(body.get("by") or "assistant"))
+    except assistant.Refusal as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, "that action failed: %s: %s"
+                                 % (e.__class__.__name__, e))
 
 
 @app.on_event("startup")

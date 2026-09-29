@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>viz.js — the chart set</title>
+<link rel="stylesheet" href="/ui/app.css">
+<link rel="stylesheet" href="/ui/theme.css">
+<style>
+  /* This page's own frame only. Every chart below styles itself from the
+     tokens in theme.css -- nothing here colours a mark. */
+  body { margin: 0; }
+  .vd-top {
+    position: sticky; top: 0; z-index: 9; display: flex; flex-wrap: wrap;
+    align-items: center; gap: var(--s3); padding: var(--s3) var(--gutter);
+    background: var(--bg-2); border-bottom: 1px solid var(--hairline);
+  }
+  .vd-t { font-size: var(--fs-lg); font-weight: var(--w-semi); }
+  .vd-s { font-size: var(--fs-xs); color: var(--faint); }
+  .vd-wrap { padding: var(--s5) var(--gutter) 80px; max-width: 1180px; }
+  .vd-h { font-size: var(--fs-xs); letter-spacing: var(--track-caps);
+          text-transform: uppercase; color: var(--faint);
+          margin: var(--s6) 0 var(--s3); }
+  .vd-h:first-child { margin-top: 0; }
+  .vd-2 { display: grid; grid-template-columns: repeat(auto-fit,
+          minmax(290px, 1fr)); gap: var(--s4); }
+  .vd-4 { display: grid; grid-template-columns: repeat(auto-fit,
+          minmax(150px, 1fr)); gap: var(--s4); }
+  .vd-c { background: var(--surface); border: 1px solid var(--hairline);
+          border-radius: var(--r-lg); padding: var(--s4);
+          box-shadow: inset 0 1px 0 0 var(--rim), var(--e1); min-width: 0; }
+  .vd-ct { font-size: var(--fs-sm); font-weight: var(--w-semi);
+           margin-bottom: var(--s3); }
+  .vd-cs { font-size: var(--fs-xs); color: var(--faint); font-weight: 450;
+           display: block; margin-top: 2px; }
+  .vd-b { font: inherit; font-size: var(--fs-xs); cursor: pointer;
+          padding: 6px 12px; border-radius: var(--radius-pill);
+          border: 1px solid var(--hairline2); background: var(--surface-2);
+          color: var(--text); }
+  .vd-b:hover { background: var(--surface-3); }
+  .vd-tile { background: var(--surface-2); border: 1px solid var(--hairline);
+             border-radius: var(--r-md); padding: var(--s3); }
+  .vd-tk { font-size: var(--fs-micro); color: var(--faint);
+           letter-spacing: var(--track-caps); text-transform: uppercase; }
+  .vd-tv { font-size: var(--fs-2xl); font-weight: var(--w-semi);
+           letter-spacing: var(--track-tight); margin: 2px 0 6px;
+           font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<div class="vd-top">
+  <div>
+    <div class="vd-t">viz.js + calendar.js</div>
+    <div class="vd-s" id="vdSub">every component, with its empty and its
+      unmeasured case beside it</div>
+  </div>
+  <div style="flex:1"></div>
+  <button class="vd-b" id="vdTheme" type="button">Toggle theme</button>
+  <button class="vd-b" id="vdNarrow" type="button">Narrow to 400px</button>
+</div>
+
+<div class="vd-wrap" id="vd"></div>
+
+<script type="module">
+import {
+  donut, pie, hbar, area, spark, gauge, histogram, heatmap, vbars,
+  legend, vizEmpty, vizColor, vfmt,
+} from "/ui/viz.js";
+import { plCalendar, plCalendars, weekdayHeat, monthTotal } from "/ui/calendar.js";
+
+/* ------------------------------------------------------------- fixtures
+   Shaped like the real payloads: perf.daily() rows for the calendar, a hub
+   metric envelope wherever a number could be missing, and at least one null
+   in every series so the gap handling is visible rather than asserted. */
+const R = (seed) => { let s = seed; return () => {
+  s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; };
+
+const rnd = R(7);
+const DAYS = (() => {
+  const out = [];
+  let eq = 50000;
+  for (let m = 8; m <= 9; m++) {
+    const n = m === 8 ? 31 : 28;
+    for (let d = 1; d <= n; d++) {
+      const date = "2026-" + (m < 10 ? "0" + m : m) + "-"
+        + (d < 10 ? "0" + d : d);
+      /* perf.daily() emits a row only for a date that HAS an equity print
+         or a trade, so a weekend is simply absent rather than null. The two
+         nulls below are the two it really does emit. */
+      const dow = new Date(Date.UTC(2026, m - 1, d)).getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      if (m === 8 && d === 21) {
+        out.push({ date, realized: 0, net: null, open_delta: null, trades: 0,
+                   equity: 50000, funding: 50000,
+                   why: "$50000.00 of cash moved in or out on this day. "
+                      + "Alpaca's equity curve and the activity date do not "
+                      + "agree on which day a transfer lands." });
+        continue;
+      }
+      if (m === 9 && d === 7) {
+        out.push({ date, realized: 0, net: null, open_delta: null, trades: 0,
+                   equity: null, funding: 0,
+                   why: "Alpaca printed no equity for this date" });
+        continue;
+      }
+      const net = Math.round((rnd() - 0.44) * 1700) / 1;
+      eq += net;
+      out.push({ date, realized: Math.max(0, Math.round(net * 0.6)),
+                 net, open_delta: Math.round(net * 0.4),
+                 trades: Math.round(rnd() * 14), equity: Math.round(eq),
+                 funding: 0, why: null });
+    }
+  }
+  return out;
+})();
+
+const EQ = DAYS.filter((d) => d.equity !== null)
+  .map((d) => ({ t: d.date, v: d.equity }));
+const EQ_GAP = DAYS.map((d) => ({ t: d.date, v: d.equity,
+                                  why: d.why || "" }));
+
+const sec = (h, body) => `<div class="vd-h">${h}</div>${body}`;
+const c = (t, sub, body) => `<div class="vd-c"><div class="vd-ct">${t}${
+  sub ? `<span class="vd-cs">${sub}</span>` : ""}</div>${body}</div>`;
+
+const OUT = [];
+
+/* 1 ------------------------------------------------------------- donut */
+OUT.push(sec("Donut and pie — allocation", `<div class="vd-2">
+  ${c("By ticker", "one accent, eight steps", donut({
+    slices: [
+      { label: "RAM", value: 18400 }, { label: "MSTX", value: 11250 },
+      { label: "SPY", value: 9100 }, { label: "QQQ", value: 5400 },
+      { label: "AAPL", value: 3200 }, { label: "Cash", value: 5705 },
+    ],
+    unit: "usd", centerSub: "deployed",
+  }))}
+  ${c("By asset class", "a share of it never measured", donut({
+    slices: [
+      { label: "Shares", value: 29650 },
+      { label: "Options", value: 12400 },
+      { label: "Crypto", value: null, why: "no crypto feed is connected, so "
+        + "this share is unknown rather than zero" },
+    ],
+    unit: "usd", centerSub: "marked",
+  }))}
+  ${c("Pie — strategy mix", "no hole, no centre figure", pie({
+    slices: [
+      { label: "ladder_v3", value: 6 }, { label: "basic", value: 3 },
+      { label: "supertrend", value: 2 }, { label: "put spread", value: 2 },
+    ],
+    unit: "count",
+  }))}
+  ${c("Refused", "a ring cannot show a negative share", donut({
+    slices: [{ label: "RAM", value: 400 }, { label: "MSTX", value: -220 }],
+    unit: "usd",
+  }))}
+</div>`));
+
+/* 2 --------------------------------------------------------------- hbar */
+OUT.push(sec("Horizontal bar — ranked contribution", `<div class="vd-2">
+  ${c("P/L by symbol", "diverging: zero sits where zero falls", hbar({
+    rows: [
+      { label: "RAM", value: 1842.11, sub: "312 trades" },
+      { label: "MSTX", value: -640.5, sub: "88 trades" },
+      { label: "SPY", value: 412.0, sub: "12 trades" },
+      { label: "QQQ", value: -122.4, sub: "9 trades" },
+      { label: "AAPL", value: 88.2, sub: "3 trades" },
+      { label: "TSLA", value: null,
+        why: "no closed trade on TSLA in this window" },
+    ],
+    unit: "usd",
+  }))}
+  ${c("Trades by symbol", "all one sign, so no zero line", hbar({
+    rows: [
+      { label: "RAM", value: 312 }, { label: "MSTX", value: 88 },
+      { label: "SPY", value: 12 }, { label: "QQQ", value: 9 },
+    ],
+    unit: "count", signed: false,
+  }))}
+  ${c("Empty", "nothing to rank, said in words", hbar({
+    rows: [], empty: "No symbol has closed a trade yet",
+    why: "the journal has 0 realised rows for this account",
+  }))}
+</div>`));
+
+/* 3 --------------------------------------------------------------- area */
+OUT.push(sec("Area and stacked area", `<div class="vd-2">
+  ${c("Account equity", "39 sessions, weekends are gaps", area({
+    series: [{ label: "Equity", points: EQ_GAP, tone: "accent" }],
+    unit: "usd", h: 180,
+  }))}
+  ${c("Exposure by ticker", "stacked, with a hole left open", area({
+    series: [
+      { label: "RAM", points: EQ.map((p, i) => ({ t: p.t,
+          v: i === 9 ? null : 4000 + Math.sin(i / 3) * 1400 })) },
+      { label: "MSTX", points: EQ.map((p, i) => ({ t: p.t,
+          v: 2600 + Math.cos(i / 4) * 900 })) },
+      { label: "SPY", points: EQ.map((p, i) => ({ t: p.t, v: 1750 })) },
+    ],
+    unit: "usd", stacked: true, h: 180,
+  }))}
+  ${c("One point", "a chart of a single measurement is a tile", area({
+    series: [{ label: "Equity", points: [{ t: "2026-09-28", v: 53055.43 }] }],
+    unit: "usd", h: 140,
+  }))}
+  ${c("Two series, one unmeasured", "the legend says which", area({
+    series: [
+      { label: "Realised", points: DAYS.slice(20).map((d) => ({
+          t: d.date, v: d.realized })) },
+      { label: "Open", points: DAYS.slice(20).map(() => null),
+        why: "nothing keeps a history of unrealised P/L to plot" },
+    ],
+    unit: "usd", h: 160,
+  }))}
+</div>`));
+
+/* 4 ------------------------------------------------------------ spark */
+OUT.push(sec("Sparkline — inside a metric tile", `<div class="vd-4">
+  <div class="vd-tile"><div class="vd-tk">Account P/L</div>
+    <div class="vd-tv up">+$3,055.43</div>
+    ${spark({ points: EQ.map((p) => p.v), unit: "usd", label: "equity" })}</div>
+  <div class="vd-tile"><div class="vd-tk">Daily net</div>
+    <div class="vd-tv down">−$412.00</div>
+    ${spark({ points: DAYS.map((d) => d.net), unit: "usd", zero: true,
+              label: "daily net" })}</div>
+  <div class="vd-tile"><div class="vd-tk">Open P/L</div>
+    <div class="vd-tv" style="color:var(--faint)">—</div>
+    ${spark({ points: [], why: "no mark for this position, so there is no "
+              + "curve -- not a flat line at zero" })}</div>
+  <div class="vd-tile"><div class="vd-tk">Trades / day</div>
+    <div class="vd-tv">7</div>
+    ${spark({ points: DAYS.map((d) => d.trades), unit: "count",
+              tone: "flat" })}</div>
+</div>`));
+
+/* 5 ------------------------------------------------------------- gauge */
+OUT.push(sec("Gauge — a bounded ratio", `<div class="vd-4">
+  ${c("Win rate", "", gauge({
+    value: 1.0, min: 0, max: 1, unit: "pct", dp: 0, label: "win rate",
+    tone: "up", sub: "322 of 322 — and there is no stop loss, so a loser is "
+      + "never closed",
+  }))}
+  ${c("Exposure", "", gauge({
+    value: 0.42, min: 0, max: 1, unit: "pct", dp: 0, label: "of equity",
+    bands: [{ from: 0.8, to: 1, tone: "down", label: "over 80%" }],
+  }))}
+  ${c("Fill rate", "", gauge({
+    value: 0.22, min: 0, max: 1, unit: "pct", dp: 0, label: "sessions",
+    tone: "warn",
+  }))}
+  ${c("Unmeasured", "", gauge({
+    value: { value: null, n: 0, unit: "pct", reason:
+      "profit factor is undefined when nothing lost -- that is a fact about "
+      + "the window, not an edge", thin: false, as_of: null },
+    min: 0, max: 1, unit: "pct", label: "profit factor",
+  }))}
+</div>`));
+
+/* 6 ---------------------------------------------------- histogram / vbars */
+OUT.push(sec("Distribution and per-period bars", `<div class="vd-2">
+  ${c("Trade outcomes", "a wins-only journal has nothing on the left",
+    histogram({
+      values: DAYS.filter((d) => d.realized > 0).map((d) => d.realized),
+      unit: "usd", h: 160,
+    }))}
+  ${c("R-multiples", "both signs, with a zero line", histogram({
+    values: (() => { const r = R(31), a = [];
+      for (let i = 0; i < 220; i++) a.push(Math.round((r() * 6 - 2.2) * 100) / 100);
+      a.push(null, null, null); return a; })(),
+    unit: "ratio", h: 160,
+  }))}
+  ${c("Daily P/L", "unmeasured days are a mark on the axis", vbars({
+    bars: DAYS.slice(-30).map((d) => ({ label: d.date.slice(5), value: d.net,
+                                        why: d.why || "" })),
+    unit: "usd", h: 150,
+  }))}
+  ${c("Nothing measured", "", vbars({
+    bars: [{ label: "Mon", value: null, why: "no equity print" },
+           { label: "Tue", value: null, why: "no equity print" }],
+    unit: "usd", h: 150,
+  }))}
+</div>`));
+
+/* 7 ----------------------------------------------------------- heatmap */
+const WH = weekdayHeat(DAYS, { valueKey: "net" });
+OUT.push(sec("Heatmap", `<div class="vd-2">
+  ${c("Day of week by month", "scrolls sideways below 400px on purpose",
+    heatmap({ rows: WH.rows, cols: WH.cols, cells: WH.cells, unit: "usd" }))}
+  ${c("Correlation", "diverging, and one pair never measured", heatmap({
+    rows: ["RAM", "MSTX", "SPY"], cols: ["RAM", "MSTX", "SPY"],
+    cells: {
+      "RAM|RAM": 1, "RAM|MSTX": 0.62, "RAM|SPY": 0.18,
+      "MSTX|RAM": 0.62, "MSTX|MSTX": 1,
+      "MSTX|SPY": { value: null, why: "MSTX and SPY have no overlapping bars "
+        + "in this window" },
+      "SPY|RAM": 0.18,
+      "SPY|MSTX": { value: null, why: "MSTX and SPY have no overlapping bars "
+        + "in this window" },
+      "SPY|SPY": 1,
+    },
+    unit: "ratio", dp: 2,
+  }))}
+</div>`));
+
+/* 8 ---------------------------------------------------------- calendar */
+OUT.push(sec("P/L calendar", `
+  ${c("Two months, one scale", "grey is not zero: the 21st is the funding "
+      + "day and the 7th had no equity print",
+    plCalendars({ days: DAYS, months: 2, unit: "usd" }))}
+  <div style="height:var(--s4)"></div>
+  <div class="vd-2">
+    ${c("Realised instead of net", "the same grid over a different column",
+      plCalendar({ days: DAYS, month: "2026-09", valueKey: "realized",
+                   unit: "usd" }))}
+    ${c("No days at all", "", plCalendar({ days: [] }))}
+  </div>`));
+
+/* 9 ------------------------------------------------------ legend + empty */
+OUT.push(sec("The two shared pieces", `<div class="vd-2">
+  ${c("legend()", "", legend({ items: [
+    { label: "RAM", color: vizColor(0), value: "$18,400" },
+    { label: "MSTX", color: vizColor(1), value: "$11,250" },
+    { label: "Booked", tone: "up", value: "+$2,974.23" },
+    { label: "Open", tone: "down", value: "−$295.00" },
+    { label: "Crypto", tone: "flat", value: "—",
+      why: "no crypto feed is connected" },
+  ] }))}
+  ${c("vizEmpty()", "holds the height the chart would have had", vizEmpty({
+    h: 120, title: "No equity curve for this window",
+    body: "Alpaca returned 0 points for 1D. The account was funded on "
+        + "2026-08-21 and this window starts before that.",
+  }))}
+</div>`));
+
+document.getElementById("vd").innerHTML = OUT.join("");
+
+/* the two controls */
+document.getElementById("vdTheme").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme") === "light"
+    ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", cur);
+};
+document.getElementById("vdNarrow").onclick = (e) => {
+  const w = document.querySelector(".vd-wrap");
+  const on = w.style.maxWidth === "400px";
+  w.style.maxWidth = on ? "1180px" : "400px";
+  e.target.textContent = on ? "Narrow to 400px" : "Back to full width";
+};
+window.__VIZDEMO = { DAYS, monthTotal: monthTotal(DAYS, "2026-09", {}) };
+</script>
+</body>
+</html>

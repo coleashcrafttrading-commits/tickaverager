@@ -77,6 +77,52 @@ aggregator over a stub fleet. They are, in one line each:
   hubthin      one sample per bucket, so every candle is a doji
   hubfail      every /api/hub read and write answers 502
 
+THE P/L PAGE's scenarios are in mockperf.py, and they are the REAL `perf.py`
+run over five account shapes. The first one is the owner's own account:
+
+  perfwins     REALISED IS ALL WINS -- 122 closes, not one loser, +8,882.86
+               booked -- against an account up +3,055.43 on a $50,000 deposit,
+               with the LADDER FLAT and six OPTION contracts open. That is the
+               "P/L all time says 3 thousand, the history says 6,200, still
+               open says 2,700 when we have nothing open" complaint, whole
+  perfloss     a losing account: red calendar, and profit factor, average
+               loss, win/loss ratio and the loss streak all computable, which
+               they are not in a wins-only book
+  perfcross    THE SAME LOSING BOOK with a winner first on each ticker, which
+               USED TO CRASH perf.py (ratios() guarded only start > 0, so a curve
+               crossing zero produced a complex number and a 500). Fixed;
+               kept as an ordinary losing scenario, which is what it is. A
+               scenario because a bug with a reproduction is a bug somebody
+               can fix
+  perfnew      funded this morning, nothing traded: every figure a dash with
+               its reason, and never a row of 0.00s
+  perfthin     two trades and three equity prints, under every sample floor
+  perfnofeed   Alpaca's activities and history NOT read -- the headline is a
+               dash saying so, never equity less base_value, which is the
+               window-shaped number that started all of this
+
+THE ONE BANK (mockbank.py, over the real `bank.py`, with its four stores
+copied to a scratch tree so a Save in the browser cannot edit the repo):
+
+  banktriple   ONE TICKER, SEVERAL STRATEGIES: SPY carries a ladder preset, an
+               indicator document, a banked option structure and a tailored
+               play at once. The case a ladder-shaped page cannot draw
+  bankfail     every /api/bank read and write answers 502, for the stranded
+               dropdown -- which is now the only way to put a strategy on a
+               ticker, so its failure has to be visible rather than empty
+
+THE ASSISTANT (mockai.py, over the real `assistant.py` with only the MODEL
+stubbed; the panel answers under every OTHER scenario too, as a model that is
+reachable):
+
+  assistant        proposals with real diffs, applied only through /act
+  assistantoff     NO MODEL CONFIGURED: `chat` answers `blocked` and the slash
+                   commands still work, which is the screen a fresh machine
+                   gets and the one most likely to be skipped
+  assistantslow    a 3-second answer, for the pending state
+  assistantrefuse  the model proposes ARMING and a SIZING change; both are
+                   refused by assistant.py's own validator
+
 Two accounts are served in every scenario -- "Options" (the default) and
 "Test" -- because the bug that started this work was one account's Overview
 looking different from the other's. They go through ONE code path here, so a
@@ -113,7 +159,14 @@ SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
              "perf", "perfempty", "perfstub", "perffail",
              # the trading hub: the strategy-agnostic model (see hub fixtures)
              "hub", "hubnew", "hubwatch", "hubdouble", "hubdrawdown",
-             "hubunclaimed", "hubclash", "hubthin", "hubfail"]
+             "hubunclaimed", "hubclash", "hubthin", "hubfail",
+             # the P/L page: perf.py run over five account shapes (mockperf.py)
+             "perfwins", "perfloss", "perfcross", "perfnew", "perfthin",
+             "perfnofeed",
+             # the one bank, and the ticker that carries three strategies
+             "banktriple", "bankfail",
+             # the page assistant (mockai.py -- a PROPOSED contract)
+             "assistant", "assistantoff", "assistantslow", "assistantrefuse"]
 
 # ------------------------------------------------------------- plays fixtures
 # The Plays room's routes, faked. Same trap as everywhere else in this file: a
@@ -1058,10 +1111,13 @@ function show(tab) {
 }
 function el(id) { return document.getElementById(id); }
 
-/* "chain" is still here even though it left the real tab bar: it is
-   reachable at #/options/chain for debugging and its checks below still
-   mount it. */
-const TABS = ["perf", "plays", "board", "strategies", "backtest", "chain"];
+/* The three real rooms, plus three hashes that are NOT rooms any more and are
+   here on purpose. "chain" left the tab bar and is still reachable at
+   #/options/chain for debugging, and its checks below mount it. "plays" and
+   "board" are the two rooms deleted on 28 Sep 2026: their buttons drive the
+   MOVED note, which is the thing somebody following an old bookmark actually
+   sees, and a harness that could not reach it could not check it. */
+const TABS = ["perf", "strategies", "backtest", "chain", "plays", "board"];
 el("mkTabs").innerHTML = TABS.map((t) =>
   `<button data-tab="${t}" class="btn sm">${t}</button>`).join("");
 el("mkTabs").onclick = (e) => {
@@ -1486,20 +1542,38 @@ import tempfile as _tempfile
 from pathlib import Path as _Path
 
 
+#: Every top-level CONSTANT the shim must carry, and who needs it. A name that
+#: is missing does not fail loudly: the module that wanted it raises on import
+#: and its whole store disappears from whatever is built on it.
+_ENGINE_WANTS = {"TICKER_DEFAULTS": "hub.LadderStrategy.settings_schema",
+                 "LADDER_V2": "presets.PRESETS (ladder_v3 and its flatten twin)"}
+
+
 def _install_engine_shim() -> None:
-    """Put `TICKER_DEFAULTS` on a module named `engine`, without engine.py.
+    """Put engine.py's LITERAL CONSTANTS on a module named `engine`.
 
     `hub.LadderStrategy.settings_schema` does `from engine import
-    TICKER_DEFAULTS`; engine.py imports broker.py, which this file is forbidden
-    to touch. So the literal is parsed out of the source with `ast` -- no code
-    from engine.py runs -- and handed over on a bare module object. The
-    settings pane therefore renders the ladder's REAL fields and real defaults,
-    and gains a new one the day engine.py does.
+    TICKER_DEFAULTS` and `presets.py` does `{**engine.LADDER_V2, ...}` at
+    import time; engine.py itself imports broker.py, which this file is
+    forbidden to touch. So the literals are parsed out of the source with `ast`
+    -- no code from engine.py runs -- and handed over on a bare module object.
+    The settings pane therefore renders the ladder's REAL fields and real
+    defaults, and gains a new one the day engine.py does.
+
+    IT USED TO CARRY TICKER_DEFAULTS ALONE, and that silently emptied a whole
+    store. `presets.py` raised `AttributeError: module 'engine' has no
+    attribute 'LADDER_V2'` at import, `bank._shelf()` caught it and turned the
+    preset store into ONE error row, and `/api/bank/entries?kind=ladder` came
+    back EMPTY in the harness while the real route returns three. A UI built
+    against that would have shipped a ticker dropdown with no ladder strategies
+    in it and nobody would have known until it was live. So EVERY top-level
+    literal is taken now, not a named one: a shim that carries less than the
+    module it stands in for is the harness disagreeing with the real route.
     """
     if "engine" in _sys.modules:
         return
     import types
-    defaults = {}
+    consts, why = {}, ""
     try:
         with open(os.path.join(ROOT, "engine.py"), "r", encoding="utf-8") as fh:
             src = fh.read()
@@ -1507,18 +1581,31 @@ def _install_engine_shim() -> None:
             tgt = None
             if isinstance(node, _ast.AnnAssign):
                 tgt = node.target
-            elif isinstance(node, _ast.Assign) and node.targets:
+            elif isinstance(node, _ast.Assign) and len(node.targets) == 1:
                 tgt = node.targets[0]
-            if isinstance(tgt, _ast.Name) and tgt.id == "TICKER_DEFAULTS":
-                defaults = _ast.literal_eval(node.value)
-                break
+            if not isinstance(tgt, _ast.Name) or node.value is None:
+                continue
+            try:
+                consts[tgt.id] = _ast.literal_eval(node.value)
+            except (ValueError, SyntaxError, TypeError):
+                continue                   # not a literal: ROOT, NY, LOG, ...
     except Exception as e:                      # a shim that lies is worse
-        print("mock: could not read engine.TICKER_DEFAULTS (%r); the ladder's "
-              "settings schema will be empty" % (e,))
+        why = repr(e)
+    missing = [k for k in _ENGINE_WANTS if k not in consts]
+    if why or missing:
+        # LOUD. The failure this replaces was silent, and a silent shim is how
+        # a store goes missing from a page that looks fine.
+        print("mock: engine shim incomplete%s -- missing %s. What needs them: "
+              "%s" % ((" (%s)" % why) if why else "", ", ".join(missing) or "-",
+                      "; ".join("%s -> %s" % (k, v)
+                                for k, v in sorted(_ENGINE_WANTS.items())
+                                if k in missing)))
     mod = types.ModuleType("engine")
-    mod.TICKER_DEFAULTS = defaults
-    mod.__doc__ = ("mockserver shim: the real TICKER_DEFAULTS literal, parsed "
-                   "from engine.py. NOT the engine.")
+    for k, v in consts.items():
+        setattr(mod, k, v)
+    mod.__doc__ = ("mockserver shim: engine.py's top-level LITERALS, parsed "
+                   "out with ast. NOT the engine -- no function, no class, and "
+                   "nothing that could reach a broker.")
     _sys.modules["engine"] = mod
 
 
@@ -1526,6 +1613,13 @@ _install_engine_shim()
 
 import hub                                     # noqa: E402  (after the shim)
 import optplays as _optplays                   # noqa: E402
+# The perf and bank fixtures. Both live in their own files and neither imports
+# this one: they are handed the facts and hand back the payload, so there is no
+# import cycle and each can be exercised from a test without a server.
+import mockperf as _mockperf                   # noqa: E402
+import mockbank as _mockbank                   # noqa: E402
+import mockai as _mockai                       # noqa: E402
+import mockticker as _mockticker               # noqa: E402
 
 # One throwaway state directory per scenario and account. hub really writes
 # tickers.json and options/plays.json, and the repo's own state/ belongs to a
@@ -1579,6 +1673,12 @@ def hub_reset(scen: str = "") -> None:
     hub._REGISTRIES.clear()
     hub._SERIES_CACHE.clear()
     hub._MARKETS.clear()
+    # The bank seeding and the assistant thread live beside those directories
+    # and have to go with them. A three-strategy ticker surviving into the
+    # "brand new account" scenario is the same failure the state dirs had.
+    for key in [k for k in list(_BANK_SEEDED) if not scen or k.startswith(scen + ".")]:
+        _BANK_SEEDED.discard(key)
+    _mockai.reset(scen)
 
 
 # ----------------------------------------------------------- the stub fleet
@@ -1637,10 +1737,13 @@ class _MockBroker:
     prove a chart works against data the real route never sends.
     """
 
-    def __init__(self, quotes, kind, base):
+    def __init__(self, quotes, kind, base, equity=None):
         self._quotes = quotes
         self._kind = kind                    # which story the equity tells
         self._base = base
+        #: The account's OWN equity. The curve is scaled so its last point is
+        #: exactly this -- see portfolio_history.
+        self._equity = equity
 
     def latest_quotes(self, syms):
         return {s: dict(self._quotes[s]) for s in syms if s in self._quotes}
@@ -1654,12 +1757,31 @@ class _MockBroker:
         reviewer would have read that as a charting bug and gone hunting in
         the view. The window now decides the span and the sample step, and the
         page gets a real number of candles at every timeframe.
+
+        THE CURVE ENDS AT THE ACCOUNT'S OWN EQUITY, in every window. It did
+        not, and the browser is where it showed: the `perfwins` scenario put
+        "ACCOUNT VALUE $53,055.43" in the tile and "Account value $141.5k
+        +$44.7k (+46.15%)" in the chart directly beneath it, with a $142,653
+        peak and a drawdown card built on it. The shapes came from a fixed
+        sine profile that had never been tied to the account block beside it.
+        A reviewer reading that page would have found the account's own chart
+        disagreeing with the account's own headline and gone looking in the
+        view for a bug this file had put there.
+
+        Scaled, not shifted. A multiplier keeps every peak-to-trough ratio
+        exactly where it was, so the drawdown PERCENTAGES the shape was
+        designed to produce survive; adding a constant would flatten them.
         """
         pts, base = _curve_for(self._kind, period, timeframe)
         if not pts:
             return {"timestamp": [], "equity": [], "base_value": None}
+        k = 1.0
+        if self._equity and pts[-1][1]:
+            k = float(self._equity) / float(pts[-1][1])
+        if base is not None:
+            base = round(base * k, 2)
         return {"timestamp": [t for t, _v in pts],
-                "equity": [v for _t, v in pts],
+                "equity": [round(v * k, 2) for _t, v in pts],
                 "base_value": base if base is not None else self._base,
                 "timeframe": timeframe, "period": period}
 
@@ -1690,7 +1812,8 @@ class _MockFleet:
         # a strategy-less ticker actually takes.
         self.quotes = {}
         self.snap_at = time.time()
-        self.broker = _MockBroker(quotes, curve_kind, base)
+        self.broker = _MockBroker(quotes, curve_kind, base,
+                                  equity=(account or {}).get("equity"))
         self.journal_path = journal_path
         self._assets = list(assets)
         self._realized = realized
@@ -1756,7 +1879,27 @@ class _PlayPos:
     def __init__(self, pid, symbol, *, legs, contracts=1, is_open=True,
                  entry_net=None, close_net=None, pl=None, pl_pct=None,
                  mark=None, state="open", kind="credit_spread", expiry="",
-                 is_credit=True, requested=0, entry_at="", closed_at=""):
+                 is_credit=True, requested=0, entry_at="", closed_at="",
+                 play="", adopted=False, close_reason="", target_px=None,
+                 stop_px=None, rest_order_id="", rest_refused=""):
+        # The fields beyond hub's are `optperf.Trade`'s, which the options
+        # TICKER pane reads through `optticker.report`. They were absent and
+        # the pane raised AttributeError on the first one it reached: a stub
+        # that carries "what hub reads and nothing more" is right up until a
+        # second reader arrives, and then the right answer is to carry what
+        # BOTH read -- not to grow a second position class.
+        self.play = play or {"put_credit_spread": "index-put-credit-spread",
+                             "credit_spread": "index-put-credit-spread",
+                             "long_call": "swing-atm-hourly",
+                             "long_single": "swing-atm-hourly"}.get(kind, kind)
+        self.adopted = adopted or state == "monitored"
+        self.close_reason = close_reason
+        self.target_px = target_px
+        self.stop_px = stop_px
+        self.rest_order_id = rest_order_id
+        self.rest_refused = rest_refused
+        self.rest_tif = "gtc"
+        self.mark_error = ""
         # `entry_at` / `closed_at` are what `hub._exposure_samples` walks to
         # build the exposure curve. Leaving them off is not neutral: the play
         # then contributes nothing to that chart and the line silently shows
@@ -1778,6 +1921,11 @@ class _PlayPos:
         self.expiry = expiry
         self.is_credit = is_credit
         self.requested = requested
+
+    @property
+    def exit_cover(self):
+        """The real rule, borrowed. See mockticker.exit_cover."""
+        return _mockticker.exit_cover(self)
 
 
 def _leg(occ, side, strike, ratio=1):
@@ -1922,6 +2070,140 @@ def _curve_for(kind, period, timeframe):
 
 
 # ------------------------------------------------------------ journal fixture
+#: The three books the P/L page has to survive. They are generated rather than
+#: typed because the point of each is its SHAPE over a hundred-odd rows, and a
+#: hand-typed hundred rows is a hundred chances to put a loser in the wins-only
+#: book by accident -- which is the one fixture whose entire value is that it
+#: has none.
+#:
+#: Every row is the PAIR the engine writes: an `open` carrying shares and
+#: entry_price, then a `close` carrying `realized`. perf.rows_from_journal
+#: reads `realized` off the close and `entry_time` for the hold, so some rows
+#: deliberately carry no `entry_time`: the real journal has 29 such rows and
+#: perf reports avg_hold with the exclusion named rather than silently
+#: averaging over what it has.
+_PERF_BOOKS = {
+    # (symbol, weight) -- how the closes are spread over the tickers
+    "winsonly": {"n": 122, "days": 37, "total": 8882.86,
+                 "syms": [("RAM", 5), ("SPY", 3), ("MSTX", 2), ("QQQ", 1)]},
+    "losing": {"n": 64, "days": 45, "total": -5216.40,
+               "syms": [("RAM", 4), ("MSTX", 3), ("SPY", 2)],
+               # EVERY TICKER'S FIRST CLOSE IS A LOSS. Not decoration: see
+               # `crossing` below and the note on it. With a loser first, the
+               # per-ticker cumulative curve opens at or below zero, perf's
+               # `start > 0` guard holds and the whole metric set renders.
+               "loss_first": True},
+    # The same book with a WINNER first, so each ticker's cumulative realised
+    # curve starts above zero and ends below it. THIS CRASHES perf.py TODAY:
+    # `ratios()` computes `(end / start) ** (365 / span_days)`, guards only
+    # `start > 0`, and a negative `end` makes that a COMPLEX number, which
+    # `round()` refuses -- perf.py:676, raised at :689. app.py turns it into a
+    # 500 and the entire P/L page goes with it. It cannot fire on the live
+    # account because that journal is wins-only; it fires the day a stop loss
+    # lands. Reproduced minimally with eight ordinary closed lots.
+    "crossing": {"n": 64, "days": 45, "total": -5216.40,
+                 "syms": [("RAM", 4), ("MSTX", 3), ("SPY", 2)],
+                 "loss_first": False},
+    "thin": {"n": 2, "days": 2, "total": 310.00,
+             "syms": [("RAM", 1)]},
+}
+
+
+def _perf_journal(profile):
+    """A book whose realised total is EXACTLY `total`, to the cent.
+
+    Exactly, because perf publishes a reconciliation residual and any drift
+    here would surface there as a defect in perf.py rather than in the
+    fixture. The remainder after rounding goes on the last close, so the sum
+    is provable by reading the file.
+
+    `winsonly` has NO LOSING ROW AT ALL. That is the account's real shape --
+    the ladder has no stop, so a losing lot is never closed and never books --
+    and it is what makes profit factor, average loss, the win/loss ratio and
+    the losing streak come back as dashes with their reason instead of as
+    infinity, a zero and a lie.
+    """
+    spec = _PERF_BOOKS[profile]
+    n, span, total = spec["n"], spec["days"], float(spec["total"])
+    syms = []
+    for sym, w in spec["syms"]:
+        syms.extend([sym] * w)
+    now = time.time()
+
+    def ts(days_ago, hour=15):
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                             time.gmtime(now - days_ago * 86400.0
+                                         + hour * 3600.0))
+
+    # A deterministic profile of per-trade sizes, normalised to `total`. For
+    # the losing book the sign alternates on a 5/8 duty cycle so there are
+    # real wins, real losses, and runs of each for the streak counters.
+    raw = []
+    seen = set()
+    for i in range(n):
+        mag = 1.0 + 0.85 * math.sin(i * 1.7) ** 2 + 0.4 * ((i * 7) % 11) / 11.0
+        if total < 0:
+            win = (i % 8) < 3            # 3 winners in every 8
+            sym = syms[i % len(syms)]
+            if spec.get("loss_first") and sym not in seen:
+                win = False              # see _PERF_BOOKS: the first close per
+            seen.add(sym)                # ticker decides whether perf survives
+            # THE LOSER IS THE BIGGER ONE. It was the winner (1.9 against 1.0)
+            # and the profile then summed POSITIVE, so `scale = total / sum`
+            # came out negative and silently inverted every sign in the book:
+            # the "losing" fixture was three big losers and five winners with
+            # the labels swapped, and the first trade on every ticker came out
+            # a WIN -- which is exactly what `loss_first` above exists to
+            # prevent. Caught by reading the per-ticker curves, not the code.
+            raw.append(mag * (1.0 if win else -1.9))
+        else:
+            raw.append(mag)
+    scale = total / sum(raw) if sum(raw) else 0.0
+    pl = [round(v * scale, 2) for v in raw]
+    pl[-1] = round(pl[-1] + round(total - sum(pl), 2), 2)
+
+    rows = []
+    for i, amount in enumerate(pl):
+        sym = syms[i % len(syms)]
+        # THE CLOSES ARE STRICTLY IN ORDER and the HOLD is what varies. It was
+        # the other way round -- one close time, a hold of 0.4 to 2.6 days
+        # subtracted from it -- and that reordered the book: a trade generated
+        # later could close EARLIER than the one before it, so `loss_first`
+        # above put its loser first in generation order and a winner first in
+        # the order `realized_curve` actually sorts by. Which is the whole
+        # difference between the scenario that renders and the one that 500s.
+        closed = span * (1.0 - i / float(max(n - 1, 1))) + 0.05
+        opened = closed + 0.3 + (i % 7) * 0.9      # the hold, 0.3 to 5.7 days
+        shares = 100 if sym != "SPY" else 10
+        px = {"RAM": 12.44, "SPY": 627.10, "MSTX": 8.21, "QQQ": 575.4}[sym]
+        lot = "%s-%04d" % (sym, i)
+        rows.append({"ts": ts(opened, 14), "event": "open", "symbol": sym,
+                     "shares": shares, "entry_price": px, "lot_id": lot,
+                     "dry_run": False})
+        close = {"ts": ts(closed, 15 + (i % 4)), "event": "close",
+                 "symbol": sym, "realized": amount, "shares": shares,
+                 "qty": shares, "entry_price": px,
+                 "price": round(px + amount / shares, 4), "lot_id": lot,
+                 "dry_run": False}
+        # one close in nine carries no entry_time, so the hold-time metric has
+        # rows it must EXCLUDE and name rather than quietly average over
+        if i % 9:
+            close["entry_time"] = ts(opened, 14)
+        rows.append(close)
+    if n >= 4:
+        # the two rows that are not trades: a ledger correction and a dry run.
+        # They are here so the trade count on screen can be checked against a
+        # file that contains both.
+        rows.append({"ts": ts(1.5), "event": "close", "symbol": syms[0],
+                     "realized": 0.0, "qty": 100, "inferred": True,
+                     "lot_id": "L900", "dry_run": False})
+        rows.append({"ts": ts(1.2), "event": "close", "symbol": syms[0],
+                     "realized": 4210.0, "qty": 100, "lot_id": "L901",
+                     "dry_run": True})
+    rows.sort(key=lambda r: r["ts"])
+    return rows
+
+
 def _journal_rows(profile="rich"):
     """Closed-lot rows for the LADDER only, which is all the journal holds.
 
@@ -1933,6 +2215,8 @@ def _journal_rows(profile="rich"):
     """
     if profile == "empty":
         return []
+    if profile in _PERF_BOOKS:
+        return _perf_journal(profile)
     now = time.time()
 
     def ts(days_ago, h=15):
@@ -2102,6 +2386,21 @@ def _rich_plays(ctx, store_dir):
             store.assign(a.symbol, a.play, enabled=a.enabled, by="mock")
         except Exception:
             pass                       # the store is a convenience, not truth
+    pcs_rows, swing_rows, orphan_rows = _rich_play_rows()
+    return [
+        _play_strategy(ctx, "index-put-credit-spread", pcs_rows, [spy]),
+        _play_strategy(ctx, "swing-atm-hourly", swing_rows + orphan_rows, [qqq]),
+    ]
+
+
+def _rich_play_rows():
+    """The play POSITIONS, apart from the hub strategies built over them.
+
+    Split out because the options ticker pane (`optticker.report`) reads the
+    same rows through a play ledger rather than through hub, and two copies of
+    one book is how a ticker page and the Overview come to disagree about a
+    position that is open right now.
+    """
     pcs_rows = [
         # OPEN, at a profit. entry_net is + because it is a CREDIT.
         _PlayPos("p-1001", "SPY", contracts=2, entry_net=1.35, pl=118.0,
@@ -2142,10 +2441,7 @@ def _rich_plays(ctx, store_dir):
                  entry_at=_ago_iso(9),
                  legs=[_leg(_AAPL_ORPHAN, "buy", 260.0)]),
     ]
-    return [
-        _play_strategy(ctx, "index-put-credit-spread", pcs_rows, [spy]),
-        _play_strategy(ctx, "swing-atm-hourly", swing_rows + orphan_rows, [qqq]),
-    ]
+    return pcs_rows, swing_rows, orphan_rows
 
 
 def _rich_positions():
@@ -2171,6 +2467,55 @@ def _rich_positions():
     return shares, opts
 
 
+# ----------------------------------------------- the perf scenarios, as hub
+# The P/L page is not a room of its own -- the shell, the ticker pages and the
+# Overview strip are all up while it is being looked at, and they read the hub
+# routes. So every perf scenario is ALSO a hub profile, built from the SAME
+# account block and the SAME position book that perf.py is handed. A harness
+# that served one account on /api/perf and another on /api/hub would reproduce
+# the owner's original complaint -- one account reading three different ways --
+# in the very tool built to stop it.
+def _perf_hub_profile(scen):
+    spec = _mockperf.profile(scen)
+    pos = list(spec.get("positions") or [])
+    shares = {p["symbol"]: p for p in pos
+              if p.get("asset_class") != "us_option"}
+    opts = [p for p in pos if p.get("asset_class") == "us_option"]
+
+    # THE LADDERS ARE FLAT in the wins-only book, and that is the point of it:
+    # the owner's page said "still open 2,700" while the ladder held nothing,
+    # because six OPTION contracts were open and the tile did not say whose
+    # they were. A fixture whose ladder held the open risk cannot reproduce it.
+    closed = {"RAM": 68, "SPY": 41, "MSTX": 13, "QQQ": 9}
+    eng = {}
+    # perfnew has no ladder at all. A flat ladder and NO ladder are different
+    # screens -- one has traded 68 times and is between lots, the other has
+    # never been set up -- and a fixture that conflated them would let the
+    # "nothing yet" page pass while showing a closed-trade count.
+    for sym in () if scen == "perfnew" else ("RAM", "SPY", "MSTX"):
+        held = shares.get(sym)
+        qty = float(held["qty"]) if held else 0.0
+        eng[sym] = _MockEngine(
+            sym, shares=qty, costs=([abs(held["market_value"])] if held else []),
+            running=bool(held), dry_run=not held, lots=1 if held else 0,
+            max_lots=20, avg=(held["avg_entry_price"] if held else None),
+            realized_all=0.0, realized_today=0.0,
+            unrealized=(held["unrealized_pl"] if held else None),
+            closed=closed.get(sym, 0), preset="basic",
+            state="running" if held else "stopped")
+    return {"engines": eng, "shares": shares, "opts": opts, "plays": "none",
+            # `curve` feeds hub's OWN chart, which asks the broker per window;
+            # perf gets the pinned all-time curve instead. Both end at the same
+            # equity because both are pinned to the same account block.
+            "curve": "empty" if scen == "perfnew" else "rich",
+            "journal": spec["journal"], "watch": [],
+            # EXACT: perf's account block is the fact here, derived from the
+            # stated equity and this same book. Re-deriving it from cash would
+            # give a second answer for one account.
+            "account": dict(spec["account"]), "account_exact": True,
+            "made_today": None, "base_value": None, "realized": None}
+
+
 # ------------------------------------------------------------ scenario tables
 def _hub_profile(scen, acct):
     """Everything one (scenario, account) pair is: the whole fixture in one
@@ -2179,6 +2524,9 @@ def _hub_profile(scen, acct):
     test_acct = acct != HUB_DEFAULT_ACCOUNT
     shares, opts = _rich_positions()
     engines = _rich_engines()
+
+    if scen in _mockperf.PROFILES:
+        return _perf_hub_profile(scen)
 
     if scen == "hubnew":
         # Nothing. Not zero -- NOTHING. Every number on this page must come
@@ -2299,6 +2647,48 @@ def _hub_profile(scen, acct):
             "realized": 2974.23}
 
 
+def _positions_of(prof):
+    """Every broker position the profile holds, shares and options together.
+
+    ONE list, because that is what the fleet's own snapshot is and what
+    app.py hands perf.py. Splitting them here and forgetting to rejoin them is
+    how an account comes to report a share book and an option book that do not
+    add up to the equity beside them.
+    """
+    return list(prof["shares"].values()) + list(prof["opts"] or [])
+
+
+def _derived_account(prof):
+    """THE ACCOUNT BLOCK, DERIVED FROM THE BOOK THE FIXTURE ACTUALLY HOLDS.
+
+    A hand-written long_market_value that disagrees with the positions beside
+    it makes hub's equity_residual warning fire on every scenario, which trains
+    a reader to ignore the one time it is real. Scenarios that WANT the
+    disagreement set prof["account_exact"] and keep their own numbers.
+
+    THE OPTION BOOK COUNTS. It did not: the sum below read the option market
+    values with `getattr(o, "market_value", 0.0)` while `_opt()` returns a
+    DICT, so every option position contributed exactly 0.00 and the derived
+    equity was short by the whole option book -- $89.00 of it in the `hub`
+    scenario. perf.py's reconciliation walks funding -> realised -> OPEN MARKS
+    -> equity, so that gap would have surfaced as a residual perf could not
+    explain, on a page written to explain residuals. Found by reading the
+    derived equity against the positions it was derived from.
+    """
+    acct = dict(prof["account"])
+    if prof.get("account_exact"):
+        return acct
+    mvs = [float((p or {}).get("market_value") or 0.0)
+           for p in _positions_of(prof)]
+    long_mv = round(sum(m for m in mvs if m > 0), 2)
+    short_mv = round(sum(m for m in mvs if m < 0), 2)
+    cash = float(acct.get("cash") or 0.0)
+    acct.update({"long_market_value": long_mv, "short_market_value": short_mv,
+                 "equity": round(cash + long_mv + short_mv, 2),
+                 "buying_power": cash * 2})
+    return acct
+
+
 def _hub_ctx(scen, acct):
     """One request's worth of hub context: a stub fleet, a scratch state dir,
     and the provider list swapped for this scenario's strategies.
@@ -2316,23 +2706,7 @@ def _hub_ctx(scen, acct):
         _write_journal(jpath, _journal_rows(prof["journal"]))
     meta = next((a for a in HUB_ACCOUNTS if a["id"] == acct), HUB_ACCOUNTS[0])
 
-    # THE ACCOUNT BLOCK IS DERIVED FROM THE BOOK THE FIXTURE ACTUALLY HOLDS.
-    # A hand-written long_market_value that disagrees with the positions beside
-    # it makes hub's equity_residual warning fire on every scenario, which
-    # trains a reader to ignore the one time it is real. Scenarios that WANT
-    # the disagreement set prof["account_exact"] and keep their own numbers.
-    _acct = dict(prof["account"])
-    if not prof.get("account_exact"):
-        _mvs = [float(v.get("market_value") or 0.0)
-                for v in list(prof["shares"].values())]
-        _mvs += [float(getattr(o, "market_value", 0.0) or 0.0)
-                 for o in (prof["opts"] or [])]
-        _long = round(sum(m for m in _mvs if m > 0), 2)
-        _short = round(sum(m for m in _mvs if m < 0), 2)
-        _cash = float(_acct.get("cash") or 0.0)
-        _acct.update({"long_market_value": _long, "short_market_value": _short,
-                      "equity": round(_cash + _long + _short, 2),
-                      "buying_power": _cash * 2})
+    _acct = _derived_account(prof)
 
     fleet = _MockFleet(account_id=acct, label=meta["label"], state_dir=sdir,
                        account=_acct, positions=dict(prof["shares"]),
@@ -2377,7 +2751,160 @@ def _hub_ctx(scen, acct):
     else:
         providers = [hub.ladder_strategies,
                      lambda c: _rich_plays(c, sdir)]
+    if scen == "banktriple":
+        _seed_bank(scen, acct, ctx, providers)
     return ctx, providers
+
+
+#: (scenario, account) already seeded. bank.attach is idempotent in effect but
+#: not free -- it walks the whole 259-row shelf -- and re-running it on every
+#: request would put a second of latency on every poll and make the page look
+#: like the slow one it is not.
+_BANK_SEEDED: set = set()
+
+
+def _seed_bank(scen, acct, ctx, providers):
+    """Attach mockbank's THREE-ON-ONE plan, once per (scenario, account).
+
+    Through `bank.attach` itself, not by writing the stores by hand: the whole
+    claim being tested is that one call attaches every kind, so a fixture that
+    wrote `config.json` and `bank_attachments.json` directly would prove the
+    page can render rows that the real attach path may never produce.
+    """
+    key = "%s.%s" % (scen, acct)
+    if key in _BANK_SEEDED:
+        return
+    _BANK_SEEDED.add(key)
+    with _Providers(providers):
+        STATE["bank_seed"] = _mockbank.seed(ctx)
+
+
+def hub_optlab_ticker(scen, acct, sym):
+    """`/api/optlab/ticker/{sym}` -- ONE ticker's options pane.
+
+    app.py's handler reads four stores and hands them to `optticker.report`;
+    this does the same, from the SAME fixtures the hub and perf routes use. The
+    play positions come from `_rich_play_rows`, the attachments and the shelf
+    from the real `bank`, and the broker marks from the scenario's own position
+    book -- so the pane's open P/L for a contract is the one the Overview shows
+    for it, which is the whole reason app.py routes both through one snapshot.
+    """
+    import bank
+    prof = _hub_profile(scen, acct)
+    sdir = _hub_state_dir(scen, acct)
+    ctx, providers = _hub_ctx(scen, acct)
+    kind = prof["plays"]
+    if kind == "rich":
+        pcs, swing, orphan = _rich_play_rows()
+        rows = pcs + swing + orphan
+    elif kind == "spy-only":
+        rows = _rich_play_rows()[0][:1]
+    else:
+        rows = []
+    if scen == "playsnoquote":
+        # An open position with NO two-sided quote: mark, P/L and % all absent.
+        # They must render as dashes. 0.00 is a different fact and it is the
+        # one a page invents when it treats None as a number.
+        rows = [r for r in rows if r.pl is None] or rows[:1]
+        for r in rows:
+            r.pl, r.pl_pct, r.mark = None, None, None
+    with _Providers(providers):
+        # RUN THE PROVIDERS FIRST. The play ASSIGNMENTS are written into the
+        # scratch store by the provider itself (`_rich_plays` calls
+        # `Assignments.assign`), so a request that never ran one found an
+        # empty store and the pane reported no strategy on a ticker that
+        # plainly has two. Ordering, not data -- the worst kind to chase from
+        # a screenshot.
+        for prov in providers:
+            prov(ctx)
+        attached = bank.attached(ctx, sym)
+        shelf = (bank.entries(ctx, kind="option")
+                 + bank.entries(ctx, kind="option-tailored"))
+    return _mockticker.report(
+        sym, state_dir=sdir, positions=rows,
+        assignments=_optplays.Assignments(sdir / "options" / "plays.json"),
+        shelf=shelf, attached=attached,
+        broker_positions=_positions_of(prof),
+        armed=scen != "playsempty",
+        # FROZEN OUTRANKS THE ARM, and the pane has to draw it that way: an
+        # armed-and-frozen account that renders as "live" is the screen that
+        # gets somebody to stop watching.
+        frozen=("state/FROZEN is present" if scen == "playsfrozen" else ""))
+
+
+def _ai_scen(scen):
+    """Which assistant story this scenario tells.
+
+    THE PANEL IS ON EVERY PAGE, so it has to answer under every scenario and
+    not only under the four named for it. Anything else gets the reachable
+    model: a harness where the chat panel is dead on 30 of 34 scenarios is a
+    harness in which nobody checks the chat panel.
+    """
+    return scen if scen in _mockai.SCENARIOS else "assistant"
+
+
+def _perf_spec(scen, acct):
+    """The perf fixture for this (scenario, account).
+
+    A perf* scenario states its own account; every OTHER scenario is measured
+    off the hub profile that is already on screen, so /api/perf and
+    /api/hub/portfolio answer about ONE account. Serving two would reproduce
+    the owner's complaint inside the tool built to end it.
+    """
+    spec = _mockperf.profile(scen)
+    if spec is not None:
+        return spec
+    prof = _hub_profile(scen, acct)
+    return _mockperf.from_hub_profile(prof, _positions_of(prof),
+                                      _derived_account(prof))
+
+
+def _perf_journal_rows(scen, acct):
+    """The SAME journal file the hub routes read, parsed by journal.py.
+
+    app.py's perf context does `journal.load(path=f.journal_path)`, so the
+    harness does too -- rather than handing perf the fixture list directly and
+    skipping the parser, the bookkeeping filter and the dry-run filter that the
+    real route depends on.
+    """
+    ctx, _providers = _hub_ctx(scen, acct)
+    import journal
+    try:
+        return journal.load(path=str(ctx.fleet.journal_path))
+    except Exception:
+        return []
+
+
+#: The one defect this harness found in perf.py, named so a 500 is readable.
+#: Delete this the day the guard lands -- a blame string for a bug that has
+#: been fixed is worse than no blame string, because it sends the next reader
+#: to a line that is now correct.
+PERF_KNOWN_DEFECT = (
+    "perf.py crashed: %s. THIS IS perf.py's BUG, NOT THE HARNESS'S and not "
+    "yours. perf.ratios() computes `ann = (end / start) ** (365 / span_days)` "
+    "at perf.py:676 and guards only `start > 0`. A cumulative curve that "
+    "starts ABOVE zero and ends BELOW it raises a negative number to a "
+    "fractional power, which Python evaluates as a COMPLEX number, and "
+    "round() refuses it at perf.py:689. Every per-ticker block uses the "
+    "realised curve, so one ticker that wins first and ends underwater 500s "
+    "the whole P/L page. It cannot fire on the live account today because "
+    "that journal is wins-only; it fires the day a stop loss lands. "
+    "Reproduced with eight ordinary closed lots. The guard is `start > 0 and "
+    "end > 0`. Scenario `perfloss` is the same account WITHOUT this shape and "
+    "renders in full.")
+
+
+def _perf_blame(exc):
+    if isinstance(exc, TypeError) and "complex" in str(exc):
+        return PERF_KNOWN_DEFECT % exc
+    return "perf.py raised %s: %s" % (exc.__class__.__name__, exc)
+
+
+def _perf_call(fn, scen, acct, **kw):
+    meta = next((a for a in HUB_ACCOUNTS if a["id"] == acct), HUB_ACCOUNTS[0])
+    return fn(_perf_spec(scen, acct),
+              journal_rows=_perf_journal_rows(scen, acct),
+              account_id=acct, label=meta["label"], **kw)
 
 
 class _Providers:
@@ -2743,6 +3270,64 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(404, str(e))
             return self._fail(404, f"mock has no hub route for {p}")
 
+        # ------------------------------------------------------- the bank
+        # THE WRITES GO THROUGH bank.py. Nothing here restates them, and
+        # mockbank.sandbox() has already repointed the four stores at a scratch
+        # tree, so a Save in the browser cannot edit the live repo.
+        if "/bank" in p:
+            if scen == "bankfail":
+                return self._fail(502, "mock: the bank write blew up")
+            acct = hub_account_of(p)
+            ctx, providers = _hub_ctx(scen, acct)
+            try:
+                with _Providers(providers):
+                    if p.endswith("/bank/attach"):
+                        return self._json(_mockbank.attach(ctx, body))
+                    # "copy" before "entry": an entry id is "<store>:<slug>",
+                    # so the shorter suffix would otherwise swallow it.
+                    if p.endswith("/bank/entry/copy"):
+                        return self._json(_mockbank.copy(body))
+                    if p.endswith("/bank/entry"):
+                        return self._json(_mockbank.save(body))
+                    parts = [x for x in p.rstrip("/").split("/") if x]
+                    if len(parts) >= 5 and parts[-1] == "params" \
+                            and parts[-4] == "bank":
+                        return self._json(_mockbank.set_params(
+                            parts[-3], parts[-2], body))
+            except Exception as e:
+                return self._fail(400, "%s: %s" % (e.__class__.__name__, e))
+            return self._fail(404, "mock has no bank route for %s" % p)
+
+        # -------------------------------------------------- the assistant
+        if "/assistant/" in p:
+            if scen == "assistantslow":
+                # long enough to navigate away underneath it, which is what a
+                # model round trip does on its own
+                time.sleep(3.0)
+            import assistant as _assistant
+            acct = hub_account_of(p)
+            ctx, providers = _hub_ctx(scen, acct)
+            try:
+                with _Providers(providers):
+                    if p.endswith("/assistant/chat"):
+                        return self._json(_mockai.chat(_ai_scen(scen), ctx,
+                                                       body))
+                    if p.endswith("/assistant/act"):
+                        # app.py: a Refusal here is a 409 (the proposal expired
+                        # or was already used), not a 400. A page that retries
+                        # on 400 and gives up on 409 renders the two
+                        # differently, so the harness must too.
+                        return self._json(_mockai.act(_ai_scen(scen), ctx,
+                                                      body))
+            except _assistant.Refusal as e:
+                return self._fail(409 if p.endswith("/act") else 400, str(e))
+            except ValueError as e:
+                return self._fail(400, str(e))
+            except Exception as e:
+                return self._fail(400, "that action failed: %s: %s"
+                                       % (e.__class__.__name__, e))
+            return self._fail(404, "mock has no assistant route for %s" % p)
+
         if p.endswith("/optlab/plays/cycle"):
             return self._json(plays_cycle(scen))
         if p.endswith("/optlab/plays/disarm"):
@@ -2867,6 +3452,23 @@ class Handler(BaseHTTPRequestHandler):
                                                     sym))
             except ValueError as e:
                 return self._fail(409, str(e))
+        # A personal bank entry. REFUSED with 409 while a ticker still uses it,
+        # which is bank.delete's own rule: deleting a strategy out from under a
+        # running ladder leaves the ticker pointing at a document that is gone.
+        if "/bank/entry/" in p:
+            if scen == "bankfail":
+                return self._fail(502, "mock: the bank write blew up")
+            from urllib.parse import parse_qs as _pq, unquote, urlparse as _up
+            eid = unquote(p.rstrip("/").split("/bank/entry/", 1)[1])
+            force = (_pq(_up(self.path).query).get("force")
+                     or ["false"])[0] == "true"
+            acct = hub_account_of(p)
+            ctx, providers = _hub_ctx(scen, acct)
+            try:
+                with _Providers(providers):
+                    return self._json(_mockbank.delete(ctx, eid, force))
+            except Exception as e:
+                return self._fail(409, "%s: %s" % (e.__class__.__name__, e))
         return self._fail(404, f"mock has no DELETE route for {p}")
 
     def do_GET(self):
@@ -2913,6 +3515,17 @@ class Handler(BaseHTTPRequestHandler):
         # shorter path would never match the longer one here, but the reverse
         # order is the bug that bites the moment a suffix route is added, so the
         # specific path goes first as a matter of habit.
+        # ONE ticker's options pane, through the real optticker.report. Tested
+        # before /optlab/plays and friends only because it is a longer path;
+        # the habit of putting the specific one first is what keeps a suffix
+        # route from swallowing the one added after it.
+        if "/optlab/ticker/" in p:
+            acct = hub_account_of(p)
+            sym = p.rstrip("/").rsplit("/", 1)[-1].upper()
+            try:
+                return self._json(hub_optlab_ticker(scen, acct, sym))
+            except ValueError as e:
+                return self._fail(400, str(e))
         if p.endswith("/optlab/perf"):
             if scen == "perffail":
                 return self._fail(502, "mock: the performance route blew up")
@@ -2983,6 +3596,83 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._fail(400, str(e))
             return self._fail(404, f"mock has no hub route for {p}")
+
+        # --------------------------------------------------- performance
+        # perf.py is run for real over mockperf.py's snapshots; the envelopes
+        # are app.py's. `/api/perf/...` and `/api/a/<id>/perf/...` are the same
+        # route, as they are in the real server.
+        if "/perf/" in p:
+            acct = hub_account_of(p)
+            try:
+                if p.endswith("/perf/report"):
+                    return self._json(_perf_call(_mockperf.report, scen, acct))
+                if p.endswith("/perf/account"):
+                    return self._json(_perf_call(_mockperf.account, scen, acct))
+                if p.endswith("/perf/reconcile"):
+                    return self._json(_perf_call(_mockperf.reconcile, scen,
+                                                 acct))
+                if p.endswith("/perf/daily"):
+                    return self._json(_perf_call(_mockperf.daily, scen, acct))
+                if p.endswith("/perf/metrics"):
+                    return self._json(_perf_call(
+                        _mockperf.metrics, scen, acct,
+                        symbol=(q.get("symbol") or [""])[0]))
+            except KeyError as e:
+                # app.py 404s here rather than rendering an empty metric block
+                # for a symbol nobody traded.
+                return self._fail(404, "%s has no closed trade and nothing "
+                                       "open on this account."
+                                       % str(e).strip("'").upper())
+            except Exception as e:
+                # app.py turns this into a 500 too, so the harness does not
+                # soften it. It NAMES the defect instead, because a bare 500
+                # here would send five agents hunting in their own code for a
+                # bug that is in perf.py and was found by this fixture.
+                return self._fail(500, _perf_blame(e))
+
+        # ------------------------------------------------------- the bank
+        if "/bank" in p:
+            if scen == "bankfail":
+                return self._fail(502, "mock: the bank read blew up")
+            acct = hub_account_of(p)
+            ctx, providers = _hub_ctx(scen, acct)
+            try:
+                with _Providers(providers):
+                    if p.endswith("/bank/entries"):
+                        return self._json(_mockbank.entries(
+                            ctx, kind=(q.get("kind") or [""])[0],
+                            origin=(q.get("origin") or [""])[0],
+                            symbol=(q.get("symbol") or [""])[0],
+                            q=(q.get("q") or [""])[0],
+                            attachable=(q.get("attachable")
+                                        or ["false"])[0] == "true"))
+                    if p.endswith("/bank/attached"):
+                        return self._json(_mockbank.attached(
+                            ctx, (q.get("symbol") or [""])[0]))
+                    if "/bank/entry/" in p:
+                        from urllib.parse import unquote
+                        eid = unquote(p.rstrip("/").split("/bank/entry/", 1)[1])
+                        return self._json(_mockbank.get(ctx, eid))
+                    if p.rstrip("/").endswith("/api/bank"):
+                        return self._json(_mockbank.listing())
+                    parts = [x for x in p.split("/") if x]
+                    if len(parts) >= 4 and parts[-3] == "bank":
+                        return self._json(_mockbank.detail(parts[-2],
+                                                           parts[-1]))
+            except Exception as e:
+                return self._fail(404, "%s: %s" % (e.__class__.__name__, e))
+
+        # -------------------------------------------------- the assistant
+        # The REAL assistant.py over the stub fleet, with only the MODEL
+        # stubbed -- see mockai.py. `/api/assistant` is the status route (no
+        # suffix), which is why this tests the bare path rather than a suffix.
+        if p.rstrip("/").endswith("/api/assistant") or "/assistant/" in p:
+            acct = hub_account_of(p)
+            ctx, providers = _hub_ctx(scen, acct)
+            if p.rstrip("/").endswith("/assistant"):
+                with _Providers(providers):
+                    return self._json(_mockai.status(_ai_scen(scen), ctx))
+            return self._fail(404, "mock has no assistant GET route for %s" % p)
 
         # -------------------------------------------------- the shell
         if p == "/api/accounts":
@@ -3101,99 +3791,44 @@ check("and does not leave the fresh box at scrollTop 0",
 el("view").style.display = "none";
 await scen("default");
 
-section(5, "the board shows the watchlist before it has measured anything");
-await scen("boardempty");
-await mount("board");
-check("the honest line is the first thing on the page",
-      /Nothing is armed\\. No option is being traded\\./.test(text()), true);
-// "we are watching four names and have not measured them yet" and "we are
-// watching nothing" are different answers, and this is the one that used to
-// render as an empty page.
-check("the watched count is on screen before any fact is",
-      /WATCHED\\s*4 \\/ 4/i.test(el("view").textContent.replace(/\\s+/g, " ")),
-      true);
-check("every ticker still has a row",
-      el("view").querySelectorAll(".b-row").length, 4);
-check("and each row says it is being measured",
-      /no refresh has completed yet/.test(text()), true);
-check("no row claims a number",
-      [...el("view").querySelectorAll(".b-val")]
-        .every((v) => v.textContent.trim() === "\\u2014"), true);
-check("the empty cells are marked absent, not merely blank",
-      el("view").querySelectorAll(".b-cell.none").length > 0, true);
-
-section(6, "a fact that never formed is a dash with a reason, never a zero");
+section(5, "the Plays and Data rooms are gone, and say where they went");
+// They were deleted on 28 Sep 2026, by description rather than by name: "we
+// have a lot of waste with 'plays' and 'data' on the options ... the plays are
+// just a conglomerate of all the tickers when i can just go to them myself and
+// see it". Sections 5 to 9 used to drive the Data room's cards -- the IV-rank
+// dash, the spread unit, the provenance badge, the rate limiter -- and they
+// went with it. What the room MEASURED did not go anywhere: it is per ticker,
+// on the ticker's own Options pane, out of the same /api/optlab/board cache.
+//
+// What is checked instead is that the departure was clean, which is the shape
+// the Positions room's departure left behind: no tab, no renderer, and a
+// sentence for somebody who follows an old link.
 await scen("default");
+check("the tab bar is the three rooms that are left",
+      VIEWS.options.tabs.map((t) => t[0]).join(","),
+      "perf,strategies,backtest");
+await mount("plays");
+check("an old #/options/plays link still lands on a real page",
+      !!el("view").querySelector("#ov-head"), true);
+check("and says the Plays room is gone",
+      /The Plays room is gone\\./.test(text()), true);
+check("naming where its controls went",
+      /that TICKER.s own Options pane/.test(text()), true);
+await mount("data");
+check("an old #/options/data link lands on a real page too",
+      !!el("view").querySelector("#ov-head"), true);
+check("and says the Data room is gone",
+      /The Data room is gone\\./.test(text()), true);
 await mount("board");
-const row = (sym) => [...el("view").querySelectorAll(".b-row")]
-  .find((r) => r.querySelector(".b-sym").textContent.trim().indexOf(sym) === 0);
-const cell = (sym, label) => [...row(sym).querySelectorAll(".b-cell")]
-  .find((c) => c.querySelector(".b-lab").textContent.trim() === label);
-const qqqRank = cell("QQQ", "IV rank");
-// The value is a dash AND the day count sits beside it. "No rank" and "no
-// history" are different answers, and only the second tells a human that
-// leaving the recorder running is the thing that fixes it.
-check("QQQ has six days of history, so there is no IV rank",
-      qqqRank.querySelector(".b-val").textContent.trim(), "\\u20146d");
-check("...but the six days are on the number, not only in the tooltip",
-      /6d/.test(qqqRank.querySelector(".b-val").textContent), true);
-// The whole point of the increment. A rank here would be a 52-week statistic
-// invented out of one afternoon.
-check("...and no rank of zero is printed",
-      /^0/.test(qqqRank.querySelector(".b-val").textContent.trim()), false);
-check("...the cell says it was not measured",
-      qqqRank.classList.contains("none"), true);
-check("...and carries the reason, with the day count in it",
-      /6 session\\(s\\) of recorded IV history/.test(qqqRank.title), true);
-check("SPY's rank exists but is flagged thin",
-      cell("SPY", "IV rank").classList.contains("thin"), true);
-check("...and says how much history backs it",
-      /94 of 252 sessions/.test(cell("SPY", "IV rank").title), true);
-check("...with the day count printed on the number itself",
-      /94d/.test(cell("SPY", "IV rank").querySelector(".b-val").textContent),
-      true);
-
-section(7, "the unit trap: a spread is a FRACTION of mid on the wire");
-row("IWM").querySelector(".b-sym").click();
-await sleep(300);
-const drawer = row("IWM").querySelector(".b-drawer");
-const spread = [...drawer.querySelectorAll("tbody tr")]
-  .find((tr) => /atm_spread_pct/.test(tr.textContent));
-check("0.462 renders as 46.2%", /46\\.2%/.test(spread.textContent), true);
-check("and never as 0.5%", /0\\.5%/.test(spread.textContent), false);
-check("the drawer lists every fact the row has",
-      drawer.querySelectorAll("tbody tr").length > 10, true);
-check("and says who is SUPPOSED to serve each one",
-      /nobody \\u2014 we compute it/.test(drawer.textContent), true);
-
-section(8, "provenance is visible on the number, not in a footnote");
-const badge = (sym, label) => {
-  const b = cell(sym, label).querySelector(".b-src");
-  return b ? b.className.replace("b-src ", "") : "none";
-};
-check("SPY's at-the-money IV is Alpaca's", badge("SPY", "IV"), "s-alpaca");
-check("its realised vol is ours", badge("SPY", "Realised"), "s-computed");
-// A near-dated chain genuinely is both, and the board must not pick a side.
-check("QQQ's IV is a mix and says so", badge("QQQ", "IV"), "s-mixed");
-check("a fact that never formed carries no badge at all",
-      badge("QQQ", "IV rank"), "none");
-
-section(9, "the rate limiter's refusal reaches the page");
-await scen("boardlimit");
-await mount("board");
-el("obGo").click();
-await sleep(600);
-check("the 429 is shown, not swallowed",
-      /may be forced once every 20s/.test(text()), true);
-check("and it names the budget it is protecting",
-      /200\\/min the live share ladders/.test(text()), true);
-check("the board is still on screen behind it",
-      el("view").querySelectorAll(".b-row").length > 0, true);
-check("and Refresh is a button again, not stuck on Measuring",
-      el("obGo").textContent.trim(), "Refresh");
+check("so does its older name",
+      /The Data room is gone\\./.test(text()), true);
+check("no board row is rendered anywhere",
+      el("view").querySelectorAll(".b-row").length, 0);
+check("an old hash lights the Overview rather than nothing",
+      VIEWS.options.activeTab({ tab: "plays" }), "perf");
 await scen("default");
 
-section(10, "the Options Overview: measured, or it says why not");
+section(6, "the Options Overview: measured, or it says why not");
 await scen("perf");
 await mount("perf");
 const ovText = () => el("view").textContent.replace(/\\s+/g, " ");
@@ -3225,7 +3860,7 @@ check("a ticker with nothing open prints a dash, not 0.00",
       [...el("view").querySelectorAll("td")]
         .some((td) => td.textContent.trim() === "\u2014"), true);
 
-section(11, "the two states that were invisible before this page existed");
+section(7, "the two states that were invisible before this page existed");
 check("an open position with no resting exit is the first thing on it",
       /no resting take-profit/.test(ovText()), true);
 check("and it is drawn as critical, not as a note",
@@ -3241,7 +3876,7 @@ check("and it names the check that refused it",
 check("with the sentence it actually printed",
       /\\$741000 against a \\$53155 cap/.test(ovText()), true);
 
-section(12, "a fresh account reads as nothing yet, not as a broken page");
+section(8, "a fresh account reads as nothing yet, not as a broken page");
 await scen("perfempty");
 await mount("perf");
 check("it says no play has opened yet",
@@ -3253,7 +3888,7 @@ check("the capital card is still real money",
 check("nothing on it is drawn as a fault",
       el("view").querySelectorAll(".note.bad").length, 0);
 
-section(13, "no metrics module is a STATED fact, not a page of empty cards");
+section(9, "no metrics module is a STATED fact, not a page of empty cards");
 await scen("perfstub");
 await mount("perf");
 check("the page says so once, at the top",

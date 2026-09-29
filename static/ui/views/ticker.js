@@ -48,6 +48,26 @@ import {
 import { tickerMetrics } from "../tkmetrics.js";
 import { MiniSeries, FORMS } from "../tkseries.js";
 import { ensureCSS } from "../tkstyle.js";
+/* The OPTIONS pane is its own module. It is where the Options tab's Plays room
+   went when that room was deleted: the arm switch, the open structures, the
+   one closing order and the volatility facts, all keyed by THIS symbol.
+   Separate file because views/options.js is at the compile-stack limit of the
+   2017 Babel test_optview.py runs it through. Its payload is proved by
+   test_optticker.py (which also holds the source invariants for the pane) and
+   its DOM by the browser half of the suite against mockshell.py. */
+import { mountOptions, hasOptions } from "../tickeropts.js";
+import {
+  METRIC_GROUPS, metricOf, caveatsOf, isEmptyBlock,
+  perTrade, dailyRealised, contributions,
+} from "../tkperf.js";
+import { ensureVisCSS, groupHeadHTML } from "../tkvis.js";
+/* THE SHARED VISUAL KIT, not a second one. `calendar.js` takes perf.daily()'s
+   own row shape verbatim and `viz.js` owns the donut, the histogram and the
+   ranked bar for every page in this dashboard. Both inject their own CSS on
+   import. A ticker-page copy of any of them would be the second component for
+   one idea, which is how two pages come to disagree about one number. */
+import { plCalendars } from "../calendar.js";
+import { donut, histogram, hbar } from "../viz.js";
 
 /* ============================================================== page state */
 /* The hub payload is this page's own, not the shell's: S.ticker is the
@@ -59,6 +79,22 @@ const H = {
   cfgOpen: "",           // which strategy's settings pane is expanded
   cfgDirty: false,       // ... and has been typed into, so a poll must not
                          // re-render it out from under the cursor
+
+  /* THE ACCOUNT'S OWN ARITHMETIC, from perf.py. `perf` is this ticker's block
+     out of /api/perf/metrics?symbol=, which is the SAME shape the portfolio
+     page renders -- perf.per_ticker and perf.portfolio return byte-identical
+     key sets so one component draws both. `perfWhy` carries the 404 for a
+     symbol that has never traded and holds nothing, which is a real answer
+     and not an error. */
+  perf: null, perfWhy: "", perfAt: 0, perfBusy: false,
+
+  /* THE ONE BANK. `bank` caches /api/bank/entries by (kind, query) because
+     the unfiltered call is 259 rows and 257 KB -- measured by the agent that
+     built it -- and a dropdown that downloads a quarter of a megabyte on every
+     repaint is a dropdown nobody opens twice. `att` is /api/bank/attached for
+     this symbol, which names the STORE each attachment came from. */
+  bank: {}, bankKind: "ladder", bankQ: "", bankPick: "", bankBusy: false,
+  att: null, attWhy: "",
 };
 let panelC = null;       // the price chart
 let series = null;       // the record curve
@@ -68,6 +104,14 @@ let hubTimer = null;
    TRADING budget and cached 20 s. Polling faster than that cache spends the
    ladders' request budget and returns the same answer. */
 const HUB_POLL_MS = 20000;
+
+/* /api/perf/* is served off ONE report cached 60 s behind a build lock (app.py
+   _PERF_TTL), because building it re-reads the journal and CLAUDE.md measures
+   that at 5.9-6.5 s over the VM's 21 MB file. Asking more often than the cache
+   returns the same payload and, on a cold cache, queues behind a handler
+   slower than the poll -- which is the documented cause of /api/overview
+   taking 39 s. So this page asks once a minute and no faster. */
+const PERF_TTL_MS = 60000;
 
 async function loadHub(sym, { quiet = false } = {}) {
   if (H.busy) return;
@@ -89,6 +133,98 @@ async function loadHub(sym, { quiet = false } = {}) {
   repaint();
 }
 
+/* This ticker's block out of perf.py.
+
+   A 404 here is not a failure: /api/perf/metrics answers 404 for a symbol with
+   no closed trade and nothing open, which is a MEASUREMENT -- "this ticker has
+   no record" -- and it is rendered as that sentence rather than as a red
+   error. Anything else is an error and says so. */
+async function loadPerf(sym, { force = false } = {}) {
+  if (H.perfBusy) return;
+  if (!force && H.perf && Date.now() - H.perfAt < PERF_TTL_MS) return;
+  H.perfBusy = true;
+  const acct = S.account;
+  try {
+    const r = await GET("/api/perf/metrics?symbol=" + encodeURIComponent(sym));
+    if (acct !== S.account || H.sym !== sym) return;
+    H.perf = r.metrics || null;
+    H.perfWhy = "";
+    H.perfNone = false;
+    H.perfAt = Date.now();
+    H.perfStale = !!r.stale;
+    H.perfAge = r.cache_age_s;
+  } catch (e) {
+    if (acct !== S.account || H.sym !== sym) return;
+    const msg = e.message || String(e);
+    H.perf = null;
+    H.perfAt = Date.now();
+    /* THE 404 IS AN ANSWER, and separating it from a failure is the whole
+       point of this flag. app.py answers 404 for a symbol with no closed
+       trade and nothing open, which MEANS "this ticker has no record" --
+       measured, not missing. Without the distinction an untraded ticker read
+       "the account's metric set is not available … this page could not read
+       it", which says the report is broken when the report answered
+       perfectly well. Seen in a browser on NVDA. */
+    H.perfNone = /has no closed trade/i.test(msg);
+    H.perfWhy = H.perfNone
+      ? msg
+      : "the account's performance report could not be read — " + msg;
+  } finally {
+    H.perfBusy = false;
+  }
+  repaint();
+}
+
+/* What the ONE bank says is attached here, each row naming its own store.
+
+   This is a SECOND opinion beside hub's strategy cards on purpose. hub knows
+   the ladder and the tailored plays because it runs them; the bank also knows
+   the indicator documents and the banked option structures, which live in
+   their own files. Where the two disagree the page shows both and says which
+   store said what, which is the ground-truth rule in CLAUDE.md applied to a
+   list of strategies rather than to a position. */
+async function loadAttached(sym) {
+  try {
+    const r = await GET("/api/bank/attached?symbol=" + encodeURIComponent(sym));
+    if (H.sym !== sym) return;
+    H.att = r.attached || [];
+    H.attWhy = "";
+  } catch (e) {
+    if (H.sym !== sym) return;
+    H.att = null;
+    H.attWhy = e.message || String(e);
+  }
+  repaint();
+}
+
+/* One page of the bank, cached by (kind, query).
+
+   `attachable=true` drops the entries that cannot go on a ticker at all --
+   coded strategies, which run only in the backtester -- so the dropdown does
+   not offer something the server will refuse. The reason it refuses is still
+   readable: the Strategies page lists them whole. */
+function bankKey(kind, q) { return kind + "\u0000" + q; }
+
+async function loadBank(kind, q) {
+  const key = bankKey(kind, q);
+  const hit = H.bank[key];
+  if (hit && Date.now() - hit.at < 120000) return hit;
+  if (H.bankBusy) return hit || null;
+  H.bankBusy = true;
+  try {
+    const qs = "?attachable=true&kind=" + encodeURIComponent(kind)
+      + (q ? "&q=" + encodeURIComponent(q) : "");
+    const r = await GET("/api/bank/entries" + qs);
+    H.bank[key] = { rows: r.entries || [], at: Date.now(), err: "" };
+  } catch (e) {
+    H.bank[key] = { rows: [], at: Date.now(), err: e.message || String(e) };
+  } finally {
+    H.bankBusy = false;
+  }
+  repaint();
+  return H.bank[key];
+}
+
 function startPoll(sym) {
   if (hubTimer) { clearTimeout(hubTimer); hubTimer = null; }
   const again = () => {
@@ -98,7 +234,11 @@ function startPoll(sym) {
       // stop condition is "this is no longer the page on screen"
       if (H.sym !== sym || !S.view || S.view.kind !== "ticker"
           || S.view.sym !== sym) return;
-      if (!document.hidden) await loadHub(sym, { quiet: true });
+      if (!document.hidden) {
+        await loadHub(sym, { quiet: true });
+        // self-throttled to PERF_TTL_MS, so this is a no-op most ticks
+        loadPerf(sym);
+      }
       again();
     }, HUB_POLL_MS);
   };
@@ -130,11 +270,27 @@ const hasLadder = (d) => attachedStrats(d).some((s) => s.id === "ladder");
 function nsub(m, unitWord = "trade", extra = "") {
   const bits = [];
   const n = m && typeof m.n === "number" ? m.n : 0;
-  if (n) bits.push(`${n} ${unitWord}${n === 1 ? "" : "s"}`);
+  // a unit word that is already a PHRASE ("closed + open") is not pluralised
+  // by bolting an s on the end of it: "56 trade or positions" is what that
+  // produces, and it was on screen before this line existed
+  if (n) bits.push(`${n} ${unitWord}${n === 1 || /[ +]/.test(unitWord) ? "" : "s"}`);
   if (extra) bits.push(extra);
   const why = m && (m.value === null || m.thin) ? mreason(m) : "";
   if (why) bits.push(`<span class="warn">${esc(shortWhy(why))}</span>`);
   return bits.join(" · ");
+}
+
+/* The sample line under "Realised + open". Its `n` is closed trades PLUS open
+   positions, which is two counts in one number, so it is spelt out rather than
+   pluralised into "56 trade or positions". */
+function totalSub(P) {
+  const t = metricOf(P, { key: "trades" });
+  const o = metricOf(P, { key: "open_pl" });
+  const tn = (t && t.n) || 0, on = (o && o.n) || 0;
+  const m = metricOf(P, { key: "total_pl" });
+  const why = (m && m.value === null) ? shortWhy(mreason(m)) : "";
+  return `${tn} closed · ${on} still open`
+    + (why ? ` · <span class="warn">${esc(why)}</span>` : "");
 }
 
 /* The caveat, trimmed for a tile. The sentences these carry are written to be
@@ -397,6 +553,11 @@ function mountOverview(sym) {
       </div>
     </div>
 
+    ${panel("Record", `<div id="tkOvRec"></div>`,
+      { sub: "realised is never shown on its own — the open book is beside it",
+        actions: `<button class="btn sm" data-go="ticker" data-sym="${esc(sym)}"
+          data-tab="history">Full metric set</button>` })}
+
     ${panel("Strategies on this ticker", `<div id="tkStratStrip"></div>`,
       { sub: "the ladder and the options plays are peers here",
         actions: `<button class="btn sm" id="tkGoStrat">Manage</button>` })}`;
@@ -464,6 +625,18 @@ function paintOverview() {
     tile({ label: "Spread", metric: mk.spread_pct, dp: 3, sub: "of the mid" }),
     tile({ label: "Volume", metric: mk.volume, sub: "last session" }),
     tile({ label: "ADV", metric: mk.adv, hint: mreason(mk.adv), sub: nsub(mk.adv, "session") }),
+    /* Volume against its own average, which is the one thing a raw volume
+       cannot say. Computed HERE and only when BOTH sides were measured -- a
+       ratio against an unmeasured average is a ratio against nothing, and
+       both of these really do go missing (`mk.why` names the case). */
+    tile({ label: "Volume vs ADV",
+           html: (measured(mk.volume) && measured(mk.adv) && Number(mv(mk.adv)))
+             ? `<span class="num">${(Number(mv(mk.volume))
+                 / Number(mv(mk.adv))).toFixed(2)}×</span>`
+             : unmeasured(measured(mk.adv)
+                 ? mreason(mk.volume) || "no volume for the last session"
+                 : mreason(mk.adv) || "no average to compare against"),
+           sub: "last session over the average" }),
     tile({ label: "Sessions",
            html: mk.sessions == null
              ? unmeasured(mk.why || "no daily bars held")
@@ -472,6 +645,47 @@ function paintOverview() {
   ], { cols: 2, cls: "plain" });
 
   el("tkHold").innerHTML = holdBlock(d);
+
+  /* The three numbers the owner's complaint is about, on the page he opens
+     first. Realised ALONE is the lie -- on this account it is 322 rows and
+     zero losers -- so it never appears without the open mark and their sum
+     next to it, and the sum is the big tile. */
+  const ovr = el("tkOvRec");
+  if (ovr) {
+    const P = H.perf;
+    if (P && !isEmptyBlock(P)) {
+      const t = (key, label, opt = {}) => {
+        const m = metricOf(P, { key });
+        return tile(Object.assign({
+          label, metric: m, signed: opt.signed !== false, dp: opt.dp,
+          hint: mreason(m), sub: opt.sub || nsub(m, opt.word || "trade"),
+        }, opt.extra || {}));
+      };
+      ovr.innerHTML = tileGrid([
+        t("total_pl", "Realised + open", { extra: { big: true },
+          sub: totalSub(P) }),
+        t("net_pl", "Realised"),
+        t("open_pl", "Open P/L", { word: "position" }),
+        t("win_rate", "Win rate", { signed: false, dp: 1 }),
+        t("profit_factor", "Profit factor", { signed: false, dp: 2 }),
+        t("max_drawdown", "Max drawdown", { signed: false }),
+      ], { cols: 3 })
+        + (caveatsOf(P).length
+          ? `<div class="note warn" style="margin-top:14px">${
+              esc(caveatsOf(P)[0])}</div>` : "");
+    } else if (P || H.perfNone) {
+      ovr.innerHTML = emptyState({
+        title: "No record on this ticker yet",
+        body: `Nothing has closed here and nothing is open, so there is no
+          realised P/L, no win rate and no drawdown. These are absent, not zero.`,
+      });
+    } else {
+      ovr.innerHTML = `<div class="note ${H.perfWhy ? "bad" : "info"}">${
+        esc(H.perfWhy || "reading this ticker's block out of the account's "
+          + "performance report…")}</div>`;
+    }
+  }
+
   el("tkStratStrip").innerHTML = stratCards(d, { compact: true });
 
   // an options play's fills are not in the ladder's trade file
@@ -505,7 +719,42 @@ function holdBlock(d) {
       tile({ label: "Options value", html: `<span class="num">${money(o.value)}</span>` }),
       tile({ label: "Options P/L", html: sgn(o.open_pl), sub: "at Alpaca's mark" }));
   }
-  return tileGrid(tiles, { cols: 2, cls: "plain" });
+  /* The split between the two asset classes on this one ticker, which is the
+     thing the tiles cannot show: six option legs and 400 shares are two very
+     different books and they are held under the same symbol.
+
+     A SHORT position has a negative market value at Alpaca and a donut cannot
+     draw a negative slice, so the magnitudes are passed and the caption says
+     they are magnitudes. viz.donut refuses a negative outright rather than
+     absolutising it silently -- the absolutising is done here, in the open,
+     where the label can say so. */
+  /* The split between the two asset classes held under this one symbol,
+     which the tiles cannot show: six option legs and 400 shares are very
+     different books.
+
+     The RAW market values go in, signs and all. viz.donut REFUSES a negative
+     slice and says why -- a short position's market value is negative at
+     Alpaca, and drawing its magnitude would make a short look like an
+     allocation. Absolutising it here to get a picture would be choosing the
+     picture over the fact. */
+  const parts = [];
+  if (p && p.value !== null && p.value !== undefined) {
+    parts.push({ label: Number(p.qty) < 0 ? "Shares (short)" : "Shares",
+                 value: Number(p.value) });
+  }
+  if (o && o.value !== null && o.value !== undefined) {
+    parts.push({ label: "Options", value: Number(o.value) });
+  }
+  const split = parts.length > 1
+    ? `<div style="margin-top:var(--s5)">${donut({
+        slices: parts, unit: "usd", size: 132, centerSub: "market value",
+        empty: "No split to draw",
+        why: "a ring divides a whole into shares and a short position's "
+           + "market value is negative at Alpaca, so there is no share to "
+           + "draw for it",
+      })}</div>`
+    : "";
+  return tileGrid(tiles, { cols: 2, cls: "plain" }) + split;
 }
 
 /* ============================================================ strategy cards */
@@ -648,6 +897,41 @@ function stratCards(d, opt = {}) {
 }
 
 /* ============================================================ STRATEGIES tab */
+/* THE ONE BANK, on one ticker.
+
+   What this replaces is the thing the owner called "the dumbest thing I have
+   ever seen": four separate shelves -- ladder presets in presets.py, indicator
+   documents in strategies/, 231 researched option structures in options/bank/
+   and two tailored plays in optplays -- reachable from four different pages,
+   with a per-ticker dropdown (`/api/presets`) that could see exactly three of
+   the 259. A strategy on the shelf did not appear where it would be used.
+
+   There is now one registry (`bank.py`, `GET /api/bank/entries`) over all four
+   stores with one id space, `"<store>:<slug>"`, and ONE attach call for every
+   kind. An option structure goes on a ticker exactly the way a ladder preset
+   does, and SEVERAL can be on one ticker at once.
+
+   TWO THINGS THE PANE HAS TO SAY OUT LOUD, both measured by the agent that
+   built the bank and neither of them hidden here:
+
+     * A ladder-shaped entry REPLACES the ladder already on the ticker, because
+       a ticker has exactly one engine config. The confirmation names what it
+       is about to replace.
+     * A banked option STRUCTURE records the ticker's chosen options strategy
+       and NOTHING TRADES IT YET -- optengine sends the two tailored plays and
+       nothing else. Every such row carries that sentence from the server
+       (`trades.why`) and it is rendered, not swallowed.
+
+   The dropdown is filtered on the SERVER (`?kind=&q=`): the unfiltered call is
+   259 rows and 257 KB, and a select with 259 options in it is a list nobody
+   reads anyway. */
+const BANK_KINDS = [
+  ["ladder", "Ladder"],
+  ["indicator", "Indicator"],
+  ["option", "Option structure"],
+  ["option-tailored", "Tailored play"],
+];
+
 function mountStrategies(sym) {
   ensureFieldStyles();
   /* Everything hangs off one wrapper that innerHTML replaces on every mount.
@@ -656,10 +940,22 @@ function mountStrategies(sym) {
      detach confirmations for one click. */
   el("view").innerHTML = `<div id="tkStratRoot">
     <div id="tkWarn"></div>
-    ${panel("Attached", `<div id="tkAttached"><div class="empty">Loading…</div></div>`,
+    ${panel("Attached", `<div id="tkAttached"><div class="empty">Loading…</div></div>
+      <div id="tkAttBank"></div>`,
       { sub: "each with its own state, its own settings and its own P/L",
         actions: `<span class="faint" id="tkAttCount"></span>` })}
+
+    ${panel("Where this ticker's money came from", `<div id="tkContrib2"></div>`,
+      { sub: "each attached strategy, by the size of what it booked" })}
+
     ${panel("Attach a strategy", `
+      <div class="tkv-bankbar">
+        ${segmented({ options: BANK_KINDS, value: H.bankKind, id: "tkBankKind",
+                      size: "sm", label: "Kind of strategy" })}
+        <label class="f tkv-bq"><span>Search the bank</span>
+          <input type="search" id="tkBankQ" placeholder="name, slug or summary"
+                 autocomplete="off" value="${esc(H.bankQ)}"></label>
+      </div>
       <div class="tkx-att">
         <label class="f"><span>Strategy</span>
           <select id="tkPick"><option>loading…</option></select></label>
@@ -668,7 +964,9 @@ function mountStrategies(sym) {
       <div class="hint" id="tkPickDesc"></div>
       <div class="tip"><b>Attaching never arms.</b> A ladder arrives stopped and
         in dry run; an options play is assigned and the arm file is not touched.
-        Nothing transmits until you arm it from its own control.</div>`)}
+        Nothing transmits until you arm it from its own control.</div>`,
+      { actions: `<span class="faint" id="tkBankCount"></span>` })}
+
     ${panel("Remove from this account", `<div class="tip" style="margin-top:0">
       ${esc(sym)} leaves this account's ticker list. It is refused while a
       strategy is still attached, and <b>nothing at Alpaca is cancelled or
@@ -681,7 +979,26 @@ function mountStrategies(sym) {
 
   el("tkAttach").onclick = () => act(() => attachPicked(sym));
   el("tkForget").onclick = () => act(() => forget(sym));
-  el("tkPick").addEventListener("change", describePick);
+  el("tkPick").addEventListener("change", () => {
+    H.bankPick = el("tkPick").value;
+    describePick();
+  });
+  wireSegmented("tkBankKind", (k) => {
+    H.bankKind = k;
+    H.bankPick = "";
+    fillBankPick();                       // paint what is cached, then fetch
+    loadBank(k, H.bankQ);
+  });
+  /* Typing is debounced against the SERVER, not against the paint: `q` is a
+     server-side filter over 259 rows and a request per keystroke would be
+     nine requests for one word. */
+  let qt = null;
+  el("tkBankQ").addEventListener("input", (e) => {
+    H.bankQ = e.target.value.trim();
+    if (qt) clearTimeout(qt);
+    const want = H.bankQ;
+    qt = setTimeout(() => { if (H.bankQ === want) loadBank(H.bankKind, want); }, 260);
+  });
 
   el("tkStratRoot").addEventListener("click", (e) => {
     if (e.target.closest("[data-open-ladder]")) {
@@ -694,6 +1011,8 @@ function mountStrategies(sym) {
       el("tkAttached").innerHTML = stratCards(H.d);
       return;
     }
+    const bd = e.target.closest("[data-bank-detach]");
+    if (bd) { act(() => bankDetach(sym, bd.dataset.bankDetach)); return; }
     const det = e.target.closest("[data-detach]");
     if (det) act(() => detach(sym, det.dataset.detach));
   });
@@ -708,15 +1027,147 @@ function mountStrategies(sym) {
   });
 }
 
+/* ------------------------------------------------------- the bank dropdown */
+const bankRows = () => {
+  const hit = H.bank[bankKey(H.bankKind, H.bankQ)];
+  return hit ? hit : null;
+};
+
+/* The entry ids hub's own cards already account for, so the same strategy is
+   not listed twice on one page under two names. */
+function coveredIds() {
+  const out = new Set();
+  const cards = attachedStrats(H.d);
+  for (const c of cards) {
+    if (c.id === "ladder") {
+      // the ladder card IS whichever preset is on the engine
+      if (c.preset) out.add("preset:" + c.preset);
+      out.add("ladder");
+    } else {
+      out.add("play:" + c.id);
+    }
+  }
+  return out;
+}
+
+function fillBankPick() {
+  const sel = el("tkPick");
+  if (!sel || document.activeElement === sel) return;
+  const hit = bankRows();
+  const count = el("tkBankCount");
+  if (!hit) {
+    sel.innerHTML = `<option value="">loading the bank…</option>`;
+    el("tkAttach").disabled = true;
+    if (count) count.textContent = "";
+    return;
+  }
+  if (hit.err) {
+    sel.innerHTML = `<option value="">the bank could not be read</option>`;
+    el("tkAttach").disabled = true;
+    if (count) count.innerHTML = `<span class="down">${esc(hit.err)}</span>`;
+    return;
+  }
+  const on = coveredIds();
+  const rows = hit.rows;
+  if (count) {
+    count.textContent = rows.length
+      ? `${rows.length} in the bank${H.bankQ ? ` matching “${H.bankQ}”` : ""}`
+      : "nothing matches";
+  }
+  if (!rows.length) {
+    sel.innerHTML = `<option value="">nothing in the bank matches that</option>`;
+    el("tkAttach").disabled = true;
+    return;
+  }
+  /* PERSONAL FIRST, and in its own group. The bank sorts that way already
+     (personal before standard WITHIN a kind) and the optgroup makes it
+     visible: two entries the owner wrote himself are otherwise lost among
+     231 researched ones. */
+  const group = (origin, label) => {
+    const mine = rows.filter((r) => r.origin === origin);
+    if (!mine.length) return "";
+    return `<optgroup label="${esc(label)} (${mine.length})">${mine.map((r) =>
+      `<option value="${esc(r.id)}"${on.has(r.id) ? " disabled" : ""}>${
+        esc(r.name)}${on.has(r.id) ? " — already on " + esc(H.sym) : ""}${
+        (r.tickers || []).length && !on.has(r.id)
+          ? " — on " + esc((r.tickers || []).join(", ")) : ""}</option>`).join("")}</optgroup>`;
+  };
+  sel.innerHTML = group("personal", "Mine") + group("standard", "Standard");
+  const want = H.bankPick && rows.some((r) => r.id === H.bankPick)
+    ? H.bankPick : "";
+  if (want) sel.value = want;
+  H.bankPick = sel.value;
+  el("tkAttach").disabled = !sel.value;
+  describePick();
+}
+
 function describePick() {
   const sel = el("tkPick");
   const box = el("tkPickDesc");
   if (!sel || !box) return;
-  const s = H.d && (H.d.available_strategies || []).find((x) => x.id === sel.value);
-  const n = s ? (s.settings_schema || []).length : 0;
-  box.textContent = s
-    ? `${s.label} — ${s.kind}, ${n} setting${n === 1 ? "" : "s"} of its own.`
-    : "";
+  const hit = bankRows();
+  const r = hit && (hit.rows || []).find((x) => x.id === sel.value);
+  if (!r) { box.innerHTML = ""; return; }
+  const n = (r.params_schema || []).length;
+  const bits = [];
+  bits.push(`<b>${esc(r.name)}</b> <span class="mono faint">${esc(r.id)}</span>`);
+  if (r.summary) bits.push(esc(r.summary));
+  bits.push(`${n ? `${n} setting${n === 1 ? "" : "s"} of its own`
+                 : esc(r.params_reason || "no settings of its own")}.`);
+  if ((r.tickers || []).length) {
+    bits.push(`Already on <b>${esc(r.tickers.join(", "))}</b>.`);
+  }
+  box.innerHTML = bits.join(" ")
+    + (r.trades && !r.trades.ok
+        ? `<div class="note warn" style="margin-top:10px"><b>Attaching this
+           does not trade it.</b> ${esc(r.trades.why)}</div>`
+        : "");
+}
+
+/* ------------------------------------ what the BANK says is attached here */
+/* hub's cards cover the ladder and the tailored plays because hub runs them.
+   The indicator documents and the banked option structures live in their own
+   files and hub has no card for them, so they are drawn here from
+   /api/bank/attached -- each row naming the store the fact came from, which
+   is the ground-truth rule applied to a list of strategies. */
+function bankOnlyCards(sym) {
+  if (H.attWhy) {
+    return `<div class="note warn" style="margin-top:14px">The bank's own list
+      of what is attached to ${esc(sym)} could not be read — ${esc(H.attWhy)}.
+      The cards above are hub's and are unaffected.</div>`;
+  }
+  if (!H.att) return "";
+  const on = coveredIds();
+  const extra = H.att.filter((a) => !on.has(a.id));
+  if (!extra.length) return "";
+  const card = (a) => `<div class="tkx-sc">
+    <div class="tkx-sc-h">
+      <span class="tkx-sc-l">${esc(a.name)}</span>
+      <span class="tkx-sc-k">${esc(a.kind || "")}${
+        a.origin ? " · " + esc(a.origin) : ""}</span>
+      ${stateChip(a.enabled ? "idle" : "off",
+                  { title: a.trades && a.trades.ok
+                      ? "attached and enabled; nothing is armed"
+                      : "recorded on this ticker" })}
+    </div>
+    <dl class="tkx-kv">
+      <dt>Entry</dt><dd><span class="mono faint">${esc(a.id)}</span></dd>
+      <dt>Recorded in</dt><dd><span class="mono faint">${esc(a.source || "")}</span></dd>
+      ${Object.keys(a.settings || {}).length
+        ? `<dt>Overridden</dt><dd>${esc(Object.keys(a.settings).join(", "))}</dd>`
+        : ""}
+    </dl>
+    ${a.why ? `<div class="note bad" style="margin:12px 0 0">${esc(a.why)}</div>` : ""}
+    ${a.trades && !a.trades.ok
+      ? `<div class="note warn" style="margin:12px 0 0"><b>Nothing trades this
+         yet.</b> ${esc(a.trades.why)}</div>` : ""}
+    <div class="tkx-sc-a">
+      <button class="btn sm danger" data-bank-detach="${esc(a.id)}">Detach</button>
+    </div></div>`;
+  return `<div class="tkv-bankhead">From the strategy bank — ${extra.length}
+      entr${extra.length === 1 ? "y" : "ies"} hub has no engine card for, each
+      naming its own store</div>
+    <div class="tkx-strats">${extra.map(card).join("")}</div>`;
 }
 
 function paintStrategies() {
@@ -732,22 +1183,26 @@ function paintStrategies() {
      Measured in a browser: refs went stale mid-edit on the second poll. */
   const busy = box.contains(document.activeElement) || H.cfgDirty;
   if (!busy) box.innerHTML = stratCards(d);
+  const bankBox = el("tkAttBank");
+  if (bankBox && !busy) bankBox.innerHTML = bankOnlyCards(d.symbol);
+
+  const extra = H.att
+    ? H.att.filter((a) => !coveredIds().has(a.id)).length : 0;
   const n = attachedStrats(d).length;
   const c = el("tkAttCount");
-  if (c) c.textContent = n ? `${n} on ${d.symbol}` : "none";
-
-  const sel = el("tkPick");
-  if (sel && document.activeElement !== sel) {
-    const avail = d.available_strategies || [];
-    const cur = sel.value;
-    sel.innerHTML = avail.length
-      ? avail.map((s) =>
-          `<option value="${esc(s.id)}">${esc(s.label)} — ${esc(s.kind)}</option>`).join("")
-      : `<option value="">every strategy is already attached</option>`;
-    if (avail.some((s) => s.id === cur)) sel.value = cur;
-    el("tkAttach").disabled = !avail.length;
-    describePick();
+  if (c) {
+    c.textContent = (n + extra)
+      ? `${n + extra} on ${d.symbol}${extra ? ` (${extra} from the bank)` : ""}`
+      : "none";
   }
+
+  const cb = el("tkContrib2");
+  if (cb) {
+    const c2 = strategyContributions(d);
+    cb.innerHTML = contribBars(d, c2) + contribNote(d, c2);
+  }
+
+  fillBankPick();
 }
 
 /* The settings pane for one attached strategy, built from its own
@@ -821,24 +1276,67 @@ async function saveStrategy(sym, id, form) {
   await loadHub(sym);
 }
 
+/* ONE attach call, every kind. `bank.attach` delegates to that subsystem's
+   own audited entry point -- hub.set_strategy for a ladder or a play,
+   optplays.Assignments for the plays' store -- so this is not a second way to
+   start a strategy, it is the same one reached from one place.
+
+   The confirmation names the two things that are easy to get wrong: a
+   ladder-shaped entry REPLACES the ladder already on the ticker (one engine
+   config per symbol), and a banked option structure is RECORDED and not
+   traded. Both sentences come from the server's own row, not from here. */
 async function attachPicked(sym) {
-  const id = el("tkPick").value;
+  const sel = el("tkPick");
+  const id = sel ? sel.value : "";
   if (!id) return;
-  const s = (H.d.available_strategies || []).find((x) => x.id === id);
+  const hit = bankRows();
+  const r = (hit && (hit.rows || []).find((x) => x.id === id)) || { name: id };
+  const ladderish = id.indexOf("preset:") === 0 || id.indexOf("doc:") === 0;
+  const cur = attachedStrats(H.d).find((c) => c.id === "ladder");
+  const replacing = ladderish && cur
+    ? `<br><br><b>This replaces the ladder strategy already on ${esc(sym)}</b>
+       (${esc(cur.preset || "custom")}). A ticker has exactly one engine
+       config, so there is no way to run two ladder strategies at once. Open
+       lots keep their exits.`
+    : "";
   if (!await ask({
-    title: `Attach ${esc(s ? s.label : id)} to ${esc(sym)}?`, ok: "Attach",
-    body: `On <b>${esc(acctLabel())}</b> (${esc(acctNumber() || "—")}).<br><br>
-      <b>Nothing is armed and no order is placed.</b> ${
-        id === "ladder"
-          ? `A ladder is created <b>stopped and in dry run</b> on the default
-             preset; you size it on the Ladder tab afterwards.`
-          : `The play is assigned to ${esc(sym)}. It can only open once the
-             options plays are armed, which is a separate control.`}`,
+    title: `Attach ${esc(r.name)} to ${esc(sym)}?`, ok: "Attach",
+    body: `On <b>${esc(acctLabel())}</b> (${esc(acctNumber() || "—")}).
+      ${r.summary ? `<br><br>${esc(r.summary)}` : ""}${replacing}<br><br>
+      <b>Nothing is armed and no order is placed.</b>${
+        r.trades && !r.trades.ok
+          ? `<br><br><b>And nothing trades it yet:</b> ${esc(r.trades.why)}`
+          : ""}`,
   })) return;
-  await POST(`/api/hub/ticker/${encodeURIComponent(sym)}/strategy`,
-             { strategy: id, action: "attach", by: "dashboard" });
-  toast(`${esc(s ? s.label : id)} attached to ${sym} — not armed.`, "ok");
-  await loadHub(sym);
+  const out = await POST("/api/bank/attach",
+                         { symbol: sym, id, by: "dashboard" });
+  toast(`${esc(r.name)} attached to ${sym} — not armed.${
+    out && out.replaced ? ` Replaced ${esc(out.replaced)}.` : ""}`, "ok");
+  H.bankPick = "";
+  H.bank = {};                 // `tickers` on every row has just changed
+  await Promise.all([loadHub(sym), loadAttached(sym),
+                     loadBank(H.bankKind, H.bankQ)]);
+}
+
+/* Detaching a bank entry hub has no card for. It is a separate button from
+   the hub one on purpose: they write different stores, and a single button
+   that guessed which would be the place a wrong guess is invisible. */
+async function bankDetach(sym, id) {
+  const row = (H.att || []).find((a) => a.id === id) || { name: id };
+  if (!await ask({
+    title: `Detach ${esc(row.name)} from ${sym}?`, danger: true,
+    ok: "Detach", requireWord: "DETACH",
+    body: `${esc(row.name)} is removed from ${esc(sym)} in
+      <span class="mono">${esc(row.source || "the bank's own store")}</span>.
+      <b>Nothing at Alpaca is cancelled or sold</b> and ${sym} stays on the
+      ticker list.`,
+  })) return;
+  await POST("/api/bank/attach",
+             { symbol: sym, id, action: "detach", by: "dashboard" });
+  toast(`${esc(row.name)} detached from ${sym}.`, "ok");
+  H.bank = {};
+  await Promise.all([loadHub(sym), loadAttached(sym),
+                     loadBank(H.bankKind, H.bankQ)]);
 }
 
 async function detach(sym, id) {
@@ -863,7 +1361,11 @@ async function detach(sym, id) {
   H.cfgOpen = "";
   H.cfgDirty = false;
   toast(`${esc(c.label)} detached from ${sym}.`, "ok");
-  await loadHub(sym);
+  // the bank's own list and every row's `tickers` have just changed too, and
+  // the attached COUNT on this tab is the sum of both lists
+  H.bank = {};
+  await Promise.all([loadHub(sym), loadAttached(sym),
+                     loadBank(H.bankKind, H.bankQ)]);
 }
 
 async function forget(sym) {
@@ -879,22 +1381,113 @@ async function forget(sym) {
   go({ kind: "overview" });
 }
 
-/* =============================================================== HISTORY tab */
+/* =============================================================== RECORD tab */
+/* This ticker's record, measured by perf.py -- the SAME block the portfolio
+   page renders, because `perf.per_ticker` and `perf.portfolio` return
+   byte-identical key sets so one component draws both and the two pages can
+   never quietly diverge.
+
+   WHAT IS AND IS NOT ON THIS PAGE, and it is the owner's complaint in one
+   paragraph. "Realised" here is the strategies' own logs, and on this account
+   that set has 322 rows and ZERO losers -- the ladder has no stop loss, so a
+   losing lot is never closed and never books. A realised figure alone is
+   therefore structurally a wins-only figure, and a page that leads with it is
+   lying by omission. So: realised is shown NEXT TO the open mark and their
+   SUM, perf.py's own `caveats[]` ride above the numbers as one banner rather
+   than being scattered over thirty tooltips, and the risk block says on its
+   face which curve it was measured on. There is no "booked" anywhere. */
 function mountHistory(sym) {
   el("view").innerHTML = `
     <div id="tkWarn"></div>
-    ${panel(`${esc(sym)}'s own record`, `<div id="tkRec"></div>
+    ${panel(`${esc(sym)}'s record`, `<div id="tkRecCav"></div>
+      <div id="tkRec"></div>
       <div class="tip" id="tkRecSrc"></div>`,
-      { sub: "every figure carries the number of trades behind it" })}
-    ${panel("Realised curve", `<div id="tkCurve"></div>`,
-      { sub: "cumulative booked P/L, oldest first",
-        actions: segmented({ options: FORMS, value: H.form, id: "tkForm",
-                             size: "sm", label: "Chart form" }) })}
+      { sub: "measured by perf.py — the same arithmetic the portfolio runs",
+        actions: `<span class="faint" id="tkRecAge"></span>` })}
+
+    ${panel("P/L calendar", `<div id="tkCal"></div>`,
+      { sub: "what this ticker BOOKED each day, in Eastern" })}
+
+    <div class="grid main">
+      <div>
+        ${panel("Realised curve", `<div id="tkCurve"></div>`,
+          { sub: "cumulative booked P/L, oldest first",
+            actions: segmented({ options: FORMS, value: H.form, id: "tkForm",
+                                 size: "sm", label: "Chart form" }) })}
+        ${panel("Distribution of outcomes", `<div id="tkDist"></div>`,
+          { sub: "every closed trade, bucketed by what it booked" })}
+      </div>
+      <div>
+        ${panel("Where it came from", `<div id="tkContrib"></div>`,
+          { sub: "each strategy attached here, by size of its contribution" })}
+      </div>
+    </div>
+
+    ${panel("The full metric set", `<div id="tkFull"></div>`,
+      { sub: "net P/L, profit factor, expectancy, drawdown, Sharpe, Sortino, "
+           + "Calmar, exposure, streaks and holding time — each with the "
+           + "number of trades behind it" })}
+
     ${panel("Closed trades", `<div id="tkTrades"></div>`, { flush: true })}`;
 
   series = new MiniSeries(el("tkCurve"), { height: 230, form: H.form,
                                            unit: "usd", zero: true });
   wireSegmented("tkForm", (f) => { H.form = f; series.setForm(f); });
+}
+
+/* The headline three, in the order the owner asked for them: what closed,
+   what is still open, and the only one of the three that is this ticker's
+   P/L. `total_pl` is deliberately the big tile. */
+function recHead(P, M) {
+  const spec = METRIC_GROUPS[0].items;
+  const by = {};
+  for (const s of spec) by[s.key] = s;
+  const t = (key, extra = {}) => {
+    const s = by[key];
+    const m = metricOf(P, s);
+    return tile(Object.assign({
+      label: s.label, metric: m, signed: !!s.signed, dp: s.dp,
+      hint: mreason(m) || s.hint || "",
+      sub: nsub(m, s.unitWord || "trade"),
+    }, extra));
+  };
+  return tileGrid([
+    t("total_pl", { big: true, sub: totalSub(P) }),
+    t("net_pl", { spark: M.curve,
+                  sparkWhy: "one closed trade does not make a curve" }),
+    t("open_pl"),
+    t("gross_win"),
+    t("gross_loss"),
+    tile({ label: "Win rate", metric: metricOf(P, { key: "win_rate" }), dp: 1,
+           hint: mreason(metricOf(P, { key: "win_rate" })),
+           sub: nsub(metricOf(P, { key: "win_rate" })) }),
+  ], { cols: 3 });
+}
+
+/* perf.py's own caveats, once, above the numbers. Scattered over thirty
+   tooltips they stop being read, which is how the wins-only figure survived
+   on the front page for as long as it did. */
+function recCaveats(P) {
+  const cav = caveatsOf(P);
+  if (!cav.length) return "";
+  return cav.map((c) => `<div class="note warn">${esc(c)}</div>`).join("");
+}
+
+/* The four groups, each with the sentence that says what it is measured on. */
+function recFull(P) {
+  return METRIC_GROUPS.slice(1).map((g) => {
+    const tiles = g.items.map((s) => {
+      const m = metricOf(P, s);
+      return tile({
+        label: s.label, metric: m, signed: !!s.signed, dp: s.dp,
+        hint: mreason(m) || s.hint || "",
+        sub: nsub(m, s.unitWord || "trade"),
+      });
+    });
+    const note = g.id === "risk" && P && P.equity_basis
+      ? P.equity_basis : g.note;
+    return groupHeadHTML(g.title, note) + tileGrid(tiles, { cols: 5 });
+  }).join("");
 }
 
 function paintHistory() {
@@ -903,37 +1496,133 @@ function paintHistory() {
   const d = H.d;
   if (!d || !el("tkRec")) return;
   const M = tickerMetrics(d);
+  const P = H.perf;
 
-  el("tkRec").innerHTML = tileGrid([
-    tile({ label: "Trades", metric: M.trades, hint: mreason(M.trades), sub: "closed, all time",
-           spark: M.curve, sparkWhy: "one closed trade does not make a curve" }),
-    tile({ label: "Realised", metric: M.realized, hint: mreason(M.realized), signed: true,
-           sub: nsub(M.realized) }),
-    tile({ label: "Win rate", metric: M.win_rate, hint: mreason(M.win_rate), dp: 1, sub: nsub(M.win_rate) }),
-    tile({ label: "Expectancy", metric: M.expectancy, hint: mreason(M.expectancy), signed: true,
-           sub: nsub(M.expectancy, "trade", "per closed trade") }),
-    tile({ label: "Profit factor", metric: M.profit_factor, hint: mreason(M.profit_factor),
-           sub: nsub(M.profit_factor) }),
-    tile({ label: "Average win", metric: M.avg_win, hint: mreason(M.avg_win), signed: true,
-           sub: nsub(M.avg_win, "winner") }),
-    tile({ label: "Average loss", metric: M.avg_loss, hint: mreason(M.avg_loss), signed: true,
-           sub: nsub(M.avg_loss, "loser") }),
-    tile({ label: "Deepest fall", metric: M.drawdown, hint: mreason(M.drawdown),
-           sub: nsub(M.drawdown, "trade", M.drawdown.peak_at
-             ? "in the realised curve, at " + esc(String(M.drawdown.peak_at).slice(0, 10))
-             : "in the realised curve") }),
-    tile({ label: "Held for", metric: M.hold, hint: mreason(M.hold),
-           sub: nsub(M.hold, "lot",
-                     M.hold.median ? "median " + dur(M.hold.median) : "") }),
-  ], { cols: 3 });
+  /* THE RECORD ITSELF ------------------------------------------------ */
+  el("tkRecCav").innerHTML = P ? recCaveats(P)
+    : (H.perfNone
+        ? ""                                  // the empty state below says it
+        : `<div class="note ${H.perfWhy ? "bad" : "info"}">${esc(H.perfWhy
+            || "reading this ticker's block out of the account's performance "
+             + "report…")}</div>`);
+
+  if (P && !isEmptyBlock(P)) {
+    el("tkRec").innerHTML = recHead(P, M);
+    el("tkFull").innerHTML = recFull(P);
+  } else if (P || H.perfNone) {
+    /* NO RECORD, which is an ANSWER. perf.py either handed back an empty
+       block or app.py 404'd the symbol, and both mean the same measured
+       thing: nothing has closed here and nothing is open. It is NOT the
+       report failing, and it used to be drawn as though it were. */
+    const blank = emptyState({
+      title: `${esc(d.symbol)} has no record yet`,
+      body: `Nothing has closed here and nothing is open, so there is no win
+        rate, no drawdown and no expectancy to compute. An empty account is not
+        a flat one — these are dashes because nobody measured them, not zeroes.`,
+    });
+    el("tkRec").innerHTML = blank;
+    el("tkFull").innerHTML = blank;
+  } else {
+    /* perf.py could not be read. The ladder's own journal arithmetic
+       (tkmetrics.js) is still true and is shown rather than an empty page --
+       clearly labelled as the smaller answer, because it is the journal alone
+       and cannot see the open book. */
+    el("tkRec").innerHTML = tileGrid([
+      tile({ label: "Realised", metric: M.realized, signed: true,
+             hint: mreason(M.realized), sub: nsub(M.realized),
+             spark: M.curve, sparkWhy: "one closed trade does not make a curve" }),
+      tile({ label: "Trades", metric: M.trades, hint: mreason(M.trades),
+             sub: "closed, all time" }),
+      tile({ label: "Win rate", metric: M.win_rate, dp: 1,
+             hint: mreason(M.win_rate), sub: nsub(M.win_rate) }),
+      tile({ label: "Expectancy", metric: M.expectancy, signed: true,
+             hint: mreason(M.expectancy),
+             sub: nsub(M.expectancy, "trade", "per closed trade") }),
+    ], { cols: 4 });
+    el("tkFull").innerHTML = emptyState({
+      title: "The account's metric set is not available",
+      body: `Sharpe, drawdown, profit factor and the rest are computed by
+        <b>perf.py</b> over the whole account and this page could not read it.
+        The four figures above come from this ticker's own journal rows and
+        are all that can be said without it.`,
+    });
+  }
+
+  const age = el("tkRecAge");
+  if (age) {
+    age.innerHTML = P
+      ? `perf.py · ${H.perfStale ? "rebuilding, showing the last answer"
+          : "cached " + Math.round(H.perfAge || 0) + " s"}`
+      : "";
+  }
 
   el("tkRecSrc").innerHTML =
-    `Source: <b>${esc(M.source)}</b>. This is the <b>share ladder's</b> record.
-     An options play's realised P/L is on its own card under Strategies and the
-     two are <b>not added up here</b> — they are two ledgers with two
-     conventions. "Deepest fall" is this ticker's own booked curve, not its
-     share of the account drawdown.`;
+    `Realised above is <b>perf.py's</b>: the ladder's journal and any closed
+     options play on ${esc(d.symbol)}, under one stated convention
+     (<span class="mono">rows_from_journal</span> +
+     <span class="mono">rows_from_option_positions</span>). Open P/L is
+     <b>Alpaca's own mark</b>. The trade table below is
+     <b>${esc(M.source)}</b> — the ladder's rows only — so the table's own
+     total and the figure above cover two different sets and are
+     <b>not added up here</b>. There is no "booked" figure anywhere on this
+     page: a realised total with no losing trade behind it is what a strategy
+     with <b>no stop loss</b> always prints, and it is shown only beside the
+     open inventory and their sum.`;
 
+  /* THE CALENDAR ----------------------------------------------------- */
+  /* Built from the CUMULATIVE curve, not the trade table: the table is the
+     last 200 rows and MSTX already has 205 closes. Bucketed in Eastern,
+     because a UTC calendar moves every fill after 20:00 ET to the next
+     square. */
+  const trades = perTrade(d);
+  const days = dailyRealised(trades);
+  /* `valueKey: "realized"` and NOT "net". calendar.js draws whichever key it
+     is asked for and never sums them; "net" is the change in ACCOUNT equity,
+     which cannot be split per ticker because no per-symbol equity curve
+     exists anywhere. Asking for net here would hand it a key these rows do
+     not carry and every square would go grey with the wrong reason. */
+  el("tkCal").innerHTML = plCalendars({
+    days, valueKey: "realized", months: 6, unit: "usd", signed: true,
+    empty: `Nothing has closed on ${esc(d.symbol)}`,
+    why: (d.history && d.history.why)
+      || `No closed trade on record for ${esc(d.symbol)}, so there is no day
+          to lay out. An empty grid of this month would be a claim that the
+          ticker traded nothing on every one of those days.`,
+  }) + `<div class="tip">Each square is what <b>${esc(d.symbol)}</b> BOOKED
+    that day — closed trades only, bucketed in <b>Eastern</b>. It is <b>not</b>
+    this ticker's share of the account's P/L: there is <b>no per-ticker equity
+    curve</b> anywhere, at Alpaca or here, so a day this ticker held a losing
+    lot open shows no colour at all. Built from the cumulative curve, which
+    carries all <b>${trades.length}</b> closes — the table below is capped at
+    200.</div>`;
+
+  /* THE DISTRIBUTION ------------------------------------------------- */
+  const vals = trades.map((t) => t.realized);
+  const losers = vals.filter((v) => v < 0).length;
+  el("tkDist").innerHTML = histogram({
+    values: vals, unit: "usd", h: 170,
+    empty: "No distribution to draw",
+    why: `${trades.length} closed trade${trades.length === 1 ? "" : "s"} on
+      ${esc(d.symbol)} — a histogram of that is a list, not a shape.`,
+  }) + (trades.length < 2
+    /* NOTHING IS DRAWN, so nothing is described. The caption used to read
+       "0 of 0 closed trades booked a loss. Bars left of the zero line are
+       losers" beside an empty panel -- a legend for a chart that is not
+       there. Seen in a browser on NVDA. */
+    ? ""
+    : (!losers
+      ? `<div class="tip"><b>There is nothing left of zero.</b> Every closed
+         trade on ${esc(d.symbol)} is a winner, which is not an edge — it is
+         what a ladder with <b>no stop loss</b> looks like drawn out. The
+         losers are in the open inventory, which this chart cannot see.</div>`
+      : `<div class="tip">${losers} of ${trades.length} closed trades booked a
+         loss. Bars left of the zero line are losers, right of it winners.</div>`));
+
+  /* WHERE IT CAME FROM ----------------------------------------------- */
+  const cc = strategyContributions(d);
+  el("tkContrib").innerHTML = contribBars(d, cc) + contribNote(d, cc);
+
+  /* THE CURVE AND THE TABLE ------------------------------------------ */
   if (series) {
     series.setData({
       points: M.curve.map((p) => ({ t: p.t, c: p.c })),
@@ -964,6 +1653,88 @@ function paintHistory() {
     empty: (d.history && d.history.why)
       || `No closed trade on record for ${esc(d.symbol)}.`,
   });
+  const cap = el("tkTrades");
+  if (cap && rows.length >= 200 && trades.length > rows.length) {
+    cap.insertAdjacentHTML("afterend",
+      `<div class="tip">This table is the most recent ${rows.length} closes —
+        the hub route caps it. The calendar, the distribution and the metric
+        set above are built on all <b>${trades.length}</b>.</div>`);
+  }
+}
+
+/* Each attached strategy's realised contribution on this ticker.
+
+   The ladder's card carries `realized_all`; an options play's card does NOT
+   carry a realised figure at all -- hub.OptionPlayStrategy.for_ticker
+   publishes `open`, `closed` and `open_pl` and nothing booked. That is a real
+   hole and it renders as a dash with that sentence on it, rather than as a
+   zero that would make the ladder look like the only thing working here. */
+function strategyContributions(d) {
+  const parts = attachedStrats(d).map((c) => ({
+    key: c.id,
+    label: c.label || c.id,
+    kind: c.kind || "",
+    value: c.realized_all === undefined ? null : c.realized_all,
+    reason: c.realized_all === undefined
+      ? `${c.label || c.id} publishes no realised figure on its ticker card `
+        + `(hub sends its open positions and their mark, not what it booked)`
+      : "",
+  }));
+  return contributions(parts);
+}
+
+/* The split, as viz.js's ranked bar rather than a ring.
+
+   A RING WOULD BE THE WRONG PICTURE HERE and viz.donut refuses to draw it:
+   these are P/L contributions and one of them can be negative, so there is no
+   whole to divide. hbar ranks by magnitude, keeps the sign in the colour and
+   sinks an unmeasured row to the bottom instead of sorting it as zero. */
+function contribBars(d, c) {
+  return hbar({
+    rows: (c.rows || []).map((r) => ({
+      label: r.label + (r.kind ? " · " + r.kind : ""),
+      value: r.value, why: r.reason,
+      sub: r.share === null ? "" : (r.share * 100).toFixed(1) + "% of the movement",
+    })),
+    unit: "usd", signed: true, h: 130,
+    empty: `Nothing to attribute on ${d.symbol}`,
+    why: c.why || `Nothing is attached to ${d.symbol}, so there is no strategy
+      to attribute its record to.`,
+  });
+}
+
+/* THE TWO SOURCES, SIDE BY SIDE, and the sentence for when they disagree.
+
+   The parts come from each strategy's own card -- for the ladder that is the
+   ENGINE's running counter, `engine.summary()["realized_all"]`. perf.py's
+   `net_pl` for the same ticker is computed independently, by re-reading
+   journal.jsonl. They are two answers to one question from two stores, and
+   CLAUDE.md's ground-truth rule says to say so loudly rather than to pick the
+   convenient one.
+
+   MEASURED in a browser against the perfwins fixture: the ladder card
+   reported realized_all $0.00 on a ticker whose journal perf.py adds up to
+   $4,052.14 over 56 closes. Without this line the split read "every strategy
+   here has booked exactly $0.00" directly under a +$4,052.14 headline and
+   nothing on the page said which was wrong. */
+function contribNote(d, c) {
+  const P = H.perf;
+  const net = P ? metricOf(P, { key: "net_pl" }) : null;
+  if (!net || net.value === null || !c || !c.measured) return "";
+  const gap = Math.round((net.value - c.net) * 100) / 100;
+  if (Math.abs(gap) < 0.01) {
+    return `<div class="tip">The parts add to <b>${esc(money(c.net))}</b>,
+      which is what <b>perf.py</b> measures for ${esc(d.symbol)} from the
+      journal. The two stores agree.</div>`;
+  }
+  return `<div class="note warn"><b>The two stores disagree by
+    ${esc(money(gap))}.</b> These parts are each strategy's own running
+    counter (for the ladder, <span class="mono">engine.summary()</span>);
+    <b>perf.py</b> re-reads <span class="mono">journal.jsonl</span> and gets
+    <b>${esc(money(net.value))}</b> for ${esc(d.symbol)} over
+    ${net.n} closed trade${net.n === 1 ? "" : "s"}. The journal is the truth
+    about history, so the headline above is the one to read; the split below
+    is only as good as the counters behind it.</div>`;
 }
 
 /* ================================================================ LADDER tab */
@@ -1447,21 +2218,34 @@ VIEWS.ticker = {
      on every paint, so the tab appears and disappears with the strategy. */
   get tabs() {
     const t = [["live", "Overview"], ["strategies", "Strategies"],
-               ["history", "History"]];
+               ["history", "Record"]];
+    /* Same rule as the Ladder tab, for the same reason: a tab is offered when
+       the thing behind it exists. A ticker with no options strategy and no
+       option position does not need an options room, and putting an empty one
+       on every ladder page is the kind of waste the Plays room was deleted
+       for. It appears the moment either becomes true. */
+    if (hasOptions(H.d)) t.push(["options", "Options"]);
     if (hasLadder(H.d)) t.push(["settings", "Ladder"]);
     return t;
   },
 
   mount(v) {
     ensureCSS();
+    ensureVisCSS();
     if (panelC) { panelC.destroy(); panelC = null; }
     if (series) { series.destroy(); series = null; }
     const fresh = H.sym !== v.sym || H.acct !== S.account;
     if (fresh) {
       H.sym = v.sym; H.acct = S.account; H.d = null; H.err = ""; H.at = 0;
       H.cfgOpen = ""; H.cfgDirty = false;
+      // the account's report is per ACCOUNT, so switching either the symbol
+      // or the account invalidates it. The bank's shelf is not per account,
+      // but which tickers an entry is on is, so `att` goes too.
+      H.perf = null; H.perfWhy = ""; H.perfNone = false; H.perfAt = 0;
+      H.att = null; H.attWhy = ""; H.bankPick = "";
     }
     if (v.tab === "strategies") mountStrategies(v.sym);
+    else if (v.tab === "options") mountOptions(v.sym);
     else if (v.tab === "history") mountHistory(v.sym);
     else if (v.tab === "settings") mountLadder(v.sym);
     else mountOverview(v.sym);
@@ -1471,6 +2255,14 @@ VIEWS.ticker = {
     // flight; only a first visit shows the loading state
     if (fresh || Date.now() - H.at > HUB_POLL_MS) loadHub(v.sym, { quiet: !fresh });
     else repaint();
+    // the record and the strategy list are the two tabs that need them, and
+    // both self-throttle, so asking here costs nothing on the other two
+    if (v.tab === "history" || v.tab === "live") loadPerf(v.sym, { force: fresh });
+    if (v.tab === "strategies") {
+      loadPerf(v.sym, { force: fresh });
+      loadAttached(v.sym);
+      loadBank(H.bankKind, H.bankQ);
+    }
   },
 
   paint(v) {

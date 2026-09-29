@@ -27,13 +27,17 @@ Babel that ships inside dukpy and run in Duktape against a small DOM shim.
    other check can come to depend on layout.
 
 2. Duktape's Babel overflows its C stack on a template literal with more than
-   about fifteen ${} substitutions, which excludes four functions from the
-   bundle: paintDoc, structCard, paintSweep and gradedRows. They are replaced
-   by stubs that THROW, so a check that needs one fails loudly rather than
-   passing on a stub. What they render is covered two ways instead: by the
-   source invariants in section 10, which are stronger than a spot check
-   because they hold for the whole file, and by the browser half of the suite
-   in mockserver.py, served at /check, which runs them for real in a DOM.
+   about fifteen ${} substitutions, which excludes THREE functions from the
+   bundle: paintDoc, paintSweep and gradedRows. It excluded seven until the
+   Plays and Data rooms left options.js on 28 Sep 2026; the other four went
+   with the room, and TOO_DEEP below carries the measurement showing these
+   three are individually too deep rather than a symptom of bundle size. They
+   are replaced by stubs that THROW, so a check that needs one fails loudly
+   rather than passing on a stub. What they render is covered two ways
+   instead: by the source invariants in section 10, which are stronger than a
+   spot check because they hold for the whole file, and by the browser half of
+   the suite in mockserver.py, served at /check, which runs them for real in a
+   DOM.
 """
 from __future__ import annotations
 
@@ -71,23 +75,32 @@ def text(html):
 
 # ======================================================== building the bundle
 # Functions Duktape's Babel cannot compile; see the caveat in the docstring.
-# The Plays room's four builders join them, and the reason is worth stating
-# because it is NOT the same as the first three. Those are individually too
-# deep. These are not: bisecting shows the file compiles with any three of them
-# and fails with all four, so what is exhausted is Duktape's compile stack for
-# the BUNDLE AS A WHOLE, not any one function. That is a limit of the 2017
-# engine this harness runs on and says nothing about the code.
 #
-# It does mean the DOM-level checks below no longer reach the Plays room, so
-# what covers it instead is stated rather than left implied: the whole-file
-# checks at the end of this file read the source as text and still apply, and
-# the room was rendered against mockserver.py in a real browser at 1280px and
-# 400px, in both themes, with no console errors. If the Plays room grows again,
-# the right move is to split it into its own view file rather than to excise
-# more of this one -- at that point the bundle stops growing and the DOM checks
-# can come back.
-TOO_DEEP = ("paintDoc", "paintSweep", "gradedRows",
-            "plStrip", "plAssignTable", "plOpenTable", "plPreview")
+# THE PLAYS ROOM'S FOUR BUILDERS ARE NO LONGER ON THIS LIST, because the room
+# is gone (28 Sep 2026): the Plays and Data rooms left options.js and took
+# ~1,070 lines of bundle with them. They were on it for a different reason
+# from the three that remain, and deleting them settled which reason was
+# right. The old note said the four were not individually deep -- the file
+# compiled with any three of them and failed with all four -- so what was
+# exhausted looked like the compile stack for the BUNDLE AS A WHOLE. If that
+# had been the whole story, a bundle 1,070 lines shorter would now carry
+# paintDoc, paintSweep and gradedRows as well.
+#
+# It does not. Measured, by compiling the shortened file four ways:
+#
+#     excising nothing                      -> RangeError
+#     excising paintDoc                     -> RangeError
+#     excising paintDoc, paintSweep         -> RangeError
+#     excising all three                    -> compiles
+#
+# So both things were true at once: the four Plays builders were a whole-bundle
+# cost, and these three are individually past what this 2017 Babel will parse,
+# whatever else is in the file. Shrinking the module further will not buy them
+# back; only splitting THEM out would. What covers them meanwhile is stated
+# rather than implied: the source invariants in section 10, which hold for the
+# whole file, and the browser half of the suite in mockserver.py, served at
+# /check, which runs them for real in a DOM.
+TOO_DEEP = ("paintDoc", "paintSweep", "gradedRows")
 
 
 def view_source() -> str:
@@ -714,6 +727,89 @@ def main() -> int:
           "spread_pct is a FRACTION of mid" in src, True)
     check("no raw spread_pct reaches a renderer",
           bool(re.search(r"pc1\(leg\.spread_pct\)", src)), False)
+
+    # ----------------------------------------------------------------------
+    print("\n11. The Plays and Data rooms left cleanly")
+    # The Positions room set the precedent and this follows it: a room that
+    # leaves has to leave NOTHING -- no tab, no renderer, no route call, no
+    # orphaned CSS -- and it has to leave a SENTENCE, because the owner
+    # deleted these two by description and the next reader will not know
+    # where the numbers went. "It still renders" is not the check; "there is
+    # one copy of each fact, and the page says where it is" is.
+    check("no Plays tab is offered", '["plays", "Plays"]' in src, False)
+    check("no Data tab is offered", '["data", "Data"]' in src, False)
+    check("the tab bar is the three rooms that are left",
+          re.findall(r'\["([a-z]+)", "[A-Z]',
+                     src[src.index("const TABS = ["):src.index("const SUB = {")]),
+          ["perf", "strategies", "backtest"])
+    check("no orphaned board renderer is left behind",
+          any(w in code for w in ("mountBoard", "paintBoard", "loadBoard",
+                                  "boardRows", "rowCard", "factCell",
+                                  "regimeChips", "wireBoard", "addForm",
+                                  "watchAct")), False)
+    check("no orphaned plays renderer is left behind",
+          any(w in code for w in ("mountPlays", "playsHost", "plStrip",
+                                  "plAssignTable", "plOpenTable", "plPreview",
+                                  "plArm", "plFieldVal")), False)
+    check("and nothing calls either room's routes",
+          any(w in code for w in ("/api/optlab/board", "/api/optlab/watch",
+                                  "/api/optlab/plays")), False)
+    # The header sentence that was false for a fortnight -- "this page only
+    # reads" while the Plays room wrote the arm file -- is true again, and
+    # this check is what keeps it true rather than the paragraph.
+    check("the module sends nothing at all", "POST(" in code, False)
+    # On the import STATEMENT, not the file: the header comment names POST in
+    # prose, and a substring check would read that sentence as the bug it
+    # describes.
+    imp = re.search(r"import \{([\s\S]*?)\} from \"\.\./core\.js\";", src)
+    check("there is one import from core.js", bool(imp), True)
+    check("and POST, ask and toast are not in it",
+          sorted(w for w in re.findall(r"[A-Za-z_]+", imp.group(1) if imp else "")
+                 if w in ("POST", "ask", "toast")), [])
+    check("the header says where the Plays room went",
+          "is now on the TICKER's own Options pane (tickeropts.js)" in src, True)
+    check("and where the Data room went",
+          "are per ticker and they now live on the ticker" in src, True)
+    # An old hash must land on a real page AND say why it is not the page that
+    # was asked for. Asserted against a route that FAILS, because the sentence
+    # is written synchronously and the report is not: somebody following a
+    # stale link while the server is unhappy still gets told.
+    for tab, want in (("plays", "The Plays room is gone."),
+                      ("data", "The Data room is gone."),
+                      ("board", "The Data room is gone.")):
+        js.plan({"/api/optlab/perf": {"err": "mock: perf is down",
+                                      "status": 502}})
+        js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: %s}); 1'
+               % json.dumps(tab))
+        js.run("1")
+        check("#/options/%s lands on the report" % tab,
+              "ov-head" in (js.html("view") or ""), True)
+        check("and #/options/%s says where the room went" % tab,
+              want in js.txt("view"), True)
+    check("an old hash lights the Overview rather than nothing",
+          [js.run('VIEWS.options.activeTab({tab: "plays"})'),
+           js.run('VIEWS.options.activeTab({tab: "data"})'),
+           js.run('VIEWS.options.activeTab({tab: "board"})'),
+           js.run('VIEWS.options.activeTab({tab: "chain"})')],
+          ["perf", "perf", "perf", "perf"])
+    check("and a real tab still lights itself",
+          [js.run('VIEWS.options.activeTab({tab: "strategies"})'),
+           js.run('VIEWS.options.activeTab({tab: ""})')],
+          ["strategies", "perf"])
+    # Dead CSS is not cosmetic here: every rule in this file lives in the ONE
+    # <style> element the view injects, so a rule for a room that no longer
+    # exists is shipped to every reader of every other room.
+    cssblk = src[src.index("const CSS = `"):
+                 src.index("\n`;\n\nfunction ensureStyle")]
+    rest = src.replace(cssblk, "")
+    words = set()
+    for m in re.findall(r'class="([^"]*)"', rest):
+        words |= {w for w in re.split(r"[\s${}()?:.+]+", m) if w}
+    for m in re.findall(r"""[\"'\s]([a-z][a-z0-9- ]*)[\"']""", rest):
+        words |= set(m.split())
+    dead = [c for c in sorted(set(re.findall(r"\.([a-z][a-z0-9-]+)", cssblk)))
+            if c not in words]
+    check("no rule is left styling a room that is gone", dead, [])
 
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
     return 1 if FAIL else 0

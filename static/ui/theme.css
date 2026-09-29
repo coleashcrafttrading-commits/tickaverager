@@ -489,7 +489,11 @@ body::before {
 .tab { font-size: var(--fs-md); font-weight: var(--w-med); padding: 10px 0 9px; }
 .tab.on { color: var(--text); border-bottom-color: var(--accent); }
 
-.page { padding: var(--gutter); max-width: 1560px; }
+/* CENTRED, and the margin is the whole fix. With a max-width and no auto
+   margin the content sat flush LEFT, so collapsing the rail on a wide screen
+   moved everything left and left a band of dead ground down the right-hand
+   side instead of recentring what you were reading. */
+.page { padding: var(--gutter); max-width: 1560px; margin-inline: auto; }
 
 /* ================================================== THE SHARED PRIMITIVES
    The five pieces core.js publishes. Their look is defined once, here, so a

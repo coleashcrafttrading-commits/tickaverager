@@ -25,15 +25,15 @@
    ========================================================================= */
 "use strict";
 import {
-  S, VIEWS, POST, DEL, act, ask, toast, el, esc, card,
+  S, VIEWS, POST, DEL, act, ask, toast, el, esc, panel,
   money, money0, go, toggleTheme, curAccount, acctLabel, acctNumber,
-  loadAccounts, setAccount, pickAccount, hashFor,
+  loadAccounts, setAccount, pickAccount, hashFor, segmented, wireSegmented,
 } from "../core.js";
 import { mountAgents, paintAgents } from "./agents.js";
 /* One classification of what a setting can cost, one search, one badge --
    shared with the per-ticker settings tab rather than re-invented here. */
 import {
-  ensureFieldStyles, impactOf, impactBadge, applySearch,
+  ensureFieldStyles, impactOf, impactBadge, applySearch, IMPACT,
 } from "../fields.js";
 
 let renaming = false;   // the label is being edited; the poll must not repaint it
@@ -67,17 +67,24 @@ VIEWS.settings = {
 };
 
 /* =============================================================== account */
+/* TWO PANELS, not five cards. What this account IS, and the process that runs
+   it. Appearance was a card containing one button; "Starting and stopping" was
+   a card containing one paragraph pointing somewhere else. Both are lines now.
+
+   The three actions keep their own impact tier, because "Remove account" reads
+   like a housekeeping button and is the loudest thing on the page: it stops
+   the ladder managing positions that stay open at Alpaca. */
 function mountAccount() {
   ensureFieldStyles();          // the impact badges below come from fields.js
   ensureSettingsStyles();
   renaming = false;
   acctMsg = "";
   el("view").innerHTML = `
-    ${card("Account", `
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <div id="acctName" style="flex:1;min-width:240px">
-          <div style="font-size:19px;font-weight:650;letter-spacing:-.01em" id="acctLabelTxt">—</div>
-          <div class="faint" style="font-size:12px;margin-top:2px" id="acctMeta"></div>
+    ${panel("This account", `
+      <div class="acct-top">
+        <div id="acctName" class="acct-id">
+          <div class="acct-label" id="acctLabelTxt">—</div>
+          <div class="faint" id="acctMeta"></div>
         </div>
         <div class="row-btns">
           <button class="btn sm" id="acctRename">Rename</button>
@@ -98,32 +105,31 @@ function mountAccount() {
           open.</div>
       </div>
       <div class="tip" id="acctMsg"></div>`,
-      `<span class="faint">one Alpaca key pair · one fleet</span>`)}
-    <div class="grid main">
-      <div>
-        ${card("The server", `
-          <button class="btn primary" id="sRestart" style="width:100%">
-            Restart dashboard</button>
-          <div class="set-acts" style="margin:10px 0 0"><div>
-            <span class="imp imp-guard">limit</span> No order is placed or
-            cancelled by a restart, and nothing is armed that was not armed
-            before — but every account's engines stop for the duration.</div></div>
+      { sub: "one Alpaca key pair · one fleet" })}
+
+    ${panel("The server", `
+      <div class="srv">
+        <div class="srv-a">
+          <button class="btn primary" id="sRestart">Restart dashboard</button>
+          <button class="btn" id="bTheme">Toggle light / dark</button>
+        </div>
+        <div class="srv-b">
+          <div class="set-acts" style="margin:0"><div>
+            <b>Restart</b> <span class="imp imp-guard">limit</span>
+            No order is placed or cancelled by a restart, and nothing is armed
+            that was not armed before — but every account's engines stop for the
+            duration.</div></div>
           <div class="tip" id="sRestartNote">Relaunches the server so new code and
             settings take effect. This is one process for <b>every account</b> —
             all of their fleets restart, not just this one. Take-profits resting
             at Alpaca are the broker's orders and stay live throughout.</div>
-          <div class="tip" id="sHealth"></div>`)}
-      </div>
-      <div>
-        ${card("Appearance", `<button class="btn" id="bTheme">Toggle light / dark</button>`)}
-        ${card("Starting and stopping", `<div class="tip" style="margin-top:0">
-          Start all, Stop all, Disarm all and Panic live on
-          <a href="${hashFor({ kind: "overview" })}">Portfolio</a>, beside the
-          ladders they act on — there is one copy of them now, not two.
-          Balances and the ticker list are there and in the rail for the same
-          reason.</div>`)}
-      </div>
-    </div>`;
+          <div class="tip" id="sHealth"></div>
+          <div class="tip">Start all, Stop all, Disarm all and Panic are on
+            <a href="${hashFor({ kind: "overview" })}">Portfolio</a>, beside the
+            ladders they act on — one copy of them, not two. Balances and the
+            ticker list are there and in the rail for the same reason.</div>
+        </div>
+      </div>`)}`;
 
   el("bTheme").onclick = toggleTheme;
   el("sRestart").onclick = doRestart;
@@ -222,6 +228,10 @@ const SET_ALL = SET_GROUPS.flatMap((g) => g.fields);
 const setByKey = (k) => SET_ALL.find((f) => f.k === k);
 
 let setQ = "";          // the settings search box
+/* The impact filter: "" | money | guard | safe. It is a SECOND axis over the
+   same rows, not a second list -- "show me only the things that can cost me
+   money" is the question this page exists to answer quickly. */
+let setImp = "";
 
 /* What the SERVER last put in the boxes, captured the moment paintEngine fills
    them. Every "has this changed" question is asked against this and never
@@ -240,76 +250,152 @@ function setRowHTML(f) {
     ? `<select name="${f.k}">${f.opts.map(([v, l]) =>
         `<option value="${esc(v)}">${esc(l)}</option>`).join("")}</select>`
     : `<input name="${f.k}" type="number" step="${f.step}" min="${f.min}">`;
+  /* TWO COLUMNS: what it is on the left, what it does to your money on the
+     right. The old row stacked six blocks of prose under every control and
+     that stack IS the "endless widgets" complaint -- at three groups and
+     seven settings the page was four screens long. */
   return `<div class="fld set-row" data-k="${f.k}" data-impact="${impactOf(f.k)}">
-    <div class="fld-h"><span class="fld-l">${esc(f.label)}</span>${impactBadge(f.k)}</div>
-    ${ctl}
-    ${f.used ? `<div class="use" data-use="${f.k}"></div>` : ""}
-    <div class="hint">${f.hint}</div>
-    <div class="affects"><span>Affects</span> ${f.affects}</div>
+    <div class="set-row-a">
+      <div class="fld-h"><span class="fld-l">${esc(f.label)}</span>${impactBadge(f.k)}
+        <span class="fld-key mono">${esc(f.k)}</span></div>
+      ${ctl}
+      ${f.used ? `<div class="use" data-use="${f.k}"></div>` : ""}
+    </div>
+    <div class="set-row-b">
+      <div class="hint">${f.hint}</div>
+      <div class="affects"><span>Affects</span> ${f.affects}</div>
+    </div>
   </div>`;
 }
 
+/* The impact filter offers only the tiers that are ACTUALLY on this page, with
+   their counts. A "Trades money" button that can never match anything is not a
+   filter, it is a dead control -- and the fact behind it (nothing account-wide
+   changes what is bought directly) is worth SAYING rather than leaving to be
+   discovered by clicking. */
+const TIER_WORD = { money: "Trades money", guard: "Limits", safe: "Display",
+                    unknown: "Unclassified" };
+
+function impactCounts() {
+  const out = {};
+  for (const f of SET_ALL) {
+    const t = impactOf(f.k);
+    out[t] = (out[t] || 0) + 1;
+  }
+  return out;
+}
+
+function impactOptions() {
+  const c = impactCounts();
+  const opts = [["", `All ${SET_ALL.length}`]];
+  for (const t of ["money", "guard", "safe", "unknown"]) {
+    if (!c[t]) continue;
+    opts.push([t, `${TIER_WORD[t]} ${c[t]}`, IMPACT[t].blurb]);
+  }
+  return opts;
+}
+
+function legendHTML() {
+  const c = impactCounts();
+  const lines = [];
+  for (const t of ["money", "guard", "safe", "unknown"]) {
+    if (!c[t]) continue;
+    lines.push(`<span><span class="imp ${IMPACT[t].cls}">${IMPACT[t].badge}</span>
+      ${esc(IMPACT[t].blurb)}</span>`);
+  }
+  if (!c.money) {
+    /* Stated, not implied. Every account-wide setting here is a limit or a
+       display preference; the settings that change what is bought are a
+       TICKER's, and saying which scope you are in is the whole point of
+       splitting them across three pages. */
+    lines.push(`<span><b>Nothing on this page places or prices an order.</b>
+      The settings that change what is bought are a ticker's own, on that
+      ticker's Settings tab.</span>`);
+  }
+  lines.push(`<span>Every row says what it affects, and a guardrail says how
+    much of itself the account is using right now.</span>`);
+  return lines.join("");
+}
+
 /* ================================================================ engine */
+/* ONE ROOM, not a wall of panes.
+
+   What was here: three cards stacked in a column, two prose cards in a rail
+   beside them, and a search box in a sixth card above the lot -- six framed
+   boxes for seven settings. The owner's words were "endless windows and
+   widgets". So: one toolbar, one sticky rail of group links, one column of
+   two-column rows, one sticky Save. The prose that was in the rail is one
+   line at the bottom, because it is a footnote and it was being rendered at
+   the same weight as the account's daily loss limit.
+
+   NOTHING ABOUT THE FORM ITSELF CHANGED. Same `#gform`, same `name=` per key,
+   same `.fld[data-k]` markup the search walks, same baseline capture, same
+   save. This is layout; the ladder's real settings flow through this form and
+   they are live money. */
 function mountEngine() {
   setBase = null;
   ensureFieldStyles();
   ensureSettingsStyles();
   el("view").innerHTML = `
-    ${card("Account-wide settings", `
+    <div class="set-tools">
       <div class="set-bar">
         <input id="setQ" class="set-q" placeholder="Search settings — try “loss”, “feed”, “limit”"
                value="${esc(setQ)}" spellcheck="false" autocomplete="off">
+        ${segmented({ id: "setImp", value: setImp, size: "sm", label: "impact",
+          options: impactOptions() })}
         <span class="faint" id="setQn"></span>
       </div>
-      <div class="set-legend">
-        <span class="imp imp-money">trades money</span> can change what is bought
-        or sold ·
-        <span class="imp imp-guard">limit</span> a limit or a gate — loosening one
-        removes a protection ·
-        <span class="imp imp-safe">display</span> this browser only
-      </div>`,
-      `<span class="faint">${SET_ALL.length} settings · applies to every ladder
-        in this account</span>`)}
+      <div class="set-legend">${legendHTML()}</div>
+    </div>
     <form id="gform">
-      <div class="grid main">
+      <div class="set-room">
+        <nav class="set-nav" id="setNav" aria-label="setting groups"></nav>
         <div id="setCol"></div>
-        <div>
-          ${card("Why the used bars are here", `<div class="tip" style="margin-top:0">
-            Each guardrail shows how much of itself the account is using right
-            now, on the field that sets it. There used to be a read-only copy of
-            this table on the Risk page that could only send you back here to
-            change anything; a limit and how close you are to it are one thought,
-            so they are one place.<br><br>
-            What a move against you would <i>cost</i> — in dollars and in ATR —
-            is the <a href="${hashFor({ kind: "risk" })}">Risk</a> page's job and
-            stays there.</div>`)}
-          ${card("Per-ticker settings are not here", `<div class="tip" style="margin-top:0">
-            Everything on this page is measured across the <b>account</b>. A
-            ladder's own rung, target, sessions and side live on that ticker's
-            Settings tab, and a strategy's own numbers live on the
-            <a href="${hashFor({ kind: "strategies" })}">Strategies</a> page
-            beside the strategy they belong to. Three scopes, three places, and
-            each one says which it is.</div>`)}
-        </div>
       </div>
       <div class="set-save">
         <button type="submit" class="btn primary" id="gsave">Save settings</button>
         <div class="tip" id="gmsg" style="margin:0"></div>
+        <span style="flex:1"></span>
+        <div class="set-foot">Everything here is measured across the
+          <b>account</b>. A ladder's own rung, target and sessions are on that
+          ticker's Settings tab; a strategy's own numbers are on
+          <a href="${hashFor({ kind: "strategies" })}">Strategies</a>; what a
+          move against you would <i>cost</i> is on
+          <a href="${hashFor({ kind: "risk" })}">Risk</a>. Three scopes, three
+          places.</div>
       </div>
     </form>`;
 
-  el("setCol").innerHTML = SET_GROUPS.map((g) => card(g.title, `
-    <div class="tip" style="margin-top:0">${g.lead}</div>
-    <div class="set-fields" data-setgroup="${g.id}">
-      ${g.fields.map(setRowHTML).join("")}</div>`,
-    `<span class="faint set-count" data-setcount="${g.id}"></span>`)).join("");
+  el("setNav").innerHTML = SET_GROUPS.map((g) =>
+    `<button type="button" class="set-nav-b" data-jump="setg-${g.id}">
+      ${esc(g.title)}
+      <span class="faint set-count" data-setcount="${g.id}"></span></button>`).join("");
+
+  el("setCol").innerHTML = SET_GROUPS.map((g) => `
+    <section class="set-g" id="setg-${g.id}">
+      <header class="set-g-h">
+        <h3 class="set-g-t">${esc(g.title)}</h3>
+        <span class="faint">${g.fields.length} setting${
+          g.fields.length === 1 ? "" : "s"}</span>
+      </header>
+      <p class="set-g-lead">${g.lead}</p>
+      <div class="set-fields" data-setgroup="${g.id}">
+        ${g.fields.map(setRowHTML).join("")}</div>
+    </section>`).join("");
 
   const f = el("gform");
   f.addEventListener("input", () => { S.touched = true; paintEngine(); });
   f.addEventListener("submit", onSaveEngine);
 
+  for (const b of el("setNav").querySelectorAll("[data-jump]")) {
+    b.onclick = () => {
+      const t = el(b.dataset.jump);
+      if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  }
   const q = el("setQ");
   q.oninput = () => { setQ = q.value; runSetSearch(); };
+  wireSegmented("setImp", (v) => { setImp = v; runSetSearch(); });
   runSetSearch();
   paintEngine();
 }
@@ -321,20 +407,40 @@ function mountEngine() {
 function runSetSearch() {
   const f = el("gform");
   if (!f) return;
-  const r = applySearch(f, setQ);
+  applySearch(f, setQ);
+  /* The impact filter hides by its OWN class, never by `disabled` and never by
+     touching `q-out`, so it composes with the text search instead of fighting
+     it -- and, like the search, a hidden row is still in the form and still
+     saved. Filtering a form and then silently sending only the visible half is
+     the kind of bug nobody finds until a guardrail comes back as 0. */
+  let shownAll = 0, hiddenAll = 0;
+  for (const row of f.querySelectorAll(".fld[data-k]")) {
+    const off = !!setImp && row.dataset.impact !== setImp;
+    row.classList.toggle("i-out", off);
+    if (off || row.classList.contains("q-out")) hiddenAll += 1; else shownAll += 1;
+  }
+  const r = { shown: shownAll, hidden: hiddenAll };
+  const live = (x) => !x.classList.contains("q-out")
+                   && !x.classList.contains("i-out");
   for (const host of f.querySelectorAll("[data-setgroup]")) {
     const rows = [...host.querySelectorAll(".fld")];
-    const shown = rows.filter((x) => !x.classList.contains("q-out")).length;
+    const shown = rows.filter(live).length;
     const tag = f.querySelector(`[data-setcount="${host.dataset.setgroup}"]`);
-    if (tag) tag.textContent = setQ ? `${shown} of ${rows.length}` : "";
-    const cardEl = host.closest(".card");
-    if (cardEl) cardEl.hidden = setQ ? shown === 0 : false;
+    if (tag) tag.textContent = (setQ || setImp) ? `${shown}/${rows.length}` : "";
+    const sec = host.closest(".set-g");
+    if (sec) sec.hidden = (setQ || setImp) ? shown === 0 : false;
+    const nav = f.querySelector(`[data-jump="setg-${host.dataset.setgroup}"]`);
+    if (nav) nav.hidden = !!sec && sec.hidden;
   }
   const n = el("setQn");
   if (n) {
-    n.innerHTML = setQ
-      ? (r.shown ? `${r.shown} of ${r.shown + r.hidden} settings match`
-                 : `<span class="warn">Nothing matches “${esc(setQ)}”.</span>`)
+    const what = [setQ ? `“${esc(setQ)}”` : "",
+                  setImp ? `<b>${esc(IMPACT[setImp].badge)}</b>` : ""]
+      .filter(Boolean).join(" + ");
+    n.innerHTML = (setQ || setImp)
+      ? (r.shown
+          ? `${r.shown} of ${r.shown + r.hidden} settings match ${what}`
+          : `<span class="warn">Nothing matches ${what}.</span>`)
       : "";
   }
 }
@@ -456,25 +562,77 @@ function ensureSettingsStyles() {
   const s = document.createElement("style");
   s.id = "setCSS";
   s.textContent = [
+    /* the toolbar */
+    ".set-tools{background:var(--surface);border:1px solid var(--hairline);",
+    "border-radius:var(--radius);padding:14px 16px;margin-bottom:var(--s5)}",
     ".set-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}",
-    ".set-q{flex:1;min-width:180px;font-size:13px;padding:9px 12px}",
+    ".set-q{flex:1;min-width:200px;font-size:13px;padding:9px 12px}",
     ".set-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;",
     "margin-top:12px;font-size:11.5px;color:var(--faint);line-height:1.9}",
-    ".set-fields{display:flex;flex-direction:column;gap:18px;margin-top:14px}",
+    /* the room: a sticky rail of group links beside one column of rows */
+    ".set-room{display:grid;gap:var(--s5);grid-template-columns:190px minmax(0,1fr);",
+    "align-items:start}",
+    ".set-nav{position:sticky;top:var(--s4);display:flex;flex-direction:column;",
+    "gap:2px}",
+    ".set-nav-b{font:inherit;font-size:12.5px;text-align:left;cursor:pointer;",
+    "padding:8px 11px;border-radius:var(--r-sm);border:1px solid transparent;",
+    "background:transparent;color:var(--muted);display:flex;gap:8px;",
+    "align-items:baseline}",
+    ".set-nav-b:hover{background:var(--surface-2);color:var(--text)}",
+    ".set-nav-b[hidden]{display:none}",
+    ".set-g{background:var(--surface);border:1px solid var(--hairline);",
+    "border-radius:var(--radius);padding:16px 18px;margin-bottom:var(--s4);",
+    "scroll-margin-top:var(--s4)}",
+    ".set-g[hidden]{display:none}",
+    ".set-g-h{display:flex;align-items:baseline;gap:10px}",
+    ".set-g-t{margin:0;font-size:var(--fs-md);font-weight:var(--w-semi)}",
+    ".set-g-lead{margin:5px 0 0;font-size:11.5px;color:var(--faint);",
+    "line-height:1.6;max-width:70ch}",
+    ".set-fields{display:flex;flex-direction:column;gap:2px;margin-top:14px}",
+    /* one row: control on the left, consequences on the right */
+    ".set-row{display:grid;gap:6px 22px;grid-template-columns:minmax(0,260px) ",
+    "minmax(0,1fr);align-items:start;padding-top:14px;padding-bottom:14px;",
+    "border-top:1px solid var(--hairline)}",
+    ".set-fields > .set-row:first-child{border-top:none;padding-top:4px}",
+    ".set-row.i-out{display:none !important}",
+    ".set-row-a input,.set-row-a select{width:100%}",
+    ".set-row .hint{margin-top:0}",
     ".set-row .affects{font-size:11.5px;color:var(--muted);margin-top:5px;",
     "line-height:1.55}",
     ".set-row .affects>span{font-size:10px;letter-spacing:.08em;font-weight:700;",
     "text-transform:uppercase;color:var(--faint);margin-right:5px}",
-    ".set-count{font-size:11px}",
-    ".set-save{position:sticky;bottom:0;display:flex;gap:14px;align-items:center;",
-    "flex-wrap:wrap;padding:14px 0;margin-top:6px;",
-    "background:linear-gradient(180deg,transparent,var(--bg) 40%)}",
+    ".set-count{font-size:11px;margin-left:auto}",
+    /* the save bar */
+    /* SOLID, not a gradient. A translucent sticky bar over a form reads as a
+       button floating on top of a field -- measured at 400px, where the Save
+       sat across the Data feed row and the gradient's transparent half let the
+       control show through it. */
+    ".set-save{position:sticky;bottom:0;z-index:5;display:flex;gap:14px;",
+    "align-items:center;flex-wrap:wrap;padding:14px 0 16px;margin-top:6px;",
+    "background:var(--bg);border-top:1px solid var(--hairline)}",
     ".set-save .btn{min-width:190px}",
+    ".set-foot{font-size:11px;color:var(--faint);line-height:1.6;max-width:56ch}",
     ".set-diff{display:flex;flex-direction:column;gap:7px;font-size:12.5px}",
     ".set-acts{display:flex;flex-direction:column;gap:7px;margin-top:14px;",
     "font-size:12px;line-height:1.6;color:var(--muted)}",
     ".set-acts b{color:var(--text)}",
-    "@media (max-width:560px){.set-save .btn{min-width:0;width:100%}}",
+    /* the account panel */
+    ".acct-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}",
+    ".acct-id{flex:1;min-width:240px}",
+    ".acct-label{font-size:19px;font-weight:650;letter-spacing:-.01em}",
+    ".acct-id .faint{font-size:12px;margin-top:2px}",
+    ".srv{display:grid;gap:var(--s4);grid-template-columns:minmax(0,200px) ",
+    "minmax(0,1fr);align-items:start}",
+    ".srv-a{display:flex;flex-direction:column;gap:8px}",
+    ".srv-a .btn{width:100%}",
+    ".srv-b .tip{margin-top:10px}",
+    "@media (max-width:900px){.set-room{grid-template-columns:1fr}",
+    ".set-nav{position:static;flex-direction:row;flex-wrap:wrap}",
+    ".srv{grid-template-columns:1fr}}",
+    "@media (max-width:620px){.set-row{grid-template-columns:1fr}",
+    ".set-legend{gap:8px;flex-direction:column;align-items:flex-start}",
+    ".set-save{gap:8px}.set-save .btn{min-width:0;width:100%}",
+    ".set-foot{max-width:none}}",
   ].join("");
   document.head.appendChild(s);
 }
@@ -557,8 +715,8 @@ function endRename() {
   const host = el("acctName");
   if (!host) return;
   host.innerHTML = `
-    <div style="font-size:19px;font-weight:650;letter-spacing:-.01em" id="acctLabelTxt">—</div>
-    <div class="faint" style="font-size:12px;margin-top:2px" id="acctMeta"></div>`;
+    <div class="acct-label" id="acctLabelTxt">—</div>
+    <div class="faint" id="acctMeta"></div>`;
   paintAccount();
 }
 
