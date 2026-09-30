@@ -174,6 +174,7 @@ function gateSolo(g, tally) {
 /* ------------------------------------------------------------ the reads */
 let CAT_ROWS = [];        // /api/hub/strategies -> strategies[]   (the money)
 let CAT_TICKERS = [];     // /api/hub/tickers    -> tickers[]
+let CAT_PL = null;
 let CAT_WARN = [];
 let CAT_ERR = "";
 let SHELF = [];           // /api/bank/entries   -> entries[]      (all 259)
@@ -231,6 +232,11 @@ async function loadCatalogue(force = false) {
      short -- is invisible on /strategies and /tickers. A page about strategies
      that cannot say "this strategy's ledger disagrees with Alpaca" is the
      wrong page to leave that on. */
+  // THE ACCOUNT'S OWN REALISED, for the account-level tile below. Summing
+  // each strategy's realised made an ACCOUNT claim out of strategy
+  // statistics: the ladder's figure is its journal's, which is wins-only on
+  // this account, so the card read +$8,882.86 on an account that is down.
+  CAT_PL = (by.portfolio.d && by.portfolio.d.pl) || null;
   CAT_WARN = (by.portfolio.d && by.portfolio.d.warnings)
     || (by.strategies.d && by.strategies.d.warnings) || [];
   if (by.entries.d) {
@@ -353,7 +359,8 @@ function renderHead() {
       ${metricTile("Tickers covered", { value: syms.size, n: syms.size, unit: "count" })}
       ${metricTile("Value held", sum("value"))}
       ${metricTile("Open P/L", sum("open_pl"), { signed: true })}
-      ${metricTile("Realised", sum("realized_pl"), { signed: true })}
+      ${metricTile("Realised", (CAT_PL && CAT_PL.realized)
+                    || sum("realized_pl"), { signed: true })}
       ${metricTile("At risk", sum("at_risk"))}
     </div>
     ${warn}`,

@@ -662,8 +662,23 @@ class OptionPlayStrategy(Strategy):
         return [p for p in self._rows if getattr(p, "is_open", False)]
 
     def tickers(self) -> list:
+        """The tickers this play is ON: assigned, or still holding something.
+
+        `self._rows` is every position this play ever had, CLOSED ONES
+        INCLUDED, and unioning all of them meant a ticker advertised a play
+        forever once it had run there. Measured 30 Sep 2026: the owner removed
+        every strategy from every ticker, `state/options/plays.json` came back
+        with an empty assignment list, and /api/hub/tickers still reported nine
+        attachments -- one per symbol that had ever traded a play.
+
+        An OPEN position keeps its ticker in the list even with no assignment,
+        and that is deliberate: the position is real, it is being managed to a
+        target and a stop, and hiding it because nobody re-assigned the play
+        would hide the thing that most needs watching. A CLOSED one is
+        history, and history belongs on the history tab.
+        """
         syms = {str(a.symbol).upper() for a in self._assigned}
-        syms |= {str(p.symbol).upper() for p in self._rows if p.symbol}
+        syms |= {str(p.symbol).upper() for p in self._open() if p.symbol}
         return sorted(syms)
 
     def state(self) -> str:
@@ -1178,15 +1193,13 @@ def portfolio(ctx: Ctx) -> dict:
         # lines up, and shadowing it made `eq - _fund` a dict minus a float on
         # every hub request. Measured in production as a 500 on
         # /api/hub/portfolio.
-        eq_real = _perf.realized_from_fills(fills)
-        opt = 0.0
-        for s in strategies_:
-            if str(getattr(s, "kind", "")) == "options":
-                v, _n, _w = s.realized()
-                if v is not None:
-                    opt += v
-        realized = round(eq_real["total"] + opt, 2)
-        realized_n = eq_real["fills"]
+        # ONE SOURCE. The options ledger used to be added on top because the
+        # fill walk was long-only and could not book a sold-to-open leg; it
+        # books both sides now, so adding the ledger would count every option
+        # twice.
+        all_real = _perf.realized_from_fills(fills)
+        realized = all_real["total"]
+        realized_n = all_real["fills"]
         realized_why = None
         measured = True
     else:

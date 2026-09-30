@@ -298,16 +298,13 @@ def section2():
     html = call("tickerRow", hub_row(), False)
     root = dom(html)
 
-    chips = one(root, "tick-chips")
-    check("the chip reads 'watching'", text_of(chips) == "watching",
-          "it read %r" % text_of(chips))
-
-    chip = one(root, "chip")
-    why = chip["attrs"].get("title", "")
-    check("the chip says nothing trades it", "nothing trades it" in why,
-          "title was %r" % why)
-    check("and that it keeps its market data",
-          "market data" in why and "watchlist" in why)
+    # NO STRATEGY NAME ON THE RAIL, on the owner's instruction. The row keeps
+    # the facts about the SYMBOL and says nothing about what runs on it.
+    check("the row carries no strategy chip at all",
+          "tick-chips" not in html, "the chips are back on the rail row")
+    said = says(html)
+    check("but it still names the symbol", "nvda" in said)
+    check("and still prints the price", "$" in html or "num" in html)
 
     held = one(root, "tick-val")
     check("what is held reads 'flat'", text_of(held) == "flat",
@@ -368,30 +365,27 @@ def section3():
         check("%s: prints none of the ladder's units" % name, not bad,
               "found %s in: %s" % (bad, said[:300]))
 
-    # The ladder ATTACHED is allowed to name itself -- that is the point of
-    # demoting it to a strategy rather than deleting it.
-    said = says(call("tickerRow", hub_row(strategies=[LADDER_CARD]), False))
-    check("an ATTACHED ladder still names itself", "dca ladder" in said)
-    check("but still prints no lot count",
-          "lots" not in said and "100000" not in said and "8" not in
-          text_of(one(dom(call("tickerRow", hub_row(strategies=[LADDER_CARD]),
-                               False)), "tick-chips")),
-          "the card carried lots=4 max_lots=8 and the row leaked one of them")
-
-    # Two strategies on one ticker: the strongest state wins the chip.
-    html = call("tickerRow",
-                hub_row(strategies=[dict(PLAY_CARD),
-                                    dict(LADDER_CARD, state="armed")]), False)
-    chips = one(dom(html), "tick-chips")
-    check("with two strategies the ARMED one is the chip shown",
-          text_of(chips).startswith("DCA ladder"),
-          "it showed %r" % text_of(chips))
-    check("and the other is counted, not dropped", "+1" in text_of(chips))
-    html2 = call("tickerRow",
-                 hub_row(strategies=[dict(LADDER_CARD, state="idle"),
-                                     dict(PLAY_CARD, state="live")]), False)
-    check("an IDLE ladder does not outrank a LIVE play",
-          text_of(one(dom(html2), "tick-chips")).startswith("Swing ATM hourly"))
+    # THE CHIP-RANKING CHECKS ARE GONE WITH THE CHIP. They proved which
+    # strategy won the one slot on the row (armed outranks live outranks
+    # idle), and there is no slot any more -- the owner asked for the
+    # strategy preview off the rail entirely. `stratChips()` still exists and
+    # is still exported, so if that slot ever comes back its ranking is still
+    # written down; nothing in the shipped rail calls it.
+    #
+    # What replaces them is the guarantee he actually asked for: whatever is
+    # attached, the row says nothing about it.
+    for cards in ([LADDER_CARD],
+                  [dict(PLAY_CARD), dict(LADDER_CARD, state="armed")],
+                  [dict(LADDER_CARD, state="idle"),
+                   dict(PLAY_CARD, state="live")]):
+        h = call("tickerRow", hub_row(strategies=cards), False)
+        said = says(h)
+        check("with %d strategies the row still names none of them"
+              % len(cards),
+              ("dca ladder" not in said) and ("swing atm" not in said),
+              "the row said %r" % said[:90])
+        check("...and still prints no lot count",
+              ("lots" not in said) and ("100000" not in said))
 
 
 # ================================================================ SECTION 4 ==
@@ -542,7 +536,9 @@ def section7():
         bad = [w for w in BANNED if w in said]
         check("%s: the REAL hub row renders no ladder vocabulary" % sym,
               not bad, "found %s" % bad)
-        check("%s: and reads 'watching'" % sym, "watching" in said)
+        check("%s: and names the symbol without naming a strategy" % sym,
+              (sym.lower() in said) and ("ladder" not in said)
+              and ("swing" not in said))
 
     for sym in attached:
         ids = [c.get("id") for c in rows[sym]["strategies"]]

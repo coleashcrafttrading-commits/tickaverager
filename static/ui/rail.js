@@ -130,7 +130,6 @@ export function tickerRow(t, on) {
            <span class="tick-val" title="${esc(
              "Nothing of this symbol is held at the broker right now.")
              }">flat</span>`}
-      <span class="tick-chips">${stratChips(cards)}</span>
     </div>
   </div>`;
 }

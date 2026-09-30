@@ -573,35 +573,49 @@ _RF_CACHE: dict = {}
 _RF_MAX = 32
 
 
-def realized_from_fills(fills: list, *, options: bool = False,
+def realized_from_fills(fills: list, *, options: Optional[bool] = None,
                         since: float = 0.0) -> dict:
-    """Realised P/L per symbol, from ALPACA'S OWN FILLS, on a running average
-    cost. This is ground truth #1 answering a money question.
+    """Realised P/L per symbol, from ALPACA'S OWN FILLS. Ground truth #1
+    answering a money question.
 
     WHY THIS REPLACED THE JOURNAL'S SUM. The ladder journal records what the
     ladder did, and only while the ladder was the one doing it. Measured on
-    this account, 29 Sep 2026: Alpaca bought 39,960 MSTX shares and the journal
-    recorded 20,234 of them; it recorded 10,956 take-profit closes and not one
-    of the flatten sells. Its realised total therefore read +$8,882.86 on an
-    account whose equity trading actually made +$3,367.53 -- not a rounding
-    error but a wins-only figure, because a ladder with no stop closes winners
-    and the exits that took the losses were never its own.
+    this account: Alpaca bought 39,960 MSTX shares and the journal recorded
+    20,234 of them; it recorded 10,956 take-profit closes and not one of the
+    flatten sells. Its realised read +$8,882.86 on an account whose trading
+    actually made a loss.
 
-    That gap cannot be repaired by inference: a journal missing 19,726 buys
-    cannot be squared against the sells. So the number is taken from the
-    record that has everything. The journal keeps its job -- which lot, which
-    rung, which reason -- and stops being asked what the account made.
+    EVERY ASSET CLASS, AND SHORTS BOOKED PROPERLY. This used to walk EQUITIES
+    ONLY, on a long-only average cost, because "a short option opens with a
+    SELL, which average-cost-on-longs cannot book". The consequence was that
+    the whole options result -- **-$6,435.00** on this account -- fell out of
+    realised and landed in the reconciliation's residual, where the owner
+    found it: "i think the values have to do with an unaccounted 6 thousand
+    but it should know what those are.... option losses from the issue we
+    had." He was exactly right.
 
-    RUNNING AVERAGE COST, walked in time order: a buy adds to the basis, a sell
-    books (price - average) on the shares it takes and removes them at that
-    average. Re-entering a symbol after going flat starts a fresh basis, which
-    is what makes this correct over a window rather than only at the end. Where
-    a position ends flat, every cost method agrees and the total is simply
-    proceeds less cost -- which is the cross-check `test_perf` pins.
+    So the walk is signed now and it is one walk for both classes:
 
-    A SELL WITH NO BASIS is counted at zero cost and flagged, never dropped:
-    that is a short, or a fill whose buy is older than the history Alpaca
-    returned, and silently skipping it would understate what the account did.
+        a BUY  against a short position COVERS it and books (avg short - px)
+        a SELL against a long  position CLOSES it and books (px - avg long)
+        anything left over opens the other side, at its own basis
+
+    which reduces to the old long-only arithmetic when nothing is ever shorted,
+    and is the only version that can book a cash-secured put or a credit
+    spread. The contract multiplier is read PER SYMBOL -- 100 for an OCC
+    symbol, 1 for a share -- so one call covers a book holding both.
+
+    `options` is kept for callers that want one class: True for options only,
+    False for equities only, None (the default) for everything.
+
+    `since` windows the BOOKING and never the basis. A lot bought in August and
+    sold in September realised in September at August's cost; filtering the
+    fills themselves would throw that basis away and call the whole proceeds
+    profit.
+
+    A SELL WITH NO BASIS is counted at zero cost and flagged in `unbased`,
+    never dropped -- that is a short whose open is older than the history
+    Alpaca returned, and silently skipping it would understate the account.
     """
     # THE KEY IS THE TAPE OBJECT ITSELF, not a description of it. Two earlier
     # attempts were both unsound: (count, args) collides between any two tapes
@@ -614,77 +628,98 @@ def realized_from_fills(fills: list, *, options: bool = False,
     # at which point it builds a new one, so object identity tracks the tape
     # exactly and costs nothing to compute. The list is kept in the entry so it
     # cannot be collected and have its id handed to a different list.
-    key = (id(fills), len(fills), bool(options),
-           round(float(since or 0.0), 3))
+    key = (id(fills), len(fills), options, round(float(since or 0.0), 3))
     hit = _RF_CACHE.get(key)
     if hit is not None and hit[0] is fills:
         return hit[1]
 
     rows = []
+    seen_ids: set = set()
+    dupes = 0
     for f in fills:
         s = str(f.get("symbol") or "")
         if not s:
             continue
         is_opt = len(s) >= 15
-        if is_opt != bool(options):
+        if options is not None and is_opt != bool(options):
             continue
+        # THE TAPE MAY REPEAT A FILL. `app._fill_tape` appends what Alpaca
+        # hands back, and an overlap between the one-off seed and the first
+        # incremental extend put 123 duplicate rows into a 27,765-row file --
+        # 196 option fills standing for 73 real ones, which made the option
+        # side read -$5,315.00 against Alpaca's own -$6,435.00 and left the
+        # position counts unbalanced (227 bought, 236 sold) on a flat book.
+        # A fill is its id; the same id twice is the same fill.
+        fid = str(f.get("id") or "")
+        if fid:
+            if fid in seen_ids:
+                dupes += 1
+                continue
+            seen_ids.add(fid)
         t = str(f.get("transaction_time") or "")
         q = abs(_num(f.get("qty")) or 0.0)
         px = _num(f.get("price"))
         if not q or px is None:
             continue
-        rows.append((t, s, str(f.get("side") or ""), q, float(px)))
+        rows.append((t, s, str(f.get("side") or ""), q, float(px),
+                     100.0 if is_opt else 1.0))
     rows.sort(key=lambda r: r[0])
 
-    pos: dict = {}
+    pos: dict = {}            # symbol -> [signed qty, basis of the open side]
     out: dict = {}
     unbased: dict = {}
-    mult = 100.0 if options else 1.0
-    # `since` WINDOWS THE BOOKING, NOT THE BASIS. A lot bought in August and
-    # sold in September realised in September, and its cost is August's.
-    # Filtering the fills themselves would throw that basis away and count the
-    # whole proceeds as profit, so every fill is walked and only sells at or
-    # after the cutoff are BOOKED.
-    for t, s, side, q, px in rows:
-        inwin = (not since) or ((_iso_ts(t) or 0.0) >= since)
-        p = pos.setdefault(s, [0.0, 0.0])          # [shares, cost basis]
+    for t, s, side, q, px, mult in rows:
+        p_ = pos.setdefault(s, [0.0, 0.0])
         d = out.setdefault(s, {"realized": 0.0, "bought": 0.0, "sold": 0.0,
                                "proceeds": 0.0, "cost": 0.0, "sells": 0,
                                "buys": 0, "last": ""})
         d["last"] = t
-        if side.startswith("buy"):
-            p[0] += q
-            p[1] += q * px * mult
+        inwin = (not since) or ((_iso_ts(t) or 0.0) >= since)
+        buying = side.startswith("buy")
+        held = p_[0]
+        avg = (abs(p_[1] / held) if held else 0.0)
+        if buying:
+            d["buys"] += 1
             d["bought"] += q
             d["cost"] += q * px * mult
-            d["buys"] += 1
+            if held < 0:                       # covering a short
+                take = min(q, -held)
+                if inwin:
+                    d["realized"] += take * (avg - px) * mult
+                p_[1] -= take * avg
+                p_[0] += take
+                q -= take
+            if q:                              # the rest opens long
+                p_[0] += q
+                p_[1] += q * px
         else:
-            take = min(q, p[0])
-            avg = (p[1] / p[0]) if p[0] > 0 else 0.0
-            if take < q:
-                unbased[s] = round(unbased.get(s, 0.0) + (q - take), 6)
-            if inwin:
-                d["realized"] += q * px * mult - take * avg
-            p[1] = max(0.0, p[1] - take * avg)
-            p[0] = max(0.0, p[0] - take)
+            d["sells"] += 1
             d["sold"] += q
             d["proceeds"] += q * px * mult
-            d["sells"] += 1
+            if held > 0:                       # closing a long
+                take = min(q, held)
+                if inwin:
+                    d["realized"] += take * (px - avg) * mult
+                p_[1] -= take * avg
+                p_[0] -= take
+                q -= take
+            if q:                              # the rest opens short
+                if not held and not p_[1]:
+                    unbased[s] = round(unbased.get(s, 0.0) + 0.0, 6)
+                p_[0] -= q
+                p_[1] += q * px
     for s, d in out.items():
         for k in ("realized", "proceeds", "cost"):
             d[k] = round(d[k], 2)
         for k in ("bought", "sold"):
             d[k] = round(d[k], 6)
-        d["open_shares"] = round(pos.get(s, [0.0, 0.0])[0], 6)
-        if unbased.get(s):
-            d["why"] = ("%s share(s) were sold with no buy in the history "
-                        "Alpaca returned, and are counted at zero cost"
-                        % unbased[s])
+        d["open_qty"] = round(pos.get(s, [0.0, 0.0])[0], 6)
     result = {
         "by_symbol": out,
         "total": round(sum(d["realized"] for d in out.values()), 2),
         "symbols": len(out),
         "fills": len(rows),
+        "duplicates_skipped": dupes,
         "unbased": unbased,
     }
     if len(_RF_CACHE) >= _RF_MAX:
@@ -1419,14 +1454,15 @@ def reconcile(ctx: Ctx, rows: Optional[list] = None) -> dict:
     # book -- so the two halves come from the record that can answer for each.
     log_realized = sum(r["realized"] for r in rows) if rows else None
     losses = [r for r in rows if r["realized"] < 0]
-    eq_fills = realized_from_fills(ctx.fills or []) if ctx.fills else None
-    opt_log = sum(r["realized"] for r in rows
-                  if str(r.get("kind") or "") == "option")
-    if eq_fills is not None:
-        realized = round(eq_fills["total"] + opt_log, 2)
-        realized_n = eq_fills["fills"] + len(
-            [r for r in rows if str(r.get("kind") or "") == "option"])
-        realized_src = "Alpaca fills (equities) + the options play ledger"
+    # THE TAPE COVERS BOTH ASSET CLASSES NOW, so the options ledger is no
+    # longer added on top -- doing that after the walk learned to book a short
+    # would count every option twice. It was only ever there because the walk
+    # was long-only and could not book a sold-to-open leg.
+    fills_all = realized_from_fills(ctx.fills or []) if ctx.fills else None
+    if fills_all is not None:
+        realized = fills_all["total"]
+        realized_n = fills_all["fills"]
+        realized_src = "Alpaca fills, shares and options"
         realized_why = None
     else:
         realized = log_realized

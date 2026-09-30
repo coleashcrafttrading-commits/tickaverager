@@ -374,7 +374,6 @@ const CSS = `
 .pl-scroll { overflow-x: auto; }
 .pl-scroll table { min-width: 720px; }
 .pl-scroll td, .pl-scroll th { font-variant-numeric: tabular-nums; }
-.pl-scroll .sm { font-size: 11px; }
 
 /* ---- the overview room -------------------------------------------------
    Two additions, and neither is decoration. A metric that never formed is a
@@ -1353,31 +1352,12 @@ function ovBook(d) {
   return head + rows.map(ovRow).join("");
 }
 
-/* Why a play did not open. The refusal that mattered was a line in a log
-   nobody reads; grouped, counted and carrying the sentence it printed, it is
-   the second thing on the page. None of this is an explanation -- every row
-   is a thing that happened. */
-function ovWhyNot(d) {
-  const b = d.decisions || {};
-  const rows = (b.refusals || []).map((g) => `<tr>
-    <td>${esc(String(g.class || "?"))}</td>
-    <td class="num">${n0(g.n)}</td>
-    <td>${esc((g.symbols || []).join(", ") || "—")}</td>
-    <td class="sm faint">${esc(String(g.example || ""))}</td>
-  </tr>`);
-  const head = `<div class="pl-stats">
-    ${stat("Proposals", n0(b.proposals), n2(b.window_h, 0) + "h")}
-    ${stat("Allowed", n0(b.ok), "")}
-    ${stat("Refused", n0(b.refused), "")}
-    ${stat("Submitted", n0(b.submitted), "")}
-  </div>`;
-  const body = rows.length
-    ? `<div class="pl-scroll">${tableHTML(
-        ["Refused by", "Times", "Tickers", "The sentence it printed"], rows)}</div>`
-    : `<div class="note">Nothing was refused in this window.</div>`;
-  return head + body;
-}
-
+/* The money, in four figures. (The "Refused" panel that used to sit here is
+   gone on the owner's instruction -- it listed every reason a proposal did
+   NOT become a trade, on a page about what IS open. Nothing diagnostic was
+   lost with it: `state/options/play_decisions.jsonl` carries one row per
+   proposal per cycle with its sentence, and that log is what the SPY/QQQ
+   failure was actually diagnosed from.) */
 function ovPL(d) {
   const p = d.pl || {};
   const c = d.counts || {};
@@ -1508,7 +1488,6 @@ function ovHost(moved) {
   ${moved ? `<div class="note">${esc(moved)}</div>` : ""}
   <div id="ov-head">${loading("the options record")}</div>
   <div id="ov-book"></div>
-  <div id="ov-why"></div>
   <div id="ov-result"></div>
   <div id="ov-bounds"></div>
   <div id="ov-break"></div>`;
@@ -1521,7 +1500,7 @@ function ovHost(moved) {
 function mountPerf(moved) {
   el("view").innerHTML = ovHost(moved || "");
 
-  const BLOCKS = ["ov-why", "ov-result", "ov-bounds", "ov-break"];
+  const BLOCKS = ["ov-result", "ov-bounds", "ov-break"];
 
   const paint = (d) => {
     put("ov-head", ovState(d) + ovDead(d) + ovWarn(d));
@@ -1535,7 +1514,6 @@ function mountPerf(moved) {
     const c = d.counts || {};
     put("ov-book", panel("Open book", ovAttention(d) + ovBook(d),
         { sub: n0(c.open) + " open · " + n0(c.adopted) + " adopted" }));
-    put("ov-why", panel("Refused", ovWhyNot(d)));
     put("ov-result", panel("Result", ovPL(d) + ovRecord(d) + ovExits(d)
                            + ovHold(d)));
     put("ov-bounds", panel("What bounds it", ovCapital(d) + ovAssign(d)));

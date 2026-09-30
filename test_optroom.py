@@ -261,7 +261,9 @@ for scen in ("perf", "perfempty", "perfstub"):
 # a reason for each one.
 np_ = len(re.findall(r'class="panel"', PAGE["perf"]))
 nc_ = len(re.findall(r'class="card[ "]', PAGE["perf"]))
-check("the room is five panels now, not ten cards", np_ == 5 and nc_ == 0,
+# FOUR PANELS. "Refused" was removed on the owner's instruction -- "remove
+# refused list from options" -- and it was the fifth.
+check("the room is four panels now, not ten cards", np_ == 4 and nc_ == 0,
       (np_, nc_))
 
 
@@ -281,12 +283,22 @@ for want in (
     check("the attention row survives: " + want[:44], want in loaded,
           loaded[:400])
 
-# Every refusal, with the sentence it printed. This is the block the room
-# exists for: the day SPY and QQQ never opened, the answer was in a log.
-for want in ("assignment_capacity", "risk_ceiling", "already_open",
-             "$0 open plus $741000 here is $741000 against a $53155 cap",
+# THE REFUSED PANEL IS GONE and none of its sentences render any more. The
+# owner asked for it by name and he is right that it was a wall of text: it
+# listed every reason a proposal did NOT become a trade, on a page about what
+# IS open.
+#
+# It cost nothing diagnostically, and that is worth stating because the old
+# comment here claimed the opposite. The day SPY and QQQ never opened, the
+# answer came out of `state/options/play_decisions.jsonl` -- one row per
+# proposal per cycle, with the sentence -- not out of this panel. That log is
+# untouched and is still the thing to read. What the ROOM must keep showing is
+# a problem someone has to act on, which is the "Needs attention" block
+# checked immediately above.
+check("the Refused panel is gone", "Refused" not in loaded, loaded[:200])
+for gone in ("assignment_capacity", "risk_ceiling",
              "one entry per session and this session already has one"):
-    check("the refusal survives: " + want[:44], want in loaded, "")
+    check("...and so is its text: " + gone[:40], gone not in loaded, "")
 
 check("the report-wide warning survives",
       "1 open position(s) have no price" in loaded, "")
