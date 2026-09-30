@@ -401,25 +401,33 @@ export function modelCredsHTML(r, { test = false, id = "mcTest" } = {}) {
        offer that button. The FAILING branch below is unchanged -- that one is
        a real problem and still shouts. */
     if (!test) return "";
+    /* NAME THE MODEL, not just the credential. "Model: an API key" does not
+       answer the question anyone actually has, which is WHICH model is
+       answering and therefore what it costs and how good it is. */
     return `<div class="tip" style="margin:0 0 10px">Model:
-      ${esc(AUTH_NAME[how] || how || "the Claude Code CLI")}.
+      <b>${esc(r.model || "unknown")}</b> via ${
+        esc(AUTH_NAME[how] || how || "the Claude Code CLI")}.
       <button class="btn sm" id="${id}" style="margin-left:8px">Test it</button>
       <span id="${id}Out" class="faint"></span></div>`;
   }
   return `<div class="note warn" style="margin-top:0">
     <b>This dashboard cannot reach a model yet.</b> ${esc(r.problem || "")}
     ${r.fix ? `<br>${esc(r.fix)}` : ""}
-    <div class="tip">Two separate one-time steps, and you need <b>both</b>:<br>
-      <b>1. Trust</b> — open a terminal in the bot folder, run <code>claude</code>,
-      accept the trust prompt. Without it the CLI silently ignores every
-      permission rule in <code>.claude/settings.json</code>.<br>
-      <b>2. Credentials</b> — in that same session run <code>/login</code> (uses
-      your subscription), <i>or</i> put <code>ANTHROPIC_API_KEY=sk-ant-…</code> in
-      <code>.env</code> and restart the dashboard (billed per token, a few cents
-      a run).</div>
+    <div class="tip"><b>On the server</b> (which is where this dashboard
+      runs) there is one way, and it is one line: put
+      <code>ANTHROPIC_API_KEY=sk-ant-…</code> in the bot folder's
+      <code>.env</code> and restart the service. Billed per token; this
+      assistant makes small calls.<br>
+      It would then answer with <b>${esc(r.model || "its default model")}</b>.
+      Set <code>ANTHROPIC_MODEL</code> in the same file to change that.<br>
+      <span class="faint">On a desktop checkout the Claude Code CLI works
+      instead: run <code>claude</code> in the bot folder once to accept the
+      trust prompt, then <code>/login</code>.</span></div>
     ${test ? `<button class="btn sm" id="${id}" style="margin-top:8px">Test it anyway</button>
       <span id="${id}Out" class="faint"></span><br>
-      <span class="faint">Schedules still save; every run until then is recorded as
+      <span class="faint">Until then the assistant still works for anything
+      starting with <code>/</code> — those are parsed in the repo and never
+      reach a model. Schedules still save, and every run is recorded as
       blocked rather than failing silently.</span>` : ""}</div>`;
 }
 

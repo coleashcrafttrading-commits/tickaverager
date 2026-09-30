@@ -39,6 +39,25 @@ CUSTOM_DIR.mkdir(exist_ok=True)
 
 MAX_SECONDS = 180
 
+#: THE MODEL, IN ONE PLACE AND CONFIGURABLE. This was the literal string
+#: "claude-opus-4-6" buried in the request body, which is two problems: it went
+#: stale the moment the family moved on, and changing it meant editing code on
+#: a trading box.
+#:
+#: Sonnet is the default because of what this assistant actually does -- many
+#: small, tool-shaped calls where latency is felt by someone waiting at a
+#: panel, and where the work is choosing among typed tools rather than open
+#: reasoning. Set ANTHROPIC_MODEL in .env to override; opus is the one to
+#: reach for when a question needs real thinking rather than a lookup.
+DEFAULT_MODEL = "claude-sonnet-5-5"
+#: Offered in the dashboard so the owner can switch without editing a file.
+KNOWN_MODELS = ("claude-sonnet-5-5", "claude-opus-5", "claude-haiku-4-5-20251001")
+
+
+def model_name() -> str:
+    """Which model this process will call, and never an empty string."""
+    return (os.environ.get("ANTHROPIC_MODEL") or "").strip() or DEFAULT_MODEL
+
 CONTRACT = r"""
 You are writing ONE indicator for a custom charting dashboard. Return JSON only.
 
@@ -101,18 +120,29 @@ def _cli() -> str:
 
 
 def readiness() -> dict:
+    """Whether a model can be reached, how, and WHICH ONE.
+
+    `model` is on every branch, including the unready ones: a panel that says
+    "no model configured" is more useful when it also says what it would call
+    once one is, and an error that names the model is the difference between
+    "the key is wrong" and "that model id does not exist".
+    """
+    m = model_name()
     key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if key.startswith("sk-"):
-        return {"ready": True, "how": "api_key"}
+        return {"ready": True, "how": "api_key", "model": m}
     try:
         import scheduler
         r = scheduler.readiness()
         if r.get("ready"):
-            return {"ready": True, "how": "cli"}
-        return {"ready": False, "how": "none", "problem": r.get("problem", ""),
-                "fix": r.get("fix", "")}
+            return {"ready": True, "how": "cli", "model": m}
+        return {"ready": False, "how": "none", "model": m,
+                "problem": r.get("problem", ""),
+                "fix": ("Put ANTHROPIC_API_KEY=sk-ant-... in the VM's .env "
+                        "and restart the service. " + (r.get("fix", "") or ""))}
     except Exception as e:
-        return {"ready": False, "how": "none", "problem": repr(e), "fix": ""}
+        return {"ready": False, "how": "none", "model": m,
+                "problem": repr(e), "fix": ""}
 
 
 def _ask(prompt: str, timeout: int = MAX_SECONDS) -> tuple[str, str]:
@@ -122,7 +152,7 @@ def _ask(prompt: str, timeout: int = MAX_SECONDS) -> tuple[str, str]:
         try:
             import urllib.request
             body = json.dumps({
-                "model": "claude-opus-4-6",
+                "model": model_name(),
                 "max_tokens": 4000,
                 "messages": [{"role": "user", "content": prompt}],
             }).encode("utf-8")
@@ -137,7 +167,10 @@ def _ask(prompt: str, timeout: int = MAX_SECONDS) -> tuple[str, str]:
                      if c.get("type") == "text"]
             return "".join(parts), ""
         except Exception as e:
-            return "", "the API call failed: %r" % (e,)
+            # NAME THE MODEL IN THE ERROR. "the API call failed" is the same
+            # sentence for a wrong key, a model id that no longer exists and a
+            # network that is down, and those need different answers.
+            return "", ("the API call to %s failed: %r" % (model_name(), e))
 
     exe = _cli()
     if not exe:

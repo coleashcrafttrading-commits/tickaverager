@@ -525,6 +525,30 @@ def main() -> int:
     check("...and it points at the commands that still work",
           "/help" in r["reply"], True)
 
+    # ------------------------------------------------------------------
+    # THE ROOM MAP IS THE ROOMS THAT EXIST
+    # ------------------------------------------------------------------
+    # `ROOMS` is sent to the model as "which page am I on and what is it
+    # for". After the 30 Sep demolition it still described `research`,
+    # `scanner` and `risk` -- three rooms deleted that day -- and had no entry
+    # for `returns`, which survived. An assistant that describes a page nobody
+    # can open sends people somewhere that is not there, and it is exactly the
+    # kind of drift nothing was watching.
+    print(chr(10) + "the room map matches the views the SPA registers")
+    import re as _re
+    _views = set()
+    _vdir = Path(__file__).resolve().parent / "static" / "ui" / "views"
+    for _f in _vdir.glob("*.js"):
+        for _m in _re.finditer(r"VIEWS[.]([a-zA-Z_]+)[ ]*=", 
+                               _f.read_text(encoding="utf-8")):
+            _views.add(_m.group(1))
+    check("some views were found (the scan works at all)",
+          len(_views) >= 5, True)
+    check("every room the assistant describes is a real view",
+          sorted(set(assistant.ROOMS) - _views), [])
+    check("and every view has a room the assistant can describe",
+          sorted(_views - set(assistant.ROOMS)), [])
+
     aiwrite.readiness, aiwrite._ask = aiwrite_readiness, aiwrite_ask
     shutil.rmtree(SCRATCH, ignore_errors=True)
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))

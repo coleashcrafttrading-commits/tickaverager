@@ -256,35 +256,36 @@ ROOMS: dict = {
                     "edit_strategy", "copy_strategy", "delete_strategy",
                     "attach_strategy"],
     },
-    "research": {
-        "label": "Research",
-        "about": "the strategy builder, the backtester, the risk profiles and "
-                 "the risk bank. 'test that' here means run_backtest.",
-        "natural": ["run_backtest", "list_strategies", "create_strategy",
-                    "change_strategy_params"],
+    # NO `research`, `scanner` OR `risk` ENTRY. Those three rooms were deleted
+    # on 30 Sep 2026 and describing a page that does not exist is how an
+    # assistant sends someone somewhere they cannot go. The backtester they
+    # held now lives on the Options room's Backtest tab, so `run_backtest` is
+    # natural THERE.
+    "returns": {
+        "label": "Returns",
+        "about": "where the account's profit and loss came from, decomposed "
+                 "into terms that add up to it: realised, open, fees, income "
+                 "and the residual nothing explains. Read-only -- nothing on "
+                 "this page changes anything, so questions here are about "
+                 "WHY a number is what it is.",
+        "natural": ["list_attachments", "list_tickers"],
     },
     "options": {
         "label": "Options",
-        "about": "the options board, the chain and the tailored plays. The "
-                 "assistant may attach or detach an option structure or a "
-                 "play; it may not touch a play's numbers and it may not arm.",
-        "natural": ["list_strategies", "attach_strategy", "detach_strategy"],
+        "about": "the options board, the tailored plays and the backtester. "
+                 "The plays are the Wheel (weekly cash-secured put, then "
+                 "covered calls), MABB (moving average + Bollinger bands + IV "
+                 "rank), the index put credit spread and the hourly ATM "
+                 "swing. The assistant may attach or detach a play; it may "
+                 "not touch a play's numbers and IT MAY NOT ARM.",
+        "natural": ["list_strategies", "attach_strategy", "detach_strategy",
+                    "run_backtest"],
     },
     "settings": {
         "label": "Settings",
         "about": "the account's own settings and the scheduled agents. The "
                  "assistant changes per-ticker strategy settings only.",
         "natural": ["get_settings", "change_setting"],
-    },
-    "scanner": {
-        "label": "Scanner",
-        "about": "finding symbols worth watching. 'watch that' means add_ticker.",
-        "natural": ["add_ticker", "list_tickers"],
-    },
-    "risk": {
-        "label": "Risk",
-        "about": "live exposure across the account.",
-        "natural": ["list_attachments", "get_settings"],
     },
     "add": {
         "label": "Add a ticker",

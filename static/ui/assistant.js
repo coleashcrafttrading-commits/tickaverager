@@ -323,15 +323,29 @@ function paint() {
 
 function intro() {
   const never = (cat && cat.never) || [];
-  const head = (cat && cat.ready)
-    ? "Ask for what you want done. Everything it would change is shown to you "
-      + "as a diff first, and nothing happens until you confirm it."
-    : "No model is configured, so it cannot answer in words — but the "
-      + "commands below work with no model at all.";
+  /* THE FIX, WHERE THE PROBLEM IS. `status()` has carried the readiness detail
+     all along -- which model, and the one line that would connect one -- and
+     this panel showed neither, so "no model is configured" was a dead end on
+     the only surface reachable from every page. (The other renderer of that
+     detail lives in views/agents.js, which nothing registers.) */
+  const m = (cat && cat.model) || {};
+  let head;
+  if (cat && cat.ready) {
+    head = "Ask for what you want done. Everything it would change is shown "
+         + "to you as a diff first, and nothing happens until you confirm it.";
+    if (m.model) head += "\n\nAnswering with " + m.model + ".";
+  } else {
+    head = "No model is configured, so it cannot answer in words \u2014 but "
+         + "the commands below work with no model at all, and they build the "
+         + "same proposals it would.";
+    if (m.fix) head += "\n\nTo connect one: " + m.fix;
+    if (m.model) head += "\nIt would then answer with " + m.model + ".";
+  }
   return head + (never.length
     ? "\n\nIt will never: " + never.join("; ") + "."
     : "");
 }
+
 
 /* ------------------------------------------------------------------ talking */
 function say(card) { cards.push(card); paint(); }
