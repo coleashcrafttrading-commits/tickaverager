@@ -629,11 +629,24 @@ def exit_prices(entry_net: float, kind: str, profit_pct: float,
     Both are returned as positive prices because that is what an order carries.
     Which side of the market they sit on is decided by the leg's closing side,
     not by the number.
+      SHORT SINGLE (a cash-secured put or a covered call) is a CREDIT and
+      takes the credit branch. Reading it as a debit would put the target
+      ABOVE the entry -- buying back for more than was received and calling it
+      profit.
+
+      A stop_pct of 0 means NO STOP, and returns None rather than a price. On
+      the Wheel that is the owner's instruction: he gave a stop for the long
+      side only, and there assignment IS the exit -- the covered call is what
+      is done about it. Zero must not be read as "stop at the entry", which
+      would buy the position back at breakeven the moment it moved a cent.
     """
     e = abs(float(entry_net))
-    if kind == P.CREDIT_SPREAD:
-        return round(e * (1.0 - float(profit_pct)), 2), round(e * (1.0 + float(stop_pct)), 2)
-    return round(e * (1.0 + float(profit_pct)), 2), round(e * (1.0 - float(stop_pct)), 2)
+    sp = float(stop_pct or 0.0)
+    if kind in (P.CREDIT_SPREAD, P.SHORT_SINGLE):
+        target = round(e * (1.0 - float(profit_pct)), 2)
+        return target, (round(e * (1.0 + sp), 2) if sp > 0 else None)
+    target = round(e * (1.0 + float(profit_pct)), 2)
+    return target, (round(e * (1.0 - sp), 2) if sp > 0 else None)
 
 
 class Ledger:
@@ -1346,7 +1359,14 @@ class Playbook:
 
         # ---- then the thresholds, which an adopted position does not have ----
         elif (not pos.adopted and mark is not None
-                and pos.target_px is not None and pos.stop_px is not None):
+                and pos.target_px is not None):
+            # A MISSING STOP DOES NOT DISABLE THE TARGET. This branch used to
+            # require BOTH prices, so a play with no stop -- the Wheel, on the
+            # owner's instruction, because assignment is its exit -- would have
+            # had its take-profit silently switched off along with the stop it
+            # deliberately does not have. The target stands alone; each stop
+            # comparison checks for itself.
+            #
             # WHO OWNS THE TARGET. When a real order is resting at the profit
             # price, that order IS the target and this loop must not race it:
             # firing here cancels a good GTC order to send a worse one for the
@@ -1362,14 +1382,14 @@ class Playbook:
                 if owns_target and mark <= pos.target_px:
                     acted = self._close(pos, "profit target: buy back at %.2f <= %.2f"
                                         % (mark, pos.target_px), quotes, res)
-                elif mark >= pos.stop_px:
+                elif pos.stop_px is not None and mark >= pos.stop_px:
                     acted = self._close(pos, "stop: buy back at %.2f >= %.2f"
                                         % (mark, pos.stop_px), quotes, res)
             else:
                 if owns_target and mark >= pos.target_px:
                     acted = self._close(pos, "profit target: sell at %.2f >= %.2f"
                                         % (mark, pos.target_px), quotes, res)
-                elif mark <= pos.stop_px:
+                elif pos.stop_px is not None and mark <= pos.stop_px:
                     acted = self._close(pos, "stop: sell at %.2f <= %.2f"
                                         % (mark, pos.stop_px), quotes, res)
 

@@ -37,18 +37,31 @@ import {
   curAccount, acctLabel, initTheme, toggleTheme, toast,
   mv, mfmt, mnum, measured, mreason, pctf, sparkline, stateChip, STATE_WORDS,
 } from "./core.js";
+/* The rail's ticker rows. Extracted so they can be RUN in a test rather than
+   grepped: rail.js touches no DOM and test_rail.py executes it for real. It
+   is also where the "ladder 0/100000 lots" caption used to live, and the
+   header of that file is the record of why it no longer exists anywhere. */
+import { topState, stateWhy, tickerSection } from "./rail.js";
 
-/* Six destinations, six modules. The pages that stopped being destinations
-   did not stop existing: Performance is a tab of Portfolio (overview.js
-   imports it), Agents a tab of Settings, and the strategy builder, the
-   backtester and the risk bank are tabs of Research, each imported by the
-   page that now hosts it. core.js's MOVED map redirects their old URLs. */
+/* Five destinations plus the ticker pages, and one module each. The pages
+   that stopped being destinations did not stop existing: Performance is a tab
+   of Portfolio (overview.js imports it), Agents a tab of Settings, and the
+   strategy builder is a tab of Strategies. core.js's MOVED map redirects
+   their old URLs.
+
+   ROUND 8 DELETED THREE ROOMS -- Risk, Research and Scanner -- on the owner's
+   instruction ("remove the risk tab and the research tab and the scanner tab
+   completely from the code"). They are gone from disk, not hidden from the
+   nav: views/risk.js, views/research.js, views/scanner.js and riskmath.js no
+   longer exist, and their server routes went with them, because a view
+   deleted while its route keeps answering leaves the CPU cost behind. The
+   assignment-exposure figure the Risk room carried is not lost -- the Options
+   room's Overview has drawn its own, off /api/optlab/perf, since round 7.
+   Anything that used to live under #/risk, #/research or #/scanner now falls
+   through readHash() to Portfolio. */
 import "./views/overview.js";
 import "./views/returns.js";
 import "./views/ticker.js";
-import "./views/research.js";
-import "./views/scanner.js";
-import "./views/risk.js";
 import "./views/add.js";
 import "./views/settings.js";
 import "./views/strategies.js";
@@ -110,7 +123,7 @@ async function hubTick(force) {
     /* The account is stamped on FAILURE too, not only on success. Without it
        hubOf() treats a failed attempt as belonging to some other account and
        throws the error away, and the rail then says nothing at all about why
-       it is showing the ladder's own numbers. */
+       it fell back to the ladder fleet's own list. */
     if (acct === S.account) h.account = acct;
     h.tried = true;
     h.at = Date.now();
@@ -120,22 +133,9 @@ async function hubTick(force) {
 }
 window.__hubTick = hubTick;
 
-/* the strongest state among a ticker's strategies, in the order a trader
-   cares: is anything transmitting, is anything broken, is anything running */
-const STATE_RANK = { armed: 6, halted: 5, live: 4, adopted: 3, idle: 2,
-                     error: 5, off: 1 };
-const DOT_FOR = { armed: "armed", halted: "halt", error: "halt", live: "run",
-                  adopted: "run", idle: "", off: "" };
-function topState(cards) {
-  let best = "";
-  for (const c of cards || []) {
-    const st = String((c && c.state) || "").toLowerCase();
-    if (!st) continue;
-    if (!best || (STATE_RANK[st] || 0) > (STATE_RANK[best] || 0)) best = st;
-  }
-  return best;
-}
-const stateWhy = (st) => (STATE_WORDS[st] || {}).why || "";
+/* `topState`, `stateWhy`, the state ranking and every ticker row now live in
+   rail.js, which has no DOM and is executed by test_rail.py. They were here,
+   next to a fallback row that printed a lot count on every symbol. */
 
 /* ------------------------------------------------------------------ rail */
 /* The account switcher's own rows. Rendered into the popover, not the nav,
@@ -195,95 +195,14 @@ function paintAccountSwitch() {
   }
 }
 
-/* one compact chip per strategy actually attached to this ticker */
-function stratChips(cards) {
-  const list = (cards || []).filter(Boolean);
-  if (!list.length) {
-    return `<span class="chip ch-mute sm"
-      title="No strategy is attached. This ticker is on the watchlist: it still
-carries market data and history, and nothing trades it.">watching</span>`;
-  }
-  /* ONE chip, plus a count. Two full strategy names on a 262 px row squeeze
-     the price and the change into an ellipsis, and the price is the thing a
-     trader is actually looking at. The one shown is the strongest state, so
-     "armed" can never hide behind "idle"; the rest are in the +n tooltip. */
-  const order = list.slice().sort(
-    (a, b) => (STATE_RANK[String(b.state || "off").toLowerCase()] || 0)
-            - (STATE_RANK[String(a.state || "off").toLowerCase()] || 0));
-  const c = order[0];
-  const st = String(c.state || "off").toLowerCase();
-  const d = STATE_WORDS[st] || { tone: "idle" };
-  const first = `<span class="chip st-${d.tone} sm" title="${
-    esc((c.label || c.id || "strategy") + " — " + st + ": " + stateWhy(st))
-  }">${esc(c.label || c.id)}</span>`;
-  const more = order.length > 1
-    ? `<span class="chip sm" title="${esc(order.slice(1)
-        .map((x) => (x.label || x.id) + " (" + (x.state || "off") + ")")
-        .join(", "))}">+${order.length - 1}</span>`
-    : "";
-  return first + more;
-}
+/* stratChips(), tickerRow() and the row used while /api/hub/tickers has not
+   answered are rail.js's. THE FALLBACK THAT USED TO BE HERE IS DELETED, not
+   moved: `tickerRowLegacy` captioned every symbol in the rail
 
-/* A TICKER ROW. Price, change, what is held, which strategies -- what a
-   trader wants from a symbol, with nothing in it that assumes a ladder. */
-function tickerRowHub(t, on) {
-  const cards = t.strategies || [];
-  const st = topState(cards);
-  const dot = DOT_FOR[st] || "";
-  const pos = t.position, opt = t.options;
-  const heldValue = (pos && pos.value !== null && pos.value !== undefined)
-    ? pos.value
-    : (opt && opt.value !== null && opt.value !== undefined ? opt.value : null);
-  const heldWhat = pos ? `${qty(pos.qty)} sh`
-    : (opt ? `${qty(opt.contracts)} ct` : "");
-  return `<div class="nav-item tick-item ${on ? "on" : ""}"
-               data-go="ticker" data-sym="${esc(t.symbol)}"
-               title="${esc(t.name || t.symbol)}">
-    <div class="tick-top">
-      ${dot ? `<span class="dot ${dot}" title="${esc(st + ": " + stateWhy(st))}"></span>` : ""}
-      <span class="tick-sym">${esc(t.symbol)}</span>
-      <span class="tick-px num">${mnum(t.price, { dp: 2 })}</span>
-    </div>
-    <div class="tick-bot">
-      <span class="tick-chg">${measured(t.change_pct)
-        ? pctf(mv(t.change_pct), 2)
-        : `<span class="unmeasured" title="${esc(mreason(t.change_pct)
-            || "no previous close to compare against")}">—</span>`}</span>
-      ${heldValue !== null
-        ? `<span class="tick-sep">·</span>
-           <span class="tick-val num" title="${esc(heldWhat + " held at the broker")
-             }">${money0(heldValue)}</span>`
-        : `<span class="tick-sep">·</span>
-           <span class="tick-val" title="Nothing of this symbol is held at the
-broker right now.">flat</span>`}
-      <span class="tick-chips">${stratChips(cards)}</span>
-    </div>
-  </div>`;
-}
+       ladder <lot_count>/<max_lots> lots · <shares> sh
 
-/* THE FALLBACK, used only while /api/hub/tickers has never answered. It
-   renders the ladder's own numbers and SAYS they are the ladder's, instead of
-   printing lot counts under a bare symbol as if that were what a ticker is. */
-function tickerRowLegacy(t, on) {
-  const dot = t.halted ? "halt" : (t.running && !t.dry_run) ? "armed"
-    : t.running ? "run" : "";
-  const open = Number(t.unrealized) || 0;
-  return `<div class="nav-item tick-item ${on ? "on" : ""}"
-               data-go="ticker" data-sym="${esc(t.symbol)}">
-    <div class="tick-top">
-      ${dot ? `<span class="dot ${dot}"></span>` : ""}
-      <span class="tick-sym">${esc(t.symbol)}</span>
-      <span class="tick-px num" title="Open P/L on what the ladder holds"
-        >${open ? sgn(open, 0) : `<span class="unmeasured"
-          title="the ladder holds nothing here">—</span>`}</span>
-    </div>
-    <div class="tick-bot"><span class="tick-val">ladder ${t.lot_count}/${
-      t.max_lots} lots · ${qty(t.shares)} sh</span>
-      <span class="tick-chips">${t.dry_run ? ""
-        : `<span class="chip st-armed sm" title="${esc(stateWhy("armed"))
-           }">armed</span>`}</span></div>
-  </div>`;
-}
+   and, because the hub endpoints were timing out past 55 s, it was what the
+   owner actually saw on every ticker. rail.js's header is the full record. */
 
 function paintRail() {
   const ov = S.ov;
@@ -337,43 +256,28 @@ function paintRail() {
       + item("returns", "Returns", "◱")
       + item("strategies", "Strategies", "◇")
       + item("options", "Options", "◈")
-      + item("risk", "Risk", "◎")
       + item("settings", "Settings", "⚙");
   }
 
   /* ---- the tickers ------------------------------------------------------ */
-  const hubRows = hub.tickers;
-  if (hubRows) {
-    const rows = hubRows.map((t) => tickerRowHub(
-      t, cur.kind === "ticker" && cur.sym === t.symbol)).join("");
-    const withStrat = hubRows.filter((t) => (t.strategies || []).length).length;
-    html += `<div class="nav-label">Tickers
-        <span class="tail" title="${withStrat} of ${hubRows.length} carry a strategy"
-          >${hubRows.length}</span>
-        <button class="nav-add" data-go="add" type="button"
-          title="Add a ticker. It arrives with NO strategy attached.">＋</button></div>`
-      + (rows || `<div class="nav-item" style="cursor:default;color:var(--faint)">
-           Nothing on the watchlist yet</div>`);
+  const curSym = cur.kind === "ticker" ? cur.sym : "";
+  if (hub.tickers) {
+    html += tickerSection(hub.tickers, { fromHub: true, curSym });
   } else if (ov) {
-    const rows = (ov.tickers || []).map((t) => tickerRowLegacy(
-      t, cur.kind === "ticker" && cur.sym === t.symbol)).join("");
-    html += `<div class="nav-label">Tickers <span class="tail">${
-        ov.totals.count}</span>
-        <button class="nav-add" data-go="add" type="button">＋</button></div>`
-      + (rows || `<div class="nav-item" style="cursor:default;color:var(--faint)">
-           No tickers</div>`)
-      + `<div class="nav-item" style="cursor:default;color:var(--faint);
-           font-size:11px;line-height:1.5;white-space:normal">${
-           hub.tried ? "Showing the ladder's own numbers: the hub could not be read."
-                     : "Loading market data…"}</div>`;
+    /* The hub has not answered, so the WATCHLIST is unknown and every
+       strategy-neutral fact about these symbols is unknown with it. What is
+       left is /api/overview's list of ladder engines, and rail.js renders it
+       as exactly that: the ladder's own list, the ladder's own state, and a
+       dash with its reason everywhere the hub would have spoken. */
+    html += tickerSection(ov.tickers || [],
+                          { fromHub: false, curSym, hubTried: hub.tried });
   } else if (S.account) {
     html += `<div class="nav-item" style="cursor:default;color:var(--faint)"
       >Loading ${esc(acctLabel())}…</div>`;
   }
 
-  html += `<div class="nav-label">Shared library</div>`
-    + item("research", "Research", "◭")
-    + item("scanner", "Scanner", "◉");
+  /* No "Shared library" group any more: Research and Scanner were the only
+     two rows in it and both are deleted. */
   el("nav").innerHTML = html;
 
   /* ---- the foot: how old the data is, and whether the hub answered ------ */
@@ -601,10 +505,11 @@ function cmdSources() {
                                  : "watchlist only"),
            tail: "Ticker", view: { kind: "ticker", sym: t.symbol, tab: "live" } });
   }
+  /* Returns has never been in this list and is not added here: this round
+     only removes. It is a nav row, so it is one click away either way. */
   for (const [kind, label] of [["overview", "Portfolio"],
        ["strategies", "Strategies"], ["options", "Options"],
-       ["risk", "Risk"], ["settings", "Settings"], ["research", "Research"],
-       ["scanner", "Scanner"], ["add", "Add a ticker"],
+       ["settings", "Settings"], ["add", "Add a ticker"],
        ["addaccount", "Add an account"]]) {
     if (!VIEWS[kind]) continue;
     push({ key: "v:" + kind, label, meta: "", tail: "Page", view: { kind, tab: "" } });
@@ -722,7 +627,9 @@ function paintStatus(v) {
         else if (o.running && !o.dry_run) { cls = "down"; txt = "armed"; }
         else if (o.running) { cls = "up"; txt = "live"; }
         else txt = "idle";
-        why = stateWhy(txt) + " (the ladder's own state; the hub has not answered)";
+        why = stateWhy(txt) + " This is the DCA LADDER'S state and only its"
+            + " state: the strategy-neutral model has not answered, so an"
+            + " options play on this ticker is not in this word.";
       }
     }
   } else if (ov && ov.frozen) {
@@ -741,20 +648,22 @@ function paintStatus(v) {
        live / idle / adopted / off and NEVER "armed" -- whether the playbook
        may actually open a structure is state/options/PLAYS_ARMED, which the
        hub contract does not carry. So a count of armed strategies is a count
-       of ladders, and saying otherwise would be the old "armed means two
+       of SHARE LADDERS, and saying otherwise would be the old "armed means two
        things" bug in a new place. The pill says so rather than implying a
        completeness it does not have. */
     if (rows.some((r) => r.kind === "options" && r.state === "live")) {
       why += " An options play reads 'live' once it is assigned and enabled;"
           + " whether it may OPEN is the arm on the Options tab, which the hub"
-          + " does not report, so this count covers ladders only.";
+          + " does not report, so this count covers share ladders only.";
     }
   } else if (ov) {
     const T = ov.totals || {};
     if (T.halted) { cls = "warn"; txt = `${T.halted} halted`; }
     else if (T.running) { cls = T.armed ? "down" : "up"; txt = `${T.running} running`; }
     else txt = "idle";
-    why = "The ladder's own state; the hub has not answered.";
+    why = "The DCA ladder's own state and only its state: the"
+        + " strategy-neutral model has not answered, so the options plays"
+        + " are not counted in this word.";
   }
   pill.hidden = !txt;
   pill.className = "pill " + cls;
@@ -1070,13 +979,33 @@ window.addEventListener("hashchange", () => {
   }
 });
 
-// Load AI-written indicators before the first chart draws, so they are in the
-// picker everywhere rather than only after visiting the builder.
+/* Load AI-written indicators before the first chart draws, so they are in the
+   picker everywhere rather than only on one page.
+
+   THIS CODE MOVED HERE IN ROUND 8 and it is four lines rather than a module
+   on purpose. installAll() used to live in views/research.js, which is
+   deleted, and its only other reader was the Indicators room inside that
+   same page. What it feeds is NOT research: ind.js's CATALOG is what the
+   ticker chart and the backtest chart draw from, so an indicator the owner
+   had written stays on those charts. The two WRITE routes that room used
+   (POST /api/indicators/ai, DELETE /api/indicators/custom/{key}) went with
+   it; GET /api/indicators/custom stays because this is its caller.
+
+   A bad indicator is skipped and never fatal -- one that throws at compile
+   would otherwise take every later one on the list down with it. */
 (async () => {
   try {
     const r = await GET("/api/indicators/custom");
-    const m = await import("./views/research.js");
-    if (m.installAll) m.installAll(r.indicators || []);
+    const { CATALOG } = await import("./ind.js");
+    for (const ind of (r.indicators || [])) {
+      try {
+        const fn = new Function("b", "p", ind.js);
+        CATALOG[ind.key] = {
+          label: ind.name, params: { ...(ind.params || {}) },
+          panel: !!ind.panel, run: (b, p) => fn(b, p), custom: true,
+        };
+      } catch (e) { /* a bad one is skipped, never fatal */ }
+    }
   } catch (e) { /* the dashboard works without them */ }
 })();
 

@@ -18,13 +18,12 @@ Babel that ships inside dukpy and run in Duktape against a small DOM shim.
    way that matters: assigning innerHTML registers the ids in the new markup
    and disconnects the ones it replaced, because "a new element carrying the
    same id" is the exact condition the stale-timer check has to survive.
-   Layout is modelled in exactly ONE place, added for section 11: the chain's
-   ATM row, through `__BOX` and `__LAYOUT` below. centreChain's arithmetic is
-   arithmetic over offsetTop, offsetHeight and clientHeight, and without a
-   number for those there is no way to tell "centred on the ATM row" from
-   "left at the top of the board" -- which is exactly the regression section
-   11 exists to catch. Every other querySelector still answers null, so no
-   other check can come to depend on layout.
+
+   IT NO LONGER MODELS LAYOUT AT ALL. `__BOX` and `__LAYOUT` existed for one
+   function, centreChain, which centred the chain board on its ATM row; the
+   chain was deleted in round 8 and they went with it. querySelector answers
+   null for everything, which is what it did for everything else before, so
+   no check here can come to depend on a measurement this harness invents.
 
 2. Duktape's Babel overflows its C stack on a template literal with more than
    about fifteen ${} substitutions, which excludes THREE functions from the
@@ -244,19 +243,17 @@ if (typeof Map === "undefined") {
    the stale-timer check exists to survive. */
 var NODES = {};
 
-/* The only layout this shim has. __BOX is the scroll viewport every node is
-   born with; __LAYOUT, when set, is where the ATM row sits inside it. The
-   numbers the checks use are the reviewer's own browser measurements. */
-var __BOX = { h: 420, w: 900 };
-var __LAYOUT = null;   // {atmTop, atmHeight, kLeft, kWidth}
-
+/* NO LAYOUT. __BOX and __LAYOUT stood here and modelled the chain board's
+   ATM row for centreChain; both went with the chain in round 8. The node
+   keeps plain zeros for the offset fields so nothing throws reading one, and
+   nothing in this file asserts on them. */
 function Node(id) {
   this.id = id;
   this._html = "";
   this._owned = [];
   this.isConnected = true;
   this.scrollTop = 0; this.scrollLeft = 0;
-  this.clientHeight = __BOX.h; this.clientWidth = __BOX.w;
+  this.clientHeight = 420; this.clientWidth = 900;
   this.offsetTop = 0; this.offsetHeight = 20; this.offsetLeft = 0;
   this.offsetWidth = 40;
   this.value = ""; this.checked = false;
@@ -277,35 +274,9 @@ Object.defineProperty(Node.prototype, "innerHTML", {
     }
   },
 });
-/* Does the page as a whole carry this markup? The registry is searched rather
-   than one node's own _html because innerHTML registers a CHILD id as an
-   empty node -- #ocScroll's markup lives in #ocBody's string, not its own. */
-function __docHas(frag) {
-  for (var k in NODES) {
-    if (String(NODES[k]._html).indexOf(frag) >= 0) return true;
-  }
-  return false;
-}
-
-/* Only the two selectors centreChain asks for, and only when the page really
-   did render an ATM row -- an element that is not on screen must not be
-   findable, or the centring would look right on a chain with no anchor. */
-Node.prototype.querySelector = function (sel) {
-  if (!__LAYOUT || !__docHas("o-atm")) return null;
-  if (sel === "tr.o-atm") {
-    var row = new Node("__atmRow");
-    row.offsetTop = __LAYOUT.atmTop;
-    row.offsetHeight = __LAYOUT.atmHeight;
-    return row;
-  }
-  if (sel.indexOf("td.o-k") >= 0) {
-    var k = new Node("__atmStrike");
-    k.offsetLeft = __LAYOUT.kLeft;
-    k.offsetWidth = __LAYOUT.kWidth;
-    return k;
-  }
-  return null;
-};
+/* centreChain was the only caller that asked this shim for a real element,
+   and it is deleted. Nothing answers a selector now. */
+Node.prototype.querySelector = function () { return null; };
 Node.prototype.querySelectorAll = function () { return []; };
 Node.prototype.appendChild = function () {};
 Node.prototype.insertAdjacentHTML = function () {};
@@ -405,65 +376,16 @@ class JS:
 
 
 # ============================================================== the payloads
-# Every one of these is a reviewer's demonstrated input, in the wire units the
-# real routes use. spread_pct is a FRACTION of mid (optdata.py:694).
-WIDE_CHAIN = {
-    "symbol": "SPY", "expiry": "2026-09-18", "count": 4, "solved": 4,
-    "expiration": {"dte": 0, "expired": False},
-    "spot": 612.34, "forward": 612.51, "priced_off": "forward",
-    "as_of": "2026-09-18T14:30:00+00:00", "as_of_from": "option quote",
-    "contracts": [
-        # 0.04 x 0.07: mid 0.055, spread 0.03, 54.5% of mid and uncloseable.
-        {"occ": "SPY260918C00640000", "strike": 640.0, "right": "C",
-         "bid": 0.04, "ask": 0.07, "mid": 0.055, "spread": 0.03,
-         "spread_pct": 0.545455, "volume": 3, "open_interest": 60,
-         "iv": 0.31, "delta": 0.012, "gamma": 0.001, "theta": -0.02,
-         "vega": 0.004, "solved": True, "skipped": "",
-         "quality": {"ok": False, "score": 0.1,
-                     "reason": "spread 54.5% of mid, over the 10% limit"}},
-        {"occ": "SPY260918C00630000", "strike": 630.0, "right": "C",
-         "bid": 1.00, "ask": 1.60, "mid": 1.30, "spread": 0.60,
-         "spread_pct": 0.461538, "volume": 44, "open_interest": 210,
-         "iv": 0.24, "delta": 0.09, "gamma": 0.004, "theta": -0.11,
-         "vega": 0.02, "solved": True, "skipped": "",
-         "quality": {"ok": False, "score": 0.2,
-                     "reason": "spread 46.2% of mid, over the 10% limit"}},
-        {"occ": "SPY260918C00620000", "strike": 620.0, "right": "C",
-         "bid": 2.70, "ask": 3.28, "mid": 2.99, "spread": 0.58,
-         "spread_pct": 0.19398, "volume": 310, "open_interest": 880,
-         "iv": 0.21, "delta": 0.22, "gamma": 0.009, "theta": -0.2,
-         "vega": 0.04, "solved": True, "skipped": "",
-         "quality": {"ok": False, "score": 0.4,
-                     "reason": "spread 19.4% of mid, over the 10% limit"}},
-        # 5.00 x 5.05: 1.0% of mid, the only closeable row on the board.
-        {"occ": "SPY260918C00612000", "strike": 612.0, "right": "C",
-         "bid": 5.00, "ask": 5.05, "mid": 5.025, "spread": 0.05,
-         "spread_pct": 0.00995, "volume": 4200, "open_interest": 9100,
-         "iv": 0.186, "delta": 0.51, "gamma": 0.014, "theta": -0.28,
-         "vega": 0.06, "solved": True, "skipped": "",
-         "quality": {"ok": True, "score": 0.9, "reason": None}},
-    ],
-    "budget": {"trading_calls": 3},
-}
-
-LIVE_EXPIRIES = {
-    "symbol": "SPY", "now": "2026-09-18T14:30:00+00:00",
-    "expirations": [
-        {"expiry": "2026-09-18", "dte": 0, "expired": False, "tradable": True},
-        {"expiry": "2026-09-25", "dte": 7, "expired": False, "tradable": True},
-    ],
-    "first_tradable": "2026-09-18", "budget": {"trading_calls": 1},
-}
-
-# The reviewer's own: first_tradable null, every row already passed.
-DEAD_EXPIRIES = {
-    "symbol": "SPY", "now": "2026-09-18T14:30:00+00:00",
-    "expirations": [
-        {"expiry": "2026-09-15", "dte": -3, "expired": True, "tradable": False},
-        {"expiry": "2026-09-17", "dte": -1, "expired": True, "tradable": False},
-    ],
-    "first_tradable": None, "budget": {"trading_calls": 1},
-}
+# WIDE_CHAIN, LIVE_EXPIRIES and DEAD_EXPIRIES stood here: four SPY contracts
+# at 54.5%, 46.2%, 19.4% and 1.0% of mid, and two expiry listings, one live
+# and one every row of which had already passed. They were the reviewer's own
+# demonstrated inputs and every check that read them is deleted with the chain
+# room in round 8, so keeping them would be keeping a fixture no test can
+# reach -- which is the shape of the bug this suite's own header warns about.
+#
+# What they proved is not lost. spread_pct is a FRACTION of mid
+# (optdata.py:694), and section 1 pins fracPc1 against all four of those
+# numbers directly, without needing a chain to render them into.
 
 
 def main() -> int:
@@ -493,27 +415,12 @@ def main() -> int:
           js.run("0.545455 > 10"), False)
 
     # ----------------------------------------------------------------------
-    print("\n2. The chain renders Spr% as a percentage of mid")
-    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run('VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
-    js.run("1")                          # let the awaits resolve
-    js.run("1")
-    body = js.html("ocBody") or ""
-    cells = re.findall(r'title="[^"]*">([0-9.]+%)</td>', body)
-    check("the uncloseable wing prints 54.5%", "54.5%" in cells, True)
-    check("the 46.2% spread prints 46.2%", "46.2%" in cells, True)
-    check("the 19.4% spread prints 19.4%", "19.4%" in cells, True)
-    check("the tight row prints 1.0%", "1.0%" in cells, True)
-    check("nothing prints the raw fraction as 0.5%", "0.5%" in cells, False)
-    check("nothing prints the raw fraction as 0.2%", "0.2%" in cells, False)
-    wide = re.search(r'class="[^"]*o-thin[^"]*"[^>]*title="spread 54\.5[^"]*">'
-                     r"54\.5%", body)
-    check("a 54.5% spread is marked fragile", bool(wide), True)
-    tight = re.search(r"<td[^>]*>1\.0%</td>", body)
-    check("the tight row has a cell at all", bool(tight), True)
-    check("and a 1.0% spread is not marked fragile",
-          "o-thin" in (tight.group(0) if tight else "o-thin"), False)
+    # Section 2 rendered the chain board and read Spr% out of it. The chain is
+    # deleted (round 8) -- the owner asked for it by description, "whatever
+    # options chain and screener we built remove it" -- so the RENDERING is
+    # gone. THE UNIT IS NOT: section 1 above still pins fracPc1 against the
+    # four spreads that produced the bug, because spread_pct arrives as a
+    # fraction on every optlab payload and the next renderer will meet one.
 
     # ----------------------------------------------------------------------
     print("\n3. A mark that has not formed prints as an em dash, never $0.00")
@@ -556,142 +463,23 @@ def main() -> int:
     check("put on a live host writes",
           js.run('NODES["view"].innerHTML = \'<div id="opBody"></div>\'; '
                  'put("opBody", "<b>x</b>")'), True)
-    js.run('NODES["view"].innerHTML = ""; 1')
-    check("paintChain with no host does not throw",
-          js.run("(function () { CH = {data: {contracts: []}, sym: \"SPY\", "
-                 'expiry: "2026-09-18", side: "", err: "", centred: false}; '
-                 'try { paintChain(); return "quiet"; } '
-                 'catch (e) { return "threw: " + e.message; } })()'), "quiet")
+    # The third check here drove paintChain() with no host. It is gone with
+    # the chain; put()'s own null guard above is what every surviving room
+    # relies on, and it is what this section is really about.
 
     # ----------------------------------------------------------------------
-    print("\n6. A transient failure of the expiry list is recoverable")
-    js.plan({"/api/optlab/expirations/": {"err": "mock: expirations blew up",
-                                           "status": 502},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
-    js.run("1")
-    js.run("1")
-    check("the failure is on screen",
-          "expirations blew up" in js.txt("ocBody"), True)
-    check("and it says Refresh retries",
-          "Refresh asks for the expiry list again" in js.txt("ocBody"), True)
-    check("no expiry was invented", js.run('CH.expiry'), "")
-    before = js.run('__getCount("/expirations/")')
-    # The server is healthy again. Refresh is the button the operator presses.
-    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run("loadChain(); 1")
-    js.run("1")
-    js.run("1")
-    check("Refresh asked for the expiry list again",
-          js.run('__getCount("/expirations/")'), 1)
-    check("and the tab came back", js.run("CH.expiry"), "2026-09-18")
-    check("and then fetched the chain", js.run('__getCount("/chain/")') >= 1,
-          True)
-    check("a spread is on screen again",
-          "54.5%" in (js.html("ocBody") or ""), True)
-    check("the earlier attempt really had failed", before >= 1, True)
-
-    # a quiet tick must not hammer the trading budget while it is still down
-    js.plan({"/api/optlab/expirations/": {"err": "still down", "status": 429},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run('CH.expiry = ""; CH.expAt = Date.now(); 1')
-    js.run("loadChain({quiet: true}); 1")
-    js.run("1")
-    check("a quiet tick backs off while the failure is fresh",
-          js.run('__getCount("/expirations/")'), 0)
-    js.run("CH.expAt = Date.now() - 61000; 1")
-    js.run("loadChain({quiet: true}); 1")
-    js.run("1")
-    check("and retries once a minute has passed",
-          js.run('__getCount("/expirations/")'), 1)
-
-    # ----------------------------------------------------------------------
-    print("\n7. Nothing tradable means nothing is requested")
-    js.plan({"/api/optlab/expirations/": {"ok": DEAD_EXPIRIES},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
-    js.run("1")
-    js.run("1")
-    check("no expired date is adopted", js.run("CH.expiry"), "")
-    check("and no chain was requested", js.run('__getCount("/chain/")'), 0)
-    check("the picker selects nothing",
-          'value="" selected disabled' in (js.html("ocExp") or ""), True)
-    check("both dead rows are still listed, disabled",
-          (js.html("ocExp") or "").count("disabled"), 3)
-    check("and the page says why",
-          "Every listed expiry for SPY has already passed"
-          in js.txt("ocBody"), True)
-
-    # ----------------------------------------------------------------------
-    print("\n8. A refresh keeps the operator where they were looking")
-    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
-    js.run("1")
-    js.run("1")
-    check("the first paint left a scroll box",
-          js.run('NODES["ocScroll"] ? "yes" : "no"'), "yes")
-    js.run('NODES["ocScroll"].scrollTop = 300; '
-           'NODES["ocScroll"].scrollLeft = 120; 1')
-    js.run("paintChain(); 1")
-    check("a repaint keeps the vertical position",
-          js.run('NODES["ocScroll"].scrollTop'), 300)
-    check("and the horizontal one",
-          js.run('NODES["ocScroll"].scrollLeft'), 120)
-    js.run("CH.centred = false; paintChain(); 1")
-    check("a new symbol or side re-centres from zero",
-          js.run('NODES["ocScroll"].scrollTop'), 0)
-
-    # ----------------------------------------------------------------------
-    print("\n9. Refresh re-centres the chain; the 20-second tick does not")
-    # The reviewer's measurements: the ATM row at offsetTop 177 in a 49px
-    # viewport, so a centred box sits at 177 - 49/2 + 30 = 182.5.
-    js.run("__BOX = {h: 49, w: 900}; "
-           "__LAYOUT = {atmTop: 177, atmHeight: 30, kLeft: 640, kWidth: 60}; 1")
-    js.plan({"/api/optlab/expirations/": {"ok": LIVE_EXPIRIES},
-             "/api/optlab/chain/": {"ok": WIDE_CHAIN}})
-    js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: "chain"}); 1')
-    js.run("1")
-    js.run("1")
-    check("the first paint centres on the ATM row",
-          js.run('NODES["ocScroll"].scrollTop'), 182.5)
-    check("and on the strike column sideways",
-          js.run('NODES["ocScroll"].scrollLeft'), 220)
-    js.run('NODES["ocScroll"].scrollTop = 40; NODES["ocScroll"].scrollLeft = 12; 1')
-    js.run("loadChain({quiet: true}); 1")
-    js.run("1")
-    js.run("1")
-    check("a quiet tick leaves the operator on the wing they were watching",
-          js.run('NODES["ocScroll"].scrollTop'), 40)
-    check("and does not move them sideways either",
-          js.run('NODES["ocScroll"].scrollLeft'), 12)
-    # The regression: the non-quiet path writes the loading placeholder into
-    # #ocBody BEFORE the await, so #ocScroll is gone and there is no offset to
-    # restore. The old guard read that as "already centred" and left the fresh
-    # box at scrollTop 0 -- the top of the board, ATM out of view.
-    js.run('__old = NODES["ocScroll"]; 1')
-    js.run("loadChain(); 1")
-    js.run("1")
-    js.run("1")
-    check("the placeholder really did destroy the scroll box",
-          js.run("__old.isConnected"), False)
-    check("so there was no offset left to restore",
-          js.run('__old === NODES["ocScroll"]'), False)
-    check("a manual Refresh re-centres on the ATM row",
-          js.run('NODES["ocScroll"].scrollTop'), 182.5)
-    check("and is not left at the top of the board",
-          js.run('NODES["ocScroll"].scrollTop') == 0, False)
-    check("and the strike column is centred again",
-          js.run('NODES["ocScroll"].scrollLeft'), 220)
-    # One side at a time pins the strike, so there is nothing to centre
-    # sideways and scrollLeft belongs at 0 rather than at a stale offset.
-    js.run('CH.side = "P"; CH.centred = false; paintChain(); 1')
-    check("one side at a time still centres vertically",
-          js.run('NODES["ocScroll"].scrollTop'), 182.5)
-    check("and pins the strike instead of centring it",
-          js.run('NODES["ocScroll"].scrollLeft'), 0)
-    js.run("__BOX = {h: 420, w: 900}; __LAYOUT = null; 1")
+    # Sections 6 through 9 drove the chain browser: a recoverable failure of
+    # the expiry list, a back-off that stopped a broken route being hammered
+    # at the poll rate on the SCARCE 200/min trading budget, an all-expired
+    # listing requesting no chain at all, and the operator's scroll position
+    # surviving a quiet refresh but not a manual one.
+    #
+    # The room and both of its routes (/api/optlab/expirations/{sym} and
+    # /api/optlab/chain/{sym}) are deleted, so these are removed rather than
+    # repointed. Two of the rules they proved are general, and are written
+    # down here for whoever next polls a route on that budget: a failing read
+    # BACKS OFF rather than retrying at the poll rate, and an expiry that has
+    # already passed is not a smaller version of a live one.
 
     # ----------------------------------------------------------------------
     print("\n10. Invariants over the whole file")
@@ -745,15 +533,13 @@ def main() -> int:
           "/options (optapi.py + static/options.html)" in src, True)
     check("every route it does call is on the optlab namespace",
           sorted(set(re.findall(r"/api/[a-z]+/", code))), ["/api/optlab/"])
-    check("centreChain tells a surviving box from a rebuilt one",
-          "if (CH.centred && keep) {" in src, True)
-    check("the API note states the spread unit",
+    check("the API note still states the spread unit",
           "spread_pct is a FRACTION of mid" in src, True)
     check("no raw spread_pct reaches a renderer",
           bool(re.search(r"pc1\(leg\.spread_pct\)", src)), False)
 
     # ----------------------------------------------------------------------
-    print("\n11. The Plays and Data rooms left cleanly")
+    print("\n11. The Plays, Data and Chain rooms left cleanly")
     # The Positions room set the precedent and this follows it: a room that
     # leaves has to leave NOTHING -- no tab, no renderer, no route call, no
     # orphaned CSS -- and it has to leave a SENTENCE, because the owner
@@ -762,6 +548,7 @@ def main() -> int:
     # one copy of each fact, and the page says where it is" is.
     check("no Plays tab is offered", '["plays", "Plays"]' in src, False)
     check("no Data tab is offered", '["data", "Data"]' in src, False)
+    check("no Chain tab is offered", '["chain", "Chain"]' in src, False)
     check("the tab bar is the three rooms that are left",
           re.findall(r'\["([a-z]+)", "[A-Z]',
                      src[src.index("const TABS = ["):src.index("const SUB = {")]),
@@ -775,9 +562,19 @@ def main() -> int:
           any(w in code for w in ("mountPlays", "playsHost", "plStrip",
                                   "plAssignTable", "plOpenTable", "plPreview",
                                   "plArm", "plFieldVal")), False)
-    check("and nothing calls either room's routes",
+    # ROUND 8, and this one is the same rule a third time. The chain was left
+    # reachable at a hash for a round after it stopped being a tab, which is
+    # how 442 lines of renderer and two routes on the SCARCE trading budget
+    # survived a deletion; a room that leaves has to leave nothing at all.
+    check("no orphaned chain renderer is left behind",
+          any(w in code for w in ("mountChain", "loadChain", "paintChain",
+                                  "loadExpiries", "centreChain", "atmStrike",
+                                  "legCells", "pivot", "setSym", "paintSide",
+                                  "budgetHTML", "ivTxt")), False)
+    check("and nothing calls any of the three rooms' routes",
           any(w in code for w in ("/api/optlab/board", "/api/optlab/watch",
-                                  "/api/optlab/plays")), False)
+                                  "/api/optlab/plays", "/api/optlab/chain",
+                                  "/api/optlab/expirations")), False)
     # The header sentence that was false for a fortnight -- "this page only
     # reads" while the Plays room wrote the arm file -- is true again, and
     # this check is what keeps it true rather than the paragraph.
@@ -791,7 +588,8 @@ def main() -> int:
           sorted(w for w in re.findall(r"[A-Za-z_]+", imp.group(1) if imp else "")
                  if w in ("POST", "ask", "toast")), [])
     check("the header says where the Plays room went",
-          "is now on the TICKER's own Options pane (tickeropts.js)" in src, True)
+          "is now in the TICKER's own strategy box (views/ticker.js)" in src,
+          True)
     check("and where the Data room went",
           "are per ticker and they now live on the ticker" in src, True)
     # An old hash must land on a real page AND say why it is not the page that
@@ -800,7 +598,8 @@ def main() -> int:
     # stale link while the server is unhappy still gets told.
     for tab, want in (("plays", "The Plays room is gone."),
                       ("data", "The Data room is gone."),
-                      ("board", "The Data room is gone.")):
+                      ("board", "The Data room is gone."),
+                      ("chain", "The chain browser is gone.")):
         js.plan({"/api/optlab/perf": {"err": "mock: perf is down",
                                       "status": 502}})
         js.run('MOUNT += 1; VIEWS.options.mount({kind: "options", tab: %s}); 1'

@@ -75,14 +75,8 @@ how two pages come to disagree about what is held.
 -------------------------------------------------------------- the scenarios
 Each one is a reviewer's failing input, reproducible in a browser:
 
-  default      a healthy board, a healthy chain and a healthy shelf
-  wide         a chain whose spreads are 54.5%, 46.2% and 19.4% of mid
-  expfail      GET /expirations answers 502 until /mock/heal is called
-  expired      first_tradable null and every listed expiry already passed
-  slow         a 3-second delay on the chain route, for the tab-change race
+  default      a healthy board and a healthy shelf
   bankfail     GET /bank/{slug} answers 404, for the stranded-detail case
-  deep         61 strikes, so the chain is taller than its scroll box and the
-               ATM centring is observable at all
   boardempty   the first GET after a restart: the watchlist is known and
                nothing is measured yet. It must not read as "nothing watched"
   boardlimit   POST /board/refresh answers 429, which is the rate limiter
@@ -200,8 +194,14 @@ STATIC = os.path.join(ROOT, "static")
 STATE = {"scenario": "default", "log": []}
 LOCK = threading.Lock()
 
-SCENARIOS = ["default", "wide", "expfail", "expired", "slow",
-             "bankfail", "deep", "boardempty", "boardlimit", "boardclash",
+# ROUND 8 dropped five: "wide", "expfail", "expired", "slow" and "deep" were
+# every one of them a CHAIN scenario -- the reviewer's own wide quotes, a 502
+# from the expiry list, a listing with nothing tradable on it, a three-second
+# chain for the tab-change race, and a 61-strike board tall enough for the ATM
+# centring to be observable. Nothing serves them any more, and a scenario
+# button that changes nothing on screen is worse than no button.
+SCENARIOS = ["default",
+             "bankfail", "boardempty", "boardlimit", "boardclash",
              "boardfail",
              # the Plays room, which replaced the board as the landing tab
              "plays", "playsempty", "playsfrozen", "playsnoquote",
@@ -1017,53 +1017,17 @@ SHARE_FLEET = ["MSTX", "NVDA", "RAM"]
 
 
 # ============================================================ the wire units
-def _wire_spread_pct(bid, ask):
-    """A FRACTION of mid, exactly as optdata.py:694 sends it.
-
-    optdata.py:   spread_pct = round(spread / mid, 6)
-    So 0.04 x 0.07 is 0.545455, not 54.5. The view multiplies by 100 once, in
-    fracPc1(). If this function is ever "fixed" to return a percentage the
-    page will understate every spread by 100x again and look right doing it.
-    """
-    mid = (bid + ask) / 2.0
-    if not mid:
-        return None
-    return round((ask - bid) / mid, 6)
-
-
-def _contract(strike, right, bid, ask, iv=None, delta=None, solved=True,
-              skipped=None, oi=1200, vol=430):
-    """One row of the chain, in the shape _chain_rows() returns.
-
-    `iv` is a decimal (0.1843 is 18.43%), the way greeks.py solves it, not a
-    percentage -- the same two-units trap as spread_pct, one field along.
-    """
-    mid = round((bid + ask) / 2.0, 4)
-    spct = _wire_spread_pct(bid, ask)
-    reason = None
-    if spct is not None and spct > 0.10:
-        # optdata.py's own sentence, including the *100 it does for display.
-        # The quality gate prints a percentage; the FIELD stays a fraction.
-        reason = (f"spread {spct * 100:.1f}% of mid, over the 10% limit -- "
-                  f"widen the strike search or trade a nearer expiry")
-    return {
-        "occ": f"SPY2609{'C' if right == 'C' else 'P'}{int(strike * 1000):08d}",
-        "strike": strike, "right": right,
-        "bid": bid, "ask": ask, "mid": mid,
-        "spread": round(ask - bid, 4), "spread_pct": spct,
-        "bid_size": 12, "ask_size": 8, "volume": vol, "prev_volume": 900,
-        "open_interest": oi, "quote_at": _now_iso(),
-        "t_years": 0.00219178 if solved else None,
-        "iv": iv, "delta": delta,
-        "gamma": 0.0142 if solved else None,
-        "theta": -0.284 if solved else None,
-        "vega": 0.061 if solved else None,
-        "rho": 0.004 if solved else None,
-        "solved": solved,
-        "skipped": skipped or ("" if solved else "no two-sided market"),
-        "quality": {"ok": reason is None, "score": 0.8 if reason is None else 0.1,
-                    "reason": reason},
-    }
+# ROUND 8: _wire_spread_pct() and _contract() stood here and built one SPY
+# board row at a time. They went with the chain browser, which the owner asked
+# to have removed -- "whatever options chain and screener we built remove it".
+#
+# _wire_spread_pct carried the unit rule and it is repeated here rather than
+# deleted with the code, because the next fixture that fakes an optlab payload
+# will meet it: SPREAD_PCT IS A FRACTION OF MID. optdata.py computes it as
+# spread / mid, app.py passes it through, and 0.462 on the wire is a 46.2%
+# spread. Printing it as a percentage understates every spread by 100x and
+# looks right doing it -- a wing quoted 0.04 x 0.07 read as the tightest row
+# on the board.
 
 
 def _now_iso():
@@ -1071,85 +1035,11 @@ def _now_iso():
 
 
 # ==================================================================== routes
-def chain(scen):
-    """A believable SPY board. `wide` swaps in the reviewer's own quotes."""
-    rows = []
-    # A normal ladder around spot. Deltas fall away from the money so the ATM
-    # row is obvious on screen.
-    #
-    # `deep` is the same board with 61 strikes instead of seven, and it exists
-    # for one reason: a chain SHORTER than its own scroll box never scrolls,
-    # so a centring check against the seven-strike default passes whatever
-    # centreChain does. The regression -- Refresh landing at the top of the
-    # board instead of on the ATM row -- is only observable on a board that
-    # overflows.
-    strikes = ([float(k) for k in range(582, 643)] if scen == "deep"
-               else [595.0, 600.0, 605.0, 610.0, 612.0, 615.0, 620.0])
-    for i, k in enumerate(strikes):
-        near = abs(k - 612.34)
-        rows.append(_contract(k, "C", round(max(0.05, 14 - near * 0.9), 2),
-                              round(max(0.08, 14.2 - near * 0.9), 2),
-                              iv=round(0.184 + near * 0.002, 4),
-                              delta=round(max(0.02, 0.62 - near * 0.05), 4)))
-        rows.append(_contract(k, "P", round(max(0.05, 2 + near * 0.8), 2),
-                              round(max(0.08, 2.1 + near * 0.82), 2),
-                              iv=round(0.201 + near * 0.003, 4),
-                              delta=round(min(-0.02, -0.38 - near * 0.04), 4)))
-    if scen == "wide":
-        # The three the reviewer measured, plus one tight row for contrast.
-        # 0.04 x 0.07 is 54.5% of mid and cannot be closed at any size; before
-        # the unit fix this cell rendered "0.5%".
-        rows = [
-            _contract(640.0, "C", 0.04, 0.07, iv=0.31, delta=0.012, oi=60,
-                      vol=3),
-            _contract(630.0, "C", 1.00, 1.60, iv=0.24, delta=0.09, oi=210,
-                      vol=44),
-            _contract(620.0, "C", 2.70, 3.28, iv=0.21, delta=0.22, oi=880,
-                      vol=310),
-            _contract(612.0, "C", 5.00, 5.05, iv=0.186, delta=0.51, oi=9100,
-                      vol=4200),
-            _contract(612.0, "P", 4.80, 4.86, iv=0.199, delta=-0.49, oi=8700,
-                      vol=3900),
-            _contract(605.0, "P", 0.90, 1.55, iv=0.26, delta=-0.11, oi=340,
-                      vol=61),
-        ]
-    solved = sum(1 for c in rows if c["solved"])
-    return {
-        "symbol": "SPY", "expiry": _expiry(0), "count": len(rows),
-        "solved": solved,
-        "expiration": {"dte": 0, "expired": False},
-        "spot": 612.34, "forward": 612.51, "priced_off": "forward",
-        "rate": 0.0435, "as_of": _now_iso(), "as_of_from": "option quote",
-        "t_years": 0.00219178, "contracts": rows,
-        "budget": {"trading_calls": 3},
-    }
-
-
-def _expiry(days):
-    return (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat()
-
-
-def expirations(scen):
-    if scen == "expired":
-        # first_tradable null and nothing tradable: the case where the old
-        # fallback to list[0] selected a disabled <option> and then spent a
-        # request on a chain app.py answers 409.
-        rows = [{"expiry": _expiry(-3), "dte": -3, "expired": True,
-                 "tradable": False, "expiry_moment": None,
-                 "seconds_left": 0, "t_years": 0.0},
-                {"expiry": _expiry(-1), "dte": -1, "expired": True,
-                 "tradable": False, "expiry_moment": None,
-                 "seconds_left": 0, "t_years": 0.0}]
-        return {"symbol": "SPY", "now": _now_iso(), "expirations": rows,
-                "first_tradable": None, "budget": {"trading_calls": 1}}
-    rows = []
-    for d in (0, 1, 2, 7, 30):
-        rows.append({"expiry": _expiry(d), "dte": d, "expired": False,
-                     "tradable": True, "expiry_moment": None,
-                     "seconds_left": 3600 * (d * 24 + 6),
-                     "t_years": round(d / 365.0, 6)})
-    return {"symbol": "SPY", "now": _now_iso(), "expirations": rows,
-            "first_tradable": rows[0]["expiry"], "budget": {"trading_calls": 1}}
+# chain() and expirations() stood here, with _expiry() feeding both. app.py's
+# /api/optlab/chain/{sym} and /api/optlab/expirations/{sym} were deleted in
+# round 8, and a harness that serves a route the real server does not have is
+# exactly the trap this file's own docstring warns about: it hides the
+# deletion instead of proving it.
 
 
 # The shelf. A NameError lived here: commit 300b7a2 ("drop the fixtures for
@@ -1338,11 +1228,11 @@ function show(tab) {
 function el(id) { return document.getElementById(id); }
 
 /* The three real rooms, plus three hashes that are NOT rooms any more and are
-   here on purpose. "chain" left the tab bar and is still reachable at
-   #/options/chain for debugging, and its checks below mount it. "plays" and
-   "board" are the two rooms deleted on 28 Sep 2026: their buttons drive the
-   MOVED note, which is the thing somebody following an old bookmark actually
-   sees, and a harness that could not reach it could not check it. */
+   here on purpose: "chain" (round 8), "plays" and "board" (28 Sep 2026). Their
+   buttons drive the MOVED note, which is the thing somebody following an old
+   bookmark actually sees, and a harness that could not reach it could not
+   check it. Clicking "chain" must now land on the Overview carrying the
+   sentence -- it must NOT render a board. */
 const TABS = ["perf", "strategies", "backtest", "chain", "plays", "board"];
 el("mkTabs").innerHTML = TABS.map((t) =>
   `<button data-tab="${t}" class="btn sm">${t}</button>`).join("");
@@ -3643,9 +3533,12 @@ class Handler(BaseHTTPRequestHandler):
             hub_reset()
             return self._json({"now": name})
         if p == "/mock/heal":
-            # The point of expfail: break it, let the page render its error,
-            # then heal and prove the page finds its own way back without a
-            # re-mount.
+            # Break a scenario, let the page render its error, then heal and
+            # prove the page finds its own way back without a re-mount. It was
+            # written for "expfail" (the chain's expiry list), which went in
+            # round 8; it is kept because it is scenario-agnostic and the
+            # remaining failing scenarios -- bankfail, boardfail, playsfail,
+            # perffail, hubfail -- all want the same button.
             with LOCK:
                 STATE["scenario"] = "default"
             return self._json({"now": "default"})
@@ -3946,18 +3839,10 @@ class Handler(BaseHTTPRequestHandler):
             if scen == "boardfail":
                 return self._fail(502, "mock: the board blew up")
             return self._json(board(scen))
-        if "/optlab/expirations/" in p:
-            if scen == "expfail":
-                return self._fail(502, "mock: expirations blew up")
-            return self._json(expirations(scen))
-        if "/optlab/chain/" in p:
-            if scen == "slow":
-                # long enough to change tab underneath it, which is what the
-                # live trading host's latency does on its own
-                time.sleep(3.0)
-            if not q.get("expiry"):
-                return self._fail(400, "expiry is required (YYYY-MM-DD)")
-            return self._json(chain(scen))
+        # /optlab/expirations/ and /optlab/chain/ answered here. Both routes
+        # were deleted from app.py in round 8; this harness 404s them now for
+        # the same reason app.py does, so a page that still asked for one
+        # would fail here the way it fails against the real server.
         if p.rstrip("/").endswith("/optlab/bank"):
             return self._json(bank())
         if "/optlab/bank/" in p:
@@ -4134,22 +4019,10 @@ async function mount(tab) {
 }
 const text = () => el("view").textContent.replace(/\\s+/g, " ");
 
-section(1, "the chain's Spr% is a percentage of mid, not a fraction");
-await scen("wide");
-await mount("chain");
-const cells = [...el("view").querySelectorAll("td[title]")]
-  .filter((td) => /%$/.test(td.textContent.trim()));
-const shown = cells.map((td) => td.textContent.trim());
-check("54.5% wing is rendered as a percentage", shown.includes("54.5%"), true);
-check("46.2% spread is rendered as a percentage", shown.includes("46.2%"), true);
-check("19.4% spread is rendered as a percentage", shown.includes("19.4%"), true);
-check("no cell prints the raw fraction 0.5%", shown.includes("0.5%"), false);
-const wideCell = cells.find((td) => td.textContent.trim() === "54.5%");
-check("a 54.5% spread is marked fragile",
-      wideCell && wideCell.classList.contains("o-thin"), true);
-const tightCell = cells.find((td) => td.textContent.trim() === "1.0%");
-check("a 1.0% spread is not marked", tightCell
-      && tightCell.classList.contains("o-thin"), false);
+/* Section 1 rendered the chain board and read Spr% out of it. The chain is
+   deleted (round 8). The unit rule it proved is pinned offline instead, in
+   test_optview.py section 1, against fracPc1 directly -- which is stronger,
+   because it needs no board to render it into. */
 
 section(2, "the half-day flatten deadline is taught, not just 15:00");
 await scen("default");
@@ -4172,35 +4045,13 @@ await sleep(50);
 check("and it returns to the grid",
       !!el("view").querySelector("[data-slug]"), true);
 
-section(4, "Refresh re-centres the chain on the ATM row");
-// This section is the only one that needs layout, so it is the only one that
-// un-hides #view: offsetTop and clientHeight are all zero inside a
-// display:none subtree, and every check below would pass on any code.
-el("view").style.display = "block";
-await scen("deep");
-await mount("chain");
-const box = () => el("view").querySelector("#ocScroll");
-const atmInView = () => {
-  const b = box(), r = b && b.querySelector("tr.o-atm");
-  if (!b || !r) return "no ATM row on the board";
-  const top = r.offsetTop - b.scrollTop;
-  return top >= 0 && top + r.offsetHeight <= b.clientHeight;
-};
-check("the board is taller than its scroll box",
-      box().scrollHeight > box().clientHeight, true);
-check("the first paint puts the ATM row in view", atmInView(), true);
-box().scrollTop = 0;
-check("at the top of the board the ATM row is out of view",
-      atmInView(), false);
-el("ocGo").click();
-await sleep(500);
-check("Refresh brings it back", atmInView(), true);
-check("and does not leave the fresh box at scrollTop 0",
-      box().scrollTop > 0, true);
-el("view").style.display = "none";
-await scen("default");
+/* Section 4 measured centreChain: the ATM row in view on the first paint,
+   out of view at scrollTop 0, and back in view after Refresh. It was the only
+   check in this file that needed real layout, which is why it was the only
+   one that un-hid #view. centreChain went with the chain in round 8 and so
+   did this. Nothing here needs layout any more. */
 
-section(5, "the Plays and Data rooms are gone, and say where they went");
+section(5, "the Plays, Data and Chain rooms are gone, and say where");
 // They were deleted on 28 Sep 2026, by description rather than by name: "we
 // have a lot of waste with 'plays' and 'data' on the options ... the plays are
 // just a conglomerate of all the tickers when i can just go to them myself and
@@ -4233,8 +4084,23 @@ check("so does its older name",
       /The Data room is gone\\./.test(text()), true);
 check("no board row is rendered anywhere",
       el("view").querySelectorAll(".b-row").length, 0);
+// ROUND 8, and this is the third time: the chain stopped being a tab in round
+// 7 and was LEFT reachable at its hash, which is how 442 lines of renderer and
+// two routes on the scarce trading budget survived a deletion. It is gone now,
+// and the check is that the hash renders the REPORT rather than a board.
+await mount("chain");
+check("an old #/options/chain link lands on a real page",
+      !!el("view").querySelector("#ov-head"), true);
+check("and says the chain browser is gone",
+      /The chain browser is gone/.test(text()), true);
+check("no chain scroll box is rendered",
+      !!el("view").querySelector("#ocScroll"), false);
+check("and no strike cell either",
+      el("view").querySelectorAll("td.o-k").length, 0);
 check("an old hash lights the Overview rather than nothing",
       VIEWS.options.activeTab({ tab: "plays" }), "perf");
+check("and so does the chain's",
+      VIEWS.options.activeTab({ tab: "chain" }), "perf");
 await scen("default");
 
 section(6, "the Options Overview: measured, or it says why not");

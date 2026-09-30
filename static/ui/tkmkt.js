@@ -110,7 +110,7 @@ export function priceBand(day, year, price, why) {
   const raw = p === null ? null : at(p);
   const out = raw !== null && (raw < 0 || raw > 1);
   return `<div class="tkx-mk-band">
-    <div class="tkx-mk-track" title="52-week ${px(yl)} to ${px(yh)}">
+    <div class="tkx-mk-track" data-why title="52-week ${px(yl)} to ${px(yh)}">
       ${seg}${raw === null ? "" : `<i class="tkx-mk-pin"
         style="left:${(clamp01(raw) * 100).toFixed(2)}%"
         title="last ${px(p)}"></i>`}</div>
@@ -151,7 +151,7 @@ export function quoteBar(bid, ask, day) {
      draw, so nothing is positioned: the spread prints as a figure instead. */
   if (span === null) {
     const pct = mid ? ((a - b) / mid) * 100 : null;
-    return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)}. No day
+    return `<div class="tkx-mk-q" data-why title="bid ${px(b)} / ask ${px(a)}. No day
       range, so there is nowhere to put it">
       <span class="tkx-mk-qv down">${px(b)}</span>
       <span class="tkx-mk-qs">${pct === null ? "—"
@@ -161,7 +161,7 @@ export function quoteBar(bid, ask, day) {
   const left = clamp01((b - dl) / span) * 100;
   const w = Math.max(clamp01((a - b) / span) * 100, 1.2);
   const room = Math.max(0, 100 - left);
-  return `<div class="tkx-mk-q" title="bid ${px(b)} / ask ${px(a)}">
+  return `<div class="tkx-mk-q" data-why title="bid ${px(b)} / ask ${px(a)}">
     <span class="tkx-mk-qv down">${px(dl)}</span>
     <span class="tkx-mk-qt"><i style="margin-left:${left.toFixed(2)}%;width:${
       Math.min(w, room).toFixed(2)}%"></i></span>
@@ -210,11 +210,11 @@ export function volumeBars(series, volume, adv, why) {
   const shown = (now !== null && sameUnit) ? now : rows[rows.length - 1].v;
   const ratio = mean ? (shown / mean) : null;
   return `<div class="tkx-mk-vol">
-    <div class="tkx-mk-vt"><b class="tkx-mk-avg"
+    <div class="tkx-mk-vt"><b class="tkx-mk-avg" data-why
       style="bottom:${(avg * 100).toFixed(1)}%" title="${rows.length}-session
       average ${vol(mean)}"></b>${bars}</div>
     <div class="tkx-mk-vl"><span>${vol(shown)}</span>${ratio === null
-        ? `<span class="faint" title="${esc(mreason(adv)
+        ? `<span class="faint" data-why title="${esc(mreason(adv)
             || "no average to compare against")}">—</span>`
         : `<span class="${ratio >= 1 ? "up" : "faint"}">${
             ratio.toFixed(2)}× avg</span>`}</div></div>`;
@@ -244,7 +244,7 @@ export function volScale(iv, rv) {
   const chip = (m, cls, label, obs, needs) => {
     const v = measured(m) ? n(mv(m)) : null;
     const why = mreason(m) || (obs + " of " + needs + " observations");
-    return `<span class="tkx-mk-chip ${cls}" title="${esc(why)}">${esc(label)}
+    return `<span class="tkx-mk-chip ${cls}" data-why title="${esc(why)}">${esc(label)}
       ${v === null ? `<b class="faint">—</b>` : `<b>${pctTxt(v, 0)}</b>`}</span>`;
   };
   const line = ivLine(iv.history);
@@ -255,17 +255,17 @@ export function volScale(iv, rv) {
     <div class="tkx-mk-chips">
       ${chip(iv.rank, "iv", "IV rank", iv.obs || 0, iv.needs || 20)}
       ${chip(rv.rank, "rv", "RV rank", rv.obs || 0, rv.needs || 20)}
-      ${measured(iv.atm) ? `<span class="tkx-mk-chip" title="at-the-money on ${
+      ${measured(iv.atm) ? `<span class="tkx-mk-chip" data-why title="at-the-money on ${
         esc(iv.expiry || "the nearest monthly")}${iv.dte == null ? ""
         : ", " + iv.dte + " days out"}${iv.source ? ", priced by "
         + esc(iv.source) : ""}">IV <b>${pctTxt(mv(iv.atm), 1)}</b></span>`
-        : `<span class="tkx-mk-chip" title="${esc(mreason(iv.atm)
+        : `<span class="tkx-mk-chip" data-why title="${esc(mreason(iv.atm)
             || "no at-the-money implied volatility")}">IV <b
             class="faint">—</b></span>`}
-      ${measured(rv.now) ? `<span class="tkx-mk-chip" title="${
+      ${measured(rv.now) ? `<span class="tkx-mk-chip" data-why title="${
         rv.window || 20}-session close-to-close, annualised">RV <b>${
         pctTxt(mv(rv.now), 1)}</b></span>`
-        : `<span class="tkx-mk-chip" title="${esc(mreason(rv.now)
+        : `<span class="tkx-mk-chip" data-why title="${esc(mreason(rv.now)
             || "no realised volatility")}">RV <b class="faint">—</b></span>`}
     </div>${line}</div>`;
 }
@@ -296,16 +296,16 @@ export function ivLine(history) {
 export function earningsChip(e) {
   e = e || {};
   if (!e.known) {
-    return `<span class="tkx-mk-chip warn" title="${esc(e.why
+    return `<span class="tkx-mk-chip warn" data-why title="${esc(e.why
       || "nothing has asserted this symbol's earnings schedule")}"
       >Earnings <b>unknown</b></span>`;
   }
   if (!e.date) {
-    return `<span class="tkx-mk-chip" title="${esc(e.why
+    return `<span class="tkx-mk-chip" data-why title="${esc(e.why
       || "asserted, and nothing upcoming")}">Earnings <b>none due</b></span>`;
   }
   const d = n(e.days);
-  return `<span class="tkx-mk-chip ${d !== null && d <= 7 ? "warn" : ""}"
+  return `<span class="tkx-mk-chip ${d !== null && d <= 7 ? "warn" : ""}" data-why
     title="${esc(e.date)}">Earnings <b>${d === null ? esc(e.date)
       : (d === 0 ? "today" : "in " + d + "d")}</b></span>`;
 }

@@ -333,23 +333,77 @@ def main():
           "was added, but" in add, True)
 
     # ============================================ 11. THE TICKER PAGE =======
-    print("\n11. the ticker page is an instrument, and the ladder is one tab")
+    print("\n11. the ticker page is ONE page: market, metrics, and a box")
+    # The owner: "make tickers just the ticker with market information and
+    # metrics and a box where i can attach strategies whether they be options
+    # or just buying and selling strategies". Five tabs -- Overview,
+    # Strategies, Record, Options and Ladder -- became one scroll. The checks
+    # below are the shape of that sentence, held for the whole file.
     tk = TICKER.read_text(encoding="utf-8")
     check("every read is the hub's single ticker route",
           '"/api/hub/ticker/" + encodeURIComponent(sym)' in tk, True)
-    check("the Ladder tab exists only when a ladder is attached",
-          'if (hasLadder(H.d)) t.push(["settings", "Ladder"])' in tk, True)
+    check("the view declares NO tabs, which is what hides the shell's tab bar",
+          re.search(r"^\s*(get )?tabs\b", tk, flags=re.M) is None, True)
+    check("and nothing routes to one either",
+          re.search(r'tab:\s*"(settings|history|strategies|options)"', tk)
+          is None, True)
     check("the subtitle no longer speaks in lots",
           "lots ·" not in tk.split("sub: (ov, v) =>")[1].split("},")[0], True)
     check("the hub poll is not faster than app._perf_positions's 20 s cache",
           "const HUB_POLL_MS = 20000;" in tk, True)
 
+    print("   ... the ladder is a CARD in the box, not the frame around it")
+    # engine.py is untouchable and the ladder trades a live account, so what
+    # was removed is its privileged place and not one control it had. Every
+    # button that was on the Ladder tab is asserted here by the route it posts
+    # to, because a button that is drawn and not wired is the failure this
+    # round could actually ship.
+    for route in ("/start", "/stop", "/arm", "/clear_halt", "/ensure_tps",
+                  "/flatten"):
+        check_true(f"the ladder can still {route.lstrip('/')}",
+                   f"/api/ticker/${{sym}}{route}`" in tk)
+    check("its 72 fields are drawn from fields.js's own groups, on the card",
+          "FIELD_GROUPS.map" in tk and "ladderFormHTML" in tk, True)
+    check("and saved through the ladder's own config route, which MERGES",
+          "`/api/ticker/${sym}/config`" in tk, True)
+    check("the card list is what a settings pane opens inside",
+          'ladderFormHTML(sym) : cfgFormHTML(sym, c)' in tk, True)
+
+    print("   ... and the box lists what the SERVER holds, not a list in here")
+    # Two options strategies (the Wheel and MABB) are being written into
+    # optplays.py and optplaybook.py in parallel with this file. They must
+    # appear in this box without anyone editing it, so the kind filter is
+    # built from `bank.BANK_KINDS` as the bank echoes it on every answer.
+    check("the kinds come off the bank's own response",
+          "if (Array.isArray(r.kinds) && r.kinds.length) H.kinds" in tk, True)
+    check("and the segment is drawn from those, with a seed until they land",
+          "H.kinds || KIND_SEED" in tk, True)
+    check("a kind the server names but this file has no word for still shows",
+          "KIND_LABEL[k]\n  ||" in tk, True)
+    check("the attached cards are hub's own list, never a hard-coded set",
+          "const attachedStrats = (d) => (d && d.strategies) || [];" in tk,
+          True)
+
     print("   ... rendered through the SHELL's kit, not a second one")
-    for name in ("panel(", "tile(", "tileGrid(", "dataTable(", "stateChip(",
+    for name in ("panel(", "tile(", "tileGrid(", "stateChip(",
                  "segmented(", "emptyState(", "unmeasured(", "mnum("):
         check_true(f"uses core.{name.rstrip('(')}", name in tk)
     check("the old card()/tableHTML()/stat() calls are gone",
           re.search(r"\bcard\(|\btableHTML\(|[^a-zA-Z]stat\(", tk) is None, True)
+    # Four modules this page used to mount are no longer reachable from it.
+    # Left as imports they would keep being downloaded and keep being
+    # maintained for a page that cannot show them.
+    # AN IMPORT, not a mention. This used to test `gone in tk`, which also
+    # forbade a COMMENT naming the module -- and the comment that has to exist
+    # is the one recording that tickeropts.js was the only file calling
+    # /api/optlab/plays/arm and /close, so when it was orphaned the dashboard
+    # briefly had no way to arm a play or send a closing order at all. A check
+    # that stops you writing down why something moved is too blunt.
+    for gone in ("tickeropts.js", "tkseries.js", "calendar.js", "tkvis.js",
+                 "tkmetrics.js"):
+        _pat = r"(?:from|import)[^\n]{0,80}" + re.escape(gone)
+        check(f"it no longer imports {gone}",
+              re.search(_pat, tk) is not None, False)
 
     print("   ... and the ladder's dangerous confirmations are untouched")
     check("arming still types ARM", 'requireWord: "ARM"' in tk, True)
@@ -369,8 +423,16 @@ def main():
           "schemaFormHTML(schema, c.settings || {})" in tk, True)
 
     print("   ... and the two ledgers are never added together on screen")
-    check("the record card says whose record it is",
-          "not added up here" in tk, True)
+    # The Record tab carried this as a paragraph over a trade table. The table
+    # went to the Returns room; the sentence stayed, on the one block that
+    # still puts the two stores side by side -- each strategy's own running
+    # counter against perf.py re-reading journal.jsonl. It names which to
+    # read, which is the ground-truth rule and not a hedge.
+    check("the split says which store each side came from",
+          "The two stores disagree by" in tk and "The two stores agree" in tk,
+          True)
+    check("and names the journal as the truth about history",
+          "The journal is the truth\n    about history" in tk, True)
 
     # ============================================ 12. the stylesheet ========
     print("\n12. the scoped stylesheet stays scoped")

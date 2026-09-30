@@ -231,7 +231,7 @@ function notes() {
       are running on stale prices.</div>`);
   }
   if (t.halted) {
-    out.push(`<div class="note bad"><b>${t.halted} ladder(s) halted.</b>
+    out.push(`<div class="note bad"><b>${t.halted} DCA ladder(s) halted.</b>
       Open each one to see why it stopped itself.</div>`);
   }
   if (t.uncovered) {
@@ -408,19 +408,23 @@ function mountHub() {
          dictionary entry for the word in the heading. The STRATEGIES column
          below already prints "none" on the rows that have none, which is the
          only part of it a reader could act on. */
-      /* NOT `data-why`: this span WRAPS four buttons, so making the wrapper a
-         disclosure would put role="button" around Panic and swallow a click
-         meant for it. The scope line stays a plain title until the buttons
-         themselves (core.js's fleetControlsHTML, another agent's file) can
-         carry it. Named in the hand-off. */
-      actions: `<span class="hub-fleet" title="${esc(
-        "share ladder only. An options play is armed on the Options tab.")}">${
-        fleetControlsHTML()}</span>
+      /* ROUND 8: THE SCOPE MOVED ONTO THE BUTTONS. It was a `title` on this
+         span, which WRAPS all four, so it could not be read per button and a
+         keyboard never reached it -- and `data-why` was not an option here,
+         because a disclosure on the wrapper puts role="button" around Panic
+         and swallows a click meant for it. core.js now labels the buttons
+         "Start ladders" / "Stop ladders" / "Disarm ladders" and gives each
+         one the scope sentence, so what they act on is in the label itself.
+         That was the hand-off this comment used to name. */
+      actions: `<span class="hub-fleet">${fleetControlsHTML()}</span>
         <button class="btn sm pri" data-go="add">Add a ticker</button>`,
       flush: true,
     })}
     ${panel("Activity", `<div class="log" id="hubLog"></div>`, {
-      titleHint: "every ladder engine in this account", flush: true,
+      /* THE LOG IS THE LADDER'S, and saying "this account" over it would let
+         one strategy's log read as the account's history. An options play
+         writes to state/options/play_ledger.jsonl and appears nowhere in it. */
+      titleHint: "the DCA ladder engines only", flush: true,
     })}`;
 
   wireFleetControls(el("view"));
@@ -1146,7 +1150,10 @@ function paintPositions() {
            { label: "%", num: true }],
     rows: shares.map((x) => [
       `<b>${esc(x.symbol)}</b>${x.managed ? ""
-        : ` ${chip("unmanaged", "mute", "no ladder engine owns this position")}`}`,
+        : ` ${chip("unmanaged", "mute",
+            "no DCA-ladder engine owns this position. It is not necessarily "
+            + "unowned: this flag is the ladder's answer only, and a hand "
+            + "trade looks the same as another strategy's from here.")}`}`,
       qty(x.qty), px(x.avg_entry_price, 4), px(x.current_price),
       money(x.cost_basis), money(x.market_value),
       sgn(x.unrealized_pl), pct(x.unrealized_plpc),

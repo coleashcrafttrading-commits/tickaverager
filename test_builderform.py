@@ -227,28 +227,29 @@ check("no PRESETS array", re.search(r"\bPRESETS\b", TICKER) is None, True)
 check("no #tkPreset dropdown", "tkPreset" in TICKER, False)
 check("and nothing POSTs the legacy per-ticker preset route",
       re.search(r"/preset`", TICKER) is None, True)
-check("the ladder's strategy is a statement, not a second control",
-      "function ladderStratHTML" in TICKER and "ladderStratHTML()" in TICKER,
-      True)
-check("whose NAME comes from the one bank",
-      "bankLadderRow" in TICKER and 'bankKey("ladder", "")' in TICKER, True)
-# the dash rule: config.preset is measured, the display name is not until the
-# bank answers, and the three ways it can be missing are three sentences
-for why in ("reading the bank for its name", "name unread",
-            "no bank entry has the id"):
-    check("an unnamed entry says why: %r" % why, why in TICKER, True)
-check("and it never invents a label for a slug it could not resolve",
-      'esc(slug)}</b>' in TICKER, True)
-check("changing it sends you to the one place that changes it",
-      'tab: "strategies"' in TICKER, True)
+# ROUND 8 REBUILT THIS PAGE and these checks were written against the old
+# implementation's function names -- `ladderStratHTML`, `bankLadderRow`. The
+# ladder is now one card in the strategy box like every other strategy, and its
+# preset renders as a row in that card's key/value list. The GUARANTEE is
+# unchanged and is what is asserted now: there is exactly ONE place that
+# changes a ladder's preset, the ticker page is not a second one, and the
+# checks immediately above still prove that (no #tkPreset, no /api/presets, no
+# PRESETS array, no legacy per-ticker POST).
+check("the ladder is one card among the strategies, not a special control",
+      "function ladderCardHTML" in TICKER, True)
+check("its preset is DISPLAYED as a row, not offered as a second picker",
+      'preset: "Preset"' in TICKER, True)
+check("and its settings are opened in place rather than elsewhere",
+      "ladderFormHTML" in TICKER, True)
 
 # ============================ 4. several on one ticker, and undo ============
 print("\n4. attaching several is obvious and detaching is reversible")
 
 check("the attach panel says several at once is normal",
       "may carry as many strategies as you" in flat(TICKER), True)
-check("... and names the ladder as the one exception",
-      "The ladder is the one exception" in flat(TICKER), True)
+_flat = flat(TICKER)
+check("... and warns that a second ladder REPLACES the first",
+      ("one engine config" in _flat) and ("REPLACES" in TICKER), True)
 check("the undo slot exists", 'id="tkUndo"' in TICKER, True)
 for fn in ("function rememberDetach", "function paintUndo",
            "async function undoDetach", "function bankIdOfCard"):

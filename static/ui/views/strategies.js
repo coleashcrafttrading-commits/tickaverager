@@ -2190,7 +2190,7 @@ function paintShell() {
       note: `Running the saved document "${slug}". Pick a symbol and a window, `
           + `then Run backtest.`,
     });
-    go({ kind: "research", tab: "backtest" });
+    go({ kind: "options", tab: "backtest" });
   });
   el("stToggleJSON").onclick = () => {
     showJSON = !showJSON;
@@ -3132,7 +3132,7 @@ function toBacktest(d) {
     selectCodeLater(d.slug);
   }
   closeSheet();
-  go({ kind: "research", tab: "backtest" });
+  go({ kind: "options", tab: "backtest" });
 }
 
 /* The Backtest tab fills its code-file list asynchronously and preset() has

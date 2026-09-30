@@ -18,10 +18,15 @@ why it is a separate module from the view -- Duktape's Babel overflows its C
 stack on a file full of template literals, and a view is nothing else.
 
 WHAT THIS FILE DOES NOT COVER, said plainly rather than left implied: the
-rendering. `views/backtest.js` and `views/research.js` are checked two other
-ways -- the whole-file source invariants in section 12, which hold for the
-file rather than for one call, and the browser half, which is `btmock.py`'s
-own `run checks` button run in a real DOM at 1280px and 400px in both themes.
+rendering. `views/backtest.js` is checked two other ways -- the whole-file
+source invariants in section 12, which hold for the file rather than for one
+call, and the browser half, which is `btmock.py`'s own `run checks` button run
+in a real DOM at 1280px and 400px in both themes.
+
+ROUND 8: `views/research.js` is DELETED, so every assertion about it went with
+it rather than being loosened to keep passing. btread.js is untouched by that
+-- it is still what resultchart.js and backtest.js read a result through, and
+sections 1-11, 13 and 14 below are exactly as they were.
 
 Nothing here reads the clock. The fixtures are btmock.py's, so the numbers the
 browser shows and the numbers asserted here are the same literals.
@@ -45,7 +50,6 @@ import btmock                                           # noqa: E402
 ROOT = Path(__file__).resolve().parent
 BTREAD = ROOT / "static" / "ui" / "btread.js"
 BACKTEST = ROOT / "static" / "ui" / "views" / "backtest.js"
-RESEARCH = ROOT / "static" / "ui" / "views" / "research.js"
 RESULTCHART = ROOT / "static" / "ui" / "resultchart.js"
 
 FAIL = 0
@@ -300,21 +304,27 @@ check("target. is the document's target", K["target.points"],
 check("stop. is the document's stop", K["stop.atr_mult"],
       "strategy document stop")
 
-print("\n=== 12. source invariants over the two view files ===")
+print("\n=== 12. source invariants over the view files ===")
 bt = BACKTEST.read_text(encoding="utf-8")
-rs = RESEARCH.read_text(encoding="utf-8")
 rc = RESULTCHART.read_text(encoding="utf-8")
+
+# Round 8 deleted views/research.js. This is not a loosened assertion,
+# it is the opposite: the file may not come back by accident, because a
+# second backtester dispatching into this one is how two rooms end up
+# disagreeing about one result.
+check("views/research.js is gone",
+      (ROOT / "static" / "ui" / "views" / "research.js").exists(), False)
 
 # core.js's sgn() formats DOLLARS. The old page wrote sgn(j.drift, 2) + "%",
 # which rendered a 3.12% tape move as "+$3.12%". Nothing may format a percent
 # with the money helper again.
 check("no percent is formatted with the money helper",
-      re.search(r"sgn\((?:j\.)?\w*(?:drift|pct|rate)\w*", bt + rs), None)
+      re.search(r"sgn\((?:j\.)?\w*(?:drift|pct|rate)\w*", bt), None)
 
 # ?? 0 and || 0 on a reported metric is how "nobody measured this" becomes
 # "$0.00" -- the failure mode CLAUDE.md names twice.
 check("no null is coerced to zero before formatting",
-      re.search(r"\?\?\s*0\)\.toFixed", bt + rs), None)
+      re.search(r"\?\?\s*0\)\.toFixed", bt), None)
 
 check("the verdict card names total P/L", "Total P/L" in bt, True)
 check("realised, open and total are drawn as one equation at one weight",
@@ -324,18 +334,18 @@ check("the ranking is stated in the room",
 
 # app.css belongs to another agent. Each of these files carries its own.
 for name, src, sid in (("backtest.js", bt, "btCss"),
-                       ("research.js", rs, "rsCss"),
                        ("resultchart.js", rc, "rcCss")):
     check(f"{name} injects its own style element",
           f'getElementById("{sid}")' in src, True)
 
-check("research.js still exports installAll (app.js calls it)",
-      "export function installAll" in rs, True)
-check("research.js still exports verify", "export function verify" in rs, True)
-check("the backtest room still exports preset (two callers navigate with it)",
+# installAll moved into app.js when research.js was deleted: what it feeds is
+# ind.js's CATALOG, which the TICKER chart draws from, and that is not
+# research. The assertion follows it rather than disappearing with the file.
+APP = (ROOT / "static" / "ui" / "app.js").read_text(encoding="utf-8")
+check("app.js installs AI-written indicators into CATALOG itself",
+      'import("./ind.js")' in APP and "CATALOG[ind.key]" in APP, True)
+check("the backtest room still exports preset (strategies.js imports it)",
       "export function preset" in bt, True)
-check("the options sweeps are reachable from Research",
-      '["options", "Options lab"]' in rs, True)
 check("the chart offers three forms",
       re.search(r'FORMS = \[\["line".*\["bar".*\["candle"', rc) is not None,
       True)
@@ -343,8 +353,8 @@ check("the chart offers three forms",
 # a hole over every night and weekend. This axis is ordinal on purpose.
 check("the chart spaces slots by index, not by timestamp",
       "ORDINAL, not time" in rc, True)
-check("no emoji anywhere in the three files",
-      [ch for ch in bt + rs + rc if ord(ch) > 0x2200], [])
+check("no emoji anywhere in the two files",
+      [ch for ch in bt + rc if ord(ch) > 0x2200], [])
 
 print("\n=== 13. the same numbers the browser shows ===")
 # btmock is the harness the browser half runs against. If its fixtures drift

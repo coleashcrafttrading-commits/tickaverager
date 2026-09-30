@@ -1638,10 +1638,17 @@ def tickers(ctx: Ctx) -> list:
             "strategies": [x for x in
                            (s.for_ticker(sym) for s in strat_syms.get(sym, []))
                            if x],
+            # LADDER-ONLY, AND THE DASH SAYS SO RATHER THAN THE TICKER.
+            # journal.jsonl is the DCA ladder's log; nothing else writes to
+            # it. So a zero here would claim this symbol has booked nothing
+            # when an options play may have booked plenty, and a dash that
+            # says "no closed trade" would claim the same thing more
+            # quietly. It names the log it read instead.
             "realized_pl": metric(_r2(js.get("realized")),
                                   int(js.get("trades") or 0), "usd",
                                   reason=None if js.get("trades") else
-                                  "no closed ladder trade for this symbol"),
+                                  "journal.jsonl records DCA-ladder trades "
+                                  "only and holds none for this symbol"),
             "trades": metric(int(js.get("trades") or 0),
                              int(js.get("trades") or 0), "count"),
             "last_trade_at": js.get("last_at"),
@@ -1746,7 +1753,9 @@ def _ticker_history(ctx: Ctx, sym: str, limit: int = 200) -> dict:
                "why": r.get("why") or r.get("reason") or ""}
               for r in reversed(closes[-limit:])]
     return {"trades": trades, "curve": curve,
-            "why": None if closes else "no closed ladder trade for this symbol",
+            "why": None if closes else ("journal.jsonl records DCA-ladder "
+                                        "trades only and holds none for "
+                                        "this symbol"),
             "source": "journal.jsonl (ladder trades only)"}
 
 

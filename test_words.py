@@ -120,7 +120,8 @@ def section(n, title):
 
 ROOMS = {
     "overview.js": UI / "views" / "overview.js",
-    "risk.js": UI / "views" / "risk.js",
+    # "risk.js" was here. The Risk room was deleted in round 8 on the
+    # owner's instruction; its 299-word budget below went with it.
     "settings.js": UI / "views" / "settings.js",
     "tkmkt.js": UI / "tkmkt.js",
 }
@@ -400,7 +401,6 @@ CAP = 30
 # not a budget, it is permission.
 BUDGET = {
     "overview.js": 123,
-    "risk.js": 299,
     "settings.js": 265,
     "tkmkt.js": 55,
 }
@@ -476,7 +476,7 @@ check("and it never removes the title, so hover still works",
 # ===========================================================================
 section(4, "and it is wired")
 # ===========================================================================
-for room in ("overview.js", "risk.js", "settings.js"):
+for room in ("overview.js", "settings.js"):
     src = SRC[room]
     check(f"{room} imports reason.js and calls wireReasons",
           'from "../reason.js"' in src and "wireReasons(" in src.replace(
@@ -521,17 +521,6 @@ GONE = [
      "the cell beside it already carries `on this list because: ...`"),
     ("overview.js", "market value at the broker", "the header says Held"),
     ("overview.js", "of the mid, right now", "the header says Spread"),
-    ("risk.js", "Cost basis of everything the ladders hold",
-     "the ratiobar under that very figure carries it as its own label"),
-    ("risk.js", "By ticker is the share ladders",
-     "both halves are on the two buttons that select them"),
-    ("risk.js", "A cap set to 0 is drawn off, not empty",
-     "the row itself prints `off -- nothing caps this`"),
-    ("risk.js", "return over the volatility of daily returns",
-     "a ratio's definition is a textbook, not a tooltip"),
-    ("risk.js", "return over max drawdown", "that is the name of the ratio"),
-    ("risk.js", "how far price must fall for every rung to fill",
-     "the header says Full ladder depth"),
     ("settings.js", "How often this page asks the server for the overview",
      "the label says Dashboard refresh (ms)"),
     ("settings.js", "Engines allowed to be running at once",
@@ -555,9 +544,6 @@ STAYED = [
      "two logs that must never be summed"),
     ("overview.js", "not comparable bets",
      "why the At risk total is a sum and not a portfolio risk"),
-    ("risk.js", "not a forecast", "what `if every rung fills` is not"),
-    ("risk.js", "no fixed depth", "why a depth cell is a dash"),
-    ("risk.js", "no stop loss", "where an unbounded loss starts"),
     ("settings.js", "Halts every ladder at once", "what it costs"),
     ("settings.js", "own orders; far above it", "what it costs"),
     ("tkmkt.js", "nothing has asserted this symbol's earnings schedule",

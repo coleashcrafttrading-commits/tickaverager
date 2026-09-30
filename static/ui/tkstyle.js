@@ -165,9 +165,53 @@ const CSS = `
   justify-content:center;color:var(--faint);font-size:var(--fs-sm);
   text-align:center;padding:0 var(--s5);line-height:var(--lh)}
 
-/* -- the add flow ------------------------------------------------------ */
+/* -- the ladder, inside its card --------------------------------------- */
+/* The ladder's seven controls used to be a row on a page 1280px wide. They
+   are now inside a card that is one grid track of .tkx-strats, which falls
+   to the container's own width at phone size -- so the row WRAPS, and the
+   buttons keep their own width rather than being squeezed to a glyph. */
+.tkx-sc .tk-ctl{display:flex;flex-wrap:wrap;gap:var(--s2);
+  margin-top:var(--s3)}
+.tkx-sc .note{overflow-wrap:anywhere}
+.tkx-sc-x{margin-top:var(--s3);font-size:var(--fs-sm);color:var(--faint)}
+/* The 72-field form is a settings PANE on a card now. It keeps fields.js's
+   own grouped panels; all this does is give the pane a top rule so it reads
+   as part of the card rather than as a page that has escaped one. */
+.tkx-ladform{margin-top:var(--s4);padding-top:var(--s4);
+  border-top:1px solid var(--hairline)}
+
+/* -- attaching the next one -------------------------------------------- */
+/* A card open at full width has a settings pane in it; the grid must not
+   then keep the attach box squeezed beside it. This block sits BELOW the
+   cards, full width, and is separated by a rule rather than by a second
+   panel title -- one panel, two jobs, and the rule says where one ends. */
+.tkx-attachbox{margin-top:var(--s5);padding-top:var(--s5);
+  border-top:1px solid var(--hairline)}
+/* A single card fills the whole grid row, and a definition list 1,200px wide
+   throws its values to the far edge with an acre of nothing between. The cap
+   is on the LIST, not on the card: the card still carries a full-width note,
+   a seven-button control row and a settings pane. */
+.tkx-sc .tkx-kv{max-width:52ch}
+.tkx-contrib{margin-top:var(--s5)}
+.tkx-cap{margin-bottom:var(--s3);color:var(--muted);font-size:var(--fs-sm);
+  line-height:var(--lh)}
+.tkx-bankbar{display:flex;gap:var(--s3) var(--s5);flex-wrap:wrap;
+  align-items:flex-end;margin-bottom:var(--s4)}
+.tkx-bq{flex:1 1 220px;margin:0;min-width:0}
+.tkx-bankhead{margin-top:var(--s5);margin-bottom:var(--s3);color:var(--muted);
+  font-size:var(--fs-sm);line-height:var(--lh)}
 .tkx-att{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:flex-end}
 .tkx-att label{flex:1 1 200px;margin:0;min-width:0}
+
+/* -- the one thing that is neither market nor strategy ----------------- */
+/* Removing the ticker from the account. It was a panel of its own with a
+   title and a paragraph; it is a footer row, because it is a thing you do to
+   the page rather than a thing the page is about. */
+.tkx-foot{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:center;
+  margin-top:var(--s5);padding-top:var(--s4);
+  border-top:1px solid var(--hairline)}
+.tkx-foot span{flex:1 1 320px;min-width:0;color:var(--faint);
+  font-size:var(--fs-xs);line-height:var(--lh)}
 
 @media (max-width:820px){
   .tkx-px{text-align:left}

@@ -179,7 +179,13 @@ def main() -> int:
     agentctl.ACCOUNT = "glenn-momentum"
     check("overview is scoped", agentctl._scoped("/api/overview"), "/api/a/glenn-momentum/overview")
     check("ticker action is scoped", agentctl._scoped("/api/ticker/RAM/arm"), "/api/a/glenn-momentum/ticker/RAM/arm")
-    check("risk exposure is scoped", agentctl._scoped("/api/risk"), "/api/a/glenn-momentum/risk")
+    # /api/risk was DELETED with the Risk room in round 8 and /api/risk/bank
+    # was not, which is why this pair stays: it is the one that proves the
+    # match is on whole path segments rather than a bare startsWith. A
+    # SHARED_PREFIXES entry of "/api/risk" would swallow the bank the moment
+    # anyone adds an exposure route back, and _scoped() is string logic that
+    # never asks whether the route exists.
+    check("an unscoped path is still scoped", agentctl._scoped("/api/risk"), "/api/a/glenn-momentum/risk")
     check("risk bank is shared", agentctl._scoped("/api/risk/bank"), "/api/risk/bank")
     check("strategies are shared", agentctl._scoped("/api/strategies"), "/api/strategies")
     check("accounts are shared", agentctl._scoped("/api/accounts"), "/api/accounts")

@@ -166,7 +166,7 @@ export const BACKTEST = {
     });
     el("btSweep").addEventListener("input", updateCount);
     el("btRun").onclick = () => act(runIt);
-    el("btOptLab").onclick = () => go({ kind: "research", tab: "options" });
+    el("btOptLab").onclick = () => go({ kind: "options", tab: "backtest" });
 
     paintModes();
     paintWindows();

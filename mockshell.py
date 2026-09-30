@@ -13,7 +13,7 @@ with `app.js` booting against those same fixtures. That is all this file adds:
   * `/` serves the REAL static/index.html and `/ui/...` the real modules, so
     the page under test is byte-for-byte the page that ships.
   * the handful of LADDER routes the shell and the Ladder tab call, which
-    mockserver has no fixtures for: /api/ticker/<sym>, its trades and orders,
+    mockserver has no fixtures for: /api/ticker/<sym> and its trades,
     /api/bars, /api/ticks, /api/presets, /api/search, /api/inspect/<sym>.
   * everything else falls through to `mockserver.Handler`, so /api/hub/*,
     /api/accounts, /api/overview, /api/perf/*, /api/bank/*, /api/assistant/*
@@ -248,17 +248,6 @@ def _ticker_trades(scen: str, acct: str, sym: str) -> dict:
             "open_lots": []}
 
 
-def _ticker_orders(sym: str) -> list:
-    px = _bars(sym, "1Min", 0.05, 60)["bars"][-1]["c"]
-    return [{"submitted_at": "2026-09-28T14:%02d:00Z" % (10 + i),
-             "client_order_id": "tp-%s-%04d" % (sym.upper(), i),
-             "side": "sell" if i % 2 else "buy", "type": "limit",
-             "qty": 1, "filled_qty": 1 if i % 2 else 0,
-             "filled_avg_price": px if i % 2 else None,
-             "limit_price": round(px + 0.1, 2),
-             "status": "filled" if i % 2 else "new"} for i in range(6)]
-
-
 # ------------------------------------------------- the ticker MARKET pane
 # `/api/ticker/<sym>/market` runs the REAL `tkmarket.report` -- the real chain
 # adapter, the real solver, the real `optvol.iv_rank` and the real
@@ -428,107 +417,6 @@ def _inspect(sym: str, known: set) -> dict:
             "in_fleet": sym in known}
 
 
-# ------------------------------------------------------------------ the risk
-# ADDED round 6. Until this existed mockshell had no /api/risk, so the Risk
-# room could only ever be LOOKED at in its own failure state: the donut, the
-# concentration bars, the cap gauges, the per-ladder table and the stress
-# table have never been on screen with data in them. That is the hole
-# mockserver's docstring warns about, in reverse -- a harness that cannot
-# serve a route hides the page instead of finding the bug in it.
-def _risk(scen: str, acct: str) -> dict:
-    """`/api/risk`, in app.py's own units and no others.
-
-    THE LADDERS COME FROM THE SAME ENGINE STUBS `/api/ticker/<sym>` READS, so
-    the Risk room and the Ladder tab cannot disagree about what a ladder holds
-    inside one harness -- which is what a second copy of a route always ends up
-    doing. Everything app.py derives (`tp_in_atr`, `ladder_depth`, `loss_1atr`,
-    `worst_case`) is derived here by the same arithmetic rather than typed in,
-    so a unit that moves there shows up here as a wrong picture rather than as
-    a plausible one.
-
-    TWO FIGURES THIS HARNESS CANNOT MEASURE, and neither is faked:
-
-      atr            app.py takes ATR(14) off 150 real bars. There are none
-                     here, so it is the mean high-low range of the synthetic
-                     1-minute series -- a different estimator of the same
-                     quantity, which moves with the symbol the way the real one
-                     does, rather than a constant.
-      buying_power   the hub fixture does not report it and there is no way to
-                     derive it from cash without inventing a margin ratio. It
-                     is None, which makes the Cash reserve gauge draw its
-                     unmeasured state -- a case worth having on screen.
-
-    The LIMITS are this harness's own choice and are labelled as such: one is
-    off (reserve_cash), one is close to binding, one is generous. A fixture
-    where every gauge is half full never shows what "off" looks like.
-    """
-    ov = MS.hub_overview(scen, acct)
-    pf = ov.get("portfolio") or {}
-    out = []
-    for row in ov.get("tickers") or []:
-        sym = str(row.get("symbol") or "").upper()
-        e = _engine_of(scen, acct, sym)
-        if e is None:
-            continue
-        summ = e.summary()
-        bars = _bars(sym, "1Min", 0.05, 60)["bars"]
-        px = bars[-1]["c"] if bars else 0.0
-        rng = [b["h"] - b["l"] for b in bars[-14:]] or [0.0]
-        atr = round(sum(rng) / len(rng), 4)
-        costs = [abs(l.cost) for l in e.ledger.open_lots]
-        held = abs(e.ledger.signed_shares)
-        spl = round(held / len(costs), 6) if costs else 1.0
-        maxlots = int(summ.get("max_lots") or 0)
-        tp = float(summ.get("take_profit") or 0.10)
-        add = 0.10
-        # app.py measures a ladder depth ONLY for fixed-dollar rungs. Half the
-        # rows here are left on ATR rungs on purpose: a dash that is not a zero
-        # is the thing this room has to get right, and a fixture where every
-        # row is measured never tests it.
-        points = (sum(ord(c) for c in sym) % 2) == 0
-        depth = add * maxlots if points else 0.0
-        out.append({
-            "symbol": sym, "price": round(px, 4), "atr": atr,
-            "atr_pct": round(100 * atr / px, 3) if px else 0.0,
-            "take_profit": tp, "add_distance": add,
-            "tp_in_atr": round(tp / atr, 2) if atr else None,
-            "add_in_atr": round(add / atr, 2) if atr else None,
-            "shares_per_lot": spl, "max_lots": maxlots,
-            "lots_open": len(costs), "shares_held": round(held, 6),
-            "cost_basis": round(sum(costs), 2),
-            "max_exposure": round(spl * maxlots * px, 2),
-            "used_pct": round(100 * len(costs) / maxlots, 1) if maxlots else 0.0,
-            "unrealized": round(float(summ.get("unrealized") or 0), 2),
-            "ladder_depth": round(depth, 2),
-            "ladder_depth_pct": round(100 * depth / px, 2) if (px and depth) else 0.0,
-            "armed": not bool(summ.get("dry_run")),
-            "running": bool(summ.get("running")),
-            "exit_mode": "limit",
-            "loss_1atr": round(-atr * held, 2),
-            "loss_full_ladder": round(-(depth / 2) * spl * maxlots, 2) if depth else 0.0,
-        })
-    deployed = round(sum(t["cost_basis"] for t in out), 2)
-    equity = pf.get("account_value") or 1
-    running = sum(1 for t in out if t["running"])
-    return {
-        "ok": True,
-        "account": {
-            "equity": pf.get("account_value"), "cash": pf.get("cash"),
-            "buying_power": None, "deployed": deployed,
-            "deployed_pct": round(100 * deployed / equity, 1),
-            "open_pl": pf.get("open_pl"), "made_today": pf.get("made_today"),
-        },
-        "limits": {
-            "max_total_exposure": round(deployed * 1.15, -3) or 50000,
-            "reserve_cash": 0,
-            "account_daily_loss_limit": 2500,
-            "max_running_tickers": max(running + 1, 2),
-        },
-        "tickers": out,
-        "worst_case": round(sum(t["max_exposure"] for t in out), 2),
-    }
-
-
 def _known(scen: str, acct: str) -> set:
     try:
         rows = MS.hub_tickers(scen, acct).get("tickers", [])
@@ -588,8 +476,6 @@ class Handler(MS.Handler):
                 strategy=(q.get("strategy") or [""])[0]))
         if bare == "/api/reports":
             return ("json", MH.reports((q.get("hist") or [MH.DEFAULT])[0]))
-        if bare == "/api/risk":
-            return ("json", _risk(scen, acct))
         if bare == "/api/presets":
             return ("json", PRESETS)
         if bare == "/api/search":
@@ -604,8 +490,6 @@ class Handler(MS.Handler):
             try:
                 if tail == "trades":
                     return ("json", _ticker_trades(scen, acct, sym))
-                if tail == "orders":
-                    return ("json", _ticker_orders(sym))
                 if tail == "market":
                     return ("json", _ticker_market(sym))
                 if not tail:

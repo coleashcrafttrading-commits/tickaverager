@@ -546,6 +546,33 @@ defined by no stylesheet in the repo**, so all four rendered with the
 platform's grey 3D button chrome. `test_stratroom.py` section 7 now checks
 every class this file emits against every sheet that could define it.
 
+## The rail (30 Sep 2026) -- claimed names, and the caption that caused it
+
+| | |
+|---|---|
+| `static/ui/rail.js` | every ticker row the left rail draws. No DOM, no fetch: data in, HTML string out |
+| `test_rail.py` | runs rail.js for real in Duktape, parses the markup, and asserts what it says |
+
+**THE LADDER IS NOT THE FRAME ANY MORE.** The owner's screenshot had every
+symbol in the rail captioned `ladder 0/100000 lots - 0 sh`, including symbols
+that had never had a ladder put on them. `0/100000` is `lot_count`/`max_lots`
+off the `basic` preset, which every new ticker starts on. It came from
+`app.js`'s `tickerRowLegacy`, the row used while `/api/hub/tickers` had not
+answered -- and the hub was timing out past 55 s on the 44 MB play ledger, so
+the fallback WAS the rail for days. `tickerRowLegacy` is deleted. A ticker row
+now prints price, change, what the broker holds, and one chip per strategy
+actually attached, or `watching` when none is. **hub.py's model was already
+right** (`Strategy`, `PROVIDERS`, `set_strategy`); only the views had not
+caught up, and `hub.add_ticker` attaches nothing on purpose.
+
+While the hub is down the rail falls back to `/api/overview`, which is the
+LADDER FLEET's list and a subset of the watchlist. `rail.unreadRow` renders it
+as exactly that: the ladder's own chip, the armed and halted dots kept because
+dropping them would be a safety regression, and a dash with its reason
+everywhere the hub would have spoken. The Tickers count is a dash there too --
+printing the engine count would be the ladder standing in for the account
+again.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -632,7 +659,8 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_reconcile test_refresh_trend test_report test_research test_returns
   test_returnscut test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
-  test_optplays test_rooms test_stratroom test_touch_adds test_trail test_trend
+  test_optplays test_rail test_rooms test_stratroom test_touch_adds test_trail test_trend
+  test_wheelmabb test_builderform test_optticker
   test_words
   test_trend_v2
   test_unwind`,

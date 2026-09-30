@@ -10,6 +10,16 @@ rooms lost their explanatory paragraphs, and what those paragraphs said moved
 onto the thing they were about -- a tooltip, a disclosure, or a new mark drawn
 by viz.js.
 
+ROUND 8 DELETED THE RISK ROOM. The owner asked for it -- "remove the risk tab
+and the research tab and the scanner tab completely from the code" -- so
+views/risk.js and riskmath.js are gone from disk, and with them every
+assertion in this file that read either. That is 36 checks, and they were
+REMOVED rather than relaxed: a check that reads a file which no longer exists
+is not a weaker check, it is a crash, and one rewritten to pass against an
+empty string is worse than both. Section 4 gains one line in their place --
+neither file may come back by accident. Overview and Settings are untouched,
+and so is every viz.js assertion, which is most of this file.
+
 That is exactly the kind of change that rots. A paragraph is one line of
 template literal; the next agent who wants to explain a number will put one
 back, and nothing in the repo would notice. So this file asserts the SHAPE,
@@ -43,9 +53,9 @@ not the wording:
              titleHint, or inside a <details>.
 
   SECTION 6  the type scale. The Settings room measured NINE sizes, including
-             a 9.5px badge in riskmath.js and a 2.1vw clamp on .stat-v in
-             app.css. theme.css has six --fs-* steps and a scale a file may
-             add a tenth step to is not a scale.
+             a 9.5px badge in riskmath.js (deleted in round 8) and a 2.1vw
+             clamp on .stat-v in app.css. theme.css has six --fs-* steps and
+             a scale a file may add a tenth step to is not a scale.
 
   SECTION 7  the warnings stayed. The owner asked for the disclaimers to go
              and for the warnings to stay, and those are not the same thing.
@@ -80,10 +90,11 @@ ROOT = Path(__file__).resolve().parent
 UI = ROOT / "static" / "ui"
 VIZ = UI / "viz.js"
 CORE = UI / "core.js"
-MATH = UI / "riskmath.js"
 OVERVIEW = UI / "views" / "overview.js"
-RISK = UI / "views" / "risk.js"
 SETTINGS = UI / "views" / "settings.js"
+# Deleted in round 8 with the Risk room. Named here because section 4 asserts
+# they are still gone.
+GONE_FILES = (UI / "riskmath.js", UI / "views" / "risk.js")
 
 FAIL = 0
 
@@ -103,8 +114,8 @@ def section(n, title):
 
 
 SRC = {p.name: p.read_text(encoding="utf-8") for p in
-       (VIZ, CORE, MATH, OVERVIEW, RISK, SETTINGS)}
-ROOMS = {"overview.js": SRC["overview.js"], "risk.js": SRC["risk.js"],
+       (VIZ, CORE, OVERVIEW, SETTINGS)}
+ROOMS = {"overview.js": SRC["overview.js"],
          "settings.js": SRC["settings.js"]}
 
 
@@ -161,7 +172,10 @@ _it = dukpy.JSInterpreter()
 _it.evaljs(dukpy.jsx_compile(SHIM) + ";1;")
 _it.evaljs(dukpy.jsx_compile(core_blocks()) + ";1;")
 _it.evaljs(dukpy.jsx_compile(strip_modules(SRC["viz.js"])) + ";1;")
-_it.evaljs(dukpy.jsx_compile(strip_modules(SRC["riskmath.js"])) + ";1;")
+# riskmath.js used to be loaded here too. Nothing below ever CALLED it -- the
+# only arithmetic exercised in Duktape is viz.js's -- so its deletion costs
+# this bundle nothing, and saying so is cheaper than the next reader working
+# it out from a git log.
 
 
 def ev(expr):
@@ -286,8 +300,9 @@ clashes = {n: f for n, f in clashes.items() if f}
 check("and none of them is a class another file already styles",
       not clashes, clashes)
 
-# the same, for the two rooms that inject their own sheets this round
-for room, prefix in (("risk.js", "rk-"), ("settings.js", "set-")):
+# the same, for the room that injects its own sheet. ("risk.js", "rk-") was
+# the other entry and went with the file.
+for room, prefix in (("settings.js", "set-"),):
     mine = {n for n in selectors_in(SRC[room]) if n.startswith(prefix)}
     dup = {n: [f for f, names in others.items()
                if n in names and f != room] for n in mine}
@@ -324,18 +339,6 @@ RETIRED = [
      "-> the panel title's hint, which does not print"),
     ("overview.js", "below the peak</div>", "-> the drawdown cell's title"),
     ("overview.js", "at its deepest</div>", "-> the drawdown cell's title"),
-    ("risk.js", "a risk figure that cannot be refreshed is not a risk\n    figure",
-     "-> one note at the top, a struck bar in each stranded block"),
-    ("risk.js", "Cost basis of the share ladders", "-> the panel title's hint"),
-    ("risk.js", "The biggest position is <b>", "-> a dot on a 0-100% track"),
-    ("risk.js", "The curve is <b>ACCOUNT equity</b>", "-> the panel's hint"),
-    ("risk.js", "is the nearest to binding at", "-> capRow draws it marked"),
-    ("risk.js", "These are American\n        options on shares",
-     "-> behind a <details> disclosure"),
-    ("risk.js", "is what one average bar's range costs on what is held",
-     "-> the column header's title"),
-    ("risk.js", "assumes the average lot is\n    half the ladder depth",
-     "-> the column header's title"),
     ("settings.js", "changes the name on the rail, the title and every",
      "-> the Rename button's title"),
     ("settings.js", "one read of the account. It places nothing",
@@ -357,15 +360,17 @@ for room, phrase, where in RETIRED:
     check(f"{room}: {phrase[:46]!r}", phrase not in ROOMS[room], where)
 
 # and the blocks that were deleted outright have no renderer left behind
-check("risk.js has no renderConcentration() left behind",
-      "renderConcentration" not in SRC["risk.js"],
-      "its ring and its bars were the same numbers twice")
 check("overview.js has no paintTiles() left behind",
       "paintTiles" not in SRC["overview.js"],
       "every one of the six tiles duplicated something else on the page")
-check("riskmath.js's capRow prints no paragraph",
-      'class="cap-w"' not in SRC["riskmath.js"],
-      "five definitions stacked down one panel")
+
+# ROUND 8. A whole ROOM is the same rule one size up: the Risk room's two
+# files were deleted and they may not reappear. Nothing else in the dashboard
+# reads either -- the options room draws its own assignment exposure from
+# /api/optlab/perf -- so a reappearance would be a second, disagreeing copy
+# of an exposure figure, which is exactly what this section exists to stop.
+for f in GONE_FILES:
+    check(f"{f.name} stays deleted", not f.exists(), f"{f} is back")
 
 
 # ===========================================================================
@@ -416,13 +421,6 @@ KEPT = [
     ("overview.js", "share ladder", "on the fleet button group"),
     ("overview.js", "the figures are since inception",
      "on the Drawdown panel title"),
-    ("risk.js", "the same quantity as the ticker ring",
-     "on the By strategy button"),
-    ("risk.js", "a curve from it cannot fall",
-     "on the Drawdown panel title"),
-    ("risk.js", "auto-exercised", "inside the assignment disclosure"),
-    ("risk.js", "ladder has no fixed depth",
-     "on the Full ladder depth column"),
     ("settings.js", "Nothing at Alpaca is\n            touched",
      "on the Rename button"),
     ("settings.js", "one process for every account",
@@ -443,13 +441,13 @@ for room, phrase, where in KEPT:
     check(f"{room}: still says {phrase.split(chr(10))[0][:38]!r}",
           phrase in ROOMS[room], f"it should be {where}")
 
-check("the assignment warning is a disclosure, not a deletion",
-      "<details" in SRC["risk.js"], "the owner asked to keep the warnings")
-check("and it is SHUT by default",
-      "<details" in SRC["risk.js"] and "<details open" not in SRC["risk.js"])
-check("capRow still carries its reason, on the row",
-      'title="${esc(' in SRC["riskmath.js"]
-      and "plain(o.why)" in SRC["riskmath.js"])
+# The three checks that stood here read views/risk.js and riskmath.js: the
+# assignment disclosure was shut by default, and capRow carried its reason on
+# the row. Both files are deleted. The WARNING they protected is not lost --
+# what a short leg can deliver is drawn by the Options room's own Overview,
+# off /api/optlab/perf, and test_optroom.py is where that is pinned. Pointing
+# at it here, rather than leaving three dead reads, is the whole difference
+# between a deletion and a hole.
 
 
 # ===========================================================================
@@ -463,8 +461,10 @@ PX = re.compile(r"font-size\s*:\s*([0-9.]+)px")
 # be measured against the page and not against the drawing. Anything that
 # lands on HTML text has to name a step.
 SVG_TEXT = re.compile(r"\.viz-g-[vl]\{[^}]*\}")
-for name in ("settings.js", "risk.js", "riskmath.js", "viz.js",
-             "overview.js"):
+# "risk.js" and "riskmath.js" were on this list; riskmath's 9.5px badge is
+# the ninth size the section's own header names. Both files are gone, so the
+# offence is gone with them.
+for name in ("settings.js", "viz.js", "overview.js"):
     body = SVG_TEXT.sub("", SRC[name])
     hits = sorted(set(PX.findall(body)))
     check(f"{name} sets no literal pixel font-size on HTML text", not hits,
@@ -493,38 +493,26 @@ WARNINGS = [
     ("overview.js", "ladder(s) halted"),
     ("overview.js", "have no\n        resting sell"),
     ("overview.js", "is a floor and not the account's risk"),
-    ("risk.js", "of equity is deployed"),
-    ("risk.js", "No portfolio guardrails are set"),
-    ("risk.js", "Worst case exceeds the account"),
-    ("risk.js", "the ladders hold is in one name"),
-    ("risk.js", "no stop\n    loss"),
-    ("risk.js", "a holiday is not a flat day"),
-    ("risk.js", "every one of them is off"),
     ("settings.js", "Restart is\n      unavailable"),
 ]
 for room, phrase in WARNINGS:
     check(f"{room} still raises {phrase.split(chr(10))[0][:40]!r}",
           phrase in ROOMS[room], "a subtraction round must not eat a warning")
 
-# ONE STRIP PER FAILING SOURCE. /api/risk feeds five blocks; before this round
-# a single 500 from it printed the same 40-word paragraph five times plus the
-# note at the top -- six copies of one fact, which reads as six problems.
-n_notes = SRC["risk.js"].count('class="note bad"') \
-        + SRC["risk.js"].count('class="note warn"')
-check("risk.js emits its stranded reason from ONE place",
-      SRC["risk.js"].count("function stranded") == 1
-      and 'class="note bad"' not in
-          SRC["risk.js"][SRC["risk.js"].index("function stranded"):
-                         SRC["risk.js"].index("function render()")],
-      "stranded() draws a mark; renderNotes() states the reason once")
-check("and its failure note names every source it reads",
-      all(k in SRC["risk.js"] for k in
-          ('["risk", "Ladder exposure"]',
-           '["perf", "The account\'s performance"]',
-           '["strat", "The strategy list"]',
-           '["plays", "The options ledger"]')),
-      "a source that fails silently is worse than one that fails loudly")
-check("the room still has warnings to raise", n_notes >= 8, n_notes)
+# ONE STRIP PER FAILING SOURCE. This block read views/risk.js -- /api/risk fed
+# five of its blocks, and a single 500 printed the same 40-word paragraph six
+# times, which reads as six problems. The room, the file and the route are all
+# deleted in round 8, so the assertion has nothing to stand on and is removed
+# rather than repointed at a room it was never measured against.
+#
+# The RULE it encoded is not deleted and belongs to whoever writes the next
+# multi-source room: state a failing source ONCE, name every source read, and
+# draw a struck mark in the blocks that source fed rather than repeating the
+# sentence in each of them.
+check("the Overview room still raises its own failures",
+      SRC["overview.js"].count('class="note bad"')
+      + SRC["overview.js"].count('class="note warn"') >= 3,
+      "a subtraction round must not eat a warning")
 
 
 print()

@@ -81,10 +81,16 @@ Account-scoped (prefix `/api/a/{acct}`): `overview`, `settings` (GET/POST),
 records the account), `bars`, `search`, `inspect/{sym}`.
 
 Shared (no prefix, same for everyone): `/api/accounts*`, `/api/strategies*`,
-`/api/code*`, `/api/indicators*`, `/api/scanner*`, `/api/pine*`,
-`/api/research*`, `/api/risk/profiles*`, `/api/risk/bank*`, `/api/health`,
-`/api/restart` (restarts the whole process -- every account; the UI must say
-so).
+`/api/code*`, `/api/indicators*`, `/api/pine*`, `/api/risk/profiles*`,
+`/api/risk/bank*`, `/api/health`, `/api/restart` (restarts the whole process
+-- every account; the UI must say so).
+
+`/api/scanner*` and `/api/research*` were on that list until round 8. The
+first went with the Scanner room when it was deleted; the second was a prefix
+for a route app.py never registered. `/api/risk` -- ladder exposure, which WAS
+per-account -- went with the Risk room, and the pair `/api/risk` /
+`/api/risk/bank` is why both this list and `core.js`'s match on whole path
+segments rather than on a bare prefix.
 
 Accounts:
 

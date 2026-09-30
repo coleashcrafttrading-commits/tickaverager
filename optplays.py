@@ -80,6 +80,14 @@ MULT = 100
 
 CREDIT_SPREAD = "credit_spread"
 LONG_SINGLE = "long_single"
+#: ONE SHORT LEG: a cash-secured put, or a covered call once shares are held.
+#: Alpaca prices both off collateral rather than premium, so the thing that
+#: bounds size is the STRIKE (for a put: strike x 100 x contracts of cash) or
+#: the SHARES (for a call: 100 per contract). This account is options level 3,
+#: which includes level 1, so both are permitted -- but an UNCOVERED short is
+#: not, and a short call with no shares behind it is uncovered. That case is
+#: refused by name rather than sent and rejected.
+SHORT_SINGLE = "short_single"
 
 
 class PlayError(Exception):
@@ -178,6 +186,99 @@ PLAYS: dict = {
                   "direction"),
         suggested=("AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA"),
     ),
+    "wheel": Play(
+        id="wheel",
+        label="The Wheel (weekly cash-secured put, then covered calls)",
+        kind=SHORT_SINGLE,
+        summary=("Sell the ~0.20 delta put a week out. If it is assigned, sell "
+                 "covered calls one strike above what the shares cost, so the "
+                 "premium and the share gain are both booked. Close the short "
+                 "at 80% of the credit."),
+        legs_desc="sell 1 put @0.20d, then sell 1 covered call above cost",
+        params={
+            "contracts": 1,
+            "short_delta": 0.20,
+            # WEEKLY IS THE DEFAULT and `cadence` is the switch the owner asked
+            # for: "maybe we can have a setting that turns it into monthly as
+            # well". target_dte follows cadence unless it is set explicitly.
+            "cadence": "weekly",
+            "target_dte": 7,
+            # HIS NUMBER FOR EVERY SHORT: "close out any contract automatically
+            # if it is at 80 percent profit on the short side". For a short
+            # that means buying it back for 20% of the credit taken.
+            "profit_pct": 0.80,
+            # NO STOP ON THE SHORT LEG, deliberately and on his instruction --
+            # he gave a stop for the long side only. On the Wheel that is
+            # coherent rather than reckless: assignment IS the exit, and the
+            # covered call is what is done about it.
+            "stop_pct": 0.0,
+            # How far above the SHARES' cost the covered call is sold, counted
+            # in real listed strikes, not dollars.
+            "call_strikes_above": 1,
+            "one_per_session": True,
+        },
+        editable=("contracts", "short_delta", "cadence", "target_dte",
+                  "profit_pct", "call_strikes_above"),
+        suggested=("SPY", "QQQ", "AAPL", "MSFT", "NVDA"),
+    ),
+    "mabb": Play(
+        id="mabb",
+        label="MABB (moving average + Bollinger bands + IV rank)",
+        kind=LONG_SINGLE,
+        summary=("Reads the 30-period moving average, the Bollinger bands and "
+                 "IV rank, and picks the contract itself. Rich IV sells, cheap "
+                 "IV buys; above the average is bullish unless price is in the "
+                 "upper band, and the mirror below. Buys at the money, sells "
+                 "at 0.20 delta."),
+        legs_desc="buys 1 ATM call/put, or sells 1 @0.20d",
+        params={
+            "contracts": 1,
+            "cadence": "weekly",
+            "target_dte": 7,
+            # The owner said "the 30 period/day moving average" and "the
+            # bollinger bands" without a band period, so the band keeps its own
+            # conventional 20/2 and the average keeps HIS 30. Both are
+            # editable, and they are separate numbers on purpose.
+            "ma_period": 30,
+            "bb_period": 20,
+            "bb_stdev": 2.0,
+            # "if rank is high we are selling and if it is low we are buying".
+            # One threshold, so there is no band in the middle where the play
+            # does nothing without saying why.
+            "iv_rank_sell_above": 50.0,
+            "sell_delta": 0.20,
+            # HOW THE SELL SIDE IS STRUCTURED, and the two sides differ because
+            # the account does, not because anyone preferred it that way.
+            #
+            # A bearish sell is a short CALL, and a naked call is uncovered --
+            # Alpaca refuses it outright on this account (403, "not eligible to
+            # trade uncovered option contracts") unless 100 shares per contract
+            # are already held. So the call side is a CREDIT SPREAD: sell the
+            # 0.20 delta, buy `sell_strikes_out` strikes further out. Defined
+            # risk, permitted, and the owner's "always .2 deltas" is untouched
+            # because the SHORT leg is still the 0.20.
+            #
+            # A bullish sell is a short PUT, which cash secures, so it stays a
+            # single leg by default. Set it to "spread" to trade the put side
+            # the same way, which ties up far less cash for a smaller credit.
+            "call_sell_structure": "spread",
+            "put_sell_structure": "cash_secured",
+            "sell_strikes_out": 2,
+            # The long side's exits, which are his: "+15 percent profit or 30
+            # percent loss". The SHORT side uses profit_pct_short.
+            "profit_pct": 0.15,
+            "stop_pct": 0.30,
+            "profit_pct_short": 0.80,
+            "one_per_bar": True,
+            "same_session_only": True,
+        },
+        editable=("contracts", "cadence", "target_dte", "ma_period",
+                  "bb_period", "bb_stdev", "iv_rank_sell_above", "sell_delta",
+                  "call_sell_structure", "put_sell_structure",
+                  "sell_strikes_out", "profit_pct", "stop_pct",
+                  "profit_pct_short"),
+        suggested=("SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "TSLA"),
+    ),
 }
 
 
@@ -269,6 +370,35 @@ def n_strikes_below(greek_rows, right: str, strike: float, n: int):
         return None
     j = i - int(n)
     if j < 0:
+        return None
+    want = grid[j]
+    for g in _rows_of(greek_rows, right):
+        if float(g.strike) == want:
+            return g
+    return None
+
+
+def n_strikes_above(greek_rows, right: str, strike: float, n: int):
+    """The row n listed strikes ABOVE `strike`, or None if the grid runs out.
+
+    The mirror of `n_strikes_below`, and it exists for the Wheel's covered
+    call: the owner's rule is "one strike above the price that we bought it
+    for", which is a position on the real listed grid and not a dollar amount.
+    None near the top of a chain, for the same reason as its twin -- naming a
+    strike that does not trade is worse than saying there is not one.
+    """
+    grid = strike_grid(greek_rows, right)
+    if not grid:
+        return None
+    # The shares' cost basis is very unlikely to BE a listed strike, so anchor
+    # on the first strike at or above it and count from there.
+    at_or_above = [g for g in grid if g >= float(strike)]
+    if not at_or_above:
+        return None
+    base = at_or_above[0]
+    i = grid.index(base)
+    j = i + max(0, int(n) - (1 if base > float(strike) else 0))
+    if j >= len(grid):
         return None
     want = grid[j]
     for g in _rows_of(greek_rows, right):
@@ -396,47 +526,70 @@ def _mid(g) -> Optional[float]:
 def build_credit_spread(symbol: str, greek_rows, expiry: _dt.date, *,
                         short_delta: float = 0.20, strikes_below: int = 2,
                         contracts: int = 10, play_id: str = "",
+                        right: str = "put", strikes_out: Optional[int] = None,
                         ) -> tuple:
     """(Structure, reason). Structure is None when it cannot be built.
 
     A refusal always names the reason rather than returning None bare, because
     "no spread today" and "the chain came back empty" need different responses
     and only one of them is normal.
+
+    PUTS OR CALLS. It was put-only, because the index play only ever sells
+    puts. MABB needs the other side: when IV is rich and the read is bearish it
+    wants to sell a call, and a naked call is uncovered -- which this account
+    may not trade at all. Selling the call and BUYING one further out makes it
+    defined-risk and permitted, and it keeps the owner's rule intact because
+    the short leg is still the 0.20 delta.
+
+    The protective leg is always further OUT OF THE MONEY than the short: below
+    for puts, above for calls. That is the whole difference, and getting it
+    backwards would buy protection on the wrong side and leave the short
+    exposed while paying for the privilege.
     """
-    short = pick_by_delta(greek_rows, "put", short_delta)
+    right = str(right).lower()
+    if right not in ("put", "call"):
+        return None, "a credit spread is puts or calls, not %r" % right
+    n_out = int(strikes_below if strikes_out is None else strikes_out)
+    short = pick_by_delta(greek_rows, right, short_delta)
     if short is None:
-        return None, ("no put with a solved delta in this expiry -- cannot "
-                      "choose a %.2f delta strike" % short_delta)
-    long_ = n_strikes_below(greek_rows, "put", short.strike, strikes_below)
+        return None, ("no %s with a solved delta in this expiry -- cannot "
+                      "choose a %.2f delta strike" % (right, short_delta))
+    if right == "put":
+        long_ = n_strikes_below(greek_rows, "put", short.strike, n_out)
+        where = "below"
+    else:
+        long_ = n_strikes_above(greek_rows, "call", short.strike, n_out)
+        where = "above"
     if long_ is None:
-        return None, ("no strike %d below %s in the listed grid"
-                      % (strikes_below, short.strike))
+        return None, ("no strike %d %s %s in the listed grid"
+                      % (n_out, where, short.strike))
     ms, ml = _mid(short), _mid(long_)
     if ms is None or ml is None:
         return None, ("no two-sided quote on %s"
                       % (short.symbol if ms is None else long_.symbol))
     net = round(ms - ml, 4)
     if net <= 0:
-        return None, ("the spread quotes at a debit (%.2f) -- a put credit "
+        return None, ("the spread quotes at a debit (%.2f) -- a %s credit "
                       "spread that costs money is a mispriced chain, not a "
-                      "trade" % net)
-    width = round(float(short.strike) - float(long_.strike), 4)
+                      "trade" % (net, right))
+    width = round(abs(float(short.strike) - float(long_.strike)), 4)
     # Defined risk: the wing width less the credit, times 100, times contracts.
     # This is what buying power is checked against, so it is computed from the
     # real strikes and the real quotes, never from the nominal width.
     max_loss = round((width - net) * MULT * contracts, 2)
     legs = [
-        Leg(short.symbol, "put", float(short.strike), "sell", expiry, ms,
+        Leg(short.symbol, right, float(short.strike), "sell", expiry, ms,
             short.delta, short.source),
-        Leg(long_.symbol, "put", float(long_.strike), "buy", expiry, ml,
+        Leg(long_.symbol, right, float(long_.strike), "buy", expiry, ml,
             long_.delta, long_.source),
     ]
     st = Structure(
         play_id=play_id or "index-put-credit-spread", symbol=symbol,
         kind=CREDIT_SPREAD, expiry=expiry, contracts=contracts, legs=legs,
         net_per_contract=net, max_loss=max_loss, width=width,
-        label="%s %s put credit spread %s/%s x%d"
-              % (symbol, expiry, short.strike, long_.strike, contracts))
+        direction=("down" if right == "call" else "up"),
+        label="%s %s %s credit spread %s/%s x%d"
+              % (symbol, expiry, right, short.strike, long_.strike, contracts))
     return st, ("sell %s delta %.3f / buy %s, credit %.2f on a %.2f wing"
                 % (short.strike,
                    short.delta if short.delta is not None else float("nan"),
@@ -468,6 +621,244 @@ def build_long_single(symbol: str, greek_rows, expiry: _dt.date, spot: float, *,
                                    right.upper(), contracts))
     return st, ("buy the %s %s at %.2f (spot %.2f), debit $%.2f"
                 % (row.strike, right, px, spot, debit))
+
+
+#: The owner asked for weekly with a switch: "hopefully make us money weekly
+#: and maybe we can have a setting that turns it into monthly as well".
+CADENCE_DTE = {"weekly": 7, "monthly": 30}
+
+
+def dte_for(params: dict) -> int:
+    """Days to expiry for a play, from its cadence unless it was set outright.
+
+    `cadence` is the owner-facing switch and `target_dte` is the escape hatch.
+    A target_dte that still equals its cadence's default is treated as unset,
+    so flipping weekly->monthly moves the trade rather than being silently
+    overridden by a number nobody edited.
+    """
+    cad = str(params.get("cadence") or "").strip().lower()
+    want = CADENCE_DTE.get(cad)
+    have = params.get("target_dte")
+    if want is None:
+        return int(have or 30)
+    if have is None:
+        return int(want)
+    # only an explicitly DIFFERENT target overrides the cadence
+    if int(have) in CADENCE_DTE.values() and int(have) != int(want):
+        return int(want)
+    return int(have) if int(have) != int(want) else int(want)
+
+
+def mabb_decision(*, close: float, ma: Optional[float],
+                  upper: Optional[float], lower: Optional[float],
+                  iv_rank: Optional[float], sell_above: float = 50.0) -> tuple:
+    """(action, right, reason) for MABB. action is "buy", "sell" or None.
+
+    THE OWNER'S RULE, in his order:
+
+      "if rank is high we are selling and if it is low we are buying, and if we
+       are above the moving average then we are bullish unless we are above the
+       upper bollinger band/in it then we are bearish and vise versa for below
+       and hitting the bottom bollinger band"
+
+    So IV rank chooses whether we are a BUYER or a SELLER of premium, and the
+    average and the bands choose the DIRECTION. The band overrides the average,
+    which is the whole point of mentioning it: above the mean is bullish right
+    up until price is stretched into the upper band, where it is not.
+
+    Then the sides map the only way they can: a bullish seller sells puts, a
+    bearish seller sells calls, a bullish buyer buys calls, a bearish buyer
+    buys puts.
+
+    Returns action None with a REASON whenever an input is missing. IV rank in
+    particular is unmeasured on a fresh install -- it needs a trailing IV
+    series this repo has only just begun recording -- and a play that guessed
+    at it would be trading on a number nobody has.
+    """
+    if ma is None:
+        return None, None, "the moving average is not measured yet"
+    if upper is None or lower is None:
+        return None, None, "the Bollinger bands are not measured yet"
+    if iv_rank is None:
+        return None, None, ("IV rank is not measured yet, and it is what "
+                            "decides whether this play buys or sells")
+
+    selling = float(iv_rank) >= float(sell_above)
+    if close >= upper:
+        bullish, why_dir = False, ("price is in or above the upper band "
+                                   "(%.2f >= %.2f)" % (close, upper))
+    elif close <= lower:
+        bullish, why_dir = True, ("price is in or below the lower band "
+                                  "(%.2f <= %.2f)" % (close, lower))
+    elif close > ma:
+        bullish, why_dir = True, "price is above the %g average" % ma
+    elif close < ma:
+        bullish, why_dir = False, "price is below the %g average" % ma
+    else:
+        return None, None, ("price is exactly on the average and inside the "
+                            "bands, which is not a direction")
+
+    if selling:
+        right = "put" if bullish else "call"
+        act = "sell"
+        why_iv = "IV rank %.1f is at or above %.1f, so this sells premium" % (
+            float(iv_rank), float(sell_above))
+    else:
+        right = "call" if bullish else "put"
+        act = "buy"
+        why_iv = "IV rank %.1f is below %.1f, so this buys premium" % (
+            float(iv_rank), float(sell_above))
+    return act, right, "%s; %s; %s the %s" % (why_iv, why_dir, act, right)
+
+
+def build_short_single(symbol: str, greek_rows, expiry: _dt.date, *,
+                       right: str, contracts: int = 1, target_delta: float = 0.20,
+                       strike: Optional[float] = None,
+                       shares_held: float = 0.0,
+                       cash_available: Optional[float] = None,
+                       play_id: str = "") -> tuple:
+    """(Structure, reason) for ONE short option: a cash-secured put, or a
+    covered call.
+
+    THE COLLATERAL IS THE POINT, and it is why this cannot reuse the long
+    builder. A long option's worst case is the premium; a short one's is the
+    thing behind it:
+
+      short PUT   -- assignment buys 100 shares per contract at the strike, so
+                     the collateral is strike x 100 x contracts IN CASH. That
+                     is what makes it "cash-secured" rather than naked, and it
+                     is the number that decides whether this account can carry
+                     the trade at all.
+      short CALL  -- assignment DELIVERS 100 shares per contract. Covered means
+                     the shares are already held. Without them it is an
+                     uncovered call, which this account may not trade, and
+                     sending one earns HTTP 403 "account not eligible to trade
+                     uncovered option contracts".
+
+    So an uncovered call is refused HERE, by name, with the shortfall counted
+    -- not sent and rejected by Alpaca. A refusal the reader can act on beats a
+    403 in a log. `strike` pins the strike (the Wheel's covered call sits a set
+    number of strikes above the shares' cost); otherwise it is chosen by delta.
+    """
+    right = str(right).lower()
+    if right not in ("put", "call"):
+        return None, "a short leg must be a put or a call, not %r" % right
+    ct = max(1, int(contracts))
+
+    if strike is not None:
+        row = None
+        for g in _rows_of(greek_rows, right):
+            if float(g.strike) == float(strike):
+                row = g
+                break
+        if row is None:
+            return None, ("no %s listed at %.2f in %s" % (right, strike, expiry))
+    else:
+        row = pick_by_delta(greek_rows, right, target_delta)
+        if row is None:
+            return None, ("no %s near %.2f delta in %s" % (right, target_delta,
+                                                           expiry))
+    px = _mid(row)
+    if px is None:
+        return None, "no two-sided quote on %s" % row.symbol
+
+    if right == "call":
+        need = ct * MULT
+        if shares_held < need:
+            return None, ("a short call needs %d share(s) behind it and this "
+                          "account holds %g. An uncovered call is not "
+                          "something this account may trade, so nothing is "
+                          "sent." % (need, shares_held))
+        secured = 0.0
+    else:
+        secured = round(float(row.strike) * MULT * ct, 2)
+        if cash_available is not None and cash_available < secured:
+            return None, ("securing this put needs $%.2f of cash and there is "
+                          "$%.2f. A put that is not cash-secured is naked, and "
+                          "this account may not trade one."
+                          % (secured, cash_available))
+
+    credit = round(px * MULT * ct, 2)
+    legs = [Leg(row.symbol, right, float(row.strike), "sell", expiry, px,
+                row.delta, row.source)]
+    # MAX LOSS IS NOT THE PREMIUM. A short put's worst case is the strike going
+    # to zero: the collateral less the credit. A covered call's "loss" is
+    # upside given up, not cash at risk, so it is reported as the collateral
+    # the shares represent rather than a number that reads like a debit.
+    if right == "put":
+        max_loss = round(secured - credit, 2)
+    else:
+        max_loss = round(float(row.strike) * MULT * ct, 2)
+    st = Structure(
+        play_id=play_id or "wheel", symbol=symbol,
+        kind=SHORT_SINGLE, expiry=expiry, contracts=ct, legs=legs,
+        net_per_contract=round(px, 4), max_loss=max_loss, width=None,
+        direction=("down" if right == "call" else "up"),
+        label="%s %s %s SHORT %s x%d" % (symbol, expiry, row.strike,
+                                         right.upper(), ct))
+    if right == "put":
+        why = ("sell the %s put at %.2f (delta %.3f), credit $%.2f, secured "
+               "by $%.2f" % (row.strike, px, row.delta or 0.0, credit, secured))
+    else:
+        why = ("sell the %s call at %.2f (delta %.3f), credit $%.2f, covered "
+               "by %d share(s)" % (row.strike, px, row.delta or 0.0, credit,
+                                   ct * MULT))
+    return st, why
+
+
+def build_mabb(symbol: str, greek_rows, expiry: _dt.date, spot: float, *,
+               action: str, right: str, params: dict,
+               shares_held: float = 0.0,
+               cash_available: Optional[float] = None) -> tuple:
+    """(Structure, reason) for whatever MABB's read asks for.
+
+    ONE PLACE THAT TURNS A DECISION INTO A SHAPE, so the decision stays a
+    decision. `mabb_decision` answers buy-or-sell and call-or-put; this turns
+    that into the structure the ACCOUNT can actually carry:
+
+        buy  + call/put   ->  a long ATM single, his "if we have to buy i
+                              would like to do atm contracts"
+        sell + put        ->  a cash-secured put at 0.20 delta, or a put credit
+                              spread if the ticker is set that way
+        sell + call       ->  a CALL CREDIT SPREAD at 0.20 delta, because a
+                              naked call is uncovered and this account may not
+                              trade one
+
+    The short leg is the 0.20 delta in every selling case, which is the rule he
+    gave: "if we are selling I want to do .2 deltas always".
+    """
+    ct = max(1, int(params.get("contracts") or 1))
+    if action == "buy":
+        return build_long_single(
+            symbol, greek_rows, expiry, spot,
+            direction=("up" if right == "call" else "down"),
+            contracts=ct, play_id="mabb")
+
+    if action != "sell":
+        return None, "no action to build (%r)" % action
+
+    delta = float(params.get("sell_delta") or 0.20)
+    out = int(params.get("sell_strikes_out") or 2)
+    how = str(params.get("call_sell_structure" if right == "call"
+                         else "put_sell_structure") or "").lower()
+    if right == "call" and how != "spread":
+        # Guarded rather than trusted: a ticker configured to sell naked calls
+        # would be configured to have every order rejected.
+        if shares_held < ct * MULT:
+            return None, ("selling a call here needs either %d share(s) to "
+                          "cover it or a spread, and this ticker is set to "
+                          "%r with %g share(s) held"
+                          % (ct * MULT, how or "single", shares_held))
+        return build_short_single(symbol, greek_rows, expiry, right="call",
+                                  contracts=ct, target_delta=delta,
+                                  shares_held=shares_held, play_id="mabb")
+    if how == "spread":
+        return build_credit_spread(symbol, greek_rows, expiry,
+                                   short_delta=delta, strikes_out=out,
+                                   contracts=ct, right=right, play_id="mabb")
+    return build_short_single(symbol, greek_rows, expiry, right="put",
+                              contracts=ct, target_delta=delta,
+                              cash_available=cash_available, play_id="mabb")
 
 
 # =========================================================== the assignments

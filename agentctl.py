@@ -70,9 +70,14 @@ API = os.environ.get("TICKAVERAGER_API", "http://127.0.0.1:8010")
 # scheduler sets the env for its agents; a human with neither gets the
 # default account -- the legacy single-account behaviour, unchanged.
 ACCOUNT = os.environ.get("TICKAVERAGER_ACCOUNT", "default") or "default"
-# routes that are shared across accounts and must NOT be prefixed
+# routes that are shared across accounts and must NOT be prefixed.
+# Round 8 removed "/api/scanner" (the route went with the Scanner room) and
+# "/api/research" (a prefix for a route app.py never registered at all). The
+# rest are live: /api/pine is read by views/backtest.js, and the two risk
+# entries are what `risk-profiles`, `risk-save`, `risk-record` and `risk-bank`
+# below call -- they are a shared library, not per-account state.
 SHARED_PREFIXES = ("/api/accounts", "/api/strategies", "/api/code", "/api/indicators",
-                   "/api/scanner", "/api/pine", "/api/research", "/api/risk/profiles",
+                   "/api/pine", "/api/risk/profiles",
                    "/api/risk/bank", "/api/health", "/api/restart")
 
 

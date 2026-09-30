@@ -23,7 +23,6 @@ Routes
   POST   /api/ticker/{sym}/config      patch that ladder's own settings
   POST   /api/ticker/{sym}/{action}    start|stop|arm|flatten|cancel_tps|
                                        ensure_tps|adopt|clear_halt
-  GET    /api/ticker/{sym}/orders      order history for that symbol
 
   GET    /api/search?q=                ticker lookup for the Add screen
   GET    /api/inspect/{sym}            one candidate symbol, in detail
@@ -47,8 +46,6 @@ Routes
   GET/POST /api/bank/attach           attach or detach one entry on one ticker
   GET    /api/optlab/bank              the options strategy shelf
   GET    /api/optlab/bank/{slug}       one strategy, with its gates
-  GET    /api/optlab/expirations/{sym} listed expiries, dead ones marked
-  GET    /api/optlab/chain/{sym}       one expiry, with local IV and greeks
   GET    /api/optlab/sweep             the saved backtests and their grades
   GET    /api/optlab/board             the watched tickers and what we know
   POST   /api/optlab/board/refresh     force a measurement (rate-limited)
@@ -58,6 +55,59 @@ Routes
 
   /api/options/* and the /options page belong to optapi.py's router, which is
   the engine that trades. Nothing in THIS file registers a path under it.
+
+Deleted in round 8, and listed here because the next reader will look
+------------------------------------------------------------------
+The owner asked for four rooms to go -- "remove the risk tab and the research
+tab and the scanner tab completely from the code" and "whatever options chain
+and screener we built remove it" -- and a view deleted while its route keeps
+answering leaves behind exactly the CPU cost he was trying to get rid of. So
+these went with their pages:
+
+  GET    /api/risk                     ladder exposure, ATR and the caps.
+                                       Its only caller was views/risk.js. It
+                                       pulled a 150-bar window PER SYMBOL
+                                       through btjobs.CACHE on every request.
+  GET    /api/scanner                  the point-in-time momentum watchlist
+  GET    /api/scanner/backtest         the last replication run
+                                       Both read research/ JSON off disk and
+                                       were called only by views/scanner.js.
+  POST   /api/indicators/ai            write an indicator from English
+  DELETE /api/indicators/custom/{key}  delete one
+                                       The Indicators room inside Research was
+                                       the only caller of either.
+  GET    /api/optlab/expirations/{sym} listed expiries, dead ones marked
+  GET    /api/optlab/chain/{sym}       one expiry, with local IV and greeks
+                                       The chain browser's two routes, and the
+                                       expiries one spent from the SCARCE
+                                       200/min trading budget the ladders
+                                       place orders through.
+
+KEPT, and why, because "the research tab is gone" is not the same claim as
+"nothing research-shaped is left":
+
+  GET    /api/indicators/custom        app.js reads it at boot so an
+                                       already-written indicator stays in
+                                       ind.js's CATALOG, which is what the
+                                       TICKER chart draws from.
+  GET    /api/pine/{rank}              views/backtest.js still reads it, and
+                                       views/strategies.js still imports that
+                                       module.
+  GET/POST/DELETE /api/risk/profiles   agentctl.py risk-profiles / risk-save
+  GET/POST /api/risk/bank              agentctl.py risk-record / risk-bank.
+                                       These are the documented CLI evidence
+                                       path in CLAUDE.md, not view-only
+                                       routes, and the append-only bank is
+                                       the record of what was tested.
+  POST   /api/backtest                 same: agentctl backtest is the
+                                       documented way a strategy is measured.
+
+scanner.py, screener.py, ross.py, pinegen.py, aiwrite.py and riskbank.py all
+stayed on disk. None of them existed only to feed a deleted route: scanner.py
+is imported by ross.py, rosslive.py and five bt_* campaigns, screener.py is a
+command line tool with no route at all (scheduler.py and two .claude skills
+invoke it), aiwrite.py is also assistant.py's, and riskbank.py is the bank
+agentctl writes to.
 """
 from __future__ import annotations
 
@@ -670,15 +720,6 @@ def ticker_trades(sym: str, days: int = 30, f: Fleet = Depends(cur)):
             "entries": entries, "exits": exits, "pairs": pairs, "open_lots": open_lots}
 
 
-@app.get("/api/a/{acct}/ticker/{sym}/orders")
-@app.get("/api/ticker/{sym}/orders")
-def ticker_orders(sym: str, status: str = "all", limit: int = 50, f: Fleet = Depends(cur)):
-    e = _engine(f, sym)
-    if not e.broker:
-        raise HTTPException(503, "Broker not connected.")
-    return e.broker.orders(status=status, symbols=e.symbol, limit=limit)
-
-
 @app.get("/api/a/{acct}/ticker/{sym}/market")
 @app.get("/api/ticker/{sym}/market")
 def ticker_market(sym: str, f: Fleet = Depends(cur)):
@@ -1092,104 +1133,6 @@ def agent_runs(job_id: str, limit: int = 20, f: Fleet = Depends(cur)):
     return {"ok": True, "runs": _sched(f)._read_runs(job_id, limit)}
 
 
-# ======================================================================= risk
-@app.get("/api/a/{acct}/risk")
-@app.get("/api/risk")
-def risk(f: Fleet = Depends(cur)):
-    """Exposure and volatility per ladder, plus what a move against you costs.
-
-    ATR is the honest unit for this strategy: a $0.10 target on a symbol that
-    ranges $0.02 a minute is a different trade from the same target on one that
-    ranges $0.15, and dollar settings alone hide that completely.
-    """
-    import trend
-    g = f.gcfg
-    p = f.portfolio()
-    out = []
-    for sym in f.symbols():
-        e = f.engines[sym]
-        c, led = e.cfg, e.ledger
-        price = e.last_price or 0.0
-        # The fleet's snapshot only keeps ~5 bars per symbol -- enough to spot a
-        # completed bar, nowhere near enough for ATR(14). Pull a real window,
-        # through the backtest cache so opening this page repeatedly does not
-        # hammer Alpaca.
-        import btjobs
-        a = 0.0
-        try:
-            tf = c.get("bar_size", "1Min")
-            # generous windows: a weekend or a market holiday can leave a
-            # 1.5-day request with literally zero bars
-            span = {"1Min": 5, "5Min": 12, "15Min": 25,
-                    "1Hour": 90, "1Day": 500}.get(tf, 7)
-            bars = btjobs.CACHE.get(f.broker, sym, tf, span, max_age=300)
-            bars = bars[-150:]
-            if len(bars) >= 16:
-                # trend.atr returns the WHOLE series, not a single value
-                series = trend.atr([float(b["h"]) for b in bars],
-                                   [float(b["l"]) for b in bars],
-                                   [float(b["c"]) for b in bars], 14)
-                a = float(series[-1]) if series else 0.0
-        except Exception:
-            a = 0.0
-        spl = qty(c["shares_per_lot"])              # a 0.01 lot is a real number here, not $0
-        maxlots = int(c["max_lots"])
-        tp = float(c["take_profit"])
-        add = float(c["add_distance"])
-        held = led.shares
-        cost = sum(l.cost for l in led.open_lots)
-        full = spl * maxlots * price
-        # how far price must fall for the ladder to fill every rung
-        depth = add * maxlots if c.get("add_mode") == "points" else 0.0
-        out.append({
-            "symbol": sym,
-            "price": round(price, 4),
-            "atr": round(a, 4),
-            "atr_pct": round(100 * a / price, 3) if price else 0.0,
-            "take_profit": tp,
-            "add_distance": add,
-            "tp_in_atr": round(tp / a, 2) if a else None,
-            "add_in_atr": round(add / a, 2) if a else None,
-            "shares_per_lot": qnum(spl),
-            "max_lots": maxlots,
-            "lots_open": len(led.open_lots),
-            "shares_held": qnum(held),
-            "cost_basis": round(cost, 2),
-            "max_exposure": round(full, 2),
-            "used_pct": round(100 * len(led.open_lots) / maxlots, 1) if maxlots else 0.0,
-            "unrealized": round(float(e.position.get("unrealized_pl") or 0), 2)
-                          if e.position else 0.0,
-            "ladder_depth": round(depth, 2),
-            "ladder_depth_pct": round(100 * depth / price, 2) if price else 0.0,
-            "armed": not bool(c.get("dry_run")),
-            "running": e.running,
-            "exit_mode": c.get("exit_mode", "limit"),
-            # a fall of one ATR against everything currently held
-            "loss_1atr": round(-a * held, 2),
-            "loss_full_ladder": round(-(depth / 2) * spl * maxlots, 2) if depth else 0.0,
-        })
-
-    deployed = p["deployed"]
-    equity = p["account_value"] or 1
-    return {
-        "ok": True,
-        "account": {
-            "equity": p["account_value"], "cash": p["cash"],
-            "buying_power": p["buying_power"], "deployed": deployed,
-            "deployed_pct": round(100 * deployed / equity, 1),
-            "open_pl": p["open_pl"], "made_today": p["made_today"],
-        },
-        "limits": {
-            "max_total_exposure": g.get("max_total_exposure") or 0,
-            "reserve_cash": g.get("reserve_cash") or 0,
-            "account_daily_loss_limit": g.get("account_daily_loss_limit") or 0,
-            "max_running_tickers": g.get("max_running_tickers") or 0,
-        },
-        "tickers": out,
-        "worst_case": round(sum(t["max_exposure"] for t in out), 2),
-    }
-
-
 # =================================================================== reports
 @app.post("/api/a/{acct}/reports")
 @app.post("/api/reports")
@@ -1361,84 +1304,6 @@ def pine_for(rank: int):
     return {"ok": True, **r}
 
 
-# =========================================================== momentum scanner
-@app.get("/api/scanner")
-def scanner_day(date: str = "", refresh: int = 0):
-    """The 09:30 watchlist for one session, exactly as it was knowable then.
-
-    Five criteria: price band, gap, relative volume, the intraday move, and
-    float. Float comes from SEC filings keyed on the date they were FILED, so
-    a share count cannot be used before it was public.
-    """
-    import json as _json
-    from pathlib import Path as _P
-    import scanner as _sc
-    import ross as _ross
-    f = _P(__file__).resolve().parent / "research" / "scanner" / "daily_table.json"
-    if not f.exists():
-        raise HTTPException(404, "no daily table yet -- run scanner.py")
-    table = _json.loads(f.read_text(encoding="utf-8"))
-    dates = sorted({r["d"] for recs in table.values() for r in recs})
-    # Default to the most recent session that actually produced survivors. The
-    # newest day is often a partial one with nothing through the float gate, and
-    # landing on an empty table reads as a broken page rather than a quiet
-    # market. An explicit ?date= is always honoured, empty or not.
-    d = date or (dates[-1] if dates else "")
-    if d not in dates:
-        raise HTTPException(404, "no session data for %s" % d)
-    if not date:
-        for cand in reversed(dates[-15:]):
-            probe = _scan_one(table, cand, _ross_cfg())
-            if probe["survived"]:
-                d = cand
-                break
-    cfg = _ross_cfg()
-    res_all = _scan_one(table, d, cfg)
-    return {"ok": True, "date": d, "dates": dates[-120:], **res_all}
-
-
-def _ross_cfg():
-    import ross as _ross
-    return _ross.scanner_cfg()
-
-
-def _scan_one(table: dict, d: str, cfg: dict) -> dict:
-    import scanner as _sc
-    cands = _sc.premarket_candidates(table, d, cfg)
-    cands = [r for r in cands
-             if r.get("open_raw") is not None
-             and cfg["min_price"] <= r["open_raw"] <= cfg["max_price"]
-             and r["gap_pct"] >= cfg["min_gap_pct"]]
-    before = len(cands)
-    cands = _sc.attach_float(cands, d, cfg)
-    res = _sc.float_filter(cands, d, table, cfg)
-    return {"gapped": before, "survived": res["after"],
-            "regime": res["regime"], "float_max": res["float_max"],
-            "dropped": res["dropped"], "criteria": cfg,
-            "candidates": res["candidates"][:40]}
-
-
-@app.get("/api/scanner/backtest")
-def scanner_backtest():
-    """The most recent replication run, if one has been produced."""
-    import json as _json
-    from pathlib import Path as _P
-    d = _P(__file__).resolve().parent / "research" / "ross"
-    runs = sorted(d.glob("run_*.json"), key=lambda x: x.stat().st_mtime)
-    if not runs:
-        return {"ok": True, "run": None}
-    r = _json.loads(runs[-1].read_text(encoding="utf-8"))
-    days = r.get("days") or []
-    trades = [t for x in days for t in (x.get("trades") or [])]
-    return {"ok": True, "file": runs[-1].name, "capital": r.get("capital"),
-            "final": r.get("final"), "curve": r.get("curve"),
-            "baseline_r": r.get("baseline_r"), "params": r.get("params"),
-            "days": [{"date": x["date"], "pl": x["pl"], "equity": x["equity_end"],
-                      "n": len(x.get("trades") or []),
-                      "watchlist": x.get("watchlist")} for x in days],
-            "trades": trades[-300:]}
-
-
 # =========================================================== AI indicators
 @app.get("/api/indicators/custom")
 def indicators_custom():
@@ -1446,25 +1311,6 @@ def indicators_custom():
     import aiwrite
     return {"ok": True, "indicators": aiwrite.listing(),
             "ready": aiwrite.readiness()}
-
-
-@app.post("/api/indicators/ai")
-def indicators_ai(body: dict = Body(...)):
-    """Describe an indicator in English; get one the chart can draw."""
-    import aiwrite
-    desc = (body.get("description") or "").strip()
-    if not desc:
-        raise HTTPException(400, "Describe the indicator you want.")
-    r = aiwrite.build(desc, timeout=int(body.get("timeout") or 180))
-    if r.get("ok") and body.get("save", True):
-        r["key"] = aiwrite.save(r["indicator"])
-    return r
-
-
-@app.delete("/api/indicators/custom/{key}")
-def indicators_custom_delete(key: str):
-    import aiwrite
-    return {"ok": aiwrite.delete(key)}
 
 
 # ================================================================ strategy bank
@@ -1996,11 +1842,6 @@ def inspect(sym: str, f: Fleet = Depends(cur)):
 # window onto those three.
 from datetime import datetime, timedelta, timezone  # noqa: E402
 
-# The flat rate optbacktest.RATE uses, and for the same reason: chain_greeks
-# prices off the forward the chain itself implies, which absorbs the real rate
-# and the dividend together, so the number here only has to be close.
-OPT_RATE = 0.043
-
 # optdata's own TTLs, named here because these routes are what they protect:
 # expiries cost the SCARCE budget and change once a day; a chain costs the
 # cheap one and must not be older than one UI poll.
@@ -2073,48 +1914,6 @@ def _opt_time(s):
     return out if out.tzinfo else out.replace(tzinfo=timezone.utc)
 
 
-def _quote_clock(rows: list) -> tuple:
-    """(the moment the snapshot is from, where that came from).
-
-    greeks.chain_greeks turns an expiry into T against whatever clock it is
-    handed, so pricing a chain fetched a minute ago against wall-clock now
-    shifts every T by a minute. On a 0DTE contract that is a real error, not a
-    rounding one. The freshest quote time on the chain is the closest thing to
-    the fetch moment that the payload itself carries; a chain carrying none
-    falls back to the wall clock and says which it used.
-    """
-    stamps = [t for t in (_opt_time(r.get("quote_at")) for r in rows) if t]
-    if stamps:
-        return max(stamps), "quote"
-    return _opt_now(), "clock"
-
-
-def _expiry_row(exp, now: datetime) -> dict:
-    """One expiry, with the two facts that decide whether to offer it.
-
-    `expired` is the one that matters. optsym.dte counts calendar days on the
-    New York date, so a contract expiring today is 0DTE at 09:30 and STILL
-    0DTE at 16:30 -- by which time it does not exist. The expiry moment is
-    16:00 ET on the day, and past it the contract is dead however friendly the
-    DTE looks.
-    """
-    import optsym
-    moment = optsym.expiry_moment(exp)
-    expired = now >= moment
-    return {
-        "expiry": exp.isoformat(),
-        "dte": optsym.dte(exp, now),
-        "expiry_moment": moment.isoformat(),
-        "expired": expired,
-        # never negative: past the moment there is no time left to report, and
-        # year_fraction floors rather than going negative for the same reason
-        "seconds_left": max(0.0, round((moment - now).total_seconds(), 1)),
-        "t_years": (None if expired
-                    else round(optsym.year_fraction(exp, now), 8)),
-        "tradable": not expired,
-    }
-
-
 # ------------------------------------------------------------- the strategies
 def _bank_listing(include_forbidden: bool) -> tuple:
     import time as _time
@@ -2168,225 +1967,6 @@ def options_bank_one(slug: str):
             "short_legs": optbank.short_legs(spec),
             "assignment_legs": optbank.assignment_legs(spec),
             "requires_share_leg": optbank.requires_share_leg(spec)}
-
-
-# ------------------------------------------------------------------ expiries
-# What this route may actually ask Alpaca for. OptionData's 15-minute cache
-# is keyed on (min_dte, max_dte), so an unsnapped query string is a cache MISS
-# per keystroke: 40 requests varying max_dte=1..40 spent 40 of the 200/min
-# trading budget the live share fleet shares. Snapping to a handful of windows
-# means a browser loop hits the cache instead of the wire.
-OPT_DTE_BUCKETS = (7, 30, 60, 90, 180, 365, 730)
-
-
-def _dte_fetch_window(min_dte: int, max_dte: int) -> tuple:
-    """(what is fetched, and it always starts at 0) for a requested window.
-
-    Always from 0: a caller asking for 20-40 DTE and a caller asking for 0-60
-    then share one cache entry, and the narrowing is done here on rows already
-    in memory rather than on the scarce endpoint.
-    """
-    want = max(0, int(max_dte))
-    hi = next((b for b in OPT_DTE_BUCKETS if b >= want), OPT_DTE_BUCKETS[-1])
-    return 0, hi
-
-
-def _in_dte_window(row: dict, min_dte: int, max_dte: int) -> bool:
-    """Is this row inside the window the caller asked for?
-
-    An EXPIRED row is kept whatever the window says. This route's job is to
-    mark the dead ones dead, and dropping one because its DTE went negative is
-    how a board full of dead expiries reads as a board with nothing on it.
-    """
-    if row["expired"]:
-        return True
-    return int(min_dte) <= row["dte"] <= max(int(min_dte), int(max_dte))
-
-
-@app.get("/api/a/{acct}/optlab/expirations/{sym}")
-@app.get("/api/optlab/expirations/{sym}")
-def options_expirations(sym: str, min_dte: int = 0, max_dte: int = 60,
-                        f: Fleet = Depends(cur)):
-    """Listed expiries for one underlying, with the dead ones marked.
-
-    This is the one read in the section that spends the 200/min trading
-    budget, so it is cached for fifteen minutes inside OptionData: the list of
-    expiries changes once a day and a dashboard left open overnight must not
-    spend the engines' requests refreshing it. The window asked of OptionData
-    is SNAPPED to a bucket for that reason -- the caller's own min_dte and
-    max_dte are applied to the rows here, where they cost nothing.
-    """
-    data = _optdata(f)
-    now = _opt_now()
-    lo, hi = _dte_fetch_window(min_dte, max_dte)
-    try:
-        dates = data.expirations(sym.upper(), min_dte=lo,
-                                 max_dte=hi, now=now)
-    except Exception as e:
-        raise HTTPException(502, f"expirations for {sym.upper()}: {e}")
-    rows = [_expiry_row(d, now) for d in dates]
-    rows = [r for r in rows if _in_dte_window(r, min_dte, max_dte)]
-    live = [r for r in rows if r["tradable"]]
-    return {"ok": True, "symbol": sym.upper(), "now": now.isoformat(),
-            "asked": {"min_dte": int(min_dte), "max_dte": int(max_dte)},
-            "fetched": {"min_dte": lo, "max_dte": hi,
-                        "why": "snapped to a bucket so the 15-minute cache "
-                               "can hold, and filtered here"},
-            "count": len(rows), "expirations": rows,
-            # what a picker should preselect. None, never the first row: an
-            # expiry that has already passed is not a smaller version of a
-            # live one, and offering it is how a dead 0DTE gets traded
-            "first_tradable": live[0]["expiry"] if live else None,
-            "budget": data.stats()}
-
-
-# -------------------------------------------------------------------- chains
-def _chain_rows(data, sym: str, exp, pct: float, right: str) -> dict:
-    """One expiry, quoted, with IV and greeks from Alpaca where it has them
-    and solved locally where it does not.
-
-    EVERY ROW CARRIES A `source`: "alpaca", "computed", or null when nothing
-    could be established. Alpaca publishes greeks on the snapshot for
-    everything except 0DTE, with coverage thinning as expiry approaches (see
-    optdata.py for the measured counts), so a near-dated chain is genuinely
-    mixed and a reader who cannot tell which row is which is worse off than
-    with either source alone. Rows that did not solve are RETURNED carrying
-    the reason, never dropped: a dropped contract looks exactly like a
-    contract that does not exist, and a screener that cannot see the strike it
-    wanted cannot say why it passed on it.
-
-    The two sources disagree slightly -- we price off the chain's implied
-    forward, Alpaca off the spot print -- and greeks.chain_greeks_merged has
-    the measured size of it and the argument for not re-basing one onto the
-    other. `sources` in the response counts the mix.
-
-    THIS IS NOT A DUPLICATE OF /api/options/chain/{symbol}, and neither of the
-    two is the tidy-up of the other. optapi's chain prices off the SPOT print;
-    this one derives the forward from put-call parity and prices off that. The
-    difference was measured on SPY after the close, 3 DTE: the spot print had
-    gone stale against quotes frozen at 16:00 ET, parity was out by a constant
-    -$1.63 at all 26 strikes, and calls implied 3-6% vol where puts implied
-    9-31% AT THE SAME STRIKES. A constant parity error across every strike
-    means the quotes agree and the spot is wrong. Spot is the right input when
-    the two are time-aligned and cheaper to get; the forward is the one that
-    survives when they are not. Keep both.
-    """
-    import greeks as _greeks
-    import optsym
-    spot = data.spot(sym)
-    rows = data.chain(sym, exp, around=spot, pct=pct, right=right,
-                      ttl=OPT_CHAIN_TTL)
-    now, clock_from = _quote_clock(rows)
-    t_years = optsym.year_fraction(exp, now)
-
-    # The forward the chain implies, computed here as well as inside
-    # chain_greeks. chain_greeks uses it and does not return it, and a caller
-    # who cannot see what the greeks were priced off has no way to check them;
-    # the cost is one pass of arithmetic over rows already in memory.
-    forward = _greeks.implied_forward(rows, t_years, OPT_RATE) if rows else None
-
-    # chain_greeks labels its rows from a `symbol` key and optdata's chain
-    # calls it `occ`; without the copy every solved row comes back anonymous
-    # and every contract on the board reads as unpriced.
-    priced = [{**c, "symbol": c["occ"]} for c in rows]
-    by_symbol: dict = {}
-    solved_rows: list = []
-    if rows and (spot or forward):
-        # _merged, not chain_greeks: the broker's values win where it has
-        # them. The broker_greeks/broker_iv keys the merge reads are already
-        # on `c` -- optdata puts them there straight off the snapshot.
-        solved_rows = _greeks.chain_greeks_merged(
-            priced, float(spot or forward), OPT_RATE, now=now)
-        for g in solved_rows:
-            by_symbol[g.symbol] = g
-
-    out = []
-    for c in rows:
-        g = by_symbol.get(c["occ"])
-        score, reason = data.gate.check(c)
-        row = {
-            "occ": c["occ"], "strike": c["strike"], "right": c["right"],
-            "bid": c["bid"], "ask": c["ask"], "mid": c["mid"],
-            "spread": c["spread"], "spread_pct": c["spread_pct"],
-            "bid_size": c["bid_size"], "ask_size": c["ask_size"],
-            "volume": c["volume"], "prev_volume": c["prev_volume"],
-            "open_interest": c["open_interest"], "quote_at": c["quote_at"],
-            "t_years": None if g is None else round(g.T, 8),
-            "iv": None, "delta": None, "gamma": None, "theta": None,
-            "vega": None, "rho": None, "solved": False,
-            # "alpaca", "computed", or null -- never a blend of the two
-            "source": None if g is None else g.source,
-            # the reason this row has no greeks, carried BY the row
-            "skipped": ("no underlying price, so nothing can be priced"
-                        if g is None else g.skipped),
-            "quality": {"ok": reason is None, "score": score, "reason": reason},
-        }
-        if g is not None and g.solved:
-            row.update(solved=True, iv=round(g.iv, 6), delta=round(g.delta, 6),
-                       gamma=round(g.gamma, 8), theta=round(g.theta, 6),
-                       vega=round(g.vega, 6), rho=round(g.rho, 6))
-        out.append(row)
-    return {
-        "spot": spot,
-        "forward": None if forward is None else round(forward, 4),
-        # which of the two the greeks were priced off, because the answer
-        # moves every delta on the board by a small, consistent amount
-        "priced_off": ("forward" if forward is not None
-                       else ("spot" if spot else None)),
-        "rate": OPT_RATE, "convention": "calendar",
-        "as_of": now.isoformat(), "as_of_from": clock_from,
-        "t_years": round(t_years, 8),
-        # How this board is made up. `mixed` true means strikes on it were
-        # measured with two different rulers that differ by about 0.02 of
-        # delta -- fine for reading one contract, a trap for picking a strike
-        # by delta across the board.
-        "sources": _greeks.chain_sources(solved_rows),
-        "contracts": out,
-    }
-
-
-@app.get("/api/a/{acct}/optlab/chain/{sym}")
-@app.get("/api/optlab/chain/{sym}")
-def options_chain(sym: str, expiry: str = "", pct: float = 0.10,
-                  right: str = "", f: Fleet = Depends(cur)):
-    """One expiry's chain, with locally computed IV and greeks.
-
-    `expiry` is required rather than defaulted to the nearest one: working out
-    which one that is costs a request on the 200/min trading budget, and a
-    page that quietly spends the engines' requests on every load is the thing
-    this whole section is arranged to avoid. Ask
-    /api/optlab/expirations/{sym} once, then name the expiry.
-    """
-    import optdata
-    if not expiry:
-        raise HTTPException(400, "expiry is required (YYYY-MM-DD). GET "
-                                 f"/api/optlab/expirations/{sym.upper()} lists them.")
-    try:
-        exp = datetime.strptime(expiry[:10], "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(400, f"expiry {expiry!r} is not a date (YYYY-MM-DD)")
-    data = _optdata(f)
-    row = _expiry_row(exp, _opt_now())
-    if row["expired"]:
-        # 16:00 ET on the day has passed. The symbols still parse and Alpaca
-        # still answers, and every contract in that chain is dead -- refusing
-        # here is cheaper than explaining a board of zeros.
-        raise HTTPException(409, f"{exp.isoformat()} expired at "
-                                 f"{row['expiry_moment']}; there is no chain "
-                                 f"left to quote.")
-    try:
-        body = _chain_rows(data, sym.upper(), exp, pct, right)
-    except optdata.OptDataError as e:
-        raise HTTPException(400, str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(502, f"chain for {sym.upper()} {exp.isoformat()}: {e}")
-    return {"ok": True, "symbol": sym.upper(), "expiry": exp.isoformat(),
-            "pct": pct, "right": (right or "").upper()[:1],
-            "count": len(body["contracts"]),
-            "solved": sum(1 for c in body["contracts"] if c["solved"]),
-            "expiration": row, **body, "budget": data.stats()}
 
 
 # --------------------------------------------------------------------- sweep
@@ -3166,8 +2746,16 @@ def optlab_plays_disarm(body: dict = Body(default=None), f: Fleet = Depends(cur)
     make the stop button the thing that strands a short leg into expiry.
     """
     path = Path(f.state_dir) / "options" / "PLAYS_ARMED"
-    open_n = len(_pbook.Ledger(Path(f.state_dir) / "options"
-                               / "play_ledger.jsonl").open_positions())
+    # TWO THINGS WERE WRONG WITH `_pbook.Ledger(...)` HERE, and this is the
+    # STOP BUTTON, so both mattered. It built a WRITEABLE ledger inside a
+    # request handler -- the exact thing ReadOnlyLedger exists to make
+    # impossible, and a rule this namespace is otherwise held to -- and its
+    # constructor replayed all 44MB of the file to produce one integer, so
+    # pressing Disarm on a cold process paid a full parse before it could
+    # answer. hub._play_ledger is the shared read-only follower: no writeable
+    # handle anywhere on this path, and a stat plus a tail read instead.
+    open_n = len(hub._play_ledger(
+        Path(f.state_dir) / "options" / "play_ledger.jsonl").open_positions())
     keys = (body or {}).get("keys")
     if isinstance(keys, str):
         keys = [keys]
@@ -3803,13 +3391,21 @@ def _perf_ctx(f: Fleet) -> "perf.Ctx":
     # The options play ledger, opened READ-ONLY. hub.py does the same and for
     # the same reason: a reporting path able to append to a trading store is
     # one bad line away from doing it.
+    #
+    # THROUGH hub._play_ledger, NOT `ReadOnlyLedger(led_path)`. That
+    # constructor replays the whole file -- 44MB on this account -- and this
+    # line ran it on EVERY report build, i.e. every _PERF_TTL, throwing the
+    # result away afterwards. It is the same defect that was found in
+    # hub.portfolio/tickers/strategies and fixed there by building one
+    # followed ledger per file; the perf path was simply not looked at in the
+    # same pass. Calling hub's cache rather than adding a second one means
+    # this process holds ONE replay of that file, not two.
     led_path = Path(f.state_dir) / "options" / "play_ledger.jsonl"
     opt_rows = None
     present = led_path.exists()
     if present:
         try:
-            import optplaybook as _pb
-            opt_rows = _pb.ReadOnlyLedger(led_path).positions()
+            opt_rows = hub._play_ledger(led_path).positions()
         except Exception as e:
             logging.getLogger("app").warning("perf options ledger: %r", e)
 

@@ -84,12 +84,21 @@ const TIMEOUT_MS = { GET: 12000, POST: 240000, DELETE: 30000 };
    path is only a compatibility alias for the default account. Views keep
    passing the plain '/api/...' path and this is the ONE place the prefix is
    put on. Anything under a shared prefix is a library shared by every account
-   and is left alone. /api/risk is exposure (per account) while /api/risk/
-   profiles and /api/risk/bank are shared, which is why the match is on whole
-   path segments and not a bare startsWith. */
+   and is left alone. THE MATCH IS ON WHOLE PATH SEGMENTS and not a bare
+   startsWith, and it stays that way now that the one pair which proved it
+   necessary has been split up: /api/risk was per-account exposure and went
+   with the Risk room in round 8, while /api/risk/profiles and /api/risk/bank
+   are shared and are still here. A startsWith list holding "/api/risk" would
+   have swallowed both of those the moment either was added back. */
 export const SHARED_API = [
   "/api/accounts", "/api/strategies", "/api/code", "/api/indicators",
-  "/api/scanner", "/api/pine", "/api/research", "/api/risk/profiles",
+  /* "/api/scanner" left with the Scanner room and "/api/research" never
+     existed at all -- it was a prefix for a route nobody ever registered.
+     "/api/pine", "/api/risk/profiles" and "/api/risk/bank" STAY: the Research
+     room was not their only caller. agentctl.py's risk-profiles, risk-save,
+     risk-record and risk-bank commands are the documented way findings are
+     banked, and views/backtest.js still reads all three. */
+  "/api/pine", "/api/risk/profiles",
   "/api/risk/bank", "/api/health", "/api/restart", "/api/presets",
   // the strategy bank is the same shelf as /api/strategies and /api/code --
   // one library every account draws from, not per-account state
@@ -286,24 +295,45 @@ export async function act(fn) {
    defined ONCE here, so a change to the wording of a confirmation or to the
    sign-in instructions cannot land on one page and not the other. */
 
-/* ---- the four fleet-wide actions ----------------------------------------
+/* ---- the four DCA-LADDER actions -----------------------------------------
    Rendered on Portfolio and nowhere else. Settings used to carry a
    byte-for-byte copy; it links to Portfolio now. Every confirmation names
-   the account, so nobody arms the wrong one. */
+   the account, so nobody arms the wrong one.
+
+   THEY ARE NOT ACCOUNT-WIDE AND THE BUTTONS NOW SAY SO. `/api/fleet/*` walks
+   `fleet.engines`, which is the share ladders and nothing else: an options
+   play is armed on the Options tab and none of these four touches it. The
+   labels used to read "Start all" / "Stop all" / "Disarm all" / "Panic",
+   which on the account's own page reads as the whole account -- the ladder
+   standing in for the product again, in the one place a mistaken click costs
+   money. overview.js carried that scope as a `title` on the SPAN around all
+   four, where it was not reachable from the keyboard and could not be read
+   per button; it hands the sentence over here, which is what its comment
+   asked for. */
+export const LADDER_SCOPE =
+  "Share ladders only. An options play is armed on the Options tab.";
 export const fleetControlsHTML = () => `
   <span class="row-btns fleet-btns">
-    <button class="btn sm" data-fleet="start">Start all</button>
-    <button class="btn sm" data-fleet="stop">Stop all</button>
-    <button class="btn sm" data-fleet="disarm">Disarm all</button>
-    <button class="btn sm danger" data-fleet="panic">Panic</button>
+    <button class="btn sm" data-fleet="start" title="${esc(
+      "Start every DCA-ladder engine on this account. " + LADDER_SCOPE)
+    }">Start ladders</button>
+    <button class="btn sm" data-fleet="stop" title="${esc(
+      "Stop every DCA-ladder engine on this account. " + LADDER_SCOPE)
+    }">Stop ladders</button>
+    <button class="btn sm" data-fleet="disarm" title="${esc(
+      "Put every DCA ladder back into dry run. " + LADDER_SCOPE)
+    }">Disarm ladders</button>
+    <button class="btn sm danger" data-fleet="panic" title="${esc(
+      "Stop and disarm every DCA ladder, selling nothing. " + LADDER_SCOPE)
+    }">Panic</button>
   </span>`;
 
 const FLEET = {
   start: async () => {
     const who = acctLabel();
     if (!await ask({
-      title: `Start every engine in ${esc(who)}?`,
-      body: `Each ladder in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) begins `
+      title: `Start every DCA ladder in ${esc(who)}?`,
+      body: `Each DCA ladder in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) begins `
           + `deciding on its own settings. Any ladder that is <b>armed</b> will transmit `
           + `real orders immediately. Other accounts are untouched.`,
       ok: "Start all",
@@ -327,10 +357,11 @@ const FLEET = {
   panic: async () => {
     const who = acctLabel();
     if (!await ask({
-      title: `Stop and disarm everything in ${esc(who)}?`, danger: true, ok: "Panic",
+      title: `Stop and disarm every DCA ladder in ${esc(who)}?`, danger: true, ok: "Panic",
       requireWord: "PANIC",
-      body: `Every engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) stops and `
-          + `every ladder returns to dry run. Other accounts are untouched.<br><br>`
+      body: `Every DCA-ladder engine in <b>${esc(who)}</b> (${esc(acctNumber() || "—")}) `
+          + `stops and returns to dry run. ${esc(LADDER_SCOPE)} Other accounts are `
+          + `untouched.<br><br>`
           + `<b>Nothing is sold.</b> Open positions and the take-profits resting `
           + `against them are left exactly as they are — flattening stays a `
           + `per-ticker decision.`,
@@ -458,11 +489,15 @@ export function go(view) {
 }
 
 /* ---------------------------------------------------------------- moved
-   Eleven nav destinations became six. Every URL the old ones answered still
-   resolves -- to wherever its content lives now, never to a 404 and never to
-   a page with no highlighted nav item. app.js rewrites the address bar on
-   arrival, so an old bookmark quietly upgrades itself the first time it is
-   used. Keyed "kind" or "kind/tab"; the longer key wins. */
+   Eleven nav destinations became six and, in round 8, five. Every URL whose
+   CONTENT still exists resolves to where that content lives now -- never to
+   a 404 and never to a page with no highlighted nav item. app.js rewrites the
+   address bar on arrival, so an old bookmark quietly upgrades itself the
+   first time it is used. Keyed "kind" or "kind/tab"; the longer key wins.
+
+   A URL whose content was DELETED is not in this map. Moved and deleted are
+   different facts and this table only records the first; see the note at the
+   end of it. */
 export const MOVED = {
   // Performance is Portfolio's History tab
   "performance":       { kind: "overview", tab: "history" },
@@ -474,20 +509,22 @@ export const MOVED = {
      VIEWS.strategies shipped (the catalogue where the ladder finally appears
      as ONE CARD beside the options plays) the page could never open. It was
      the single reason the ladder still looked dominant: the one room that
-     demotes it was unreachable. The builder keeps its own route below. */
-  "strategy-builder":  { kind: "research", tab: "builder" },
-  // the two orphan routes: registered, routable, and in no nav at all
-  "backtest":          { kind: "research", tab: "backtest" },
-  "tester":            { kind: "research", tab: "backtest" },
-  "research/tester":   { kind: "research", tab: "backtest" },
-  // Risk keeps only live exposure; its two research artefacts moved
-  "risk/live":         { kind: "risk",     tab: "" },
-  "risk/profiles":     { kind: "research", tab: "profiles" },
-  "risk/bank":         { kind: "research", tab: "bank" },
-  // the Scanner is one tab now: the Replication tab replayed a different
-  // strategy on a hypothetical account and touched nothing in this one
-  "scanner/list":      { kind: "scanner",  tab: "" },
-  "scanner/run":       { kind: "scanner",  tab: "" },
+     demotes it was unreachable. The builder is the Strategies room's own
+     second tab, which is where this now points. */
+  "strategy-builder":  { kind: "strategies", tab: "builder" },
+  /* ROUND 8: Risk, Research and Scanner were deleted from the code, so the
+     eight rows that pointed INTO them are gone rather than redirected. There
+     is nowhere honest to send them -- the backtester, the indicator writer,
+     the risk bank, the exposure page and the momentum screen are not
+     somewhere else, they are not there -- and a redirect to a room that
+     answers a different question is worse than the fall-through. readHash()
+     ends at `{kind:"overview"}` for any hash it does not recognise, so
+     #/risk, #/research, #/scanner, #/backtest, #/tester and their old sub-
+     tabs all land on Portfolio with Portfolio highlighted.
+
+     The rows deleted here, for the record, were: backtest, tester,
+     research/tester, risk/live, risk/profiles, risk/bank, scanner/list and
+     scanner/run. */
 };
 
 export function readHash() {
@@ -841,9 +878,14 @@ export const STATE_WORDS = {
   armed:   { tone: "armed",  label: "armed",
              why: "Transmits REAL orders at the broker." },
   live:    { tone: "live",   label: "live",
-             why: "Switched on and deciding. The ladder says this while it is "
-                + "still in dry run; an options play says it once it is "
-                + "assigned and enabled." },
+             /* NO SUBSYSTEM IN THE DEFINITION. This used to read "the
+                ladder says this while it is still in dry run; an options play
+                says it once it is assigned and enabled" -- accurate, and it
+                put the word "ladder" into the hover of a chip on a ticker
+                whose only strategy was an options play. One word, one
+                meaning, named after neither. */
+             why: "Switched on and deciding. It is not armed, so nothing it "
+                + "decides reaches the broker." },
   idle:    { tone: "idle",   label: "idle",
              why: "Attached to this ticker but not deciding right now." },
   halted:  { tone: "halt",   label: "halted",

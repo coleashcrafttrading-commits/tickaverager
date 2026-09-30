@@ -261,6 +261,16 @@ def main() -> int:
                      "/api/optlab/close/SPY:2026-09-18"):
             check(f"POST {gone} is not registered",
                   c.post(gone, json={}).status_code, 404)
+        # ROUND 8: the chain browser's two reads went with the page. They were
+        # the only optlab paths that spent from the SCARCE 200/min trading
+        # host, so their absence is checked on the route table rather than
+        # taken on trust -- exactly the way the collision above is.
+        for gone in (f"/api/optlab/chain/SPY?expiry={LIVE_EXPIRY}",
+                     "/api/optlab/expirations/SPY",
+                     f"/api/a/{acct}/optlab/chain/SPY",
+                     f"/api/a/{acct}/optlab/expirations/SPY"):
+            check(f"{gone.split('?')[0]} is not registered",
+                  c.get(gone).status_code, 404)
 
         print("\n1. the strategy bank")
         r = c.get("/api/optlab/bank")
@@ -295,96 +305,20 @@ def main() -> int:
         check("an unknown slug is a 404, not an empty document",
               c.get("/api/optlab/bank/no-such-strategy").status_code, 404)
 
-        print("\n2. expiries, and the dead ones marked as dead")
-        r = c.get(f"/api/a/{acct}/optlab/expirations/spy")
-        check("expirations 200", r.status_code, 200)
-        e = r.json()
-        rows = {x["expiry"]: x for x in e["expirations"]}
-        check("both expiries are returned", sorted(rows),
-              sorted([DEAD_EXPIRY.isoformat(), LIVE_EXPIRY.isoformat()]))
-        dead, live = rows[DEAD_EXPIRY.isoformat()], rows[LIVE_EXPIRY.isoformat()]
-        check("the past expiry is flagged expired and not tradable",
-              (dead["expired"], dead["tradable"], dead["seconds_left"],
-               dead["t_years"]), (True, False, 0.0, None))
-        check("the live one is tradable with time left",
-              (live["expired"], live["tradable"], live["seconds_left"] > 0,
-               live["dte"]), (False, True, True, 7))
-        check("a picker is offered the live one, never the dead one",
-              e["first_tradable"], LIVE_EXPIRY.isoformat())
-        # the bare path is bound to the DEFAULT account, and this scratch boot
-        # has no keys for one -- so 503 (routed, no broker) is the proof it is
-        # registered at all. 404 would mean it is not.
-        check("the legacy unprefixed path is registered and account-scoped",
-              c.get("/api/optlab/expirations/SPY").status_code, 503)
-
-        print("\n2b. a 0DTE expiry after 16:00 ET is dead, and dte still says 0")
-        exp = date(2026, 9, 18)
-        at_1530 = datetime(2026, 9, 18, 15, 30, tzinfo=NY)
-        at_1630 = datetime(2026, 9, 18, 16, 30, tzinfo=NY)
-        alive = app_mod._expiry_row(exp, at_1530)
-        gone = app_mod._expiry_row(exp, at_1630)
-        check("0DTE at 15:30 is alive", (alive["dte"], alive["expired"],
-              alive["tradable"]), (0, False, True))
-        check("0DTE at 16:30 is dead -- and DTE still reads 0",
-              (gone["dte"], gone["expired"], gone["tradable"]), (0, True, False))
-        check("a dead expiry has no time to price with", gone["t_years"], None)
-
-        print("\n3. the chain: IV and greeks computed here, nothing dropped")
-        r = c.get(f"/api/a/{acct}/optlab/chain/SPY?expiry={LIVE_EXPIRY}")
-        check("chain 200", r.status_code, 200)
-        ch = r.json()
-        check("every snapshot came back as a row", ch["count"], len(SNAPSHOTS))
-        check("the rows are the ones we quoted",
-              sorted(x["occ"] for x in ch["contracts"]), sorted(SNAPSHOTS))
-        by = {x["occ"]: x for x in ch["contracts"]}
-        atm = by[occ(600, "C")]
-        check("the at-the-money call solved",
-              (atm["solved"], atm["iv"] is not None, atm["skipped"]),
-              (True, True, None))
-        check("...with a delta that is a call's delta",
-              0.3 < atm["delta"] < 0.8, True)
-        check("...and the five greeks are all there",
-              all(atm[g] is not None for g in
-                  ("delta", "gamma", "theta", "vega", "rho")), True)
-        nq = by[occ(610, "C")]
-        check("the unquoted strike is RETURNED, with the reason",
-              (nq["solved"], nq["skipped"], nq["mid"]),
-              (False, "no two-sided quote", None))
-        under = by[occ(650, "P")]
-        check("the one priced under intrinsic is returned, with its reason",
-              (under["solved"], under["skipped"]), (False, "iv did not solve"))
-        check("...and it kept its quote, so a human can see why",
-              under["mid"], 5.0)
-        wide = by[occ(615, "C")]
-        check("the quality gate rejects a 100%-of-mid spread and says so",
-              (wide["quality"]["ok"], "spread" in wide["quality"]["reason"]),
-              (False, True))
-        thin = by[occ(585, "P")]
-        check("...and rejects a strike nobody traded",
-              (thin["quality"]["ok"], "contracts traded" in thin["quality"]["reason"]),
-              (False, True))
-        check("a good row passes the gate", atm["quality"]["ok"], True)
-        check("the forward it priced off is reported",
-              (ch["priced_off"], isinstance(ch["forward"], float)),
-              ("forward", True))
-        check("...and it is near spot, not miles from it",
-              abs(ch["forward"] - SPOT) < 5.0, True)
-        check("the clock is the snapshot's, not the wall's",
-              (ch["as_of_from"], ch["as_of"][:4]), ("quote", "2026"))
-        check("rate and convention are stated, not assumed",
-              (ch["rate"], ch["convention"]), (0.043, "calendar"))
-        check("solved counts only the ones that solved",
-              ch["solved"], sum(1 for x in ch["contracts"] if x["solved"]))
-
-        print("\n3b. the chain refuses what it cannot quote")
-        check("a missing expiry is a 400 pointing at the expiries route",
-              c.get(f"/api/a/{acct}/optlab/chain/SPY").status_code, 400)
-        check("a malformed expiry is a 400",
-              c.get(f"/api/a/{acct}/optlab/chain/SPY?expiry=soon").status_code, 400)
-        r = c.get(f"/api/a/{acct}/optlab/chain/SPY?expiry={DEAD_EXPIRY}")
-        check("an expired expiry is refused, not served as zeros", r.status_code, 409)
-        check("...and the refusal names the moment it died",
-              "expired at" in r.json()["detail"], True)
+        # ------------------------------------------------------------------
+        # Sections 2, 2b, 3 and 3b drove /api/optlab/expirations/{sym} and
+        # /api/optlab/chain/{sym}: a dead expiry marked dead, a 0DTE contract
+        # that is still 0DTE at 16:30 and no longer exists, every chain row
+        # carrying its IV and greeks or the reason it did not solve, and a
+        # chain refusing to guess an expiry it was not given.
+        #
+        # ROUND 8 DELETED BOTH ROUTES with the chain browser that was their
+        # only caller. What they protected is not gone: optsym.expiry_moment
+        # and optsym.dte are pinned in test_optsym.py, chain_greeks_merged in
+        # test_greeks.py and optdata's liquidity gate in test_optdata.py --
+        # each at the level the routes only wrapped. Section 0 above asserts
+        # the two paths are unregistered, which is the part a route table can
+        # lie about.
 
         print("\n4. the saved sweeps and their cross-market grade")
         # against the repo's real research files, whichever of them exist: the
@@ -421,46 +355,21 @@ def main() -> int:
                   sw["graded"][0]["grade"] if sw["graded"] else "A",
                   min(sw["grades"], key="ABCD".index) if sw["grades"] else "A")
 
-        print("\n5. nothing here spent the scarce trading budget twice")
-        paths = [p for p, _ in fl.broker.reqs]
-        check("only ONE trading-host endpoint was used, for the expiries",
-              sorted({p for p in paths if p.startswith("/v2/options")}),
-              ["/v2/options/contracts"])
-        check("...and it was cached, so repeated calls did not repeat it",
-              paths.count("/v2/options/contracts") <= 2, True)
-        check("chains and spots went to the data host",
-              all(p.startswith(("/v1beta1/", "/v2/stocks/", "/v2/options/contracts"))
-                  for p in paths), True)
+        # ------------------------------------------------------------------
+        # Sections 5 and 6 counted what the expiry and chain routes spent on
+        # the SCARCE 200/min trading host: that only /v2/options/contracts was
+        # touched, that it was cached, and that 80 requests varying max_dte
+        # cost four calls rather than eighty because OPT_DTE_BUCKETS snapped
+        # the window before it reached the cache key. Both routes are deleted,
+        # so no optlab path in app.py reaches that host at all any more --
+        # which is a stronger fact than section 5 asserted, and section 0
+        # checks it by absence rather than re-measuring it here.
+        #
+        # THE RULE OUTLIVES THE ROUTES. A cache keyed on a caller-supplied
+        # window is a cache a keystroke loop misses every single time; snap
+        # the window before it reaches the key. Round 8 removed the only route
+        # in this file that had learnt that the expensive way.
 
-        print("\n6. a query-string loop cannot burn the trading budget")
-        # probe4: 40 requests varying max_dte=1..40 produced 40 GET
-        # /v2/options/contracts. OptionData's 15-minute cache is keyed on
-        # (min_dte, max_dte), so every keystroke was a MISS on the 200/min
-        # budget the live share fleet shares -- and each miss can page six
-        # times. Run last, so section 14 still counts only the sections above.
-        def spent() -> int:
-            return [p for p, _ in fl.broker.reqs].count("/v2/options/contracts")
-
-        before = spent()
-        for d in range(1, 41):
-            c.get(f"/api/a/{acct}/optlab/expirations/SPY?max_dte={d}")
-        for d in range(1, 41):
-            c.get(f"/api/a/{acct}/optlab/expirations/SPY?min_dte={d}&max_dte=60")
-        burst = spent() - before
-        check("80 varied windows cost a handful of requests, not 80",
-              (burst <= 4, burst < 80), (True, True))
-        j = c.get(f"/api/a/{acct}/optlab/expirations/SPY?max_dte=3").json()
-        check("...and the window asked for is still applied, on the rows here",
-              [r["expiry"] for r in j["expirations"] if not r["expired"]], [])
-        check("...so nothing tradable is offered outside it",
-              j["first_tradable"], None)
-        check("...while the response says what it actually fetched",
-              (j["asked"]["max_dte"], j["fetched"]["max_dte"] >= 3), (3, True))
-        j = c.get(f"/api/a/{acct}/optlab/expirations/SPY?max_dte=10").json()
-        check("a window that does contain the live expiry still offers it",
-              j["first_tradable"], LIVE_EXPIRY.isoformat())
-        check("...and an EXPIRED row is never hidden by the window",
-              any(r["expired"] for r in j["expirations"]), True)
 
     print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{FAIL} CHECK(S) FAILED"))
     return 1 if FAIL else 0

@@ -97,6 +97,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import math
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -300,8 +301,38 @@ def timeline(events: list) -> dict:
     opened and closed flat. They are not the same trade, and one of them is not
     a trade at all.
     """
-    tl: dict = {}
+    return fold_timeline({}, events)
+
+
+def fold_timeline(tl: dict, events, totals: Optional[dict] = None) -> dict:
+    """Fold `events` onto an existing timeline, IN PLACE, and return it.
+
+    `totals` is the FILE-level pair the report quotes as `sources.events` and
+    `sources.last_at`: the row count and the newest timestamp over EVERY row,
+    including any that carries no position id and so reaches no per-position
+    entry. It is accumulated here rather than recomputed from `tl`, because
+    "rows in the ledger" and "rows the fold could attribute" are two different
+    numbers and the page has always shown the first.
+
+    WHY THIS IS A LEFT FOLD AND WHY THAT MATTERS. Every field below is
+    order-monotone: `first_ts` is written once, `last_ts`, `close_ts` and
+    `last_mark_ts` are overwritten by whichever event comes later, `n_events`
+    accumulates, `max_contracts` is a max and `ever_filled` is sticky. So
+    folding the first N events and then the rest gives the same dict as folding
+    all N+M in one pass -- which is what lets `timeline_of` read only the bytes
+    it has not seen. `test_optperf.py` section 15 pins that equality rather
+    than asserting it here.
+    """
     for ev in events:
+        if totals is not None:
+            # `_num(ts) or 0.0`, exactly as the max() this replaced did: a row
+            # with no `ts` counts as 0.0 and does not reach for `at`. Changing
+            # that here would change a number on the page for a reason that has
+            # nothing to do with making the page faster.
+            totals["rows"] = totals.get("rows", 0) + 1
+            _t = _num(ev.get("ts")) or 0.0
+            if totals.get("last_ts") is None or _t > totals["last_ts"]:
+                totals["last_ts"] = _t
         pid = str(ev.get("id") or "")
         if not pid:
             continue
@@ -332,6 +363,107 @@ def timeline(events: list) -> dict:
         if str(f.get("state") or "") == "closed":
             t["close_ts"] = ts
     return tl
+
+
+#: THE TIMELINE IS FOLDED ONCE PER FILE AND THEN ONLY EXTENDED.
+#:
+#: `report()` used to call `read_events(path)` on every request -- a second
+#: full parse of `state/options/play_ledger.jsonl` on top of the one the
+#: Ledger had already done. Measured locally against a 35.9 MB / 188,029-row
+#: copy of the live file: `read_events` 1.36 s and `timeline` 0.81 s of a
+#: 2.30 s `report()`, so 94% of the call was re-reading a file whose only
+#: change since the last request was a handful of rows at the end.
+#:
+#: The ledger is append-only, so the tail is the only part that can be new.
+#: This keeps (offset, folded timeline) per path and reads from `offset`.
+_TL_CACHE: dict = {}
+_TL_LOCK = threading.RLock()
+
+#: How many bytes of the already-folded prefix are fingerprinted. A file that
+#: was REWRITTEN rather than appended to -- which is exactly what the
+#: compaction tool does, and what a test that reuses one tmp path does -- can
+#: land on the same length as the one we folded, and a naive size check would
+#: then fold a tail that belongs to a different file onto an old timeline.
+#: Checking the first and last few KB of the prefix costs one seek and catches
+#: it. `Ledger.follow` compares size alone; this is the stricter rule and the
+#: reason a compaction can be run under a live dashboard.
+_TL_PROBE = 4096
+
+#: The row separator, named so the literal cannot be mangled by a tool that
+#: rewrites this file.
+NL = b"\x0a"
+
+
+def _probe(fh, offset: int) -> tuple:
+    """(head, tail) of the first `offset` bytes -- the prefix fingerprint."""
+    n = min(_TL_PROBE, offset)
+    if n <= 0:
+        return b"", b""
+    fh.seek(0)
+    head = fh.read(n)
+    fh.seek(max(0, offset - n))
+    return head, fh.read(n)
+
+
+def timeline_of(path, *, totals: bool = False):
+    """`timeline()` over a ledger FILE, folded once and then followed.
+
+    Returns the cached dict, or `(tl, totals)` with `totals=True`. Callers read
+    them and never write to them -- `build_trades` and `Trade` only ever
+    `.get()` out of the timeline, and a caller that wants to own the result
+    should fold its own with `timeline()`.
+    """
+    p = Path(path)
+    try:
+        size = p.stat().st_size
+    except OSError:
+        return ({}, {"rows": 0, "last_ts": None}) if totals else {}
+    key = str(p.resolve()) if p.exists() else str(p)
+    with _TL_LOCK:
+        ent = _TL_CACHE.get(key)
+        with p.open("rb") as fh:
+            start = 0
+            tl: dict = {}
+            tot: dict = {"rows": 0, "last_ts": None}
+            if ent is not None and size >= ent["offset"]:
+                head, tail = _probe(fh, ent["offset"])
+                if head == ent["head"] and tail == ent["tail"]:
+                    if size == ent["offset"]:
+                        return (ent["tl"], ent["tot"]) if totals else ent["tl"]
+                    start, tl, tot = ent["offset"], ent["tl"], ent["tot"]
+            fh.seek(start)
+            blob = fh.read()
+            # Stop at the last complete row. A torn final line is the writer
+            # mid-append: leaving the offset before it means the row is folded
+            # once, when it is whole, rather than dropped forever.
+            cut = blob.rfind(NL) + 1
+            rows = []
+            for raw in blob[:cut].split(NL):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    ev = json.loads(raw.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if isinstance(ev, dict):
+                    rows.append(ev)
+            fold_timeline(tl, rows, tot)
+            offset = start + cut
+            head, tail = _probe(fh, offset)
+        _TL_CACHE[key] = {"offset": offset, "head": head, "tail": tail,
+                          "tl": tl, "tot": tot}
+        return (tl, tot) if totals else tl
+
+
+def forget_timeline(path=None) -> None:
+    """Drop the cache, for a test or for a tool that rewrote the file."""
+    with _TL_LOCK:
+        if path is None:
+            _TL_CACHE.clear()
+            return
+        p = Path(path)
+        _TL_CACHE.pop(str(p.resolve()) if p.exists() else str(p), None)
 
 
 # ============================================================ classification
@@ -757,9 +889,20 @@ class Trade:
         }
 
 
-def build_trades(positions: list, events: list, now_ts: float) -> list:
-    """Positions plus their event timelines, newest first."""
-    tl = timeline(events)
+def build_trades(positions: list, events: Optional[list] = None,
+                 now_ts: float = 0.0, *, tl: Optional[dict] = None) -> list:
+    """Positions plus their event timelines, newest first.
+
+    `tl` is an already-folded timeline, which is how `report()` passes the one
+    `timeline_of` keeps followed rather than making this re-fold 188,029 rows
+    per request. `events` still works and still means "fold these"; passing
+    both is a caller contradicting itself, so it is refused rather than
+    silently preferring one.
+    """
+    if tl is not None and events is not None:
+        raise TypeError("build_trades takes events OR tl, not both")
+    if tl is None:
+        tl = timeline(events or [])
     out = [Trade(p, tl.get(str(p.id)) or {}, now_ts) for p in positions]
     out.sort(key=lambda t: (t.opened_ts or 0.0), reverse=True)
     return out
@@ -1258,8 +1401,14 @@ def report(*, ledger: Any = None, ledger_path=None, decisions_path=None,
         except Exception:
             pass
     positions = ledger.positions()
-    events = read_events(lpath)
-    trades = build_trades(positions, events, now_ts)
+    # NOT `read_events(lpath)`. That was a SECOND full parse of a file the
+    # Ledger above had already replayed, on every request: measured at 1.36 s
+    # of a 2.30 s report against a 35.9 MB / 188,029-row copy of the live
+    # ledger. `timeline_of` folds the file once and afterwards reads only the
+    # bytes appended since -- the same append-only trick `Ledger.follow` uses,
+    # with a stricter check so a compaction under a live dashboard is seen.
+    _tl, _tot = timeline_of(lpath, totals=True)
+    trades = build_trades(positions, now_ts=now_ts, tl=_tl)
 
     warnings: list = []
     if broker_positions is not None:
@@ -1353,7 +1502,7 @@ def report(*, ledger: Any = None, ledger_path=None, decisions_path=None,
     except OSError:
         lbytes = 0
     first_at = min((t.opened_ts for t in trades if t.opened_ts), default=None)
-    last_ev = max((_num(e.get("ts")) or 0.0 for e in events), default=None)
+    last_ev = _tot["last_ts"]
 
     return {
         "ok": True,
@@ -1361,7 +1510,7 @@ def report(*, ledger: Any = None, ledger_path=None, decisions_path=None,
         "as_of_ts": now_ts,
         "sources": {
             "ledger": str(lpath), "decisions": str(dpath),
-            "events": len(events), "decision_rows": len(drows),
+            "events": _tot["rows"], "decision_rows": len(drows),
             "first_at": _iso(first_at), "last_at": _iso(last_ev),
             "ledger_bytes": lbytes,
         },

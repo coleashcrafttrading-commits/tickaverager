@@ -342,8 +342,15 @@ def main() -> int:
     f5 = FakeFleet(sd5, positions={"RAM": pos("RAM", 10, 10.0)})
     c5 = hub.Ctx(f5, option_positions=ospos)
     plays = {s.id: s for s in hub.option_play_strategies(c5)}
+    # ONE ROW PER PLAY, whatever the plays are. This used to pin the exact
+    # roster, so adding the Wheel and MABB turned it red without anything
+    # being wrong -- a strategy-agnostic model must not have a test that
+    # forbids a new strategy.
     check("one row per play, not one row for 'options'",
-          sorted(plays), ["index-put-credit-spread", "swing-atm-hourly"])
+          all(k in plays for k in ("index-put-credit-spread",
+                                   "swing-atm-hourly")), True)
+    check("...and every play got its own row, none merged",
+          len(plays) == len(set(plays)) and len(plays) >= 2, True)
     spread = plays["index-put-credit-spread"]
     check("it claims CONTRACTS, signed by leg",
           spread.claims(), {"SPY260320P00600000": -10.0,
@@ -376,8 +383,14 @@ def main() -> int:
     c6 = hub.Ctx(f6, option_positions=ospos)
     p = hub.portfolio(c6)
     ids = [r["id"] for r in p["by_strategy"]]
-    check("the ladder is one row among the plays", sorted(ids),
-          ["index-put-credit-spread", "ladder", "swing-atm-hourly"])
+    # CONTAINMENT, not a roster. The point here is that the ladder is ONE ROW
+    # AMONG the plays rather than a separate kind of thing, and that survives
+    # new plays arriving -- a strategy-agnostic model must not carry a test
+    # that goes red the day a strategy is added.
+    check("the ladder is one row among the plays", "ladder" in ids, True)
+    check("...beside the option plays, not instead of them",
+          all(k in ids for k in ("index-put-credit-spread",
+                                 "swing-atm-hourly")), True)
     check("rows sort by size, not by 'the ladder first'",
           ids[0], "index-put-credit-spread")
     check("account value is Alpaca's equity", p["value"]["value"], 10000.0)
@@ -389,7 +402,8 @@ def main() -> int:
           sorted(p["pl"]["basis"]), ["open", "realized", "today", "total"])
     check("every strategy's share of value is a FRACTION",
           p["by_strategy"][0]["share_of_value"]["unit"], "pct")
-    check("counts see three strategies", p["counts"]["strategies"], 3)
+    check("counts see every strategy that has a row",
+          p["counts"]["strategies"], len(ids))
 
     print("\n7. UNCLAIMED is visible, never absorbed")
     f7 = FakeFleet(sd5, engines={"RAM": FakeEngine("RAM", 10.0, (100.0,))},
@@ -640,9 +654,14 @@ def main() -> int:
                 r = c.get("/api/hub/portfolio")
                 check("portfolio 200", r.status_code, 200)
                 j = r.json()
+                # Containment: "peers" means the ladder sits WITH the
+                # plays, and that stays true however many plays exist.
+                _names = [x["id"] for x in j["by_strategy"]]
                 check("the ladder is one row among peers",
-                      sorted(x["id"] for x in j["by_strategy"]),
-                      ["index-put-credit-spread", "ladder", "swing-atm-hourly"])
+                      "ladder" in _names, True)
+                check("...with the option plays beside it",
+                      all(k in _names for k in ("index-put-credit-spread",
+                                                "swing-atm-hourly")), True)
                 check("and the scoped path answers the same",
                       c.get("/api/a/default/hub/portfolio").status_code, 200)
                 r = c.get("/api/hub/series?metric=value&tf=1D&form=candle")

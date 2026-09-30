@@ -19,7 +19,7 @@
      Plays  was a control room that listed every ticker's assignment in one
             table, which is a conglomerate of pages that already exist. Every
             one of its controls -- attach, detach, enable, arm, disarm, close
-            -- is now on the TICKER's own Options pane (tickeropts.js), where
+            -- is now in the TICKER's own strategy box (views/ticker.js), where
             the symbol is already on screen and the P/L beside it is that
             symbol's. Nothing about the playbook changed: the same routes are
             called from a different place, and optplaybook's worker, arm file
@@ -56,8 +56,18 @@
                  Those two numbers decide whether a result is real, and hiding
                  them is how a curve fit gets deployed.
 
-   The CHAIN is no longer a room -- see TABS. It is still rendered at
-   #/options/chain for debugging, and what it taught is worth keeping here:
+   THE CHAIN IS DELETED (round 8). It stopped being a tab in round 7 and was
+   left reachable at #/options/chain for debugging; the owner has now asked
+   for it to go -- "Whatever options chain and screener we built remove it. I
+   want to have a slightly clean slate." So mountChain, its 442 lines of
+   renderer, its stylesheet and BOTH routes behind it (/api/optlab/chain/{sym}
+   and /api/optlab/expirations/{sym}) are gone from the code rather than from
+   the tab bar. #/options/chain lands on the Overview carrying GONE.chain.
+
+   Nothing that TRADES went with it: the playbook picks strikes and expiries
+   in optplays.py off greeks.chain_greeks_merged and optdata directly, and
+   never once called an HTTP route to do it. What the page taught is worth
+   keeping here even though the page is not:
 
                  Alpaca DOES publish greeks and implied volatility -- on
                  everything except 0DTE, where it returns none at all, and
@@ -97,27 +107,18 @@
        UNITS: "pct" is a FRACTION (0.643 is 64.3%), "usd" is dollars for the
        WHOLE position and never per share.
 
-     GET /api/optlab/expirations/{sym}?min_dte&max_dte   (account-scoped)
-       {symbol, now, expirations:[{expiry, dte, expired, tradable,
-        expiry_moment, seconds_left, t_years}], first_tradable, budget}
-       first_tradable is what the picker preselects. Never the first row: an
-       expiry that has already passed is not a smaller version of a live one.
-
-     GET /api/optlab/chain/{sym}?expiry&pct&right                (scoped)
-       {symbol, expiry, count, solved, expiration:{dte, expired, ...},
-        spot, forward, priced_off, rate, as_of, as_of_from, t_years,
-        contracts:[{occ, strike, right:"C"|"P", bid, ask, mid, spread,
-                    spread_pct, volume, open_interest, iv, delta, gamma,
-                    theta, vega, rho, solved, skipped,
-                    quality:{ok, score, reason}}],
-        budget}
-       contracts is FLAT. This file pivots it into one row per strike.
-       spread_pct is a FRACTION of mid, not a percentage: optdata.py computes
-       it as spread / mid and app.py passes it through untouched, so a 46%
-       spread arrives as 0.462. The two units look identical in a payload and
-       differ by 100x on the screen, which is how a far wing quoted 0.04 x
-       0.07 -- uncloseable, 54.5% of mid -- once printed as 0.5%, the tightest
-       row on the board. Nothing here reads the field raw; see fracPc1().
+     (Round 8 removed two more: /api/optlab/expirations/{sym} and
+      /api/optlab/chain/{sym} fed the chain browser and nothing else, and
+      they were deleted from app.py with it. One thing they taught outlives
+      them and is written down here because the next reader of an optlab
+      payload will meet it:
+          spread_pct is a FRACTION of mid, not a percentage.
+      optdata.py computes it as spread / mid and app.py passes it through
+      untouched, so a 46% spread arrives as 0.462. The two units look
+      identical in a payload and differ by 100x on the screen, which is how a
+      far wing quoted 0.04 x 0.07 -- uncloseable, 54.5% of mid -- once printed
+      as 0.5%, the tightest row on the board. Nothing here reads such a field
+      raw; see fracPc1().)
 
      GET /api/optlab/bank[?permitted=1]                       (machine-wide)
        {level, max_legs, count, stats, strategies:[optbank.listing() rows]}
@@ -172,20 +173,19 @@ import { wireReasons } from "../reason.js";
    engine's own page at /options owns live positions, the assignment guard and
    the close button now. A second view of open risk, fed by a second grouping
    of the same legs, is how two pages disagree about what is held. */
-/* THE CHAIN IS NO LONGER A ROOM. It was the landing tab and it answered a
-   question the BACKEND has, not one a person has -- the owner's words were
-   "i dont think that we need a real time chain shown, the backend just needs
-   to know that stuff. what we need is to replace the chain tab with our
-   options dashboard of what tickers we are looking at." So Board is the
-   landing tab and the chain is gone from the bar.
+/* THE CHAIN IS NOT A ROOM AND NOT A PAGE. Round 7 took it off the tab bar --
+   the owner's words were "i dont think that we need a real time chain shown,
+   the backend just needs to know that stuff" -- and left the renderer behind
+   a hash nothing linked to. Round 8 deleted it, on "Whatever options chain
+   and screener we built remove it."
 
-   It is still REACHABLE, at #/options/chain, and mountChain is still below.
-   That is deliberate and it is not a hedge: /api/optlab/chain/{sym} is the
-   one place a human can put a quote, a locally solved IV and Alpaca's own IV
-   side by side when a board number looks wrong, and deleting the only
-   renderer for a debugging endpoint means the next person reads JSON in a
-   terminal. It is not in TABS, so nothing navigates there by accident, and
-   activeTab below lights Board for anyone arriving on an old bookmark. */
+   Leaving it had a defence and the defence did not survive: a debugging page
+   is only worth its cost while somebody opens it, and this one had no link,
+   no tab and no mention on any other page. Its cost was two routes that
+   spent from the 200/min TRADING budget the ladders place orders through.
+   The measurement it made -- Alpaca's IV against ours, side by side -- is
+   written into the header above and into CLAUDE.md, which is where a
+   measurement belongs; a renderer is not a record. */
 const TABS = [
   ["perf", "Overview"],
   ["strategies", "Strategies"],
@@ -194,7 +194,6 @@ const TABS = [
 
 const SUB = {
   perf: "what is open, what it is worth, and what these plays have done",
-  chain: "Alpaca's quotes; the IV and the greeks are solved here",
   strategies: "every structure on the shelf, and what this account may send",
   backtest: "what survived a second market and a doubled spread",
 };
@@ -206,13 +205,25 @@ const SUB = {
    #/options/plays wants the plays; being dropped on a report with no
    explanation reads as the page being broken. */
 const GONE = {
-  plays: "The Plays room is gone. A ticker's option strategies, their state, "
-    + "their P/L, the arm switch and the close button are on that TICKER's "
-    + "own Options pane -- open the ticker and choose Options. Nothing about "
-    + "the playbook changed: same routes, same worker, same arm file.",
+  plays: "The Plays room is gone. A ticker's option strategies -- their "
+    + "state, their P/L, the arm switch and the close button -- are on that "
+    + "TICKER's own page, in its strategy box. Nothing about the playbook "
+    + "changed: same routes, same worker, same arm file.",
   data: "The Data room is gone. What was measured per ticker is on that "
-    + "TICKER's own Options pane, off the same board cache. The 231 "
-    + "structures are in the one strategy bank on the Strategies page.",
+    + "ticker's own page. The 231 structures are in the one strategy bank on "
+    + "the Strategies page.",
+  /* ROUND 8. The chain browser is not hidden any more, it is deleted --
+     renderer, stylesheet and both of the routes that fed it. The owner asked
+     for it by description: "Whatever options chain and screener we built
+     remove it. I want to have a slightly clean slate." It had already stopped
+     being a tab in round 7 for the reason quoted above ("the backend just
+     needs to know that stuff"), and a debugging page reachable only by typing
+     its hash is a page nobody opens and every poll still pays for. */
+  chain: "The chain browser is gone. Nothing on this dashboard reads a live "
+    + "option chain any more -- the playbook's strike and expiry selection is "
+    + "the backend's, in optplays.py through greeks.chain_greeks_merged, and "
+    + "it never went through this page. What is OPEN is on the Overview "
+    + "above, and the per-ticker facts are on that ticker's Options pane.",
 };
 
 VIEWS.options = {
@@ -220,11 +231,12 @@ VIEWS.options = {
   sub: (ov, v) => SUB[v.tab || "perf"] || SUB.perf,
   tabs: TABS,
 
-  /* An old link to #/options/chain still renders the chain, and lights the
-     Overview -- the only room left that is not the chain -- rather than
-     leaving the tab bar with nothing highlighted at all. core.js's MOVED map
-     cannot do the chain: it rewrites a whole view, and the chain is still a
-     real page in this one. */
+  /* Any tab id that is not one of the three -- an old #/options/chain,
+     #/options/plays or #/options/board bookmark, or a typo -- lights the
+     Overview rather than leaving the tab bar with nothing highlighted at
+     all, and mount() hands that room the GONE sentence for it. core.js's
+     MOVED map cannot do this: it rewrites a whole view, and these are tabs
+     inside one. */
   activeTab: (v) => (TABS.some((t) => t[0] === v.tab) ? v.tab : "perf"),
 
   mount(v) {
@@ -235,7 +247,6 @@ VIEWS.options = {
     const t = v.tab || "perf";
     if (t === "strategies") return mountStrategies();
     if (t === "backtest") return mountBacktest();
-    if (t === "chain") return mountChain();
     /* "board" was the data room's first name and is still in bookmarks. */
     return mountPerf(GONE[t === "board" ? "data" : t] || "");
   },
@@ -249,26 +260,23 @@ VIEWS.options = {
 };
 
 /* ===================================================================== css
-   This view owns markup no other page has -- a chain with two mirrored sides
-   around a strike column, and a guard state that has to be impossible to miss
-   -- and app.css belongs to another agent. One <style> element, written once,
-   in theme tokens only so both themes follow for free. */
+   This view owns markup no other page has -- a card grid over 231 documents,
+   an open-book row that draws its own stop and target, and a guard state that
+   has to be impossible to miss -- and app.css belongs to another agent. One
+   <style> element, written once, in theme tokens only so both themes follow
+   for free.
+
+   ROUND 8 removed 45 lines of it with the chain: .o-chain and its two sticky
+   header rows, .o-k, .o-itm, .o-atm, .o-why, .o-side, .o-sep, the .o-w-*
+   picker widths and the phone media query that went with them. What stayed
+   is what another room still emits -- .o-bar, .o-chips/.o-chip and .o-flags
+   are the Strategies filter bar, .o-thin marks a thin cell in the Backtest
+   table. Nothing here is defined for a selector this file no longer writes. */
 const CSS = `
 .o-bar { display: flex; gap: 10px 14px; align-items: flex-end; flex-wrap: wrap;
          margin-bottom: 16px; }
 .o-bar .f { margin: 0; }
 .o-bar label.f > span { margin-bottom: 4px; }
-.o-w-sym { width: 130px; }
-.o-w-exp { width: 250px; max-width: 60vw; }
-.o-spacer { flex: 1 1 24px; }
-/* On a phone the two pickers share the first row rather than taking one each:
-   six stacked controls push the chain itself below two screenfuls. */
-@media (max-width: 560px) {
-  .o-w-sym { flex: 0 0 92px; width: auto; }
-  .o-w-exp { flex: 1 1 150px; width: auto; max-width: none; }
-  .o-spacer { display: none; }
-  .o-bar { gap: 8px 8px; }
-}
 
 .o-chips { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px;
            border: 1px solid var(--hairline); border-radius: 8px; }
@@ -283,51 +291,7 @@ const CSS = `
 .o-flags label { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; }
 .o-flags input { width: auto; margin: 0; }
 
-/* ---- the chain ---------------------------------------------------------
-   Its own scroll box in both directions. The page body must never be what
-   moves: on a phone a horizontal page scroll drags the rail and the tab bar
-   off the screen, and on a desktop it hides the header row. */
-.o-chain { max-height: min(62vh, 720px); min-height: 220px; overflow: auto;
-           -webkit-overflow-scrolling: touch; }
-.o-chain table { border-collapse: separate; border-spacing: 0; }
-.o-chain th, .o-chain td { white-space: nowrap; font-size: 12px;
-                           padding: 5px 9px; text-align: right; }
-.o-chain th { position: sticky; top: 0; z-index: 2; background: var(--solid);
-              padding: 7px 9px; font-size: 9.5px; }
-/* Two sticky header rows, and the second one's offset has to be the first
-   one's height exactly -- a pixel short and a data row shows through the seam
-   between them. So the first row is given that height rather than being left
-   to the font. */
-.o-chain thead tr.o-grp th { top: 0; z-index: 3; height: 28px;
-                             line-height: 14px; padding: 7px 9px;
-                             box-sizing: border-box; }
-.o-chain thead tr.o-cols th { top: 28px; }
-.o-chain th:first-child, .o-chain td:first-child { padding-left: 12px; }
-.o-chain th:last-child, .o-chain td:last-child { padding-right: 12px; }
-.o-chain td { border-bottom: 1px solid var(--hairline); }
-.o-chain tbody tr:hover td { background: var(--raised); }
-
-.o-k { text-align: center !important; font-weight: 650; font-size: 12.5px;
-       background: var(--surface-2); border-left: 1px solid var(--hairline2);
-       border-right: 1px solid var(--hairline2); }
-.o-chain th.o-k { background: var(--solid); }
-/* One side at a time: the strike leads and stays pinned, because a chain you
-   have to scroll sideways to find out which strike you are reading is not a
-   chain. It has to be opaque -- translucent glass would let the rows slide
-   through it. */
-.o-chain td.o-k.stick, .o-chain th.o-k.stick {
-  position: sticky; left: 0; z-index: 1; background: var(--solid);
-  box-shadow: 1px 0 0 0 var(--hairline2); }
-.o-chain th.o-k.stick { z-index: 4; }
-.o-chain tr.o-atm td.o-k.stick { background: var(--accent-dim); }
-.o-itm { background: rgba(124, 92, 255, .07); }
-.o-chain tr.o-atm td { background: var(--accent-dim); }
-.o-chain tr.o-atm td.o-k { font-weight: 700; color: var(--accent); }
-.o-why { color: var(--faint); font-style: italic; text-align: center !important;
-         font-size: 11px; }
-.o-side { color: var(--faint); font-weight: 650; letter-spacing: .06em;
-          text-transform: uppercase; }
-.o-sep { border-left: 1px solid var(--hairline); }
+/* Backtest table only: a number that rests on too few sessions to lean on. */
 .o-thin { color: var(--warn); }
 
 /* ---- cards -------------------------------------------------------------- */
@@ -375,7 +339,6 @@ const CSS = `
           color: var(--accent); font: inherit; font-size: 12.5px; padding: 0;
           margin-bottom: 12px; }
 .o-mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
-.o-budget { font-size: 11px; color: var(--faint); }
 
 /* ---- the arm state strip, and the tiles under it -----------------------
    .pl-state is the one thing here that is not decoration: armed, disarmed
@@ -503,7 +466,6 @@ const has = (v) => v != null && Number.isFinite(Number(v));
 const DASH = `<span class="faint">—</span>`;
 const n2 = (v, dp = 2) => has(v) ? Number(v).toFixed(dp) : DASH;
 const n0 = (v) => has(v) ? Number(v).toLocaleString() : DASH;
-const dol = (v, dp = 2) => has(v) ? "$" + Number(v).toFixed(dp) : DASH;
 /* core.js's money() and sgn() coerce null to 0. That is right on an equity
    page, where every field always arrives; it is wrong here. app.py's _optf
    returns None the moment Alpaca omits a mark or sends a non-number, and
@@ -538,8 +500,6 @@ const sgnr = (v, dp = 2) => {
    every other dollar on the card. */
 const roomv = (v, dp = 2) => (!has(v) ? DASH
   : Number(v) < 0 ? `<span class="down">${mny(v, dp)}</span>` : mny(v, dp));
-/* IV is stored as a decimal; nobody reads 0.1843. */
-const ivTxt = (v) => has(v) ? (Number(v) * 100).toFixed(1) + "%" : DASH;
 /* Already a percentage on the wire: the sweep's fill_rate and win_rate are
    0-100 (optsweep.py rounds them that way). */
 const pc1 = (v) => has(v) ? Number(v).toFixed(1) + "%" : DASH;
@@ -567,27 +527,19 @@ const errNote = (e) => `<div class="note bad"><b>${esc(e.message || String(e))}<
 
 const loading = (what) => `<div class="faint">Loading ${esc(what)}…</div>`;
 
-/* What a route says it spent. The trading host allows 200 requests a minute
-   and the share fleet spends from the same bucket, so a dashboard page that
-   quietly eats it is a page that stops the ladders working. */
-const budgetHTML = (b) => {
-  const n = b && (b.trading_calls != null ? b.trading_calls : b.calls);
-  if (!has(n)) return "";
-  return `<span class="o-budget">${n} trading-API call${n === 1 ? "" : "s"}
-    spent so far · the chain itself comes off the data host, a separate
-    10,000/min budget</span>`;
-};
-
 /* A self-cancelling repeat. The router swaps #view's contents without telling
    anyone and gives this view no unmount hook, so a timer has to notice on its
    own that it has been orphaned.
 
-   "Is an element with my host's id still in the document?" is NOT that test.
-   Re-mounting the tab builds a NEW #ocBody, so the previous mount's timer
-   looked up the new host, found it connected, and carried on for ever: seven
-   visits to Chain meant seven timers and seven chain requests every twenty
-   seconds, against the one a single timer issues, with nothing bounding the
-   count. The mount token is the identity the id is not. */
+   "Is an element with my host's id still in the document?" is NOT that test,
+   and the bug it hid is worth keeping written down even though the room it
+   was found in (the chain, deleted in round 8) is gone -- the Overview polls
+   through this same function. Re-mounting a tab builds a NEW host with the
+   SAME id, so the previous mount's timer looked up the new one, found it
+   connected, and carried on for ever: seven visits to that room meant seven
+   timers and seven requests every twenty seconds, against the one a single
+   timer issues, with nothing bounding the count. The mount token is the
+   identity the id is not. */
 let MOUNT = 0;
 
 function every(ms, hostId, fn) {
@@ -613,454 +565,6 @@ function put(id, html) {
   h.innerHTML = html;
   return true;
 }
-
-const LS = {
-  get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private */ } },
-};
-
-/* ================================================================= chain */
-/* Underlyings worth one tap. Anything else is typed: an allowlist here would
-   be a second, disagreeing copy of the engine's, and this page cannot trade,
-   so it does not need one. */
-const QUICK = ["SPY", "QQQ", "IWM", "AAPL", "NVDA", "TSLA"];
-
-let CH = null;
-
-function mountChain() {
-  CH = {
-    sym: (LS.get("ta-opt-sym", "SPY") || "SPY").toUpperCase(),
-    expiry: "",
-    side: "",          // "" both · "C" calls · "P" puts
-    exps: null,
-    data: null,
-    err: "",
-    busy: false,
-    centred: false,
-  };
-  /* Side by side needs about 1,100 px before the strike column stops being
-     reachable without a deliberate sideways scroll. Below that one side is
-     the honest default, and the segment says so rather than hiding it. */
-  if (window.innerWidth < 900) CH.side = "C";
-
-  el("view").innerHTML = `
-    <div class="o-bar">
-      <label class="f o-w-sym"><span>Underlying</span>
-        <input id="ocSym" value="${esc(CH.sym)}" autocomplete="off"
-               spellcheck="false" maxlength="8"></label>
-      <label class="f o-w-exp"><span>Expiry</span>
-        <select id="ocExp"><option>loading…</option></select></label>
-      <div class="o-chips" id="ocSide">
-        <button class="o-chip" data-side="">Both</button>
-        <button class="o-chip" data-side="C">Calls</button>
-        <button class="o-chip" data-side="P">Puts</button>
-      </div>
-      <div class="o-spacer"></div>
-      <div class="o-chips">${QUICK.map((s) =>
-        `<button class="o-chip" data-quick="${s}">${s}</button>`).join("")}</div>
-      <button class="btn sm" id="ocGo">Refresh</button>
-    </div>
-    <div id="ocHead"></div>
-    <div id="ocBody">${loading("the chain")}</div>`;
-
-  paintSide();
-  el("ocSym").onchange = () => setSym(el("ocSym").value);
-  el("ocSym").onkeydown = (e) => { if (e.key === "Enter") setSym(el("ocSym").value); };
-  el("ocGo").onclick = () => loadChain();
-  el("ocExp").onchange = () => {
-    CH.expiry = el("ocExp").value;
-    CH.centred = false;
-    loadChain();
-  };
-  el("ocSide").onclick = (e) => {
-    const b = e.target.closest("[data-side]");
-    if (!b) return;
-    CH.side = b.dataset.side;
-    CH.centred = false;
-    paintSide();
-    paintChain();
-  };
-  el("view").querySelectorAll("[data-quick]").forEach((b) => {
-    b.onclick = () => setSym(b.dataset.quick);
-  });
-
-  /* Quotes go stale fast and the chain comes off the data host, which has its
-     own 10,000/min budget. The expiry LIST is deliberately not on this timer:
-     that one spends the 200/min trading budget the engines are using, and
-     app.py caches it for fifteen minutes for exactly that reason. */
-  every(20000, "ocBody", () => loadChain({ quiet: true }));
-  loadExpiries();
-}
-
-function setSym(v) {
-  const s = String(v || "").trim().toUpperCase().replace(/[^A-Z.]/g, "");
-  if (!s || s === CH.sym) { el("ocSym").value = CH.sym; return; }
-  CH.sym = s;
-  CH.expiry = "";
-  CH.exps = null;
-  CH.data = null;
-  CH.centred = false;
-  LS.set("ta-opt-sym", s);
-  el("ocSym").value = s;
-  put("ocHead", "");
-  put("ocBody", loading("the chain"));
-  loadExpiries();
-}
-
-function paintSide() {
-  el("ocSide").querySelectorAll("[data-side]").forEach((b) => {
-    b.classList.toggle("on", b.dataset.side === CH.side);
-  });
-}
-
-async function loadExpiries() {
-  if (!CH || CH.expBusy) return;
-  const sym = CH.sym;
-  CH.expBusy = true;
-  CH.expAt = Date.now();
-  let r;
-  try {
-    r = await GET(`/api/optlab/expirations/${encodeURIComponent(sym)}`
-      + `?min_dte=0&max_dte=365`);
-  } catch (e) {
-    if (sym !== CH.sym) return;
-    put("ocExp", `<option>unavailable</option>`);
-    /* Say that Refresh retries. Without an expiry loadChain used to return at
-       its first line, which made the button and the timer no-ops and left the
-       tab dead until it was re-mounted -- on the one route whose failure mode
-       is ordinary, because it spends the same 200/min trading budget the live
-       ladders are spending. */
-    put("ocBody", errNote(e) + `<div class="faint" style="margin-top:9px">
-      Refresh asks for the expiry list again. The 20-second timer retries it
-      at most once a minute: a failed lookup is the one app.py does not
-      cache.</div>`);
-    return;
-  } finally {
-    CH.expBusy = false;
-  }
-  if (sym !== CH.sym) return;
-  CH.exps = r;
-  const list = r.expirations || [];
-  if (!list.length) {
-    put("ocExp", `<option>none</option>`);
-    put("ocBody", `<div class="note warn"><b>No expiries came back
-      for ${esc(sym)}.</b> <span class="faint">GET /v2/options/contracts
-      returns only the nearest expiry unless expiration_date_gte is passed, and
-      it never returns an expired one — an empty list here usually means the
-      symbol has no listed options rather than that the request
-      failed.</span></div>`);
-    return;
-  }
-  /* first_tradable, never list[0]. An expiry that has already passed is not a
-     smaller version of a live one: every contract in it is dead, and offering
-     it as the default is how a dead 0DTE board gets read as a real one.
-     `expired` counts as dead too: the row below renders both flags the same
-     way, so a fallback that ignored one of them would select a <option> this
-     very function has just disabled. */
-  const live = list.filter((e) => e.tradable !== false && !e.expired);
-  if (!CH.expiry || !list.some((e) => e.expiry === CH.expiry)) {
-    CH.expiry = r.first_tradable || (live[0] || {}).expiry || "";
-  }
-  const opts = list.map((e) => {
-    const dead = e.tradable === false || e.expired;
-    const label = dead ? "expired"
-      : Number(e.dte) === 0 ? "0DTE, expires today" : `${e.dte}d`;
-    return `<option value="${esc(e.expiry)}" ${dead ? "disabled" : ""}
-      ${e.expiry === CH.expiry ? "selected" : ""}
-      >${esc(e.expiry)} — ${label}</option>`;
-  }).join("");
-
-  if (!CH.expiry) {
-    /* Nothing in the list is tradable and the server named no first_tradable.
-       The old fallback to list[0] selected a row it had just marked disabled
-       and then spent a request on it, which app.py answers 409 "expired;
-       there is no chain left to quote" -- the precise outcome the comment
-       above says the fallback exists to prevent. Select nothing instead. */
-    put("ocExp", `<option value="" selected disabled>no tradable expiry</option>`
-      + opts);
-    put("ocHead", "");
-    put("ocBody", `<div class="note warn" style="margin-top:0">
-      <b>Every listed expiry for ${esc(sym)} has already passed.</b>
-      <span class="faint">There is no chain left to quote, so none was
-      requested. Alpaca drops an expiry from the contracts search once it
-      settles, so a board of nothing but expired rows usually means this
-      symbol's contract list is stale rather than that it has no
-      options.</span></div>`);
-    return;
-  }
-  put("ocExp", opts);
-  loadChain();
-}
-
-async function loadChain({ quiet = false } = {}) {
-  if (!CH || CH.busy) return;
-  if (!CH.expiry) {
-    /* No expiry means the list never arrived. Ask for it again rather than
-       returning: this is the only path back from a 429 or a 502 on the
-       expirations route, and without it Refresh and the timer both did
-       nothing for ever. A quiet tick backs off to a minute because the route
-       spends the trading budget and app.py caches only its successes. */
-    const gap = Date.now() - (CH.expAt || 0);
-    if (!quiet || gap > 60000) loadExpiries();
-    return;
-  }
-  const sym = CH.sym, exp = CH.expiry;
-  CH.busy = true;
-  if (!quiet) put("ocBody", loading(`${sym} ${exp}`));
-  try {
-    const r = await GET(`/api/optlab/chain/${encodeURIComponent(sym)}`
-      + `?expiry=${encodeURIComponent(exp)}`);
-    if (sym !== CH.sym || exp !== CH.expiry) return;
-    CH.data = r;
-    CH.err = "";
-  } catch (e) {
-    if (sym !== CH.sym || exp !== CH.expiry) return;
-    CH.err = e.message || String(e);
-    // a quiet refresh that fails keeps the last good chain on screen with the
-    // failure said above it: a blank page is worse than a stale one, as long
-    // as the staleness is labelled
-    if (!CH.data) { put("ocHead", ""); put("ocBody", errNote(e)); }
-  } finally {
-    CH.busy = false;
-  }
-  paintChain();
-}
-
-/* The flat contract list, pivoted into one row per strike. app.py returns the
-   chain the way Alpaca does -- calls and puts interleaved -- and a chain is
-   read across the strike, not down it. */
-function pivot(contracts) {
-  const by = new Map();
-  for (const c of contracts || []) {
-    const k = Number(c.strike);
-    if (!Number.isFinite(k)) continue;
-    let row = by.get(k);
-    if (!row) { row = { strike: k, C: null, P: null }; by.set(k, row); }
-    const side = String(c.right || "").toUpperCase().slice(0, 1);
-    if (side === "C" || side === "P") row[side] = c;
-  }
-  return [...by.values()].sort((a, b) => a.strike - b.strike);
-}
-
-/* The row the chain is anchored on: the strike nearest whatever the greeks
-   were priced off. The forward is the better anchor -- on a dividend-paying
-   or high-rate name it can sit a strike away from spot, and the ATM row is
-   where the greeks move fastest. */
-function atmStrike(d, rows) {
-  const anchor = has(d.forward) ? Number(d.forward)
-    : has(d.spot) ? Number(d.spot) : null;
-  if (anchor == null) return null;
-  let best = null, gapBest = Infinity;
-  for (const row of rows) {
-    const gap = Math.abs(row.strike - anchor);
-    if (gap < gapBest) { gapBest = gap; best = row.strike; }
-  }
-  return best;
-}
-
-function paintChain() {
-  const d = CH && CH.data;
-  if (!d) return;
-  if (!el("ocHead") || !el("ocBody")) return;   // the tab changed mid-fetch
-  /* Where the operator had actually scrolled to, read BEFORE the rewrite:
-     this function replaces the whole scroll box, so the element itself does
-     not survive and neither does its scroll offset. Without this the 20-second
-     refresh drags anyone watching a far wing back to the ATM row. */
-  const prev = el("ocScroll");
-  const keep = prev ? { top: prev.scrollTop, left: prev.scrollLeft } : null;
-  const rows = pivot(d.contracts);
-  const atm = atmStrike(d, rows);
-  const total = (d.contracts || []).length;
-  const solved = has(d.solved) ? Number(d.solved)
-    : (d.contracts || []).filter((c) => c.solved).length;
-  const basis = has(d.forward) && has(d.spot)
-    ? Number(d.forward) - Number(d.spot) : null;
-  const dte = (d.expiration || {}).dte;
-
-  put("ocHead", `
-    ${CH.err ? `<div class="note warn"><b>Last refresh failed:</b>
-      ${esc(CH.err)} <span class="faint">— showing the chain quoted
-      ${esc(ago(d.as_of) || "earlier")}.</span></div>` : ""}
-    <div class="stats" style="margin-bottom:16px">
-      ${stat("Underlying", `${esc(d.symbol || CH.sym)} ${dol(d.spot)}`,
-             d.as_of ? `quoted ${esc(ago(d.as_of))}${d.as_of_from
-               ? ` · clock from the ${esc(d.as_of_from)}` : ""}` : "")}
-      ${stat("Implied forward", dol(d.forward),
-             basis == null
-               ? "not solved — the greeks fell back to spot"
-               : `${basis >= 0 ? "+" : ""}${basis.toFixed(2)} vs spot · `
-                 + `priced off the ${esc(d.priced_off || "forward")}`)}
-      ${stat("Expiry", esc(d.expiry || CH.expiry),
-             Number(dte) === 0 ? "expires today"
-               : dte == null ? "" : `${dte} days`)}
-      ${stat("Solved", `${solved}<span class="faint" style="font-size:14px"
-             >/${total}</span>`, total - solved
-               ? `${total - solved} row(s) say why below` : "every quoted row")}
-    </div>`);
-
-  const cols = ["IV", "Δ", "Γ", "Θ", "V", "Bid", "Mid", "Ask", "Spr%", "Vol", "OI"];
-  const both = CH.side === "";
-  const sideCols = (side) => cols.map((c, i) =>
-    `<th class="${i === 0 && side === "P" && both ? "o-sep" : ""}">${c}</th>`)
-    .join("");
-  /* Side by side the strike belongs in the middle, between the two halves it
-     joins. One side at a time it belongs first and pinned: the table is wider
-     than a phone either way, and a strike that scrolls off leaves eleven
-     numbers attached to nothing. */
-  const kCell = (inner, tag) =>
-    `<${tag} class="o-k${both ? "" : " stick"}">${inner}</${tag}>`;
-
-  const head = `
-    <thead>
-      <tr class="o-grp">
-        ${both ? `<th class="o-side" colspan="${cols.length}"
-               style="text-align:left">Calls</th>` : ""}
-        ${kCell("Strike", "th")}
-        ${both || CH.side === "P"
-          ? `<th class="o-side" colspan="${cols.length}"
-               style="text-align:right">Puts</th>` : ""}
-        ${!both && CH.side === "C"
-          ? `<th class="o-side" colspan="${cols.length}"
-               style="text-align:left">Calls</th>` : ""}
-      </tr>
-      <tr class="o-cols">
-        ${both ? sideCols("C") : ""}
-        ${kCell("", "th")}
-        ${both ? sideCols("P") : sideCols(CH.side)}
-      </tr>
-    </thead>`;
-
-  const body = rows.map((r) => {
-    const k = r.strike;
-    const isAtm = atm != null && k === atm;
-    const callItm = has(d.spot) && k < Number(d.spot);
-    const putItm = has(d.spot) && k > Number(d.spot);
-    const strike = kCell(k.toFixed(k % 1 ? 2 : 0), "td");
-    const call = legCells(r.C, callItm, cols.length, "");
-    const put = legCells(r.P, putItm, cols.length, both ? "o-sep" : "");
-    return `<tr class="${isAtm ? "o-atm" : ""}">
-      ${both ? call + strike + put
-        : strike + (CH.side === "C" ? call : put)}
-    </tr>`;
-  }).join("");
-
-  const width = (both ? cols.length * 2 : cols.length) + 1;
-  put("ocBody", `
-    ${card("", `<div class="o-chain" id="ocScroll"><table>${head}
-        <tbody>${rows.length ? body
-          : `<tr><td colspan="${width}" class="empty">No contracts came back
-             for this expiry.</td></tr>`}</tbody></table></div>`,
-      budgetHTML(d.budget), { flush: true })}
-    ${card("Where these numbers come from", `
-      <div class="tip" style="margin-top:0">
-        Alpaca publishes implied volatility and greeks for most expiries, and
-        <b>none at all for 0DTE</b> — coverage thins as expiry approaches (on
-        SPY: none at 0DTE, about half at 3 days, complete from 12 days out).
-        Rows marked <b>alpaca</b> are the broker's own numbers, untouched.
-        Rows marked <b>computed</b> were solved here from the quoted mid, with
-        the time to expiry in <b>years measured to the minute</b> rather than
-        in whole days: at 0DTE a day-resolution clock is not a rounding error,
-        it is the entire number. The two are never blended in one row.<br><br>
-        They are priced off the <b>${esc(d.priced_off || "forward")}</b>${
-          d.priced_off === "forward"
-            ? ` the chain itself gives up through put-call parity${basis == null
-                ? "" : ` (${dol(d.forward)}, ${basis >= 0 ? "+" : ""}${
-                  basis.toFixed(2)} against the last spot print)`}`
-            : `, because this chain did not have enough two-sided pairs to
-               imply a forward`}. A spot quote and an option quote are taken at
-        different instants, and on this account that gap has been measured as a
-        constant put-call-parity error across every strike — which lands in the
-        surface as a skew that is not there.<br><br>
-        A row whose IV did not solve keeps its quotes and says <b>why</b> in
-        place of its greeks. It is never dropped and never blank: a dropped
-        contract looks like a contract that does not exist, and a blank cell
-        reads as a zero.<br><br>
-        A <span class="o-thin">marked spread</span> failed app.py's quote
-        gate — wider than the threshold below which a position cannot be
-        reliably exited. Hover it for the reason. <b>Spr%</b> is the spread
-        as a percentage of the mid — the field arrives as a fraction and is
-        multiplied here, in one place, by fracPc1().
-      </div>`)}`);
-
-  centreChain(keep);
-}
-
-/* One side of one strike. `skipped` is greeks.py's own sentence, and it takes
-   the place of the five greek cells rather than leaving them empty. */
-function legCells(leg, itm, ncols, firstCls) {
-  const cls = itm ? "o-itm" : "";
-  if (!leg) {
-    return `<td class="${firstCls} ${cls} faint" colspan="${ncols}"
-      style="text-align:center">not listed</td>`;
-  }
-  const q = leg.quality || {};
-  const wide = q.ok === false && q.reason;
-  const quotes = `
-    <td class="${cls}">${dol(leg.bid)}</td>
-    <td class="${cls}">${dol(leg.mid)}</td>
-    <td class="${cls}">${dol(leg.ask)}</td>
-    <td class="${cls} ${wide || (has(leg.spread_pct)
-      && Number(leg.spread_pct) > WIDE_SPREAD_FRAC) ? "o-thin" : ""}"
-      title="${esc(q.reason || "")}">${fracPc1(leg.spread_pct)}</td>
-    <td class="${cls}">${n0(leg.volume)}</td>
-    <td class="${cls}">${n0(leg.open_interest)}</td>`;
-  if (!leg.solved || !has(leg.iv)) {
-    return `<td class="${firstCls} o-why" colspan="5"
-      title="${esc(leg.skipped || "")}">${esc(leg.skipped || "did not solve")}</td>`
-      + quotes;
-  }
-  return `
-    <td class="${firstCls} ${cls}"><b>${ivTxt(leg.iv)}</b></td>
-    <td class="${cls}">${n2(leg.delta, 3)}</td>
-    <td class="${cls}">${n2(leg.gamma, 4)}</td>
-    <td class="${cls}">${n2(leg.theta, 3)}</td>
-    <td class="${cls}">${n2(leg.vega, 3)}</td>` + quotes;
-}
-
-/* Put the ATM row in the middle of the visible box. Side by side the table is
-   wider than any screen, so the strike column is centred horizontally too on
-   the first paint: a chain that opens scrolled to the far-OTM calls is a
-   chain nobody can read. */
-function centreChain(keep) {
-  const box = el("ocScroll");
-  if (!box) return;
-  /* Three cases, and `keep` is what tells the last two apart.
-
-     FIRST paint of a symbol, expiry or side (CH.centred false): centre. There
-     is nothing of the operator's on screen to preserve, and the old offsets
-     of a table that has just changed shape are not a position anyone chose.
-
-     A QUIET 20-second refresh: #ocScroll was still in the document when
-     paintChain read it, so `keep` holds the wing the operator is actually
-     watching. Restore it. The vertical centring used to sit above this guard
-     and dragged them back to the ATM row every twenty seconds.
-
-     A MANUAL Refresh: loadChain's non-quiet path writes the loading
-     placeholder into #ocBody BEFORE the await, so #ocScroll is already gone
-     by the time paintChain looks for it and `keep` is null. This is the trap
-     -- "centred already" and "the box survived" are two different facts, and
-     treating them as one left Refresh at scrollTop 0, the top of the board,
-     with the ATM row off screen. A box with no offsets to restore is a fresh
-     box: centre it, the same as the first paint. */
-  if (CH.centred && keep) {
-    box.scrollTop = keep.top;
-    box.scrollLeft = keep.left;
-    return;
-  }
-  CH.centred = true;
-  const atm = box.querySelector("tr.o-atm");
-  if (atm) {
-    box.scrollTop = Math.max(0,
-      atm.offsetTop - box.clientHeight / 2 + atm.offsetHeight);
-  }
-  if (CH.side !== "") { box.scrollLeft = 0; return; }
-  const k = box.querySelector("tr.o-atm td.o-k") || box.querySelector("td.o-k");
-  if (k) {
-    box.scrollLeft = Math.max(0,
-      k.offsetLeft - box.clientWidth / 2 + k.offsetWidth / 2);
-  }
-}
-
 /* ============================================================ strategies */
 let BK = null;      // {stats, strategies, level, max_legs}
 let FL = null;      // the live filter

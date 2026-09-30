@@ -1,8 +1,21 @@
 #!/usr/bin/env python3
-"""btmock.py -- the Research room's harness: its read routes, faked.
+"""btmock.py -- views/backtest.js's harness: its read routes, faked.
 
-This exists so `static/ui/views/research.js` and `static/ui/views/backtest.js`
-can be looked at, and asserted against, WITHOUT starting the real dashboard.
+ROUND 8: the Research ROOM this file was written for is deleted -- the owner
+asked for that tab to go "completely from the code" -- so the host page below
+mounts `views/backtest.js` directly instead of dispatching through
+`views/research.js`, and the browser checks for the two rooms that went with
+it (the risk Bank and the Options lab) are gone. The FIXTURES are unchanged:
+test_btview.py reads them from Python to prove `btread.js`, which is still
+live code behind resultchart.js and backtest.js.
+
+**backtest.js is no longer reachable from the dashboard.** It stays on disk
+because `views/strategies.js` -- a room the owner kept -- imports `preset`
+from it, so deleting it would stop the whole SPA booting. This harness is now
+the only way what is left of it can be looked at.
+
+This exists so `static/ui/views/backtest.js` can be looked at, and asserted
+against, WITHOUT starting the real dashboard.
 The real one holds live Alpaca keys and shares a 200/min trading budget with
 the fleet on the VM; a desktop copy of it pointed at the same account is the
 "two servers" case the operating rules forbid outright. Nothing in this file
@@ -808,19 +821,21 @@ PAGE = """<!doctype html>
 <div class="toasts" id="toasts"></div>
 <div id="chk"></div>
 <script type="module">
-import { VIEWS, toggleTheme } from "/static/ui/core.js";
-import "/static/ui/views/research.js";
+import { toggleTheme } from "/static/ui/core.js";
+/* ONE room, not five. views/research.js dispatched into the backtester, the
+   Options lab, the Builder, the Indicators writer and the risk Bank; four of
+   those were deleted in round 8 and the fifth (the Builder) is the Strategies
+   room's own tab. So this mounts the module that is left, directly, and
+   `show()` keeps its signature so the rest of the page is untouched. */
+import { BACKTEST } from "/static/ui/views/backtest.js";
 
 const el = (id) => document.getElementById(id);
 function show(tab) {
-  location.hash = tab;
-  const v = VIEWS.research;
-  const on = v.activeTab ? v.activeTab({ tab }) : tab;
-  el("tabs").innerHTML = v.tabs.map(([k, l]) =>
-    `<button class="btn sm ${k === on ? "primary" : ""}" data-tab="${k}"
-      >${l}</button>`).join("");
+  location.hash = "backtest";
+  el("tabs").innerHTML = `<button class="btn sm primary" data-tab="backtest"
+      >Backtest</button>`;
   el("view").innerHTML = "";
-  v.mount({ kind: "research", tab });
+  BACKTEST.mount({ kind: "backtest", tab: "backtest" });
 }
 el("tabs").onclick = (e) => {
   const b = e.target.closest("[data-tab]");
@@ -876,20 +891,10 @@ async function checks() {
   ok("no 'NaN' anywhere", !/NaN/.test(txt), "found NaN");
   ok("no 'undefined' anywhere", !/undefined/.test(txt), "found undefined");
 
-  show("bank");
-  await wait(700);
-  const bt = T(el("view").textContent);
-  ok("the bank ranks by P/L per $DD", /P\\/L per \\$DD/.test(bt), bt.slice(0, 140));
-  ok("no NaN in the bank", !/NaN/.test(bt), "found NaN");
-
-  show("options");
-  await wait(700);
-  const ot = T(el("view").textContent);
-  ok("the options lab carries a fill rate",
-     /fill/i.test(ot), ot.slice(0, 140));
-  ok("no NaN in the options lab", !/NaN/.test(ot), "found NaN");
-
-  show("backtest");
+  /* The Bank and the Options lab used to be checked here. Both were rooms
+     of views/research.js and both were deleted in round 8; there is nothing
+     left to render, so the checks went rather than being left to pass
+     against an empty div. */
   out.push(fail ? `\\n${fail} CHECK(S) FAILED` : "\\nALL BROWSER CHECKS PASSED");
   el("chk").textContent = out.join("\\n");
 }

@@ -292,9 +292,18 @@ def main() -> int:
           ["preset:basic", "preset:ladder_v3", "preset:ladder_v3_flatten"])
     check("all 231 researched option structures are on it",
           kinds["option"], 231)
-    check("both of the owner's tailored plays are on it",
-          sorted(r["id"] for r in rows if r["kind"] == "option-tailored"),
-          ["play:index-put-credit-spread", "play:swing-atm-hourly"])
+    # EVERY tailored play is on the shelf, and this asserts CONTAINMENT rather
+    # than an exact roster. Pinning the list meant the suite went red the day a
+    # play was added -- which is the one thing this product exists to let the
+    # owner do. It now checks the ones that must be there and that nothing
+    # arrived without a usable shape.
+    _tailored = sorted(r["id"] for r in rows if r["kind"] == "option-tailored")
+    for _want in ("play:index-put-credit-spread", "play:swing-atm-hourly",
+                  "play:wheel", "play:mabb"):
+        check("%s is on the shelf" % _want, _want in _tailored, True)
+    check("and every tailored row is usable: a name and editable params",
+          all(r.get("name") and r.get("params_schema")
+              for r in rows if r["kind"] == "option-tailored"), True)
     check("a document and a coded strategy are BOTH the indicator kind",
           (by_id["doc:rsi-dip-in-an-uptrend"]["kind"],
            by_id["code:momentum-pop"]["kind"]), ("indicator", "indicator"))

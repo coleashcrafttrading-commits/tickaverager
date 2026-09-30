@@ -46,8 +46,8 @@ import dukpy                                                  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 PERFJS = ROOT / "static" / "ui" / "tkperf.js"
-VISJS = ROOT / "static" / "ui" / "tkvis.js"
 TICKER = ROOT / "static" / "ui" / "views" / "ticker.js"
+STYLE = ROOT / "static" / "ui" / "tkstyle.js"
 
 FAIL = 0
 
@@ -253,24 +253,26 @@ def main():
 
     # =========================== 5. the drawing is NOT this file's job ======
     print("\n5. the pictures come from the dashboard's own shared kit")
-    # CODE only: both files explain in a COMMENT where these components went,
+    # CODE only: the file explains in a COMMENT where these components went,
     # and a check that greps the whole text would fail on its own signpost.
     strip = lambda t: re.sub(r"^\s*//.*$", "",
                              re.sub(r"/\*.*?\*/", "", t, flags=re.S), flags=re.M)
-    tkv = strip(VISJS.read_text(encoding="utf-8"))
     src = strip(PERFJS.read_text(encoding="utf-8"))
     for gone in ("calendarMonths", "heatScale", "niceStep"):
         check(f"tkperf.js no longer builds its own {gone}", gone in src, False)
-    for gone in ("calendarHTML", "histogramHTML", "contribHTML", "donutHTML"):
-        check(f"tkvis.js no longer draws its own {gone}", gone in tkv, False)
     tk0 = TICKER.read_text(encoding="utf-8")
-    check("the page draws the calendar with calendar.js",
-          'from "../calendar.js"' in tk0 and "plCalendars(" in tk0, True)
-    check("and the rest with viz.js",
-          'from "../viz.js"' in tk0 and "histogram(" in tk0
-          and "donut(" in tk0 and "hbar(" in tk0, True)
-    check("and asks the calendar for REALISED, never for account net",
-          'valueKey: "realized"' in tk0 and 'valueKey: "net"' not in tk0, True)
+    # The P/L calendar, the holding-time histogram and the full metric set
+    # went with the Record tab. The ticker page is market data, metrics and
+    # the strategy box now, and the account's own Returns room already draws
+    # all three for every symbol -- so this is one component fewer, not a
+    # second copy of one. What the page still draws it draws with viz.js.
+    check("the page has no calendar of its own and no second calendar module",
+          "calendar.js" in tk0 or "plCalendars(" in tk0, False)
+    check("what it does draw comes from viz.js",
+          'from "../viz.js"' in tk0 and "donut(" in tk0 and "hbar(" in tk0,
+          True)
+    check("and it never re-implements one of them here",
+          re.search(r"function\s+(donut|hbar|histogram)\b", tk0) is None, True)
 
     # ============================================ 6. the contribution =======
     print("\n6. contribution shares are over ABSOLUTE size, and say so")
@@ -400,17 +402,29 @@ def main():
 
     # ============================================ 8. the stylesheet =========
     print("\n8. the ticker page's own few rules stay scoped and theme-driven")
-    vis = VISJS.read_text(encoding="utf-8")
+    # There were TWO stylesheets for one page: tkstyle.js under `.tkx-` and
+    # tkvis.js under `.tkv-`. tkvis.js held a headed band for the Record tab's
+    # four metric groups and the strip above the strategy dropdown. The first
+    # went with that tab and the second is three rules, so the FILE went and
+    # the three rules moved. One page, one sheet, one prefix -- which is the
+    # rule tkstyle.js's own header states and could not keep while a second
+    # sheet for the same page existed.
+    vis = STYLE.read_text(encoding="utf-8")
     body = vis.split("const CSS = `")[1].split("`;")[0]
     selectors = re.findall(r"^([.\w][^{@]*)\{", body, flags=re.M)
     stray = [s.strip() for s in selectors
-             if ".tkv-" not in s and not s.strip().startswith("@")]
-    check("every rule is under .tkv-", stray, [])
+             if ".tkx-" not in s and not s.strip().startswith("@")]
+    check("every rule is under .tkx-", stray, [])
     check("no hard-coded hex outside the tokens",
-          re.search(r"#[0-9a-fA-F]{3,8}", body) is None, True)
-    check("it injects itself once", 'getElementById("tkv-css")' in vis, True)
+          re.search(r"#[0-9a-fA-F]{3,8}", body) is None, True)
+    check("it injects itself once", 'getElementById("tkx-css")' in vis, True)
     check("and it does not restate a component the shared kit owns",
-          re.search(r"\.tkv-(cal|hist|donut|stack|day)", body) is None, True)
+          re.search(r"\.tkx-(cal|hist|donut|stack|day)", body) is None, True)
+    check("the bank strip it inherited is DEFINED here, not merely emitted",
+          all(("." + c) in body
+              for c in ("tkx-bankbar", "tkx-bq", "tkx-bankhead")), True)
+    check("and nothing on the page still asks for the deleted sheet",
+          "tkv-" in TICKER.read_text(encoding="utf-8"), False)
 
     # ============================================ 9. the page ===============
     print("\n9. the ticker page reads the ONE bank and the ONE headline")
@@ -428,11 +442,15 @@ def main():
     # whitespace-insensitive: this file is hard-wrapped at ~88 characters, so
     # a sentence check against the raw text breaks whenever a line moves
     flat = re.sub(r"\s+", " ", tk)
-    check("the calendar says it is REALISED and not account P/L",
-          "no per-ticker equity curve" in flat
-          and "closed trades only" in flat, True)
     check("the wins-only caveat is rendered, not swallowed",
           "caveatsOf(" in tk, True)
+    # The complaint this rule came from: realised alone on this account is 322
+    # rows and zero losers, because the ladder has no stop loss. The Metrics
+    # panel is the only place the page prints it, and it prints all three.
+    check("and realised never appears without the open mark and their sum",
+          all(k in flat for k in ('t("net_pl", "Realised")',
+                                  't("open_pl", "Open P/L"',
+                                  't("total_pl", "Realised + open"')), True)
     print("   ... and a 404 for an untraded ticker is an ANSWER, not a failure")
     # app.py answers 404 for a symbol with no closed trade and nothing open.
     # Rendered as an error that page said "the metric set is not available",
@@ -441,9 +459,8 @@ def main():
           "H.perfNone" in tk and "/has no closed trade/i.test(msg)" in tk, True)
     check("and the no-record branch is reached without a metric block",
           "P || H.perfNone" in tk, True)
-    check("the distribution draws no caption when it draws no bars",
-          "trades.length < 2" in flat.replace(" ", "") or
-          "trades.length<2" in flat.replace(" ", ""), True)
+    check("the strategy box is what the owner asked for, and not a tab bar",
+          "Strategies on ${esc(sym)}" in tk and "tkx-attachbox" in tk, True)
 
     check("nothing on this page places an order",
           re.search(r"/api/(ticker/[^`\"]*/(arm|flatten)|orders)\b", tk)
