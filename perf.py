@@ -559,6 +559,20 @@ def rows_from_option_positions(positions: Optional[list]) -> list:
 
 
 # ============================================================ equity series
+#: `realized_from_fills` is called on EVERY hub and perf request and the tape
+#: is 27,717 rows, so the walk was re-done from scratch several times a second.
+#: Measured in production on 30 Sep 2026: uvicorn pegged at 92.6% CPU and 421MB
+#: RSS, /api/health taking 6.1s and /api/hub/portfolio never finishing inside
+#: 112s. Nothing was wrong with the arithmetic -- it was simply being redone.
+#:
+#: The tape is APPEND-ONLY, so a cheap fingerprint is a sound key: how many
+#: rows, the first and last ids, and the arguments. A new fill changes the
+#: count and the last id, so the memo cannot go stale in the direction that
+#: matters. Small and bounded because the key space is.
+_RF_CACHE: dict = {}
+_RF_MAX = 32
+
+
 def realized_from_fills(fills: list, *, options: bool = False,
                         since: float = 0.0) -> dict:
     """Realised P/L per symbol, from ALPACA'S OWN FILLS, on a running average
@@ -589,6 +603,23 @@ def realized_from_fills(fills: list, *, options: bool = False,
     that is a short, or a fill whose buy is older than the history Alpaca
     returned, and silently skipping it would understate what the account did.
     """
+    # THE KEY IS THE TAPE OBJECT ITSELF, not a description of it. Two earlier
+    # attempts were both unsound: (count, args) collides between any two tapes
+    # of the same length, and (count, first id, last id) still collides when
+    # ids are not globally unique -- test_history generates forty tapes whose
+    # ids restart at 1, and three of them came back holding another tape's
+    # total. A description that can repeat is not an identity.
+    #
+    # `app._fill_tape` hands out the SAME list object until new fills arrive,
+    # at which point it builds a new one, so object identity tracks the tape
+    # exactly and costs nothing to compute. The list is kept in the entry so it
+    # cannot be collected and have its id handed to a different list.
+    key = (id(fills), len(fills), bool(options),
+           round(float(since or 0.0), 3))
+    hit = _RF_CACHE.get(key)
+    if hit is not None and hit[0] is fills:
+        return hit[1]
+
     rows = []
     for f in fills:
         s = str(f.get("symbol") or "")
@@ -649,13 +680,17 @@ def realized_from_fills(fills: list, *, options: bool = False,
             d["why"] = ("%s share(s) were sold with no buy in the history "
                         "Alpaca returned, and are counted at zero cost"
                         % unbased[s])
-    return {
+    result = {
         "by_symbol": out,
         "total": round(sum(d["realized"] for d in out.values()), 2),
         "symbols": len(out),
         "fills": len(rows),
         "unbased": unbased,
     }
+    if len(_RF_CACHE) >= _RF_MAX:
+        _RF_CACHE.clear()
+    _RF_CACHE[key] = (fills, result)      # the list is pinned by this entry
+    return result
 
 
 def clean_equity(points: Optional[list],
