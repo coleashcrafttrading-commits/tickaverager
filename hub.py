@@ -823,6 +823,36 @@ def _play_pos_row(p: Any) -> dict:
                      for l in (getattr(p, "legs", None) or [])]}
 
 
+#: ONE LEDGER PER FILE, FOLLOWED, NEVER REBUILT. `ReadOnlyLedger(path)` parses
+#: the whole play ledger in its constructor, and that file is 44MB on this
+#: account. This function is reached by hub.portfolio, hub.tickers AND
+#: hub.strategies, so every dashboard poll was parsing 44MB two or three times
+#: over -- py-spy caught four worker threads inside `Ledger.load` at one
+#: moment, with uvicorn at 92.4% CPU, /api/hub/portfolio and /api/hub/tickers
+#: both timing out past 55s, and the owner unable to use the dashboard at all.
+#:
+#: The ledger is append-only and already knows how to read just the bytes it
+#: has not seen (`follow()`), so it is built once per path and followed after.
+_LEDGERS: dict = {}
+_LEDGER_LOCK = threading.RLock()
+
+
+def _play_ledger(path):
+    """The shared ReadOnlyLedger for this file, caught up to the tail."""
+    import optplaybook as _opb
+    key = str(path)
+    with _LEDGER_LOCK:
+        led = _LEDGERS.get(key)
+        if led is None:
+            # Built INSIDE the lock: two cold requests would otherwise each
+            # start their own full parse, which is exactly what was happening.
+            led = _opb.ReadOnlyLedger(path)
+            _LEDGERS[key] = led
+            return led
+    led.follow()
+    return led
+
+
 def option_play_strategies(ctx: Ctx) -> list:
     """One Strategy per hand-written play. Read-only over the options stores.
 
@@ -844,7 +874,7 @@ def option_play_strategies(ctx: Ctx) -> list:
     rows: list = []
     if led_path.exists():
         try:
-            rows = optplaybook.ReadOnlyLedger(led_path).positions()
+            rows = _play_ledger(led_path).positions()
         except Exception as e:
             ctx.warn("options_ledger_unreadable",
                      "the options play ledger at %s could not be read (%s)"

@@ -2986,6 +2986,13 @@ def _playbook(f: Fleet, *, dry_run: bool = True) -> "_pbook.Playbook":
     with _PLAY_LOCK:
         pb = _PLAYBOOKS.get(key)
         if pb is None:
+            # BUILT UNDER THE LOCK. Playbook.__init__ calls Ledger.load(),
+            # which parses the whole play ledger -- 44MB and growing on this
+            # account. The lock used to cover only the dict lookup, so every
+            # request arriving before the first one finished started its OWN
+            # 44MB parse. After a restart that is every poller at once, and
+            # py-spy caught two worker threads inside Ledger.load at the same
+            # moment while /api/hub/portfolio was timing out at 55s.
             pb = _pbook.Playbook(f.broker, state_dir=f.state_dir,
                                  dry_run=dry_run)
             _PLAYBOOKS[key] = pb
