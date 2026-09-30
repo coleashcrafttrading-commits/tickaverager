@@ -96,7 +96,9 @@ from typing import Any, Callable, Optional, Sequence
 import optvol
 
 ROOT = Path(__file__).resolve().parent
-STATE_DIR = Path(os.environ.get("TICKAVERAGER_STATE") or (ROOT / "state"))
+import statedir as _statedir
+
+STATE_DIR = _statedir.STATE_DIR
 
 #: The trailing IV series this module keeps. One row per symbol per session.
 IV_STORE_NAME = "iv_daily.jsonl"

@@ -56,7 +56,9 @@ from typing import Any, Iterator, Optional, Sequence
 LOG = logging.getLogger("optquotes")
 
 ROOT = Path(__file__).resolve().parent
-QUOTE_LOG = ROOT / "state" / "option_quotes.jsonl"
+import statedir as _statedir
+
+QUOTE_LOG = _statedir.STATE_DIR / "option_quotes.jsonl"
 
 #: How many observations of one contract to keep. Gate G2 asks whether a spread
 #: has been STABLE, which is a question about the recent past: a contract that

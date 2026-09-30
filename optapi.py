@@ -48,6 +48,8 @@ import optrun
 import options
 
 LOG = logging.getLogger("optapi")
+import statedir as _statedir
+
 ROOT = Path(__file__).resolve().parent
 
 router = APIRouter()
@@ -59,7 +61,7 @@ QUOTE_LOG = Path(os.environ.get("TICKAVERAGER_OPTION_QUOTES",
 EVIDENCE_LOG = Path(os.environ.get("TICKAVERAGER_OPTION_EVIDENCE",
                                    str(optrun.EVIDENCE_LOG)))
 EARNINGS = Path(os.environ.get("TICKAVERAGER_EARNINGS",
-                               str(ROOT / "state" / "earnings.json")))
+                               str(_statedir.STATE_DIR / "earnings.json")))
 
 NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 

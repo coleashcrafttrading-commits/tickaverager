@@ -23,7 +23,14 @@ from urllib.parse import urlsplit
 LOG = logging.getLogger("accounts")
 
 ROOT = Path(__file__).resolve().parent
-STATE_DIR = ROOT / "state"
+import statedir as _statedir
+
+# ONE DEFINITION, in statedir.py. This line used to be its own copy of
+# `ROOT / "state"`, and fourteen modules each had one while only two
+# honoured TICKAVERAGER_STATE -- so the isolation every test claims at
+# the top of its file did not hold for this module. Unset, this is the
+# same path it always was.
+STATE_DIR = _statedir.STATE_DIR
 REGISTRY_PATH = STATE_DIR / "accounts.json"
 ACCOUNTS_DIR = STATE_DIR / "accounts"
 DEFAULT_ID = "default"

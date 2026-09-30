@@ -41,7 +41,12 @@ LOG = logging.getLogger("fleet")
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
-RESUME_PATH = ROOT / "state" / "resume.json"
+import statedir as _statedir
+
+# THE ONE DEFINITION. fleet.py owns the resume file and hands every Engine
+# its state_dir, so a test that set TICKAVERAGER_STATE still built engines
+# from live config and pointed them at live ledgers.
+RESUME_PATH = _statedir.STATE_DIR / "resume.json"
 
 # The exit code start_bot.bat watches for. Anything else means "stay down".
 RESTART_EXIT_CODE = 42
@@ -181,7 +186,8 @@ class Fleet:
         self.acct = account
         self.account_id = str(getattr(account, "id", "") or "default")
         self.label = str(getattr(account, "label", "") or "Default")
-        self.state_dir = Path(getattr(account, "state_dir", None) or (ROOT / "state"))
+        self.state_dir = Path(getattr(account, "state_dir", None)
+                              or _statedir.STATE_DIR)
         self.config_path = Path(getattr(account, "config_path", None) or CONFIG_PATH)
         self.resume_path = self.state_dir / "resume.json"
         import journal as _journal

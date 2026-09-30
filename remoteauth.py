@@ -36,7 +36,12 @@ import secrets
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-TOKEN_FILE = ROOT / "state" / "dash_token.txt"
+import statedir as _statedir
+
+# THE ONE DEFINITION. This was its own `ROOT / "state"`, so a suite
+# running before a token existed would have GENERATED one into the live
+# state directory -- writing a credential while claiming isolation.
+TOKEN_FILE = _statedir.STATE_DIR / "dash_token.txt"
 COOKIE = "dashkey"
 
 

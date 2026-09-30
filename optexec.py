@@ -67,7 +67,6 @@ import options
 LOG = logging.getLogger("optexec")
 
 ROOT = Path(__file__).resolve().parent
-STATE_DIR = ROOT / "state"
 #: Append-only. Every plan, every order, every fill, and the quote at the
 #: instant of each -- which is what turns "are we earning the spread or paying
 #: it" from an argument into a measurement.
@@ -77,11 +76,13 @@ STATE_DIR = ROOT / "state"
 # state/option_exec.jsonl. That file is the audit trail for real orders, and a
 # fabricated row in it is indistinguishable from one the account actually sent.
 # TICKAVERAGER_STATE lets a test move the whole directory in one line.
+# Resolved by statedir.py, which every module in this repo now shares. This
+# was one of only two hand-rolled copies that got it right; fourteen others
+# had no hook at all, including engine.py, which owns the ladder's ledgers.
+import statedir as _statedir
+
+STATE_DIR = _statedir.STATE_DIR
 EXEC_LOG = STATE_DIR / "option_exec.jsonl"
-if os.environ.get("TICKAVERAGER_STATE"):
-    STATE_DIR = Path(os.environ["TICKAVERAGER_STATE"])
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    EXEC_LOG = STATE_DIR / "option_exec.jsonl"
 
 #: The exact phrase `Executor` requires before it will place anything.
 ARM_PHRASE = "ARM OPTIONS TRADING"

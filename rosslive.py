@@ -42,7 +42,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parent
-STATE = ROOT / "state"
+import statedir as _statedir
+
+STATE = _statedir.STATE_DIR
 STATE.mkdir(exist_ok=True)
 LOCK = STATE / "rosslive.lock"
 JOURNAL = STATE / "ross_journal.jsonl"

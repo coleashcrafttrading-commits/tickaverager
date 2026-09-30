@@ -43,7 +43,6 @@ from typing import Any
 from qty import qstr
 
 ROOT = Path(__file__).resolve().parent
-STATE_DIR = ROOT / "state"
 
 # TICKAVERAGER_STATE MOVES THE WHOLE DIRECTORY, exactly as it does in
 # optexec.py, and for the same reason. `state/audit.jsonl` is the audited
@@ -58,9 +57,12 @@ STATE_DIR = ROOT / "state"
 # was the one file that changed. It is a module CONSTANT computed at import,
 # so a suite cannot fix it by setting the variable late; the hook has to live
 # here, beside the constant it redirects.
-if os.environ.get("TICKAVERAGER_STATE"):
-    STATE_DIR = Path(os.environ["TICKAVERAGER_STATE"])
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+# Resolved by statedir.py, which every module in this repo now
+# shares. This was one of only two hand-rolled copies that got it
+# right; fourteen others had no hook at all.
+import statedir as _statedir
+
+STATE_DIR = _statedir.STATE_DIR
 
 AUDIT_PATH = STATE_DIR / "audit.jsonl"
 FREEZE_PATH = STATE_DIR / "FROZEN"

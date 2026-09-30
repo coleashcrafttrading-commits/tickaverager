@@ -74,6 +74,8 @@ import sys
 import time
 from pathlib import Path
 
+import statedir as _statedir
+
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
@@ -313,7 +315,7 @@ def _drain(src: Path, dst_fh, offset: int) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="compact the options play ledger")
     ap.add_argument("--state", default=os.environ.get("TICKAVERAGER_STATE")
-                    or str(ROOT / "state"))
+                    or str(_statedir.STATE_DIR))
     ap.add_argument("--path", default="", help="the ledger file itself")
     ap.add_argument("--apply", action="store_true",
                     help="swap the compacted file in (default: measure only)")

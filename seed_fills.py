@@ -23,6 +23,8 @@ import sys
 import time
 from pathlib import Path
 
+import statedir as _statedir
+
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
@@ -32,7 +34,7 @@ PAGE = 100
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="seed the fill tape")
-    ap.add_argument("--state", default=str(ROOT / "state"))
+    ap.add_argument("--state", default=str(_statedir.STATE_DIR))
     ap.add_argument("--pause", type=float, default=PAUSE)
     ap.add_argument("--max-pages", type=int, default=2000)
     a = ap.parse_args(argv)

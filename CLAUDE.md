@@ -660,7 +660,7 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_returnscut test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
   test_optplays test_rail test_rooms test_stratroom test_touch_adds test_trail test_trend
-  test_wheelmabb test_builderform test_optticker
+  test_wheelmabb test_builderform test_optticker test_statedir
   test_words
   test_trend_v2
   test_unwind`,

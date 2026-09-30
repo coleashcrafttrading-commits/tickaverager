@@ -109,7 +109,14 @@ import optrun
 LOG = logging.getLogger("optloop")
 
 ROOT = Path(__file__).resolve().parent
-STATE_DIR = ROOT / "state"
+import statedir as _statedir
+
+# ONE DEFINITION, in statedir.py. This line used to be its own copy of
+# `ROOT / "state"`, and fourteen modules each had one while only two
+# honoured TICKAVERAGER_STATE -- so the isolation every test claims at
+# the top of its file did not hold for this module. Unset, this is the
+# same path it always was.
+STATE_DIR = _statedir.STATE_DIR
 #: Lane C's files live together so that one `rm -r` is a complete stand-down.
 OPT_STATE_DIR = STATE_DIR / "options"
 
