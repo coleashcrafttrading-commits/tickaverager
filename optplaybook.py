@@ -1208,6 +1208,8 @@ class Playbook:
             if sym:
                 held[sym] = p
         res.reconciled = len(held)
+        # Read ONCE per cycle, for the unfilled-entry check below.
+        working = self._working_by_leg(res)
 
         # --- our open positions against what the broker confirms ---
         # THE BROKER'S QUANTITY IS SHARED OUT, NEVER HANDED TO EACH ROW. Alpaca
@@ -1247,6 +1249,33 @@ class Playbook:
                 sym_ = str(l.get("symbol"))
                 if sym_ in left:
                     left[sym_] = max(0, left[sym_] - broker_ct)
+            if broker_ct == 0 and pos.state == "pending":
+                # AN ENTRY THAT NEVER FILLED AND IS NO LONGER WORKING. The
+                # branch below deliberately skips `pending`, because a pending
+                # row whose order is still resting must NOT be closed -- it is
+                # about to fill. But nothing ever closed the other case, so an
+                # order that was cancelled or expired unfilled left its row
+                # open for good. Measured 30 Sep 2026 on a FLAT account: five
+                # rows stuck pending with 0 contracts, which kept four tickers
+                # advertising a strategy after the owner had removed every one.
+                #
+                # Only when the order book was actually READ. `_working_by_leg`
+                # returns None when it could not be, and "nobody looked" must
+                # never be treated as "nothing is working" -- that would close
+                # a row whose entry is seconds from filling.
+                if working is None:
+                    continue
+                if any(str(l.get("symbol")) in working for l in pos.legs):
+                    continue
+                self.ledger.record(
+                    pos.id, "closed",
+                    state="closed", closed_at=_utc(), contracts=0,
+                    close_reason="the entry order never filled and is no "
+                                 "longer working at the broker")
+                self.decide("position_closed", id=pos.id, symbol=pos.symbol,
+                            reason="entry never filled")
+                res.closed += 1
+                continue
             if broker_ct == 0 and pos.state != "pending":
                 # Every leg gone. Either our close filled or it expired.
                 self.ledger.record(

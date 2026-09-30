@@ -1448,6 +1448,42 @@ def main() -> int:
     check("claiming the one contract that exists", sum(_open2.values()), 1)
     check("and the others were closed, not left claiming", _res2.closed, 2)
 
+    print(chr(10) + "38. AN UNFILLED ENTRY DOES NOT STAY OPEN FOR EVER")
+    # Reconcile skips `pending` in its every-leg-gone branch, correctly: a
+    # pending row whose entry is still resting is about to fill. But nothing
+    # closed the OTHER case, so an order cancelled or expired unfilled left its
+    # row open permanently. Measured on a FLAT account, 30 Sep 2026: five rows
+    # stuck pending with 0 contracts, which kept four tickers advertising a
+    # strategy after every one had been removed.
+    _sd3 = _pl2.Path(tempfile.mkdtemp(prefix="pend_"))
+    _led3 = PB.Ledger(_sd3 / "led.jsonl")
+    _led3.record("P-1", "opened", symbol="META", play="swing",
+                 kind=P.LONG_SINGLE, state="pending", contracts=0, requested=1,
+                 entry_at="2026-09-29T18:31:00+00:00",
+                 legs=[{"symbol": "META261030C00730000", "side": "buy"}])
+    _pb3 = fake_playbook(FakeBroker(positions=[]), _sd3, _sd3 / "ARM", _led3,
+                         dry_run=False)
+    _r3 = PB.CycleResult(started=0.0)
+    _pb3._reconcile(_r3)
+    check("a pending entry with nothing working is closed", _r3.closed, 1)
+    check("and the ledger agrees", len(_pb3.ledger.open_positions()), 0)
+
+    # ...but NOT while its order is still resting, and NOT when the order book
+    # could not be read. "Nobody looked" is not "nothing is working".
+    _sd4 = _pl2.Path(tempfile.mkdtemp(prefix="pend2_"))
+    _led4 = PB.Ledger(_sd4 / "led.jsonl")
+    _led4.record("P-2", "opened", symbol="META", play="swing",
+                 kind=P.LONG_SINGLE, state="pending", contracts=0, requested=1,
+                 entry_at="2026-09-29T18:31:00+00:00",
+                 legs=[{"symbol": "META261030C00730000", "side": "buy"}])
+    _wb = FakeBroker(positions=[], working=[
+        {"id": "o1", "symbol": "META261030C00730000", "status": "new"}])
+    _pb4 = fake_playbook(_wb, _sd4, _sd4 / "ARM", _led4, dry_run=False)
+    _r4 = PB.CycleResult(started=0.0)
+    _pb4._reconcile(_r4)
+    check("an entry whose order is STILL WORKING is left alone", _r4.closed, 0)
+    check("and its row stays open", len(_pb4.ledger.open_positions()), 1)
+
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
     return 1 if FAIL else 0
 
