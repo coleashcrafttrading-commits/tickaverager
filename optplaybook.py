@@ -1190,15 +1190,43 @@ class Playbook:
         res.reconciled = len(held)
 
         # --- our open positions against what the broker confirms ---
-        for pos in self.ledger.open_positions():
+        # THE BROKER'S QUANTITY IS SHARED OUT, NEVER HANDED TO EACH ROW. Alpaca
+        # nets every contract into ONE position, so when several of our
+        # positions sit on the same OCC symbol -- which is what a swing that
+        # opens on each hourly bar produces -- reading the broker's total per
+        # row told every one of them it owned the whole thing.
+        #
+        # MEASURED on 30 Sep 2026: four ledger rows on AMZN261030C00250000
+        # against four contracts held, each resized to 4, claiming 16. The
+        # first close sold all four and every later one was then a naked
+        # short, which Alpaca refused: HTTP 403, "account not eligible to trade
+        # uncovered option contracts", 2,468 times in one day. No stop and no
+        # target could fire on any of them. Same shape on AMZN 245C (9 v 3),
+        # GOOGL 350C (9 v 3), META 720P (9 v 3), MSFT 510C (2 v 1), MSFT 520C
+        # (4 v 2) and NVDA 230P (3 v 1).
+        #
+        # Oldest first, each row taking at most what it asked for, so the
+        # allocation sums to what is actually held. A row with nothing left
+        # falls to broker_ct 0 and is closed by the branch below, which is
+        # correct: the broker really is not holding anything for it.
+        left = {s: abs(int(float((p.get("qty") or 0)))) for s, p in held.items()}
+        for pos in sorted(self.ledger.open_positions(),
+                          key=lambda x: (str(x.entry_at or ""), str(x.id))):
             confirmed = []
             for l in pos.legs:
-                bp = held.get(str(l.get("symbol")))
-                confirmed.append(0 if bp is None
-                                 else abs(int(float(bp.get("qty") or 0))))
+                sym_ = str(l.get("symbol"))
+                if sym_ not in left:
+                    confirmed.append(0)
+                    continue
+                want = pos.requested or pos.contracts or 0
+                confirmed.append(min(left[sym_], want) if want else left[sym_])
             if not confirmed:
                 continue
             broker_ct = min(confirmed)
+            for l in pos.legs:                     # consume what this row took
+                sym_ = str(l.get("symbol"))
+                if sym_ in left:
+                    left[sym_] = max(0, left[sym_] - broker_ct)
             if broker_ct == 0 and pos.state != "pending":
                 # Every leg gone. Either our close filled or it expired.
                 self.ledger.record(
@@ -1754,6 +1782,27 @@ class Playbook:
         # cannot collateralise. What bounds FREQUENCY is the owner's own rule
         # and is not a cap on size: one entry per session for the index
         # spreads, one per closed hourly bar for the swings.
+        #
+        # EXCEPT `max_open`, WHICH IS THE OWNER'S OWN SETTING AND CAME BACK.
+        # Removing the global ceiling took this with it, and it should not
+        # have: `max_open` is not a cap this code invented, it is a number HE
+        # wrote into his own assignment params, and every swing ticker carries
+        # max_open: 1. Without it the swing opened a fresh position on EVERY
+        # closed hourly bar -- 16 entries on 30 Sep 2026, eight of them AMZN --
+        # which is what "we are either opening more than one option at a time"
+        # is, and what filled the book with rows that then could not be closed.
+        #
+        # Only honoured when the assignment actually sets it. There is still no
+        # global cap and no capital ceiling.
+        cap = params.get("max_open")
+        if cap:
+            mine = [q for q in self.ledger.positions()
+                    if q.is_open and q.symbol == a.symbol and q.play == a.play]
+            if len(mine) >= int(cap):
+                pr.reason = ("%d %s position(s) already open on %s and this "
+                             "ticker is set to a maximum of %d"
+                             % (len(mine), a.play, a.symbol, int(cap)))
+                return
 
         # ---- the time-of-day window ----
         in_win, why = P.in_entry_window(params, now=self.now())

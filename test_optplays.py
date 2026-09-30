@@ -1385,6 +1385,69 @@ def main() -> int:
           "raise on an object assembled by __new__",
           cpb.now().tzinfo is not None, True)
 
+    # =======================================================================
+    print(chr(10) + "37. RECONCILE SHARES THE BROKER QUANTITY OUT, ROW BY ROW")
+    # =======================================================================
+    # Alpaca nets every contract into ONE position. A swing that opens on each
+    # hourly bar therefore puts SEVERAL of our rows on one OCC symbol, and
+    # reconcile used to hand each of them the broker's whole holding.
+    #
+    # MEASURED LIVE, 30 Sep 2026: four rows on AMZN261030C00250000 against
+    # four contracts held, each resized to 4, claiming 16. The first close sold
+    # all four; every later one was a naked short and Alpaca refused it --
+    # HTTP 403, "account not eligible to trade uncovered option contracts",
+    # 2,468 times in one day. No target and no stop could fire on any of them.
+    import pathlib as _pl2
+    _sd = _pl2.Path(tempfile.mkdtemp(prefix="recon_"))
+    _led = PB.Ledger(_sd / "led.jsonl")
+    for _i, _hh in enumerate(("14:30", "15:30", "16:30", "17:30")):
+        _led.record("AMZN-%d" % _i, "opened", symbol="AMZN", play="swing",
+                    kind=P.LONG_SINGLE, state="open", contracts=1, requested=1,
+                    entry_at="2026-09-30T%s:00+00:00" % _hh,
+                    legs=[{"symbol": "AMZN261030C00250000", "side": "buy",
+                           "right": "call", "strike": 250.0}])
+
+    # FakeBroker, because optexec.open_option_positions reads through _req --
+    # a fake with only .positions() makes _reconcile bail out in its try block
+    # and every row keep the number it already had, which is a test passing
+    # for the wrong reason.
+    _pb = fake_playbook(
+        FakeBroker(positions=[{"symbol": "AMZN261030C00250000", "qty": "4",
+                               "asset_class": "us_option"}]),
+        _sd, _sd / "ARM", _led, dry_run=False)
+    _res = PB.CycleResult(started=0.0)
+    _pb._reconcile(_res)
+    _after = {q.id: q.contracts for q in _pb.ledger.open_positions()}
+    check("reconcile actually ran (no error swallowed it)", _res.errors, [])
+    check("four rows still open", len(_after), 4)
+    check("and together they claim exactly what the broker holds",
+          sum(_after.values()), 4)
+    check("not the broker's total each (the 16 that shipped)",
+          sum(_after.values()) == 16, False)
+    check("every row claims what it actually opened",
+          sorted(_after.values()), [1, 1, 1, 1])
+
+    _sd2 = _pl2.Path(tempfile.mkdtemp(prefix="recon2_"))
+    _led2 = PB.Ledger(_sd2 / "led.jsonl")
+    for _i, _hh in enumerate(("14:30", "15:30", "16:30")):
+        _led2.record("N-%d" % _i, "opened", symbol="NVDA", play="swing",
+                     kind=P.LONG_SINGLE, state="open", contracts=1,
+                     requested=1,
+                     entry_at="2026-09-30T%s:00+00:00" % _hh,
+                     legs=[{"symbol": "NVDA261030P00230000", "side": "buy",
+                            "right": "put", "strike": 230.0}])
+
+    _pb2 = fake_playbook(
+        FakeBroker(positions=[{"symbol": "NVDA261030P00230000", "qty": "1",
+                               "asset_class": "us_option"}]),
+        _sd2, _sd2 / "ARM", _led2, dry_run=False)
+    _res2 = PB.CycleResult(started=0.0)
+    _pb2._reconcile(_res2)
+    _open2 = {q.id: q.contracts for q in _pb2.ledger.open_positions()}
+    check("only the oldest row survives", sorted(_open2), ["N-0"])
+    check("claiming the one contract that exists", sum(_open2.values()), 1)
+    check("and the others were closed, not left claiming", _res2.closed, 2)
+
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
     return 1 if FAIL else 0
 
