@@ -101,13 +101,46 @@ export const SHARED_API = [
   "/api/pine", "/api/risk/profiles",
   "/api/risk/bank", "/api/health", "/api/restart", "/api/presets",
   // the strategy bank is the same shelf as /api/strategies and /api/code --
-  // one library every account draws from, not per-account state
+  // one library every account draws from, not per-account state. TWO PATHS
+  // UNDER IT ARE NOT THE SHELF; see ACCOUNT_API below.
   "/api/bank",
 ];
+
+/* THE EXCEPTIONS, and they are the whole reason this file has two lists.
+   `/api/bank` is a shared library -- the catalogue of strategies every account
+   draws from -- and marking it shared is right. But `/api/bank/attach` and
+   `/api/bank/attached` are not the catalogue. They are PER-ACCOUNT STATE: what
+   is attached to which ticker on which account, written into that account's
+   own store.
+
+   The prefix match swallowed them, so every attach from every account went to
+   the DEFAULT account's book. The owner attached the Wheel to NVDA while
+   looking at the Options account, the write landed in the default account's
+   `state/options/plays.json`, and the page he was on then correctly reported
+   that nothing was attached -- the card even printed the default account's
+   store path while the Options account was selected. He detached and
+   re-attached to check, which did the same thing again. Measured 1 Oct 2026.
+
+   The server was never wrong: `/api/a/{acct}/bank/attach` and
+   `/api/a/{acct}/bank/attached` have both existed all along. Nothing ever
+   called them.
+
+   The comment above SHARED_API warns about exactly this -- "a startsWith list
+   holding /api/risk would have swallowed both of those" -- and then `/api/bank`
+   was added as a bare prefix and swallowed two routes. So the rule is now
+   enforced rather than remembered: anything listed here is account-scoped even
+   when its prefix is shared, and it WINS over SHARED_API. */
+export const ACCOUNT_API = [
+  "/api/bank/attach", "/api/bank/attached",
+];
+
 export function api(path) {
   if (!path.startsWith("/api/") || path.startsWith("/api/a/")) return path;
   const bare = path.split("?")[0];
-  if (SHARED_API.some((p) => bare === p || bare.startsWith(p + "/"))) return path;
+  const seg = (p) => bare === p || bare.startsWith(p + "/");
+  // The exceptions are checked FIRST and win: a per-account route under a
+  // shared prefix must not be left unscoped.
+  if (!ACCOUNT_API.some(seg) && SHARED_API.some(seg)) return path;
   if (!S.account) return path;         // no account known: the default alias
   return "/api/a/" + encodeURIComponent(S.account) + path.slice(4);
 }

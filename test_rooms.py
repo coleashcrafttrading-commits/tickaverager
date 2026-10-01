@@ -515,6 +515,41 @@ check("the Overview room still raises its own failures",
       "a subtraction round must not eat a warning")
 
 
+# ===========================================================================
+# PER-ACCOUNT ROUTES UNDER A SHARED PREFIX
+# ===========================================================================
+# `core.api()` puts the /api/a/{acct}/ prefix on, and SHARED_API is the list of
+# libraries that must NOT get one. `/api/bank` is a shared shelf and belongs
+# there -- but `/api/bank/attach` and `/api/bank/attached` are per-account
+# STATE, and the prefix match swallowed them. Every attach from every account
+# wrote into the DEFAULT account's book: the owner attached the Wheel to NVDA
+# with the Options account selected, the write landed in the default account's
+# store, and the page then correctly reported nothing attached. The server was
+# never wrong -- /api/a/{acct}/bank/attach existed all along and nothing called
+# it.
+#
+# The comment above SHARED_API already warned about this with /api/risk. A
+# warning is not a check, so this is the check.
+_core = (ROOT / "static" / "ui" / "core.js").read_text(encoding="utf-8")
+check("core.js keeps an explicit per-account exception list",
+      "export const ACCOUNT_API" in _core, True)
+check("and the exceptions are consulted BEFORE the shared list",
+      "!ACCOUNT_API.some(seg) && SHARED_API.some(seg)" in _core, True)
+_acct_list = _core.split("export const ACCOUNT_API")[1].split("];")[0]
+for route in ("/api/bank/attach", "/api/bank/attached"):
+    check("%s is marked per-account" % route, route in _acct_list, True)
+# And the server really does offer the scoped form, or scoping it would 404.
+_app = (ROOT / "app.py").read_text(encoding="utf-8")
+for route in ("/api/a/{acct}/bank/attach", "/api/a/{acct}/bank/attached"):
+    check("the server serves %s" % route, route in _app, True)
+# No duplicate decorators: adding one that already existed is how this was
+# nearly "fixed" on the wrong side.
+check("exactly one scoped attach decorator",
+      _app.count('@app.post("/api/a/{acct}/bank/attach")'), 1)
+check("exactly one scoped attached decorator",
+      _app.count('@app.get("/api/a/{acct}/bank/attached")'), 1)
+
+
 print()
 if FAIL:
     print(f"{FAIL} CHECK(S) FAILED")
