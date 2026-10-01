@@ -56,13 +56,43 @@ reader with its own cache. A news failure NEVER blanks the rest of the page:
 every block below is independently guarded and lands its exception in
 `errors`.
 
+ANALYST CONSENSUS -- **now measured, from a source that did not exist here
+before.** This section used to read "NOT AVAILABLE", in capitals, and the
+reasoning was right: Alpaca serves no analyst ratings, nothing may derive one
+from price action, and an empty widget shaped like one is a promise nothing
+fills. Its closing line was the operative one -- *"It needs a data source the
+account does not have."*
+
+It has one. `api.nasdaq.com/api/analyst/{sym}/ratings` serves a mean rating
+free, with no key and no account, AND the number of analysts behind it, which is
+the part that makes it a measurement rather than a mood: three analysts and
+thirty-nine are not the same claim. `mktfeed.consensus_block` reads it, carries
+`n` and the source host, and is ABSENT WITH A REASON when the host says nothing.
+
+    The rule that produced the old paragraph is unchanged and still enforced:
+    nothing here derives one from price action, and `test_tkmarket.py` section 8
+    now pins the stronger invariant -- a consensus may appear only when it names
+    an external source and carries its analyst count, and is a reason rather
+    than a guess when nothing answered.
+
+EARNINGS DETAIL -- the feed also carries what optcal has no field for: which
+SESSION the print lands in (a report after the close moves the NEXT day, so a
+Friday expiry is exposed to a Thursday print), the consensus EPS forecast and
+the estimate count. optcal stays the authority on the DATE and the operator's
+override file still outranks everything; `_attach_feed_detail` attaches the
+extra columns only when the two dates agree, and says so when they do not.
+
 --------------------------------------------------------------- WHAT IS NOT HERE
 
-**PUBLIC / ANALYST SENTIMENT (buy - hold - sell). NOT AVAILABLE.** Alpaca does
-not serve analyst ratings or a consensus, and this account has no other data
-provider configured. Nothing in this module derives one from price action, and
-there is no empty widget shaped like one, because a shape is a promise. It
-needs a data source the account does not have.
+**MARKET CHAMELEON.** Asked for, and refused by the vendor rather than by a
+judgement here: their server answers this machine with an Access Denied page
+naming "web automation" as the reason and their Terms of Use as the authority,
+and separately blocks managed hosting, which is what the VM is. See
+`mktfeed.MARKET_CHAMELEON_REFUSED`.
+
+**UNUSUAL WHALES.** No free tier -- every endpoint returns 401. The client
+exists in `mktfeed` and is inert until a token is in the environment, and
+nothing on this page depends on it.
 
 ------------------------------------------------------------------- THE UNITS
 
@@ -438,8 +468,57 @@ def earnings_block(symbol: str, *, state_dir: Any = None,
         return {"known": True, "date": None, "days": None,
                 "why": "%s's schedule is asserted and holds no date on or "
                        "after today" % sym}
-    return {"known": True, "date": nxt.isoformat(),
-            "days": (nxt - today).days, "why": ""}
+    out = {"known": True, "date": nxt.isoformat(),
+           "days": (nxt - today).days, "why": ""}
+    _attach_feed_detail(out, sym, now=today)
+    return out
+
+
+def _attach_feed_detail(block: dict, sym: str, *, now: Any = None) -> None:
+    """Add `mktfeed`'s extra columns to an earnings block, in place.
+
+    optcal STAYS THE AUTHORITY on known/date/days -- that contract is the whole
+    point of `earnings_block`, and the operator's `state/earnings.json` outranks
+    any provider by design so a bad feed can be corrected without a redeploy.
+    What the feed adds is the detail optcal has no field for: which SESSION the
+    print lands in, the consensus EPS forecast, and how many estimates are
+    behind it.
+
+    THE DATES ARE CHECKED AGAINST EACH OTHER BEFORE ANYTHING IS ATTACHED.
+    They can legitimately differ -- that is exactly what the override file is
+    for -- and hanging "reports after the close" off a date the operator has
+    overridden would decorate the wrong day with real-looking detail.
+    CLAUDE.md's rule is to say so rather than pick the convenient one, so a
+    mismatch sets `feed_disagrees` and attaches nothing else.
+
+    Never raises and never reaches the network: `mktfeed`'s readers are
+    cache-only unless asked otherwise, which matters because this runs in the
+    ticker page's poll path.
+    """
+    try:
+        import mktfeed
+        risk = mktfeed.earnings_risk(sym, now=now)
+    except Exception:                                           # noqa: BLE001
+        return
+    if not risk.get("known") or not risk.get("date"):
+        return
+    if risk.get("date") != block.get("date"):
+        block["feed_disagrees"] = risk.get("date")
+        block["why"] = (block.get("why") or "") + (
+            "the swept calendar says %s for this print and the asserted "
+            "schedule says %s; the asserted one wins and no further detail "
+            "is shown" % (risk.get("date"), block.get("date")))
+        return
+    block["when"] = risk.get("when")
+    block["move_session"] = risk.get("move_session")
+    block["eps_forecast"] = risk.get("eps_forecast")
+    block["n_estimates"] = risk.get("n_estimates")
+    block["fiscal_end"] = risk.get("fiscal_end")
+    if risk.get("why"):
+        # The one that matters: Nasdaq supplies the session for a minority of
+        # rows, and an absent session means the move is ASSUMED onto the report
+        # date rather than known to land there.
+        block["why"] = (block.get("why") or "") + risk["why"]
 
 
 # =========================================================== the IV, measured
@@ -697,6 +776,26 @@ def report(symbol: str, *, od: Any = None, alpaca: Any = None,
                                   "(%s: %s)" % (type(e).__name__,
                                                 str(e)[:140])}
         errors.append("%s: earnings: %s: %s"
+                      % (sym, type(e).__name__, str(e)[:140]))
+
+    # ---- the analyst consensus --------------------------------------------
+    # THE THING THIS FILE USED TO SAY WAS IMPOSSIBLE. See the docstring: the
+    # rule was never "a consensus is forbidden", it was "none may be INVENTED",
+    # and the closing line was "It needs a data source the account does not
+    # have." api.nasdaq.com serves one free, with the number of analysts behind
+    # it, so the source now exists and the rule is unchanged -- nothing here
+    # derives a rating from price action, and an unanswered symbol is a reason
+    # rather than a guess.
+    try:
+        import mktfeed
+        out["consensus"] = mktfeed.consensus_block(sym, now=ts)
+    except Exception as e:                                      # noqa: BLE001
+        out["consensus"] = {
+            "value": None, "n": None, "unit": "rating",
+            "reason": "the consensus feed could not be read (%s: %s)"
+                      % (type(e).__name__, str(e)[:140]),
+            "source": "api.nasdaq.com", "as_of": None}
+        errors.append("%s: consensus: %s: %s"
                       % (sym, type(e).__name__, str(e)[:140]))
 
     # ---- news --------------------------------------------------------------

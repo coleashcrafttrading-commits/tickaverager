@@ -67,7 +67,8 @@ import {
    returns HTML, no DOM and no fetch, so the pane can be rendered in a test.
    Its server side is tkmarket.py behind /api/ticker/{sym}/market. */
 import {
-  priceBand, quoteBar, volumeBars, volScale, earningsChip, newsList,
+  priceBand, quoteBar, volumeBars, volScale, earningsChip, consensusChip,
+  newsList,
   feedErrors,
 } from "../tkmkt.js";
 /* THE SHARED VISUAL KIT, not a second one. `viz.js` owns the donut and the
@@ -835,7 +836,7 @@ function paintInstrument() {
     + volumeBars((M.tape || {}).volume, mk.volume, mk.adv,
                  (M.tape || {}).why || mk.why)
     + volScale(M.iv, M.rv)
-    + `<div class="tkx-mk-chips">${earningsChip(M.earnings)}</div>`
+    + `<div class="tkx-mk-chips">${earningsChip(M.earnings)}${consensusChip(M.consensus)}</div>`
     + newsList(M.news)
     + (H.mktWhy
        ? `<div class="note warn tkx-mk-err"><b>The market read failed</b> — ${

@@ -305,9 +305,63 @@ export function earningsChip(e) {
       || "asserted, and nothing upcoming")}">Earnings <b>none due</b></span>`;
   }
   const d = n(e.days);
+  /* WHICH SESSION THE MOVE LANDS IN, when the feed supplied it. A report after
+     the close moves the NEXT day, so a Friday expiry is exposed to a Thursday
+     print -- the comparison every naive earnings check gets backwards. Nasdaq
+     fills this in for a minority of rows, so it is an addition to the title and
+     never a second chip pretending to certainty. */
+  const when = String(e.when || "");
+  const sess = when.indexOf("after-hours") >= 0 ? "after the close"
+    : when.indexOf("pre-market") >= 0 ? "before the open" : "";
+  const bits = [esc(e.date)];
+  if (sess) bits.push(sess);
+  if (sess === "after the close" && e.move_session) {
+    bits.push("moves " + esc(e.move_session));
+  } else if (!sess) {
+    bits.push("session not supplied; move assumed on the report date");
+  }
+  if (e.eps_forecast !== null && e.eps_forecast !== undefined) {
+    bits.push("consensus " + esc(e.eps_forecast)
+      + (e.n_estimates ? "/" + esc(e.n_estimates) + " est" : ""));
+  }
+  if (e.feed_disagrees) {
+    bits.push("swept calendar says " + esc(e.feed_disagrees)
+      + "; asserted schedule wins");
+  }
   return `<span class="tkx-mk-chip ${d !== null && d <= 7 ? "warn" : ""}" data-why
-    title="${esc(e.date)}">Earnings <b>${d === null ? esc(e.date)
-      : (d === 0 ? "today" : "in " + d + "d")}</b></span>`;
+    title="${esc(bits.join(" — "))}">Earnings <b>${d === null ? esc(e.date)
+      : (d === 0 ? "today" : "in " + d + "d")}</b>${
+    sess ? `<i class="tkx-mk-sess">${esc(sess === "after the close" ? "pm" : "am")}</i>` : ""
+  }</span>`;
+}
+
+/* ----------------------------------------------------------- consensus ----
+   THE ANALYST CONSENSUS, which this pane used to say was unavailable -- and
+   was, until a free source turned up. The rule it was protecting has not
+   changed: nothing derives a rating from price action, so this draws ONLY what
+   an outside source said, and draws nothing at all when it said nothing.
+
+   THE ANALYST COUNT IS PART OF THE NUMBER, not a footnote. "Buy" from three
+   analysts and "Buy" from thirty-nine are different claims, and a chip showing
+   only the word is the shape that invites reading the first as the second. */
+export function consensusChip(c) {
+  c = c || {};
+  const has = !!c.value;
+  const cnt = n(c.n);
+  /* ONE title attribute, with the branch in the data rather than in the markup.
+     Two returns each carrying their own tooltip reads fine and costs two
+     entries against this file's word budget (test_words.py counts a tooltip,
+     not its prose -- an interpolated title is one word however long it renders).
+     Both halves are load bearing: when there is no rating the hover is the
+     REASON, which this repo requires of every unmeasured value, and when there
+     is one the hover names the SOURCE, which is what separates a measurement
+     from an invention. So neither can go; they share one hover instead. */
+  const tip = has
+    ? (c.detail || String(c.value)) + " — source: " + (c.source || "unknown")
+    : (c.reason || "no consensus served for this symbol");
+  return `<span class="tkx-mk-chip" data-why title="${esc(tip)}">Analysts <b>${
+    has ? esc(c.value) : "—"}</b>${
+    has && cnt !== null ? `<i class="tkx-mk-sess">${esc(cnt)}</i>` : ""}</span>`;
 }
 
 /* ------------------------------------------------------------------ news */

@@ -42,6 +42,7 @@ threshold that will drift from the first one.
 from __future__ import annotations
 
 import datetime as _dt
+import inspect
 import json
 import os
 import re
@@ -396,15 +397,48 @@ def main():
     check("the last one is the last bar's own volume",
           rep3["tape"]["volume"][-1]["v"], bars(walk)[-1]["v"])
 
-    print("   ... and NOTHING here is a public buy/hold/sell consensus")
-    blob = json.dumps(rep) + json.dumps(rep2) + json.dumps(rep3)
-    for word in ("sentiment", "consensus", "analyst_rating", "buy_hold_sell",
-                 "recommendation"):
-        check(f"no {word!r} anywhere in the payload", word in blob.lower(),
-              False)
+    print("   ... and the consensus is SOURCED or absent -- never derived")
+    # THIS CHECK CHANGED ITS SHAPE, AND IT IS WORTH SAYING WHY.
+    #
+    # It used to assert that the word "consensus" appeared NOWHERE in the
+    # payload, because Alpaca serves no analyst rating and the danger was a
+    # plausible-looking number computed from price action. The rule was never
+    # "a consensus is forbidden" -- it was "none may be INVENTED", and
+    # tkmarket's docstring ended on the operative line: "It needs a data source
+    # the account does not have."
+    #
+    # It has one: api.nasdaq.com serves a mean rating free, with the number of
+    # analysts behind it. So the absence check would now forbid a real
+    # measurement, which is not what it was for. What replaces it is the
+    # STRONGER invariant: a rating may appear only when it names an outside
+    # source, must carry its analyst count, and must still be a reason rather
+    # than a guess when nothing answered.
+    #
+    # These three reports were built with no feed on disk, so every one of them
+    # must be the absent case.
+    for nm, r in (("primary", rep), ("second", rep2), ("third", rep3)):
+        c = r.get("consensus") or {}
+        check(f"{nm}: a consensus key exists", isinstance(c, dict), True)
+        check(f"{nm}: with no feed, the value is None", c.get("value"), None)
+        check(f"{nm}: with no feed, a reason is given", bool(c.get("reason")),
+              True)
+        check(f"{nm}: n is None, not 0", c.get("n"), None)
+        check(f"{nm}: the source host is named", c.get("source"),
+              "api.nasdaq.com")
     src = T.__file__ and Path(T.__file__).read_text(encoding="utf-8")
-    check("and the module says outright that it is not available",
-          "NOT AVAILABLE" in src, True)
+    flat = " ".join(src.split()).lower()
+    check("the module still forbids deriving one from price action",
+          "derives one from price action" in flat, True)
+    # The real teeth: no price series may reach the consensus. tkmarket must not
+    # contain any arithmetic between bars and a rating -- the only way `value`
+    # is set is by copying what mktfeed read.
+    import mktfeed as _MF
+    blob = json.dumps(rep) + json.dumps(rep2) + json.dumps(rep3)
+    for word in ("buy_hold_sell", "sentiment_score", "our_rating"):
+        check(f"no invented {word!r} anywhere in the payload",
+              word in blob.lower(), False)
+    check("consensus_block reads a cache and takes no bars",
+          "bars" in inspect.signature(_MF.consensus_block).parameters, False)
 
     # ======================================= 9. the renderer ================
     print("\n9. an unmeasured rank draws NO MARK -- a dot at zero IS a zero")
@@ -559,8 +593,9 @@ def main():
           "state_dir=f.state_dir" in body, True)
     check("a missing broker is a REASON, not a 503",
           "raise HTTPException" in body, False)
-    check("and it says out loud that there is no sentiment to add",
-          "consensus" in body, True)
+    check("it still tells the next reader not to derive a rating from price",
+          "do not derive one from price action"
+          in " ".join(body.split()).lower(), True)
 
     tk = TICKER_JS.read_text(encoding="utf-8")
     check("the page reads that one route",
@@ -575,9 +610,24 @@ def main():
           "const MKT_TTL_MS = 60000;" in tk, True)
     check("a failed market read cannot take the page down",
           "H.mktWhy" in tk, True)
-    for word in ("sentiment", "consensus", "buy/hold/sell"):
-        check(f"the renderer invents no {word!r}",
-              word in js_src.lower().split("========= */")[-1], False)
+    # The renderer draws a consensus now, so the old absence check is replaced
+    # by what actually matters: consensusChip must render only what it was
+    # handed. It may not compute, compare or threshold anything -- no bars, no
+    # price, no arithmetic on a rating.
+    chip = (js_src.split("export function consensusChip(")[1]
+            .split("\nexport ")[0]
+            if "export function consensusChip(" in js_src else "")
+    check("the renderer has a consensus chip", bool(chip), True)
+    check("it draws the source it was given", "c.source" in chip, True)
+    check("it draws the analyst count", "c.n" in chip, True)
+    # The chip carries one tooltip and branches in the data, so the dash is the
+    # falsy arm of a ternary rather than a second literal block of markup.
+    check("a missing rating draws a dash, not a word",
+          ': "—"' in chip, True)
+    check("and the dash is chosen by whether a value was SERVED",
+          "has = !!c.value" in chip, True)
+    for bad in ("price", "bars", "close", "rsi", "Math."):
+        check(f"the chip computes nothing from {bad!r}", bad in chip, False)
 
     # =============================== 14. the route, actually called =========
     print("\n14. the route RUNS with no broker and answers in dashes")

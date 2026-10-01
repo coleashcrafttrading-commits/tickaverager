@@ -742,9 +742,14 @@ def ticker_market(sym: str, f: Fleet = Depends(cur)):
     registry is on the 200/min TRADING host the live share ladders spend from;
     a ticker page must never be the reason a lot cannot be covered.
 
-    NOTE FOR ANYONE ADDING TO IT: there is no analyst / public buy-hold-sell
-    consensus in this payload because Alpaca does not serve one and this
-    account has no other provider. Do not derive one from price action.
+    NOTE FOR ANYONE ADDING TO IT: the analyst / public buy-hold-sell consensus
+    in this payload comes from `api.nasdaq.com`, read out of `mktfeed`'s DISK
+    CACHE and never from the network inside this handler, and it carries the
+    number of analysts behind it. This route used to say no consensus was
+    available, which was true of Alpaca and is still true of Alpaca -- the rule
+    it was protecting is the one that still binds: **do not derive one from
+    price action.** A rating here is something an outside source said, or it is
+    a dash with the reason it is missing.
     """
     import tkmarket
     symbol = str(sym or "").strip().upper()
@@ -3614,6 +3619,28 @@ def assistant_act(body: dict = Body(...), f: Fleet = Depends(cur)):
 @app.on_event("startup")
 def boot():
     with _BOOT_LOCK:
+        # THE EARNINGS CALENDAR GETS A SOURCE. optcal has carried
+        # set_earnings_provider since it was written and nothing had ever been
+        # plugged into it, so state/earnings.json's four keys -- a comment and
+        # three index ETFs -- were the whole calendar and every single name read
+        # as UNKNOWN. mktfeed reads the swept Nasdaq calendar off disk and never
+        # touches the network here; a missing or stale feed leaves optcal
+        # exactly as it was, which is unknown-and-therefore-blocking.
+        try:
+            import mktfeed
+            if mktfeed.install():
+                logging.getLogger("app").info(
+                    "earnings provider installed from %s",
+                    mktfeed._cache_file(mktfeed.FEED_NAME))
+            else:
+                _f, _why = mktfeed.read_feed()
+                logging.getLogger("app").warning(
+                    "earnings provider installed but has no usable feed "
+                    "(%s) -- run `mktfeed.py sweep`", _why)
+        except Exception as e:                                  # noqa: BLE001
+            logging.getLogger("app").error(
+                "earnings provider not installed: %r", e)
+
         # the default account: seeded from .env on a legacy install, zero file moves
         acc = REG.seed_default_from_env()
         if acc is not None:

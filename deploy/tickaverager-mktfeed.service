@@ -1,0 +1,58 @@
+# The earnings-calendar sweep. A ONE-SHOT unit, driven by the timer beside it.
+#
+# WHY THIS IS NOT A THREAD IN THE DASHBOARD. Twice now this repo has put work
+# that talks to a slow external thing inside the web process and paid for it:
+# `/api/overview` re-parsed a 21 MB journal on a 2 s poll until the handler took
+# 39 s, and `_fill_tape` seeded itself in the request path and rate-limited
+# Alpaca to 429 on the same key the trading worker spends from. A sweep makes
+# ~43 HTTP calls to api.nasdaq.com and takes about a minute. It belongs
+# out-of-band, writing a cache that the dashboard only ever READS.
+#
+# WHY A TIMER AND NOT A LOOP. The data changes on a daily cadence at most --
+# companies confirm earnings dates days or weeks ahead -- so a long-lived
+# process would spend all day asleep. A one-shot unit that exits is also the
+# only shape where a failure is unambiguous in the journal.
+#
+# WHAT IT DOES AND DOES NOT DO. It writes `state/mktfeed/*.json` and nothing
+# else. It places no orders, reads no account, touches no ledger, and needs no
+# Alpaca credentials at all -- api.nasdaq.com and data.sec.gov take no key. If
+# it never runs, `mktfeed.read_feed` reports a stale horizon and `optcal` goes
+# back to answering UNKNOWN, which is the blocking answer. A missing sweep makes
+# the system more cautious, never less.
+#
+# Install (on the VM, as root):
+#   cp deploy/tickaverager-mktfeed.service /etc/systemd/system/
+#   cp deploy/tickaverager-mktfeed.timer   /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now tickaverager-mktfeed.timer
+#   systemctl start tickaverager-mktfeed          # run it once, now
+#   systemctl list-timers tickaverager-mktfeed
+#   journalctl -u tickaverager-mktfeed -n 60
+
+[Unit]
+Description=Tick Avenger -- earnings calendar sweep (Nasdaq + SEC, no key)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=coleashcraft_trading
+WorkingDirectory=/home/coleashcraft_trading/tickaverager
+Environment=PYTHONUNBUFFERED=1
+
+# --days 60 is the default and is stated anyway, because the number is load
+# bearing: `mktfeed.MIN_FORWARD_HORIZON_DAYS` refuses to answer off a feed whose
+# forward horizon has shrunk below 35 days, so a 60-day sweep run daily always
+# has room and a 40-day one would start failing after a week of missed runs.
+ExecStart=/home/coleashcraft_trading/tickaverager/venv/bin/python mktfeed.py sweep --days 60
+
+# A sweep that cannot finish in ten minutes is a host that is not answering, and
+# the right outcome then is to fail and leave YESTERDAY'S feed in place -- which
+# is still honest, because freshness here is judged by the forward horizon and
+# not by the file's age. cache_write is atomic for the same reason: a sweep
+# killed mid-write must not leave a half-map that parses as a complete one.
+TimeoutStartSec=600
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tickaverager-mktfeed

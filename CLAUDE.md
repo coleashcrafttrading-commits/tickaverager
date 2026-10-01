@@ -573,6 +573,118 @@ everywhere the hub would have spoken. The Tickers count is a dash there too --
 printing the engine count would be the ladder standing in for the account
 again.
 
+## The outside feeds (30 Sep 2026) -- claimed names, and what each vendor said
+
+Claimed per the rule above, because "market data" is a namespace either person
+could reach for and this one talks to third parties:
+
+| | |
+|---|---|
+| `mktfeed.py` | every non-Alpaca feed: the earnings calendar, analyst consensus, earnings-surprise history, dividends, and a dormant Unusual Whales client |
+| `state/mktfeed/` | its disk cache, including `earnings_feed.json` |
+| `deploy/tickaverager-mktfeed.{service,timer}` | the daily sweep, 06:20 ET |
+| `test_mktfeed.py` | all of it, offline |
+
+**THE PLUG POINT HAD NEVER BEEN PLUGGED IN.** `optcal.set_earnings_provider`
+has existed since `optcal.py` was written -- "when a data source is bought (or
+scraped, or typed in by hand), this is where it is attached" -- and nothing was
+ever attached. `state/earnings.json` held four keys: a `_comment` and SPY, QQQ
+and IWM asserting that index ETFs do not report. So every single name was
+UNKNOWN, and optcal's whole design is that unknown BLOCKS short premium: gate
+G5 had never once cleared on a single name, not because the gate is wrong but
+because it had no calendar to read. `app.boot()` now installs
+`mktfeed.earnings_provider()`; the operator's `state/earnings.json` still
+outranks it, by optcal's design, so a bad feed is correctable without a deploy.
+
+**The two vendors that were asked for, and their answers.** Market Chameleon
+serves this machine an Akamai `Access Denied` page that names "web automation"
+as the reason and *"prohibited under MarketChameleon's Terms of Use"* as the
+corrective action, and separately blocks virtual machines and managed hosting --
+which is what the VM is. There is no API host. `test_mktfeed.py` section 1
+asserts no module in this repo carries a marketchameleon.com URL, so it cannot
+quietly come back. Unusual Whales has **no free tier**: every endpoint returns
+`401 missing_token`. Their OpenAPI spec is public though (`GET
+api.unusualwhales.com/api/openapi`, OpenAPI 3.0.0 in **YAML** despite the path,
+214 endpoints), so `mktfeed.UnusualWhales` is written against it, is inert
+without `UNUSUAL_WHALES_TOKEN`, and **its response shapes have never been seen
+and are parsed nowhere** -- that stays true until a token exists and `probe`
+prints one.
+
+**What is free turned out to be neither of them.** `api.nasdaq.com` serves the
+earnings calendar by date (with the reporting SESSION, the EPS forecast and the
+estimate count), an analyst consensus, surprise history and dividends, with no
+key. `data.sec.gov` serves every 8-K carrying **Item 2.02** -- the company
+filing its own results -- which is the only authoritative earnings date here and
+is backward-looking by nature. They corroborate: Nasdaq and SEC independently
+date NVDA's last print to 2026-08-26.
+
+**THE ANALYST CONSENSUS NOW EXISTS, AND THE OLD RULE STILL BINDS.**
+`tkmarket.py` said in capitals that there was none and that none could be
+derived, ending "It needs a data source the account does not have." It has one,
+carrying the number of analysts behind the rating. `test_tkmarket.py` section 8
+changed from "the word consensus appears nowhere" to the stronger invariant: a
+rating may appear only when it NAMES AN EXTERNAL SOURCE and carries its count,
+and must be a reason rather than a guess when nothing answered. **Nothing may
+derive one from price action.**
+
+### Things measured here that are easy to get wrong
+
+- **Two hosts, opposite User-Agents.** api.nasdaq.com drops an agent carrying an
+  email address (`tickaverager/1.0 (glenn@...)` -> connection reset, 3/3) or a
+  library name (`python-requests/2.34.2` -> reset), and accepts
+  `tickaverager/1.0`, `Mozilla/5.0`, or no agent at all. It resets rather than
+  returning a status, so the failure reads like the network being down.
+  data.sec.gov is the mirror: it 403s a request with NO agent and its
+  fair-access policy asks for a descriptive one WITH contact details. So
+  `NASDAQ_UA` identifies us by name and version without the address and
+  `SEC_UA` keeps it. Neither impersonates a browser.
+- **`[]` CLEARS and `None` BLOCKS, and a date-keyed calendar makes the wrong one
+  natural to write.** "Symbol not in my map, therefore no earnings" is false
+  whenever one day of the sweep failed -- the company could have been on exactly
+  that day. The sweep records `days_fetched` / `days_failed`, and absence is a
+  clear ONLY when nothing failed; a restricted sweep returns None for a symbol
+  it discarded, because the rows were thrown away rather than absent.
+- **Freshness is the forward HORIZON, not the file's age.** A 60-day sweep is
+  still honest ten days later and is not honest ninety days later.
+  `MIN_FORWARD_HORIZON_DAYS` (35) refuses to answer below that, which is why the
+  timer sweeps 60 days daily rather than 40.
+- **An after-hours print moves the NEXT session.** A Thursday-evening report
+  moves Friday, so a Friday expiry is exposed to a Thursday print, and a Friday
+  evening report moves Monday. `spans_expiry` compares the MOVE, not the report
+  date -- the naive "expiry is after the earnings date, so we are fine" is
+  exactly backwards for the after-hours half of the calendar.
+- **But the session is usually absent.** Measured across the whole 4,447-symbol
+  sweep: supplied for 35% of rows 0-7 days out, 57% at 8-14 days, 19% at 15-30,
+  and **2% past 31 days**. So `earnings_risk` states that it is ASSUMING the
+  move lands on the report date rather than assuming pre-market and understating
+  the exposure by a session.
+- **Nasdaq sends percentages in two shapes in one account's payloads** --
+  `yield` as `'0.44%'` and `percentageSurprise` as bare `'6.22'` -- and both
+  leave here as FRACTIONS via `_pct`, per this repo's wire rule. `_f` is
+  deliberately not changed to divide, because it also carries money and counts.
+  Three spellings of one idea across two endpoints: `fiscalQuarterEnding`,
+  `fiscalQtrEnd`, and `fiscalQtrEnding` (which does not exist and cost a bug).
+- **A fund has no earnings and still gaps on somebody else's.** Both tickers
+  this account runs a ladder on are leveraged ETFs -- `RAM` is the *Roundhill
+  T-REX 2X Long DRAM Daily Target ETF*, `MSTX` the *Defiance Daily Target 2x
+  Long MSTR ETF* -- so their clear is correct. But MSTX is twice MSTR and gaps
+  twice as hard the evening MSTR reports. Nothing maps a fund to its underlying,
+  and a clear on MSTX is NOT a statement that the position is safe through
+  MSTR's print.
+
+### What this deliberately does NOT do
+
+**The options playbook still has no earnings gate.** Measured: `optplays.py` and
+`optplaybook.py` contain zero references to `optcal`, earnings or any event
+calendar, so the Wheel will sell a cash-secured put straight through a print.
+That is the exact failure `optcal.py`'s header is about. It is not closed here
+because closing it means refusing trades the owner has not asked to have
+refused, and this stack has a documented history of inventing exactly that (the
+three capital and position caps he removed). `mktfeed.earnings_risk()` returns
+everything a gate needs -- days to the print, the session the move lands in, and
+whether a given expiry spans it -- so it is a few lines whenever he asks for it.
+**Do not add it unasked.**
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -660,7 +772,7 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_returnscut test_reverse
   test_review_fixes test_rules test_short test_strategy test_supertrend
   test_optplays test_rail test_rooms test_stratroom test_touch_adds test_trail test_trend
-  test_wheelmabb test_builderform test_optticker test_statedir
+  test_wheelmabb test_builderform test_optticker test_statedir test_mktfeed
   test_words
   test_trend_v2
   test_unwind`,

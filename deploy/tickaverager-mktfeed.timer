@@ -1,0 +1,39 @@
+# When the earnings sweep runs.
+#
+# 06:20 AMERICA/NEW_YORK, every day. Three reasons for that slot:
+#
+#   * BEFORE THE OPEN, so the calendar the plays and the ticker page read during
+#     the session was built this morning and not yesterday morning. A company
+#     confirming a date overnight is in the feed before anything trades on it.
+#   * NOT AT THE OPEN. 09:30 is when the share ladders and the playbook are
+#     busiest and the box has two cores; a minute of HTTP has no business
+#     competing with an entry.
+#   * EVERY DAY, not just weekdays. The sweep itself skips weekends inside its
+#     window (`mktfeed.weekdays`), and a Sunday run is what makes Monday's
+#     forward horizon full rather than two days short.
+#
+# OnCalendar is evaluated in the unit's timezone, so it is stated explicitly
+# rather than inherited from whatever the VM's clock is set to. The VM is UTC.
+#
+# Persistent=true is the one that matters: if the box is down at 06:20 -- a
+# reboot, a deploy, a maintenance window -- the sweep runs as soon as it comes
+# back instead of being skipped until tomorrow. Without it a Friday reboot
+# leaves the feed ageing all weekend, and `MIN_FORWARD_HORIZON_DAYS` would
+# eventually make every symbol read UNKNOWN. That fails safe, but it fails.
+
+[Unit]
+Description=Tick Avenger -- run the earnings calendar sweep daily before the open
+
+[Timer]
+OnCalendar=*-*-* 06:20:00 America/New_York
+Persistent=true
+
+# Nothing else is waiting on this, and 43 sequential HTTP calls to one host at
+# the same second every day from every machine running this repo is the shape
+# that gets an IP rate-limited. Five minutes of jitter costs nothing here.
+RandomizedDelaySec=300
+
+Unit=tickaverager-mktfeed.service
+
+[Install]
+WantedBy=timers.target

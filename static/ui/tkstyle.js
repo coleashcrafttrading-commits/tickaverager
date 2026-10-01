@@ -109,6 +109,15 @@ const CSS = `
 .tkx-mk-chip.iv b{color:var(--accent-2)}
 .tkx-mk-chip.warn{background:var(--warn-dim);color:var(--warn)}
 .tkx-mk-chip.warn b{color:var(--warn)}
+/* The qualifier after the value: the earnings SESSION (am/pm) and the analyst
+   COUNT. Deliberately quieter than the bold value it follows -- it qualifies
+   that number rather than competing with it -- and not italic despite being an
+   i element, which is used only because it is the shortest inline tag.
+   NO BACKTICKS IN THIS FILE: the whole sheet is one JS template literal, so a
+   backtick here terminates the string and the stylesheet stops existing. */
+.tkx-mk-chip i,.tkx-mk-sess{font-style:normal;font-size:var(--fs-micro);
+  color:var(--faint);letter-spacing:normal;text-transform:none;
+  font-variant-numeric:tabular-nums}
 .tkx-mk-line{display:block;width:100%;height:22px;margin-top:var(--s3);
   color:var(--accent)}
 
