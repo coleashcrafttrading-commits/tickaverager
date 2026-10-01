@@ -824,6 +824,38 @@ window.__render = render;
    If it does not match what was just deployed, the browser is stale and a
    hard reload fixes it. If it does, the change is live and the disagreement
    is about something else. */
+/* THE STAMP NOW ACTS, INSTEAD OF ONLY TELLING.
+
+   The chip below was built so a person could CHECK whether their browser was
+   stale, and it works -- but checking it is a thing you have to know to do,
+   and the owner has now lost time to stale modules twice in one morning. The
+   second time the page showed a "Loading..." placeholder that does not exist
+   anywhere in the current source, while the server answered every endpoint in
+   under 80 ms on the new commit.
+
+   Why a reload is needed at all when every asset sends `no-store`: a reload
+   does fetch fresh code. A long-lived SPA tab simply never reloads. The page
+   polls for hours across any number of deploys and keeps the modules it booted
+   with.
+
+   So: remember the commit this page booted on, and when the server reports a
+   different one, reload ONCE. The guard against a loop is the sessionStorage
+   key -- it records the commit we reloaded FOR, so a reload that somehow does
+   not pick up the new code cannot reload again for the same commit. */
+let BOOT_COMMIT = "";
+function watchBuild(ov) {
+  const b = (ov && ov.build) || null;
+  if (!b || !b.commit) return;
+  if (!BOOT_COMMIT) { BOOT_COMMIT = b.commit; return; }
+  if (b.commit === BOOT_COMMIT) return;
+  let already = "";
+  try { already = sessionStorage.getItem("ta_reloaded_for") || ""; }
+  catch (e) { already = ""; }
+  if (already === b.commit) return;      // tried once already; do not loop
+  try { sessionStorage.setItem("ta_reloaded_for", b.commit); } catch (e) {}
+  location.reload();
+}
+
 function buildChip(ov) {
   const b = (ov && ov.build) || null;
   if (!b || !b.commit) return "";
@@ -899,6 +931,7 @@ async function tick() {
   if (acct !== S.account) return;              // a stale answer for the old account
   S.pollFails = 0;
   S.gone = 0;
+  watchBuild(ov);
   rememberAccount();                           // it answered, so it is real
 
   // the overview carries the account list, so the rail refreshes for free
