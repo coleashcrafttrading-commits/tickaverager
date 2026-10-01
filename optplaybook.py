@@ -561,7 +561,29 @@ class PlayPosition:
 
     @property
     def is_credit(self) -> bool:
-        return self.kind == P.CREDIT_SPREAD
+        """Whether this position was OPENED FOR A CREDIT, i.e. closed by buying
+        it back.
+
+        A SHORT_SINGLE belongs here and did not used to. A cash-secured put is
+        sold to open: premium comes in, and the way out is to buy it back
+        cheaper. Reading it as a debit got three separate things wrong at once
+        and the loudest was the mark -- `_mark` sums a sold leg POSITIVE, so the
+        Wheel's put came to +1.45, the "a debit must price negative" guard
+        fired, and every cycle logged "UNPRICED: the book prices this debit
+        position at +1.45, which is the wrong side of zero". An unpriced
+        position has no mark, and a position with no mark cannot reach its own
+        take-profit. Measured 1 Oct 2026 on both accounts, on every cycle, from
+        the moment the first short put filled.
+
+        The P/L sign (`entry - mark` rather than `mark - entry`) and the manage
+        branch (buy back when the mark falls TO the target, not when it rises)
+        were wrong in the same direction for the same reason.
+
+        `open_risk` is the one caller that must NOT simply follow this
+        flag, because a credit SPREAD's risk is its width and a single short
+        leg has no width. It is handled there, explicitly.
+        """
+        return self.kind in (P.CREDIT_SPREAD, P.SHORT_SINGLE)
 
     def short_legs(self) -> list:
         return [l for l in self.legs if l.get("side") == "sell"]
@@ -824,7 +846,23 @@ class Ledger:
             ct = p.contracts or (p.requested if p.state == "pending" else 0)
             if p.entry_net is None or not ct:
                 continue
-            if p.is_credit:
+            if p.kind == P.SHORT_SINGLE:
+                # A SINGLE SHORT LEG HAS NO WIDTH, so the spread arithmetic
+                # below would call it `max(0, 0 - credit)` = ZERO and report a
+                # cash-secured put as risking nothing. Its risk is the
+                # collateral the broker actually holds:
+                #   short PUT  -- strike x 100 x contracts, less the credit:
+                #                 assignment buys the shares at the strike.
+                #   short CALL -- COVERED by shares this account already owns,
+                #                 so it commits no further cash. It is not
+                #                 free -- the shares can be called away -- but
+                #                 that is the stock's risk and is already
+                #                 counted wherever the stock is.
+                leg = (p.legs or [{}])[0]
+                if str(leg.get("right", "")).lower() == "put":
+                    strike = float(leg.get("strike") or 0.0)
+                    total += max(0.0, strike - abs(p.entry_net)) * MULT * ct
+            elif p.is_credit:
                 # width less credit; width is recoverable from the strikes
                 ks = sorted(float(l.get("strike") or 0.0) for l in p.legs)
                 width = (ks[-1] - ks[0]) if len(ks) >= 2 else 0.0
@@ -2617,8 +2655,17 @@ class Playbook:
                            rest_attempts=n, rest_refused_at=time.time(),
                            rest_kind=kind, rest_session=sess,
                            rest_order_id="", rest_contracts=0)
+        # `rest_kind`, NOT `kind`. decide()'s first positional parameter IS
+        # `kind`, so passing a second one as a keyword raised "got multiple
+        # values for argument 'kind'" -- inside the handler that records a
+        # REFUSED resting exit. The refusal was never logged and the cover path
+        # raised instead, so the one position whose target the broker had
+        # rejected was also the one the system then said nothing about.
+        # Measured 1 Oct 2026 on PA3ILNUY5E4F. The ledger record directly above
+        # has always spelled this field `rest_kind`; this now matches it.
         self.decide("target_rest_refused", id=pos.id, symbol=pos.symbol,
-                    limit=pos.target_px, attempt=n, kind=kind, session=sess,
+                    limit=pos.target_px, attempt=n, rest_kind=kind,
+                    session=sess,
                     error=str(error)[:300],
                     note=("the loop will manage the target instead"
                           if final else

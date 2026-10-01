@@ -666,6 +666,74 @@ check('no literal buy_to_open survives either',
 
 print()
 print("=" * 78)
+print("18. A SHORT SINGLE IS A CREDIT, AND ITS RISK IS THE COLLATERAL")
+print("=" * 78)
+# is_credit was `kind == CREDIT_SPREAD`, so the Wheel's cash-secured put was
+# read as a DEBIT. _mark sums a sold leg POSITIVE, so the put priced at +1.45,
+# the "a debit must price negative" guard fired, and every cycle on both
+# accounts logged "UNPRICED: the book prices this debit position at +1.45,
+# which is the wrong side of zero". An unpriced position has no mark, and a
+# position with no mark can never reach its take-profit.
+_PP = PB.PlayPosition
+
+def _pos(kind, legs, net, ct=1, **kw):
+    return _PP(id="t", symbol="NVDA", play="wheel", kind=kind,
+               expiry=str(EXP), legs=legs, entry_net=net, contracts=ct,
+               state="open", **kw)
+
+_short_put = _pos(P.SHORT_SINGLE,
+                  [{"symbol": "O", "right": "put", "strike": 222.5, "side": "sell"}],
+                  1.45)
+check("a short single is a credit", _short_put.is_credit, True)
+check("a credit spread still is", _pos(P.CREDIT_SPREAD,
+      [{"symbol": "A", "right": "put", "strike": 730, "side": "sell"},
+       {"symbol": "B", "right": "put", "strike": 728, "side": "buy"}],
+      0.26).is_credit, True)
+check("a long single is NOT", _pos(P.LONG_SINGLE,
+      [{"symbol": "C", "right": "call", "strike": 230, "side": "buy"}],
+      4.10).is_credit, False)
+
+# open_risk must NOT follow is_credit blindly: a single short leg has no
+# width, and the spread arithmetic would report a cash-secured put at ZERO.
+class _Led:
+    def __init__(self, rows): self._r = rows
+    def open_positions(self): return self._r
+_led = PB.Ledger.__new__(PB.Ledger)
+_led.open_positions = lambda: [_short_put]
+risk = PB.Ledger.open_risk(_led)
+check("a cash-secured put's risk is strike x 100 less the credit, not zero",
+      risk, round((222.5 - 1.45) * 100, 2))
+
+_short_call = _pos(P.SHORT_SINGLE,
+                   [{"symbol": "O", "right": "call", "strike": 240.0, "side": "sell"}],
+                   1.10)
+_led.open_positions = lambda: [_short_call]
+check("a COVERED call commits no further cash", PB.Ledger.open_risk(_led), 0.0)
+
+_led.open_positions = lambda: [_pos(P.CREDIT_SPREAD,
+    [{"symbol": "A", "right": "put", "strike": 730, "side": "sell"},
+     {"symbol": "B", "right": "put", "strike": 728, "side": "buy"}], 0.26)]
+check("a credit spread is still width less credit",
+      PB.Ledger.open_risk(_led), round((2.0 - 0.26) * 100, 2))
+
+_led.open_positions = lambda: [_pos(P.LONG_SINGLE,
+    [{"symbol": "C", "right": "call", "strike": 230, "side": "buy"}], 4.10)]
+check("a long option still risks its premium",
+      PB.Ledger.open_risk(_led), 410.0)
+
+# And the collision that crashed the refusal handler.
+import inspect as _i18
+check("decide()'s first parameter is still named kind",
+      list(_i18.signature(PB.Playbook.decide).parameters)[1], "kind")
+_src18 = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+check("no decide() call passes kind= alongside the positional one",
+      "attempt=n, kind=kind" in _src18, False)
+check("it uses rest_kind, matching the ledger field beside it",
+      "rest_kind=kind" in _src18, True)
+
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:
