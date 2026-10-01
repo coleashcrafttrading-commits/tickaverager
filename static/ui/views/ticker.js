@@ -1248,6 +1248,21 @@ async function playClose(sym, id) {
 function stratCards(d) {
   const list = attachedStrats(d);
   if (!list.length) {
+    /* NOT LOADED IS NOT EMPTY. /api/hub/ticker carries the engine cards, and
+       until it answers this function has no idea whether anything runs here.
+       Saying "No strategy runs here" over an unanswered read told the owner
+       his Wheel was unattached while the server was reporting it live on that
+       exact symbol -- and the bank list below, which loads separately and
+       faster, then printed the same strategy as an entry "hub has no engine
+       card for". One unanswered fetch, two confident and opposite claims. */
+    if (!d || !d.strategies) {
+      return emptyState({
+        title: "Reading this ticker…",
+        body: `Whether anything trades ${esc((d && d.symbol) || "this symbol")}
+          has not been read yet. This is not an answer, it is the absence of
+          one — nothing is being claimed about what is attached.`,
+      });
+    }
     return emptyState({
       title: "No strategy runs here",
       body: `${esc(d.symbol)} is a symbol this account watches. It carries its
@@ -1399,6 +1414,12 @@ function bankOnlyCards(sym) {
       The cards above are hub's and are unaffected.</div>`;
   }
   if (!H.att) return "";
+  /* AND NOT UNTIL HUB HAS ANSWERED. `coveredIds()` reads hub's engine cards;
+     with those still in flight it is empty, so EVERY attachment looks
+     uncovered and the whole bank list renders under a heading that says hub
+     has no engine card for it. That is the second half of the same bug as
+     above, and it is the half the owner actually saw. */
+  if (!H.d || !H.d.strategies) return "";
   const on = coveredIds();
   const extra = H.att.filter((a) => !on.has(a.id));
   if (!extra.length) return "";

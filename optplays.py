@@ -131,6 +131,13 @@ class Play:
                 "suggested": list(self.suggested)}
 
 
+#: The Wheel's floor, in the owner's words: "i want to always have at least 3
+#: days of dte". It bounds the SHORTENED expiry the earnings rule picks, so
+#: dodging a print can never put the position into a 1-day contract where the
+#: spread is the whole trade.
+MIN_WHEEL_DTE = 3
+
+
 PLAYS: dict = {
     "index-put-credit-spread": Play(
         id="index-put-credit-spread",
@@ -223,9 +230,27 @@ PLAYS: dict = {
             # in real listed strikes, not dollars.
             "call_strikes_above": 1,
             "one_per_session": True,
+            # ---- added 1 Oct 2026, all four on the owner's instruction ----
+            # "i only want to open one contract at a time". `contracts: 1` is
+            # the SIZE of an entry; this is how many entries may be open at
+            # once, and without it the play opens a fresh position every cycle
+            # it is eligible. The playbook honours max_open only when the
+            # assignment sets it, which is why it has to be here.
+            "max_open": 1,
+            # "i want to open it at the same time everyday, i think after all
+            # of the morning volatility has died down". The Wheel had NO
+            # time-of-day window at all -- only the index spread did -- so it
+            # would have fired in the opening auction. 10:30 ET is the same
+            # hour he already chose for the index spreads (09:30 Central).
+            "entry_after_et": "10:30",
+            "entry_before_et": "15:30",
+            # "i want to always have at least 3 days of dte". The floor on the
+            # expiry the earnings rule may shorten to; see P.wheel_expiry.
+            "min_dte": MIN_WHEEL_DTE,
         },
         editable=("contracts", "short_delta", "cadence", "target_dte",
-                  "profit_pct", "call_strikes_above"),
+                  "profit_pct", "call_strikes_above", "max_open",
+                  "entry_after_et", "entry_before_et", "min_dte"),
         suggested=("SPY", "QQQ", "AAPL", "MSFT", "NVDA"),
     ),
     "mabb": Play(
@@ -320,6 +345,87 @@ def pick_expiry(expirations, target_dte: int, *,
 def dte(expiry: _dt.date, *, today: Optional[_dt.date] = None) -> int:
     today = today or _dt.datetime.now(NY).date()
     return (expiry - today).days
+
+
+def wheel_expiry(expirations, target_dte: int, *,
+                 earnings: Optional[_dt.date] = None,
+                 earnings_known: bool = True,
+                 today: Optional[_dt.date] = None,
+                 min_dte: int = MIN_WHEEL_DTE) -> tuple:
+    """`(expiry, why)` for a short premium entry that must dodge earnings.
+
+    THE OWNER'S RULE, 1 Oct 2026, verbatim in substance: *"if earnings falls
+    inside the next window of our option, we either do a closer dte so the date
+    falls outside or we just skip that week, and i want to always have at least
+    3 days of dte -- if earnings falls before that we wait till after earnings
+    and continue the wheel."*
+
+    So, in order:
+
+      1. The normal pick -- the first listing at or beyond `target_dte`,
+         forward only, exactly as `pick_expiry` does it.
+      2. If the print lands on or before that expiry, SHORTEN: take the longest
+         listing that still expires strictly before the print.
+      3. That shortened expiry must still be at least `min_dte` days out. If no
+         listing clears both bars, there is no trade -- WAIT for the print and
+         resume after it.
+
+    WHY `earnings <= expiry` AND NOT `<`. An expiry ON the earnings date is
+    only safe when the company reports after the close, and `mktfeed` measures
+    that the reporting session is supplied for just 2% of rows past 31 days and
+    a minority even inside two weeks. Treating the report date as unsafe is the
+    one reading that is correct whether the print lands before the open or
+    after the close, so it is the one used.
+
+    UNKNOWN IS NOT CLEAR. `earnings_known=False` returns no expiry, because the
+    whole point of `optcal`'s contract is that an unmeasured schedule blocks
+    short premium rather than clearing it. `earnings=None` with
+    `earnings_known=True` is the opposite and legitimate answer -- an index ETF
+    does not report -- and trades normally.
+
+    Returns `(None, why)` for every refusal, and the `why` is the sentence the
+    dashboard prints, so it names the dates rather than saying "blocked".
+    """
+    today = today or _dt.datetime.now(NY).date()
+    floor = max(0, int(min_dte))
+    usable = sorted({e for e in expirations if (e - today).days >= floor})
+    if not usable:
+        return None, ("no listed expiry is at least %d days out, which is this "
+                      "play's floor" % floor)
+
+    if not earnings_known:
+        return None, ("this symbol's earnings schedule is unknown, and an "
+                      "unknown schedule blocks short premium rather than "
+                      "clearing it -- run `mktfeed.py sweep`, or assert the "
+                      "schedule in state/earnings.json")
+
+    want = pick_expiry(usable, target_dte, today=today)
+    if want is None:
+        # Nothing at or beyond the target: the longest listing that clears the
+        # floor is the honest answer, and the caller is told it is short.
+        want = usable[-1]
+
+    if earnings is None:
+        return want, ("no earnings scheduled for this symbol, so the %d-day "
+                      "expiry %s stands" % ((want - today).days, want))
+
+    if earnings > want:
+        return want, ("earnings %s falls after the %s expiry (%d DTE), so the "
+                      "position is closed before the print"
+                      % (earnings, want, (want - today).days))
+
+    # The print is inside the contract's life. Shorten to clear it.
+    before = [e for e in usable if e < earnings]
+    if before:
+        pick = before[-1]
+        return pick, ("earnings %s falls inside the %s expiry, so this is "
+                      "shortened to %s (%d DTE) to expire before the print"
+                      % (earnings, want, pick, (pick - today).days))
+
+    return None, ("earnings %s is %d day(s) away and the soonest expiry that "
+                  "clears this play's %d-day floor is %s, which spans the "
+                  "print -- so the wheel waits for earnings and resumes after"
+                  % (earnings, (earnings - today).days, floor, usable[0]))
 
 
 # ============================================================ strike picking

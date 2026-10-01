@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+import pathlib
 import tempfile
 
 _scratch = os.path.join(tempfile.gettempdir(), "tickaverager_test_wm")
@@ -281,6 +282,126 @@ st_c, _ = P.build_mabb("X", cgrid, EXP, 105.0, action="sell", right="call",
                        params=naked, shares_held=100)
 check("with 100 shares held the single call IS allowed",
       st_c is not None and len(st_c.legs) == 1, True)
+
+# ===========================================================================
+print()
+print("=" * 78)
+print("13. THE WHEEL'S EXPIRY DODGES EARNINGS, AND ITS ROUTING IS PINNED")
+print("=" * 78)
+# ===========================================================================
+# Two separate failures live here, and the second one is the reason the Wheel
+# had never traded.
+#
+# 1. THE EARNINGS RULE (owner, 1 Oct 2026): "if earnings falls inside the next
+#    window of our option, we either do a closer dte so the date falls outside
+#    or we just skip that week, and i want to always have at least 3 days of
+#    dte -- if earnings falls before that we wait till after earnings."
+#
+# 2. THE ROUTING. `build_short_single` was written, documented and tested, and
+#    the ONLY caller in the whole repo was `build_mabb`. `_propose_one`
+#    branched on CREDIT_SPREAD and then fell through to `build_long_single`
+#    for everything else -- so a SHORT_SINGLE play was handed to the LONG
+#    builder with direction=None, and an armed Wheel would have BOUGHT an
+#    option instead of selling one. Nothing caught it because nothing had ever
+#    been armed.
+import datetime as _d13
+
+TODAY = _d13.date(2026, 10, 1)
+# A normal weekly grid: every Friday out to seven weeks, plus two dailies.
+WEEKLIES = [TODAY + _d13.timedelta(days=n) for n in (1, 2, 9, 16, 23, 30, 37)]
+
+# ---- no earnings at all (an index ETF) ----
+exp, why = P.wheel_expiry(WEEKLIES, 7, earnings=None, earnings_known=True,
+                          today=TODAY)
+check("no earnings -> the normal 7-day pick", exp, TODAY + _d13.timedelta(days=9))
+check("and it says so", "no earnings scheduled" in why, True)
+
+# ---- earnings comfortably after the expiry ----
+exp, why = P.wheel_expiry(WEEKLIES, 7, earnings=_d13.date(2026, 11, 18),
+                          earnings_known=True, today=TODAY)
+check("earnings after expiry -> unchanged", exp, TODAY + _d13.timedelta(days=9))
+check("and the reason names the print", "2026-11-18" in why, True)
+
+# ---- earnings INSIDE the window -> shorten to clear it ----
+# Shown twice on purpose, because the FLOOR is what decides the answer and the
+# two readings are opposite. The grid here has listings 1 and 2 days out and
+# then nothing until day 9, and the print is on day 7.
+exp, why = P.wheel_expiry(WEEKLIES, 7, earnings=_d13.date(2026, 10, 8),
+                          earnings_known=True, today=TODAY, min_dte=1)
+check("with a 1-day floor it shortens", exp, TODAY + _d13.timedelta(days=2))
+check("to an expiry strictly before the print",
+      exp < _d13.date(2026, 10, 8), True)
+
+# With the owner's real floor of 3 days that 2-day listing is not allowed, so
+# there is nothing between the floor and the print and the play WAITS. This is
+# his "if earnings falls before that we wait till after earnings".
+exp, why = P.wheel_expiry(WEEKLIES, 7, earnings=_d13.date(2026, 10, 8),
+                          earnings_known=True, today=TODAY)
+check("at the default 3-day floor there is no legal shorter expiry", exp, None)
+check("so it waits for the print", "waits for earnings" in why, True)
+check("and the default floor really is 3", P.MIN_WHEEL_DTE, 3)
+
+# ---- a print far enough out that a legal shortened expiry exists ----
+exp, why = P.wheel_expiry(WEEKLIES, 30, earnings=_d13.date(2026, 10, 20),
+                          earnings_known=True, today=TODAY, min_dte=3)
+check("a 30-day target shortens to the last expiry before the print",
+      exp, TODAY + _d13.timedelta(days=16))
+check("which clears the floor", (exp - TODAY).days >= 3, True)
+check("and expires before the print", exp < _d13.date(2026, 10, 20), True)
+
+# ---- an expiry ON the earnings date is NOT safe ----
+# The session is supplied for a minority of rows, so a report date is treated
+# as unsafe whichever side of the close it lands on.
+exp, why = P.wheel_expiry(WEEKLIES, 7, earnings=TODAY + _d13.timedelta(days=9),
+                          earnings_known=True, today=TODAY, min_dte=1)
+check("expiry ON the print date is rejected and shortened",
+      exp, TODAY + _d13.timedelta(days=2))
+
+# ---- UNKNOWN BLOCKS. The asymmetry optcal is built on. ----
+exp, why = P.wheel_expiry(WEEKLIES, 7, earnings=None, earnings_known=False,
+                          today=TODAY)
+check("unknown schedule -> no expiry", exp, None)
+check("unknown says how to fix it", "mktfeed" in why, True)
+
+# ---- the floor is absolute ----
+exp, why = P.wheel_expiry([TODAY + _d13.timedelta(days=1)], 7, earnings=None,
+                          earnings_known=True, today=TODAY, min_dte=3)
+check("a grid with nothing past the floor -> nothing", exp, None)
+check("and says what the floor is", "3 days out" in why, True)
+
+# ---- the routing bug itself ----
+check("the wheel is a SHORT_SINGLE", P.play("wheel").kind, P.SHORT_SINGLE)
+_pb = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+check("the propose path has a SHORT_SINGLE branch",
+      "elif spec.kind == P.SHORT_SINGLE:" in _pb, True)
+check("which calls the wheel builder", "self._build_wheel(" in _pb, True)
+check("and the builder exists", "def _build_wheel(" in _pb, True)
+# CODE, not comments. The branch's own comment names `build_long_single` while
+# explaining the bug it fixes, and a check that cannot tell those apart forbids
+# writing down what went wrong.
+_branch = (_pb.split("elif spec.kind == P.SHORT_SINGLE:")[1]
+              .split("else:")[0])
+_branch_code = "\n".join(ln.split("#", 1)[0] for ln in _branch.splitlines())
+check("a SHORT_SINGLE can no longer reach build_long_single",
+      _branch_code.count("build_long_single"), 0)
+check("and the branch really does call the short builder",
+      "_build_wheel" in _branch_code, True)
+check("the expiry for a short single goes through wheel_expiry",
+      "P.wheel_expiry(" in _pb, True)
+check("and the earnings read pairs known with the date",
+      "def _earnings_for(" in _pb and "earnings_known(" in _pb, True)
+
+# ---- the owner's four params are actually set on the play ----
+_w = P.PLAYS["wheel"].params
+check("one position at a time", _w.get("max_open"), 1)
+check("one contract per entry", _w.get("contracts"), 1)
+check("a fixed entry time, after the morning", _w.get("entry_after_et"), "10:30")
+check("and a close for the window", _w.get("entry_before_et"), "15:30")
+check("the 3-day floor is on the play", _w.get("min_dte"), 3)
+for k in ("max_open", "entry_after_et", "entry_before_et", "min_dte"):
+    check("%s is editable from the dashboard" % k,
+          k in P.PLAYS["wheel"].editable, True)
+
 
 print()
 print("=" * 78)

@@ -981,9 +981,15 @@ class Proposal:
     #: read identically.
     tier: str = ""
     budget: dict = field(default_factory=dict)
+    #: A sentence about HOW this proposal was built, as opposed to why it was
+    #: refused. The Wheel's expiry rule writes here when it shortens an expiry
+    #: to clear an earnings print: the trade happened, and the reason it is a
+    #: 4-day contract instead of a 7-day one belongs on the record.
+    note: str = ""
 
     def as_dict(self) -> dict:
         return {"symbol": self.symbol, "play": self.play, "ok": self.ok,
+                "note": self.note,
                 "reason": self.reason,
                 "structure": self.structure.as_dict() if self.structure else None,
                 "plan": self.plan.as_dict() if self.plan else None,
@@ -1917,11 +1923,29 @@ class Playbook:
             pr.reason = "no spot for %s" % a.symbol
             return
         exps = self.od.expirations(a.symbol, max_dte=int(params["target_dte"]) + 45)
-        expiry = P.pick_expiry(exps, int(params["target_dte"]))
-        if expiry is None:
-            pr.reason = ("no listed expiry at or beyond %d days for %s"
-                         % (params["target_dte"], a.symbol))
-            return
+        if spec.kind == P.SHORT_SINGLE:
+            # SHORT PREMIUM DODGES EARNINGS. The expiry is chosen by the rule
+            # in P.wheel_expiry rather than by the target alone, because a put
+            # sold across a print is the one trade this play must never make --
+            # and implied volatility is HIGH into earnings precisely because
+            # the market expects the gap, so an income screen walks straight
+            # into it. The calendar comes from mktfeed via optcal, whose
+            # contract is that an unknown schedule BLOCKS.
+            known, edate = self._earnings_for(a.symbol)
+            expiry, why_exp = P.wheel_expiry(
+                exps, int(params["target_dte"]), earnings=edate,
+                earnings_known=known, today=self.now().date(),
+                min_dte=int(params.get("min_dte") or P.MIN_WHEEL_DTE))
+            if expiry is None:
+                pr.reason = why_exp
+                return
+            pr.note = why_exp
+        else:
+            expiry = P.pick_expiry(exps, int(params["target_dte"]))
+            if expiry is None:
+                pr.reason = ("no listed expiry at or beyond %d days for %s"
+                             % (params["target_dte"], a.symbol))
+                return
         rows, why = self.chain_rows(a.symbol, expiry, spot)
         if not rows:
             pr.reason = why
@@ -1933,6 +1957,17 @@ class Playbook:
                 a.symbol, rows, expiry, short_delta=float(params["short_delta"]),
                 strikes_below=int(params["strikes_below"]), contracts=ct,
                 play_id=a.play)
+        elif spec.kind == P.SHORT_SINGLE:
+            # THE WHEEL, AND THIS BRANCH DID NOT EXIST. `build_short_single`
+            # was written, documented and unit-tested, and the only caller in
+            # the repo was `build_mabb`. A SHORT_SINGLE play reaching this
+            # `if` fell through to the `else` below and was handed to
+            # `build_long_single` with `direction=None` -- so an armed Wheel
+            # would have BOUGHT an option instead of selling one. It never
+            # fired only because the plays have never been armed. Measured
+            # 1 Oct 2026 by asking P.play("wheel").kind and following the
+            # branch; test_wheelmabb section 13 now pins the routing.
+            st, build_why = self._build_wheel(a, rows, expiry, ct, params)
         else:
             st, build_why = P.build_long_single(
                 a.symbol, rows, expiry, spot, direction=direction,
@@ -1968,6 +2003,106 @@ class Playbook:
             pr.reason = "%s | FROZEN is set" % build_why
             return
         self._submit(a, st, plan, pr, direction, sess, sigs, res)
+
+    def _earnings_for(self, symbol: str) -> tuple:
+        """`(known, date_or_None)` for this symbol's next earnings print.
+
+        Reads `optcal`, which is the repo's one authority on event dates and
+        whose contract this depends on: `next_earnings` returns None both for
+        UNKNOWN and for known-with-nothing-upcoming, so it is paired with
+        `earnings_known` to tell them apart. Conflating those two is how an
+        unknown becomes a clear and the Wheel sells into a print.
+
+        The calendar itself comes from `mktfeed`'s daily sweep, installed into
+        optcal at boot. If that sweep has not run, optcal answers UNKNOWN and
+        this play stands down -- which is the safe direction, and is reported
+        as a sentence rather than as silence.
+
+        Never raises: a broken calendar must read as unknown (which blocks),
+        never as clear.
+        """
+        try:
+            import optcal
+            cal = optcal.EventCalendar(None, state_dir=self.state_dir)
+            sym = str(symbol).upper()
+            if not cal.earnings_known(sym):
+                return False, None
+            return True, cal.next_earnings(sym, now=self.now().date())
+        except Exception as e:                                  # noqa: BLE001
+            self.log.warning("earnings lookup failed for %s: %r", symbol, e)
+            return False, None
+
+    def _build_wheel(self, a: P.Assignment, rows, expiry, ct: int,
+                     params: dict) -> tuple:
+        """The Wheel's leg: a covered call if the shares are held, else a
+        cash-secured put. `(Structure, why)`.
+
+        THIS IS THE WHOLE STRATEGY IN ONE DECISION. The owner's rule is "sell
+        the 0.20 delta put a week out; if assigned, sell covered calls one
+        strike above the purchase price", and those are not two plays -- they
+        are the same play reading what the account currently holds:
+
+            flat            -> sell the cash-secured put
+            holding shares  -> sell the covered call above their cost
+
+        So the branch is on the BROKER's share position, not on a flag in the
+        ledger. Assignment happens at the clearing house overnight and nothing
+        in this process is told; the shares simply appear. Reading the broker
+        is the only way the play notices, and it is also what makes the cycle
+        self-correcting if a human buys or sells the shares by hand.
+
+        THE CALL IS PRICED OFF THE SHARES' COST, NOT OFF SPOT. `n_strikes_above`
+        walks the real listed grid from the average entry price, because "one
+        strike above what we paid" is a position on that grid and not a dollar
+        amount. Selling a call BELOW cost would lock in a loss on assignment,
+        which is the one outcome the covered-call half exists to avoid.
+
+        An uncovered call is refused inside `build_short_single` by name. This
+        account is options level 3 and Alpaca answers an uncovered short with
+        403, so the guard is here rather than in a log.
+        """
+        sym = str(a.symbol).upper()
+        shares, basis = 0.0, None
+        try:
+            pos = self.a.position(sym)
+            if pos:
+                shares = _num(pos.get("qty")) or 0.0
+                basis = _num(pos.get("avg_entry_price"))
+        except Exception as e:                                  # noqa: BLE001
+            # A failed read must not become "flat", which would sell a
+            # cash-secured put on top of shares already held.
+            return None, ("could not read %s's share position, so the wheel "
+                          "cannot tell a put entry from a covered call (%s)"
+                          % (sym, e))
+
+        need = ct * P.MULT
+        if shares >= need:
+            if basis is None:
+                return None, ("%g %s shares are held but the broker sent no "
+                              "average entry price, and the covered call is "
+                              "priced off what they cost" % (shares, sym))
+            n_up = int(params.get("call_strikes_above") or 1)
+            row = P.n_strikes_above(rows, "call", float(basis), n_up)
+            if row is None:
+                return None, ("no listed call %d strike(s) above the %.2f "
+                              "cost of the %s shares in %s"
+                              % (n_up, basis, sym, expiry))
+            return P.build_short_single(
+                sym, rows, expiry, right="call", contracts=ct,
+                strike=float(row.strike), shares_held=shares,
+                play_id=a.play)
+
+        # Flat (or short of a full contract's worth): sell the put.
+        cash = None
+        try:
+            snap = optexec.account_snapshot(self.a)
+            cash = _num(snap.get("cash"))
+        except Exception:                                       # noqa: BLE001
+            cash = None
+        return P.build_short_single(
+            sym, rows, expiry, right="put", contracts=ct,
+            target_delta=float(params["short_delta"]),
+            cash_available=cash, play_id=a.play)
 
     def _submit(self, a: P.Assignment, st, plan, pr: Proposal,
                 direction: Optional[str], sess: str, sigs: dict,
