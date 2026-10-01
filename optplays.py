@@ -227,8 +227,31 @@ PLAYS: dict = {
             # covered call is what is done about it.
             "stop_pct": 0.0,
             # How far above the SHARES' cost the covered call is sold, counted
-            # in real listed strikes, not dollars.
+            # in real listed strikes, not dollars. Used only when
+            # call_strike_mode is "above_cost".
             "call_strikes_above": 1,
+            # HOW THE COVERED CALL'S STRIKE IS CHOSEN. Two rules, because the
+            # owner has given both and they are not the same rule:
+            #
+            #   "delta"       sell the ~0.20 delta call (1 Oct 2026, and the
+            #                 default: it matches the put side, so both legs of
+            #                 the wheel are picked the same way)
+            #   "above_cost"  sell `call_strikes_above` listed strikes above
+            #                 what the shares cost (30 Sep 2026)
+            #
+            # THEY AGREE ON THE DAY THE SHARES ARRIVE and diverge afterwards.
+            # Fresh stock has a cost basis at spot, so a 0.20 delta call sits
+            # well above it. Let the stock fall and the 0.20 delta call falls
+            # with it, until it is BELOW the basis -- and a covered call struck
+            # under your cost books a loss on assignment, which is the exact
+            # outcome "one strike above the purchase price" exists to prevent.
+            # `call_floor_at_cost` is the two rules together: pick by delta,
+            # but never below the shares' cost. It is OFF by default because he
+            # asked for delta and a floor he did not ask for is a cap this code
+            # invented, which this stack has done before and been told not to.
+            "call_strike_mode": "delta",
+            "call_delta": 0.20,
+            "call_floor_at_cost": False,
             "one_per_session": True,
             # ---- added 1 Oct 2026, all four on the owner's instruction ----
             # "i only want to open one contract at a time". `contracts: 1` is
@@ -250,7 +273,8 @@ PLAYS: dict = {
         },
         editable=("contracts", "short_delta", "cadence", "target_dte",
                   "profit_pct", "call_strikes_above", "max_open",
-                  "entry_after_et", "entry_before_et", "min_dte"),
+                  "entry_after_et", "entry_before_et", "min_dte",
+                  "call_strike_mode", "call_delta", "call_floor_at_cost"),
         suggested=("SPY", "QQQ", "AAPL", "MSFT", "NVDA"),
     ),
     "mabb": Play(

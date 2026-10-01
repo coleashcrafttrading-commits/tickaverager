@@ -2122,10 +2122,44 @@ class Playbook:
 
         need = ct * P.MULT
         if shares >= need:
+            mode = str(params.get("call_strike_mode") or "delta").lower()
+            if mode == "delta":
+                # PICKED THE SAME WAY AS THE PUT, which is the owner's 1 Oct
+                # rule: both legs of the wheel at ~0.20 delta. The strike is
+                # left to build_short_single's own delta picker rather than
+                # resolved here, so one ruler chooses both sides.
+                target = float(params.get("call_delta") or 0.20)
+                st, why = P.build_short_single(
+                    sym, rows, expiry, right="call", contracts=ct,
+                    target_delta=target, shares_held=shares, play_id=a.play)
+                if st is None or not params.get("call_floor_at_cost"):
+                    return st, why
+                # The floor, when it is switched on: a covered call struck
+                # BELOW what the shares cost books a loss the moment it is
+                # assigned, which is the whole point of the other mode.
+                if basis is None:
+                    return None, ("call_floor_at_cost is on but the broker "
+                                  "sent no average entry price for the %s "
+                                  "shares, so the floor cannot be applied"
+                                  % sym)
+                struck = float(st.legs[0].strike)
+                if struck >= float(basis):
+                    return st, why
+                row = P.n_strikes_above(rows, "call", float(basis), 0)
+                if row is None:
+                    return None, ("the %.2f delta call is struck at %.2f, "
+                                  "below the %.2f the %s shares cost, and no "
+                                  "listed call sits at or above that cost in "
+                                  "%s" % (target, struck, basis, sym, expiry))
+                return P.build_short_single(
+                    sym, rows, expiry, right="call", contracts=ct,
+                    strike=float(row.strike), shares_held=shares,
+                    play_id=a.play)
+
             if basis is None:
                 return None, ("%g %s shares are held but the broker sent no "
-                              "average entry price, and the covered call is "
-                              "priced off what they cost" % (shares, sym))
+                              "average entry price, and this ticker prices its "
+                              "covered call off what they cost" % (shares, sym))
             n_up = int(params.get("call_strikes_above") or 1)
             row = P.n_strikes_above(rows, "call", float(basis), n_up)
             if row is None:
@@ -2225,10 +2259,33 @@ class Playbook:
         px = leg.mid
         if px is None:
             return {"placed": False, "reason": "no quote on %s" % leg.symbol}
+        # THE SIDE COMES FROM THE LEG. It used to be the literal "buy", with
+        # "buy_to_open" beside it, because the only single-leg play that had
+        # ever existed was `swing-atm-hourly`, which always buys. The Wheel is
+        # the first single-leg play that SELLS, and this path threw its
+        # direction away: the structure said `sell the 222.5 put, credit
+        # $144.50`, every check passed on that reading, and the body that went
+        # to Alpaca said buy. Measured 1 Oct 2026 10:34 ET on PA3ILNUY5E4F --
+        # NVDA261009P00222500, side buy, filled, a long put where a
+        # cash-secured short was intended.
+        #
+        # A structure whose direction is decided twice will disagree once. It is
+        # read once now, here, and asserted below.
+        side = str(getattr(leg, "side", "") or "").lower()
+        if side not in ("buy", "sell"):
+            return {"placed": False,
+                    "reason": "leg %s has no usable side (%r); refusing rather "
+                              "than guessing a direction" % (leg.symbol, side)}
         body = {"symbol": leg.symbol, "qty": str(int(st.contracts)),
-                "side": "buy", "type": "limit", "time_in_force": "day",
-                "position_intent": "buy_to_open",
+                "side": side, "type": "limit", "time_in_force": "day",
+                "position_intent": "%s_to_open" % side,
                 "limit_price": "%.2f" % round(float(px), 2)}
+        # The last gate before the wire: the body must still say what the
+        # structure says. This is the check that would have caught the above.
+        if body["side"] != side or not body["position_intent"].startswith(side):
+            return {"placed": False,
+                    "reason": "order body direction %r does not match the "
+                              "structure's leg %r" % (body["side"], side)}
         ex._record("order_body", {"label": st.label, "body": body,
                                   "plan": plan.as_dict()})
         if ex.dry_run:
@@ -2828,9 +2885,45 @@ def rest_refusal_kind(error: str, symbol: str = "",
 
 
 # =================================================================== the CLI
-def connect() -> Any:
-    """The account, from the environment. One place so the worker and the CLI
-    cannot end up pointed at different accounts."""
+def _state_dir_for(account_id: str = "") -> Path:
+    """The state directory for an account, without connecting to the broker.
+
+    The offline subcommands (`arm`, `disarm`, `assign`, `unassign`, `seed`)
+    deliberately do not need credentials -- arming should work when the broker
+    is down -- so they cannot get their paths from `connect()`.
+    """
+    aid = (account_id or os.environ.get("TICKAVERAGER_ACCOUNT", "")
+           or "default").strip()
+    if aid == "default":
+        return STATE_DIR
+    import accounts as _acc
+    acc = _acc.Registry().get(aid)
+    if acc is None:
+        raise PlaybookError("no such account %r" % aid)
+    return Path(acc.state_dir)
+
+
+def connect(account_id: str = "") -> tuple:
+    """`(broker, state_dir, label)` for ONE account.
+
+    THE WORKER COULD ONLY EVER SERVE THE DEFAULT ACCOUNT. This read keys from
+    `.env` and nothing else, and `main()` built its Playbook with the default
+    `state_dir`, so `tickaverager-plays` served exactly one account however
+    many were registered. The multi-account design was already complete
+    everywhere else -- `Playbook.__init__` hangs every path off `state_dir`
+    for precisely this reason, and the dashboard's `_playbook(f)` builds one
+    per account correctly -- but no worker ever ran for a second account.
+
+    Measured 1 Oct 2026: the owner's Options account (PA3YVTECEQFE) carried
+    four assignments and a valid arm file written from the dashboard, and
+    nothing ever opened on it, because no process was reading them. He noticed
+    because the entry window came and went in silence.
+
+    An empty `account_id` means the default account and keeps the old
+    behaviour byte for byte: `.env` is loaded into the environment and the
+    keys come from there. A named account is resolved through the registry,
+    which is the same path `agentctl --account` and the dashboard already use.
+    """
     env = ROOT / ".env"
     if env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
@@ -2838,15 +2931,33 @@ def connect() -> Any:
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
+
+    aid = (account_id or os.environ.get("TICKAVERAGER_ACCOUNT", "")
+           or "default").strip()
+    if aid != "default":
+        import accounts as _acc
+        acc = _acc.Registry().get(aid)
+        if acc is None:
+            raise PlaybookError("no such account %r" % aid)
+        key, sec = acc.credentials()
+        if not key or not sec:
+            raise PlaybookError("no credentials for account %r" % aid)
+        if not acc.is_paper:
+            # Nothing in this repo has ever placed a live order and the worker
+            # is not the thing that starts.
+            raise PlaybookError("account %r is not paper; refusing" % aid)
+        return (broker.Alpaca(key, sec, acc.base_url, acc.data_url, acc.feed),
+                Path(acc.state_dir), acc.id)
+
     key = os.environ.get("APCA_API_KEY_ID", "")
     sec = os.environ.get("APCA_API_SECRET_KEY", "")
     if not key or not sec:
         raise PlaybookError("no APCA_API_KEY_ID / APCA_API_SECRET_KEY")
-    return broker.Alpaca(
+    return (broker.Alpaca(
         key, sec,
         os.environ.get("APCA_API_BASE_URL", "https://paper-api.alpaca.markets"),
         os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets"),
-        os.environ.get("APCA_FEED", "sip"))
+        os.environ.get("APCA_FEED", "sip")), STATE_DIR, "default")
 
 
 def main(argv=None) -> int:
@@ -2863,43 +2974,60 @@ def main(argv=None) -> int:
     ap.add_argument("--days", type=int, default=ARM_DEFAULT_DAYS)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--period", type=float, default=CYCLE_S)
+    # WHICH ACCOUNT. No default beyond the documented one, and it reaches every
+    # store: the assignments, the arm file, the ledger and the broker all hang
+    # off it. Before this flag existed the worker served only the default
+    # account whatever was registered.
+    ap.add_argument("--account", default="",
+                    help="account id (default: $TICKAVERAGER_ACCOUNT, else "
+                         "'default')")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
+    # The offline subcommands touch the assignment and arm files directly, so
+    # they need the account's own paths too -- an `arm` that wrote the default
+    # account's file while --account named another is the same class of bug as
+    # the one this flag fixes.
+    _sd = _state_dir_for(a.account)
+    _assign_path = _sd / "options" / "plays.json"
+    _arm_path = _sd / "options" / "PLAYS_ARMED"
+
     if a.command == "seed":
-        rows = P.Assignments().seed_owner_set(by=a.by)
+        rows = P.Assignments(_assign_path).seed_owner_set(by=a.by)
         print("seeded %d assignments:" % len(rows))
         for r in rows:
             print("  %-6s %s x%s" % (r.symbol, r.play, r.effective()["contracts"]))
         return 0
     if a.command == "assign":
-        r = P.Assignments().assign(a.symbol, a.play, contracts=a.contracts,
-                                   by=a.by)
+        r = P.Assignments(_assign_path).assign(
+            a.symbol, a.play, contracts=a.contracts, by=a.by)
         print(json.dumps(r.as_dict(), indent=2))
         return 0
     if a.command == "unassign":
-        print("removed" if P.Assignments().remove(a.symbol, a.play) else "not found")
+        print("removed" if P.Assignments(_assign_path).remove(a.symbol, a.play)
+              else "not found")
         return 0
     if a.command == "arm":
         keys = [k.strip() for k in a.keys.split(",") if k.strip()]
-        arm = write_arm(keys, reason=a.reason, by=a.by, days=a.days)
+        arm = write_arm(keys, reason=a.reason, by=a.by, days=a.days,
+                        path=_arm_path)
         print(json.dumps(arm.as_dict(), indent=2))
         return 0
     if a.command == "disarm":
-        print("disarmed" if disarm() else "was not armed")
+        print("disarmed" if disarm(_arm_path) else "was not armed")
         return 0
 
-    al = connect()
+    al, _sd, _label = connect(a.account)
     if a.command == "signals":
         syms = ([a.symbol] if a.symbol
-                else P.Assignments().symbols() or ["SPY", "QQQ"])
+                else P.Assignments(_assign_path).symbols() or ["SPY", "QQQ"])
         r = optsignal.SignalReader(al)
         for s, g in sorted(r.signals(syms).items()):
             print("%-6s %-5s %s" % (s, g.direction or "-", g.reason))
         return 0
 
-    pb = Playbook(al, dry_run=a.dry_run)
+    pb = Playbook(al, state_dir=_sd, dry_run=a.dry_run)
     if a.command == "board":
         print(json.dumps(pb.board(), indent=2, default=str))
         return 0

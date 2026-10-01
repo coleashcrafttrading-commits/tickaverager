@@ -1,0 +1,72 @@
+# The options playbook worker FOR THE 'options' ACCOUNT (PA3YVTECEQFE).
+#
+# WHY A SECOND UNIT. optplaybook.py serves ONE account per process, and for a
+# long time it could only ever serve the default one: connect() read keys from
+# .env and main() built the Playbook with the default state_dir. So the owner's
+# Options account carried four assignments and a valid arm file written from
+# the dashboard, and nothing ever opened on it -- no process was reading them.
+# He noticed because the entry window came and went in silence.
+#
+# ONE WRITER PER ACCOUNT still holds, and that is the reason this is a separate
+# unit rather than a loop over accounts inside one process. Each worker owns
+# exactly one account's ledger, arm file and assignments; two processes against
+# ONE account would race the per-session guards and double-open. Two processes
+# against TWO accounts share nothing at all.
+#
+# The original single-account unit below is unchanged and still serves the
+# default account.
+#
+# WHY THIS IS A SEPARATE UNIT from tickaverager.service, rather than a thread
+# inside the dashboard:
+#
+#   * THE DASHBOARD MUST NEVER SUBMIT. Two processes both proposing against one
+#     account would race the per-session and per-bar guards and could double-
+#     open a structure. One writer, one process, and the web app's /plays/cycle
+#     route is a dry-run preview precisely so that stays true.
+#   * The dashboard is the thing that gets restarted, poked and profiled. An
+#     exit path that has to run every cycle should not share a lifetime with a
+#     page somebody is reloading.
+#   * It fails independently. If uvicorn wedges, this keeps managing open
+#     positions, which is the half that matters when something is wrong.
+#
+# Install (on the VM, as root):
+#   cp deploy/tickaverager-plays-options.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now tickaverager-plays-options
+#   systemctl status tickaverager-plays-options
+#
+# It starts DISARMED and stays that way until a human writes the arm file
+# through the dashboard. Starting this unit does not start trading.
+
+[Unit]
+Description=Tick Avenger -- options playbook worker (options account)
+After=network-online.target
+Wants=network-online.target
+# Not Requires=: the playbook must keep managing open positions even if the
+# dashboard is down, which is exactly when it matters most.
+After=tickaverager.service
+
+[Service]
+Type=simple
+User=coleashcraft_trading
+WorkingDirectory=/home/coleashcraft_trading/tickaverager
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/coleashcraft_trading/tickaverager/venv/bin/python optplaybook.py serve --account options
+
+# Always come back. A worker that owns the exit path may not stay dead, and 10
+# seconds is long enough that a crash loop is visible in the journal rather
+# than being hidden by an instant restart.
+Restart=always
+RestartSec=10
+
+# A cycle that hangs on a broker call is worse than one that dies, because a
+# hung worker still looks alive. Kill it and let Restart bring it back.
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tickaverager-plays-options
+
+[Install]
+WantedBy=multi-user.target

@@ -436,6 +436,236 @@ except P.PlayError as e:
           "not_a_field" in str(e), True)
 print()
 print("=" * 78)
+print("15. THE WORKER CAN SERVE AN ACCOUNT THAT IS NOT THE DEFAULT")
+print("=" * 78)
+# optplaybook served ONE account and it was always the default: connect() read
+# keys from .env and main() built the Playbook with the default state_dir. The
+# owner's Options account carried four assignments and a valid arm file written
+# from the dashboard, and nothing ever opened on it -- no process was reading
+# them. He found it because the entry window came and went in silence.
+#
+# Playbook itself was always right (every path hangs off state_dir, and the
+# dashboard's _playbook(f) builds one per account). Only the entry point was
+# wrong, which is why this checks the ENTRY POINT.
+import inspect as _i15
+_sig = _i15.signature(PB.connect)
+check("connect takes an account", "account_id" in _sig.parameters, True)
+# A real check, and a DETERMINISTIC one. The first attempt popped the APCA env
+# vars and asserted connect("") refused -- but connect() loads .env into the
+# environment itself, so on any machine that has one the test passed for the
+# wrong reason and on CI it passed for the right one. Environment-dependent
+# tests are worse than no test. The unknown-account branch needs no credentials
+# and no .env, so that is what is checked.
+try:
+    PB.connect("no-such-account-xyz")
+    check("connect refuses an unknown account", "no error", "PlaybookError")
+except PB.PlaybookError as e:
+    check("connect refuses an unknown account by name",
+          "no-such-account-xyz" in str(e), True)
+_src = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+check("main exposes --account", '"--account"' in _src, True)
+check("the Playbook is built with that account's state dir",
+      "Playbook(al, state_dir=_sd" in _src, True)
+check("the offline subcommands use that account's stores too",
+      "_assign_path = _sd" in _src and "_arm_path = _sd" in _src, True)
+for call in ("P.Assignments(_assign_path)", "path=_arm_path", "disarm(_arm_path)"):
+    check("%s is account-scoped" % call.split("(")[0], call in _src, True)
+check("a default account still resolves to the legacy state dir",
+      PB._state_dir_for("") == PB.STATE_DIR, True)
+check("and so does the literal 'default'",
+      PB._state_dir_for("default") == PB.STATE_DIR, True)
+try:
+    PB._state_dir_for("no-such-account-xyz")
+    check("an unknown account is refused", "no error", "PlaybookError")
+except PB.PlaybookError as e:
+    check("an unknown account is refused by name",
+          "no-such-account-xyz" in str(e), True)
+# The unit that actually runs it has to name the account, or none of the above
+# reaches production.
+_unit = pathlib.Path("deploy/tickaverager-plays-options.service").read_text(
+    encoding="utf-8")
+check("the options worker unit exists and names the account",
+      "--account options" in _unit, True)
+check("and has its own syslog identity, so the two are separable in the log",
+      "SyslogIdentifier=tickaverager-plays-options" in _unit, True)
+_def_unit = pathlib.Path("deploy/tickaverager-plays.service").read_text(
+    encoding="utf-8")
+check("the default worker is untouched and still account-less",
+      "--account" in _def_unit, False)
+
+
+print()
+print("=" * 78)
+print("16. THE COVERED CALL: 0.20 DELTA, AND THE COST FLOOR WHEN IT IS ON")
+print("=" * 78)
+# The owner gave TWO rules for this strike on two days and they are not the
+# same rule:
+#   30 Sep  "sell covered calls one strike above the purchase price"
+#    1 Oct  "sell .2 delta covered calls on those shares"
+# They agree the day the shares arrive -- fresh stock has its basis at spot and
+# the 0.20 delta call sits well above it -- and diverge when the stock falls,
+# at which point the 0.20 delta call can be struck BELOW cost and book a loss
+# on assignment. Both modes exist; delta is the default because that is what he
+# last asked for; the floor is the two rules together and is OFF by default,
+# because a floor he did not ask for is a cap this code invented.
+# `chain` walks delta down 0.10 per strike from base_delta, so this grid runs
+# 0.92 at the 10 strike down to 0.12 at the 18 -- the 0.20 delta call is the 16.
+# deltas walk 0.92, 0.82, ... so the 0.20-delta call is the 17 (0.22).
+# Puts are in the same list because _build_wheel picks a PUT when the shares do
+# not cover, and a chain with no puts made that branch return None -- which
+# looked like a code bug and was a fixture bug.
+_calls = (chain("call", [10, 11, 12, 13, 14, 15, 16, 17, 18], base_delta=0.92)
+          + chain("put", [10, 11, 12, 13, 14, 15, 16, 17, 18], base_delta=0.12))
+
+class _PosBroker:
+    """Only what _build_wheel asks of a broker: the share position."""
+    def __init__(self, qty, basis):
+        self._q, self._b = qty, basis
+    def position(self, sym):
+        if not self._q:
+            return None
+        return {"qty": self._q, "avg_entry_price": self._b}
+
+def _wheel(qty, basis, **over):
+    pb = PB.Playbook.__new__(PB.Playbook)      # no broker connection needed
+    pb.a = _PosBroker(qty, basis)
+    pb.log = __import__("logging").getLogger("t16")
+    params = dict(P.PLAYS["wheel"].params); params.update(over)
+    a = P.Assignment(symbol="SOFI", play="wheel")
+    return PB.Playbook._build_wheel(pb, a, _calls, EXP, 1, params)
+
+# ---- 100 shares held -> a COVERED CALL at 0.20 delta ----
+st, why = _wheel(100, 15.00)
+check("100 shares -> something is built", st is not None, True)
+check("it is ONE leg", len(st.legs), 1)
+check("a CALL", st.legs[0].right, "call")
+check("SOLD", st.legs[0].side, "sell")
+check("one contract", st.contracts, 1)
+check("struck at the 0.20 delta (the 17), not at the cost basis",
+      st.legs[0].strike, 17.0)
+
+# ---- fewer than 100 shares -> it is NOT a covered call, it is the put ----
+st2, why2 = _wheel(40, 15.00)
+check("40 shares is not enough to cover, so it sells the PUT instead",
+      st2.legs[0].right if st2 else None, "put")
+
+# ---- no shares -> the put ----
+st3, _ = _wheel(0, None)
+check("flat -> the put", st3.legs[0].right if st3 else None, "put")
+
+# ---- the floor, OFF by default: a 0.20 delta call below cost is allowed ----
+st4, why4 = _wheel(100, 17.50)
+check("floor off: the 0.20 delta call is sold even below the 17.50 cost",
+      st4.legs[0].strike, 17.0)
+
+# ---- the floor ON: it moves up to the first strike at or above cost ----
+st5, why5 = _wheel(100, 17.50, call_floor_at_cost=True)
+check("floor on: the strike is lifted to cost or better", st5.legs[0].strike, 18.0)
+check("and it is still one short call",
+      (st5.legs[0].right, st5.legs[0].side, len(st5.legs)), ("call", "sell", 1))
+
+# ---- the floor ON but cost already below the delta strike: unchanged ----
+st6, _ = _wheel(100, 12.00, call_floor_at_cost=True)
+check("floor on, cost well below: the delta strike stands", st6.legs[0].strike, 17.0)
+
+# ---- the other mode still works ----
+st7, _ = _wheel(100, 15.00, call_strike_mode="above_cost", call_strikes_above=1)
+check("above_cost mode sells one listed strike above the 15.00 basis",
+      st7.legs[0].strike, 16.0)
+st8, _ = _wheel(100, 15.00, call_strike_mode="above_cost", call_strikes_above=2)
+check("...and two strikes above when asked", st8.legs[0].strike, 17.0)
+
+# ---- a broker that cannot answer must NOT read as flat ----
+class _BlindPos:
+    def position(self, sym):
+        raise RuntimeError("broker down")
+pb = PB.Playbook.__new__(PB.Playbook)
+pb.a = _BlindPos()
+pb.log = __import__("logging").getLogger("t16")
+st9, why9 = PB.Playbook._build_wheel(
+    pb, P.Assignment(symbol="SOFI", play="wheel"), _calls, EXP, 1,
+    dict(P.PLAYS["wheel"].params))
+check("a failed position read builds nothing", st9, None)
+check("and says why, rather than selling a put over held shares",
+      "cannot tell a put entry from a covered call" in (why9 or ""), True)
+
+
+print()
+print("=" * 78)
+print("17. THE ORDER BODY'S SIDE COMES FROM THE LEG")
+print("=" * 78)
+# THE ONE THAT COST REAL MONEY. _submit_single hard-coded side="buy" and
+# position_intent="buy_to_open" because the only single-leg play that had ever
+# existed was swing-atm-hourly, which always buys. The Wheel is the first
+# single-leg play that SELLS. Every check upstream passed on a structure that
+# correctly said "sell the 222.5 put, credit $144.50" -- and the body that went
+# to Alpaca said buy. Measured 1 Oct 2026 10:34 ET on PA3ILNUY5E4F:
+# NVDA261009P00222500, side buy, FILLED. A long put where a cash-secured short
+# was intended.
+#
+# The dry run did not catch it because the preview printed the STRUCTURE, which
+# was right. The body is the thing that reaches the broker, so the body is what
+# this checks.
+class _ExecSpy:
+    """Captures the body instead of sending it."""
+    armed = True
+    dry_run = False
+    def __init__(self): self.body = None
+    def frozen(self): return False
+    def _record(self, kind, payload):
+        if kind == "order_body": self.body = payload["body"]
+    class _A:
+        base = "https://paper-api.alpaca.markets"
+        def _req(self, *a, **k): return {"id": "fake", "status": "accepted"}
+    a = _A()
+
+class _Plan:
+    ok = True
+    def why(self): return ""
+    def as_dict(self): return {}
+
+def _body_for(right, side, strike=222.5, contracts=1):
+    leg = P.Leg("NVDA261009P00222500", right, strike, side, EXP, 1.45)
+    st = type("S", (), {"legs": [leg], "contracts": contracts,
+                        "label": "test", "kind": P.SHORT_SINGLE})()
+    ex = _ExecSpy()
+    pb = PB.Playbook.__new__(PB.Playbook)
+    out = PB.Playbook._submit_single(pb, ex, st, _Plan())
+    return ex.body, out
+
+b, out = _body_for("put", "sell")
+check("a SELL leg produces side=sell", b["side"], "sell")
+check("and sell_to_open", b["position_intent"], "sell_to_open")
+check("the order was placed", out.get("placed"), True)
+check("qty is the contract count", b["qty"], "1")
+
+b2, _ = _body_for("call", "buy")
+check("a BUY leg still produces side=buy", b2["side"], "buy")
+check("and buy_to_open", b2["position_intent"], "buy_to_open")
+
+# A leg with no usable side must REFUSE rather than default to a direction.
+# Defaulting is exactly what the old code did.
+leg = P.Leg("NVDA261009P00222500", "put", 222.5, "", EXP, 1.45)
+st = type("S", (), {"legs": [leg], "contracts": 1, "label": "t",
+                    "kind": P.SHORT_SINGLE})()
+ex = _ExecSpy()
+out = PB.Playbook._submit_single(PB.Playbook.__new__(PB.Playbook), ex, st, _Plan())
+check("a leg with no side sends nothing", out.get("placed"), False)
+check("and says it refused rather than guessing",
+      "refusing rather than guessing" in (out.get("reason") or ""), True)
+
+# And the source may not carry a hard-coded direction any more.
+_pbsrc = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+_sub = _pbsrc.split("def _submit_single(")[1].split("def _cover(")[0]
+_code = "\n".join(ln.split("#", 1)[0] for ln in _sub.splitlines())
+check('no literal "side": "buy" survives in the submit path',
+      '"side": "buy"' in _code, False)
+check('no literal buy_to_open survives either',
+      '"buy_to_open"' in _code, False)
+
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:
