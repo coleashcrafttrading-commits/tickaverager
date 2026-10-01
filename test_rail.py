@@ -567,6 +567,54 @@ def section8():
     print("       state/ %d files, md5 %s (unchanged)" % after)
 
 
+# ---------------------------------------------------------------- open P/L --
+# "a quick number of the open p/l next to the value of our position" -- and it
+# has to be ONE number covering everything held on the ticker. The row used to
+# pick shares-or-options with shares winning, which drops the short call the
+# Wheel sells against its own 100 shares.
+def section_pl():
+    section(9, "the open P/L sits beside the held value")
+    both = hub_row(symbol="SOFI",
+                   position={"qty": 100, "value": 1570.0, "open_pl": 9.0},
+                   options={"contracts": -1, "value": -15.0, "open_pl": -1.0})
+    root = dom(call("tickerRow", both, False))
+    val = one(root, "tick-val")
+    pl = one(root, "tick-pl")
+    check("the value sums shares AND options", text_of(val) == "$1555",
+          "got %r" % text_of(val))
+    check("the P/L sums both too", text_of(pl) == "+$8", "got %r" % text_of(pl))
+    check("a gain is coloured up", "up" in cls(pl), cls(pl))
+    check("and the hover says it is unrealised",
+          "unrealised" in (pl["attrs"].get("title") or "").lower(),
+          pl["attrs"].get("title"))
+
+    losing = hub_row(symbol="X",
+                     position={"qty": 100, "value": 1570.0, "open_pl": -40.0})
+    pl2 = one(dom(call("tickerRow", losing, False)), "tick-pl")
+    check("a loss is coloured down", "down" in cls(pl2), cls(pl2))
+    check("and carries no plus sign", not text_of(pl2).startswith("+"),
+          text_of(pl2))
+
+    # UNMARKED IS NOT ZERO. A position the broker has not marked reads as a
+    # dash with its reason; $0 would say "flat" in money.
+    unmarked = hub_row(symbol="Y", position={"qty": 5, "value": 50.0})
+    pl3 = one(dom(call("tickerRow", unmarked, False)), "tick-pl")
+    check("no mark -> a dash, not a zero", text_of(pl3) == "—",
+          "got %r" % text_of(pl3))
+    check("and the dash says why",
+          bool(pl3["attrs"].get("title")), "no reason on the dash")
+
+    # A flat ticker has no P/L cell at all -- `flat` already says it.
+    flat = dom(call("tickerRow", hub_row(symbol="Z"), False))
+    check("a flat ticker prints no P/L cell", not find(flat, "tick-pl"),
+          "a flat row should not carry a P/L")
+
+    # The class must be defined by a stylesheet -- the `.lnk` lesson.
+    css = (ROOT / "static" / "ui" / "theme.css").read_text(encoding="utf-8")
+    check("tick-pl is styled somewhere", ".tick-pl" in css,
+          "emitted but no sheet defines it")
+
+
 def main():
     print("test_rail.py -- the rail, run for real")
     print("scratch state: %s" % SCRATCH)
@@ -576,7 +624,7 @@ def main():
     # and without this a single structural break would hide every later
     # section, including the one that names the actual bug.
     for fn in (section1, section2, section3, section4, section5, section6,
-               section7, section8):
+               section7, section8, section_pl):
         try:
             fn()
         except Exception as e:

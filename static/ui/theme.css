@@ -432,6 +432,13 @@ body::before {
 .tick-val { color: var(--muted); min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap; }
 .tick-sep { opacity: .5; flex: none; }
+/* The open P/L beside the held value. `flex: none` so it never gets squeezed
+   out by a long value -- it is the number the owner asked to be able to read
+   at a glance, and a truncated P/L is worse than none. The up/down colours are
+   the sheet's own, so a gain here is the same green as everywhere else. */
+.tick-pl { flex: none; margin-left: 2px; font-weight: var(--w-med);
+           font-variant-numeric: tabular-nums; }
+.tick-pl.unmeasured { color: var(--faint); font-weight: var(--w-reg); }
 .tick-chips { margin-left: auto; display: flex; gap: 3px; flex: none; }
 .tick-sub { color: var(--faint); font-size: var(--fs-xs); margin-top: 3px; }
 

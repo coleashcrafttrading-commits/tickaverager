@@ -99,16 +99,43 @@ export function stratChips(cards) {
 /* ----------------------------------------------------------- the row -----
    Price, change, what is held, which strategies. Nothing in it assumes a
    ladder, and there is no branch that can print one that is not attached. */
+const num = (x) => (x === null || x === undefined || x === "") ? null
+  : (Number.isFinite(Number(x)) ? Number(x) : null);
+
+/* Everything held on this ticker, shares AND options, added up.
+
+   It used to be shares-or-options, shares winning, and that is wrong the
+   moment a ticker has both -- which is exactly what the Wheel does: 100 SOFI
+   shares with a covered call sold against them showed the shares' value and
+   silently dropped the short call. One number for "what this ticker is worth
+   to the account" has to include both legs of that.
+
+   Returns nulls rather than zeros when nothing is held, because `flat` and
+   `$0` are different claims and the row prints them differently. */
+export function heldTotals(t) {
+  const pos = t.position, opt = t.options;
+  const parts = [];
+  if (pos && num(pos.value) !== null) parts.push(["sh", pos]);
+  if (opt && num(opt.value) !== null) parts.push(["ct", opt]);
+  if (!parts.length) return { value: null, pl: null, what: "" };
+  let value = 0, pl = null;
+  const what = [];
+  for (const [unit, b] of parts) {
+    value += num(b.value);
+    const p = num(b.open_pl);
+    if (p !== null) pl = (pl === null ? 0 : pl) + p;
+    what.push(`${qty(unit === "sh" ? b.qty : b.contracts)} ${unit}`);
+  }
+  return { value, pl, what: what.join(" + ") };
+}
+
 export function tickerRow(t, on) {
   const cards = t.strategies || [];
   const st = topState(cards);
   const dot = DOT_FOR[st] || "";
-  const pos = t.position, opt = t.options;
-  const heldValue = (pos && pos.value !== null && pos.value !== undefined)
-    ? pos.value
-    : (opt && opt.value !== null && opt.value !== undefined ? opt.value : null);
-  const heldWhat = pos ? `${qty(pos.qty)} sh`
-    : (opt ? `${qty(opt.contracts)} ct` : "");
+  const held = heldTotals(t);
+  const heldValue = held.value;
+  const heldWhat = held.what;
   return `<div class="nav-item tick-item ${on ? "on" : ""}"
                data-go="ticker" data-sym="${esc(t.symbol)}"
                title="${esc(t.name || t.symbol)}">
@@ -125,7 +152,24 @@ export function tickerRow(t, on) {
       ${heldValue !== null
         ? `<span class="tick-sep">·</span>
            <span class="tick-val num" title="${esc(heldWhat + " held at the broker")
-             }">${money0(heldValue)}</span>`
+             }">${money0(heldValue)}</span>${
+          /* THE OPEN P/L, beside the value. The owner asked for "a quick number
+             of the open p/l next to the value of our position" -- so it is one
+             number, signed, coloured, and it is the UNREALISED figure on what
+             is held right now, not the day's and not the all-time. A ticker
+             holding both shares and options sums them, same as the value does.
+
+             Absent rather than zero when the broker has not marked it: an
+             unmarked position and a flat one are different, and `$0` would read
+             as the second. */
+          held.pl === null
+            ? `<span class="tick-pl unmeasured" title="${esc(
+                "nothing here carries a mark yet, so the open P/L is not known")
+               }">—</span>`
+            : `<span class="tick-pl num ${held.pl > 0 ? "up" : held.pl < 0 ? "down" : ""}"
+                 title="${esc("unrealised P/L on " + heldWhat
+                   + " held right now")}">${
+                held.pl > 0 ? "+" : ""}${money0(held.pl)}</span>`}`
         : `<span class="tick-sep">·</span>
            <span class="tick-val" title="${esc(
              "Nothing of this symbol is held at the broker right now.")
