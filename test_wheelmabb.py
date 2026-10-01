@@ -405,6 +405,37 @@ for k in ("max_open", "entry_after_et", "entry_before_et", "min_dte"):
 
 print()
 print("=" * 78)
+print("14. AN OVERRIDE CAN BE REMOVED, NOT ONLY ADDED")
+print("=" * 78)
+# `assign` merged params and never deleted, so a value typed once could not be
+# undone from anywhere -- `params: {}` merges nothing. The only "fix" was to
+# retype the current default, which pins the ticker to today's number for ever
+# and silently stops it following a later change to the play. A null now
+# clears.
+import tempfile as _tf14, pathlib as _pl14
+_store = _pl14.Path(_tf14.mkdtemp(prefix="ta_assign_")) / "plays.json"
+A = P.Assignments(_store)
+A.assign("NVDA", "wheel", params={"entry_after_et": "09:00", "contracts": 1})
+check("the override is set", A.all()[0].effective().get("entry_after_et"), "09:00")
+check("and is recorded as an override",
+      A.all()[0].params.get("entry_after_et"), "09:00")
+A.assign("NVDA", "wheel", params={})
+check("an empty params does NOT clear it (merge semantics are kept)",
+      A.all()[0].effective().get("entry_after_et"), "09:00")
+A.assign("NVDA", "wheel", params={"entry_after_et": None})
+check("a null clears it", A.all()[0].params.get("entry_after_et"), None)
+check("and the play's own default comes back",
+      A.all()[0].effective().get("entry_after_et"),
+      P.PLAYS["wheel"].params["entry_after_et"])
+check("other overrides are untouched", A.all()[0].params.get("contracts"), 1)
+try:
+    A.assign("NVDA", "wheel", params={"not_a_field": None})
+    check("clearing an unknown field is refused", "no error", "PlayError")
+except P.PlayError as e:
+    check("clearing an unknown field is still refused by name",
+          "not_a_field" in str(e), True)
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:

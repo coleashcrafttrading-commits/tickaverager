@@ -1134,7 +1134,19 @@ class Assignments:
         over = dict(params or {})
         if contracts is not None:
             over["contracts"] = int(contracts)
-        bad = [k for k in over if k not in p.params]
+        # A null CLEARS an override and returns the field to the play's own
+        # default. Without this `cur.params.update(over)` below could only ever
+        # ADD overrides: sending `params: {}` merges nothing and leaves the old
+        # value in place, so there was no way at all -- from the dashboard, the
+        # API or the CLI -- to undo a setting once it had been typed. Measured
+        # 1 Oct 2026 by setting entry_after_et to 09:00 for a dry-run check and
+        # finding it could not be put back except by naming the default
+        # explicitly, which pins the ticker to today's default for ever and
+        # silently stops it following a later change to the play.
+        clears = [k for k, v in over.items() if v is None]
+        for k in clears:
+            over.pop(k)
+        bad = [k for k in list(over) + clears if k not in p.params]
         if bad:
             raise PlayError("%s does not take %s; it takes %s"
                             % (play_id, ", ".join(sorted(bad)),
@@ -1150,6 +1162,8 @@ class Assignments:
                     added=_dt.datetime.now(_dt.timezone.utc).isoformat())
             else:
                 cur.params.update(over)
+                for k in clears:
+                    cur.params.pop(k, None)
                 cur.enabled = bool(enabled)
                 if note:
                     cur.note = note
