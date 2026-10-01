@@ -66,18 +66,29 @@ echo "service: $(systemctl is-active "$SERVICE")"
 # never required: the dashboard is the thing the owner looks at, and a missing
 # playbook unit must not fail a deploy of the share fleet. It starts disarmed,
 # so restarting it does not start trading.
-PLAYS_SERVICE=tickaverager-plays
-# Test the unit FILE rather than parsing `systemctl list-unit-files`,
-# whose output this grep did not match on the VM even with the unit
-# installed and enabled -- so the worker silently went un-restarted
-# after a deploy, which is the one thing this block exists to prevent.
-if [ -f "/etc/systemd/system/$PLAYS_SERVICE.service" ]; then
-  systemctl restart "$PLAYS_SERVICE" || true
-  sleep 3
-  echo "plays worker: $(systemctl is-active "$PLAYS_SERVICE")"
-else
-  echo "plays worker: not installed (see deploy/tickaverager-plays.service)"
-fi
+# EVERY playbook worker, not just the default account's. There is one process
+# per account, and listing only the first one here meant the options account's
+# worker kept running the code it booted with across deploy after deploy --
+# which is exactly the failure the comment below was already written about,
+# repeated for a unit that did not exist when it was written. It cost a live
+# fix: is_credit was corrected and deployed while the options worker went on
+# logging "UNPRICED ... wrong side of zero" from the old code.
+#
+# A new account's worker goes in this list. Nothing discovers them, on purpose:
+# restarting a unit nobody declared is a worse surprise than forgetting one.
+for PLAYS_SERVICE in tickaverager-plays tickaverager-plays-options; do
+  # Test the unit FILE rather than parsing `systemctl list-unit-files`,
+  # whose output this grep did not match on the VM even with the unit
+  # installed and enabled -- so the worker silently went un-restarted
+  # after a deploy, which is the one thing this block exists to prevent.
+  if [ -f "/etc/systemd/system/$PLAYS_SERVICE.service" ]; then
+    systemctl restart "$PLAYS_SERVICE" || true
+    sleep 3
+    echo "$PLAYS_SERVICE: $(systemctl is-active "$PLAYS_SERVICE")"
+  else
+    echo "$PLAYS_SERVICE: not installed (see deploy/$PLAYS_SERVICE.service)"
+  fi
+done
 echo "-- health --"
 curl -s -m 10 "http://127.0.0.1:$PORT/api/overview" | python3 -c '
 import sys, json
