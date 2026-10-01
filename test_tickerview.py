@@ -143,6 +143,9 @@ SIX = [
 def main():
     js = JS()
 
+    print("\n0. the play card reads `open` as a count, not a list")
+    section_playcard()
+
     # =================================================== 1. the contract ====
     print("\n1. the envelope and the thresholds are the PYTHON's, not a copy")
     import hub
@@ -453,6 +456,58 @@ def main():
         return 1
     print("ALL CHECKS PASSED")
     return 0
+
+
+def _strip_comments(src: str) -> str:
+    """JS source with // and /* */ comments removed.
+
+    Both styles, because the fix being checked explains itself in a BLOCK
+    comment that quotes the broken expression verbatim -- and a check that
+    only strips // would read that quotation as the bug still being present,
+    which forbids writing down what went wrong.
+    """
+    import re as _re
+    src = _re.sub(r"/\*.*?\*/", "", src, flags=_re.S)
+    return chr(10).join(ln.split("//", 1)[0] for ln in src.splitlines())
+
+
+def section_playcard():
+    """The type confusion that blanked the whole strategy panel.
+
+    hub.OptionPlayStrategy.for_ticker sends `open` as a COUNT and `positions`
+    as the rows. playCardHTML read `c.open` as the rows and called .map on it,
+    so with any play attached it threw TypeError -- and the throw went out
+    through stratCards, paintStrategyBox and paintPage, so #tkAttached kept its
+    static "Loading..." placeholder, fillBankPick never ran, the bank dropdown
+    stayed on ITS placeholder, /api/bank/entries was never requested, and
+    nothing could be attached. Measured in the browser against the live
+    dashboard on 1 Oct 2026.
+    """
+    tk = TICKER.read_text(encoding="utf-8")
+    body = tk.split("function playCardHTML(")[1].split("async function")[0]
+    # CODE, not comments: the fix's own comment quotes the broken expression,
+    # and a check that cannot tell those apart forbids writing down what went
+    # wrong.
+    code = _strip_comments(body)
+    check_true("playCardHTML no longer maps over c.open",
+               ".open || []).map" not in code)
+    check_true("it maps over c.positions instead", "c.positions" in code)
+    check_true("and still uses c.open as a NUMBER for the empty state",
+               "Number(c.open)" in code)
+
+    # And the structural guard: one card that cannot draw may not blank the
+    # panel. This is the rule the feeds in this file already follow.
+    cards = tk.split("function stratCards(")[1].split("/* =")[0]
+    check_true("stratCards draws each card inside a try", "try {" in cards)
+    check_true("...and catches what it throws", "catch (e)" in cards)
+    # The phrase is line-wrapped in the source, so this normalises whitespace
+    # rather than matching the literal -- a check that depends on where the
+    # author happened to wrap is a check that breaks on reformatting.
+    flat = " ".join(cards.split())
+    check_true("and a failed card reports itself in its own box",
+               "could not be drawn" in flat)
+    check_true("in a box of its own, not as a bare string",
+               "note bad" in cards)
 
 
 def _json(obj):

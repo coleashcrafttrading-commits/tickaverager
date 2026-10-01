@@ -1166,7 +1166,26 @@ function isPlay(c) {
 function playCardHTML(sym, c) {
   const armed = !!c.armed;
   const on = c.enabled !== false;
-  const open = (c.open || []).length;
+  /* `open` IS A COUNT AND `positions` IS THE LIST, and this read both as the
+     list. hub.OptionPlayStrategy.for_ticker sends
+         "open": len(opens),                       <- a number
+         "positions": [_play_pos_row(p) ...],      <- the rows
+     so `(c.open || []).map(...)` was `(1).map(...)`, which throws TypeError.
+
+     IT TOOK THE WHOLE PAGE WITH IT. stratCards -> paintStrategyBox ->
+     paintPage -> repaint, so the throw happened before #tkAttached was ever
+     written and before fillBankPick ran: the strategy list sat on the static
+     "Loading…" placeholder for ever, the bank dropdown stayed on its own
+     placeholder, /api/bank/entries was never even requested, and nothing could
+     be attached. Every one of those read like a server or a caching problem
+     and none of them was -- every endpoint answered 200 in under 170 ms
+     throughout.
+
+     It only fired once a play was ATTACHED, because with none attached there
+     is no play card to render. Measured 1 Oct 2026 in the browser against the
+     live dashboard; the stack is in the commit message. */
+  const rows = Array.isArray(c.positions) ? c.positions : [];
+  const open = Number.isFinite(Number(c.open)) ? Number(c.open) : rows.length;
   return `<div class="tkx-sc-ops">
     <button class="btn sm ${armed ? "" : "primary"}"
       data-play-arm="${esc(c.id)}">${armed ? "Re-arm" : "Arm"}</button>
@@ -1174,7 +1193,7 @@ function playCardHTML(sym, c) {
       armed ? "" : " disabled"}>Disarm</button>
     <button class="btn sm" data-play-enable="${esc(c.id)}"
       data-on="${on ? "0" : "1"}">${on ? "Switch off" : "Switch on"}</button>
-    ${(c.open || []).map((p) => `<button class="btn sm danger"
+    ${rows.map((p) => `<button class="btn sm danger"
       data-play-close="${esc(p.id || "")}">Close ${esc(p.id || "")}</button>`)
       .join("")}
     ${open ? "" : `<span class="faint">nothing open</span>`}</div>`;
@@ -1271,8 +1290,32 @@ function stratCards(d) {
         be. Attach one below when you want something to trade it.`,
     });
   }
-  return `<div class="tkx-strats">${
-    list.map((c) => stratCard(d.symbol, c)).join("")}</div>`;
+  /* ONE BAD CARD MAY NOT TAKE THE PANEL WITH IT.
+
+     A TypeError inside stratCard propagated out through paintStrategyBox and
+     paintPage, so the panel never got written at all: #tkAttached kept its
+     static "Loading…" placeholder and, because the throw happened partway
+     through paintPage, fillBankPick never ran either -- the bank dropdown sat
+     on ITS placeholder, /api/bank/entries was never requested, and nothing on
+     the page could be attached. Three visible failures, one exception, and the
+     two downstream ones looked exactly like a server that was not answering
+     while every endpoint was returning 200 in milliseconds.
+
+     This is the same rule the rest of this file already follows for FEEDS --
+     "a failed market read cannot take the page down" -- applied to rendering.
+     A card that cannot draw says so, in its own box, and its neighbours draw. */
+  return `<div class="tkx-strats">${list.map((c) => {
+    try {
+      return stratCard(d.symbol, c);
+    } catch (e) {
+      return `<div class="tkx-sc"><div class="tkx-sc-h">
+        <span class="tkx-sc-l">${esc((c && (c.label || c.id)) || "strategy")}</span>
+        </div><div class="note bad" style="margin:12px 0 0">This card could not
+        be drawn: ${esc(e && e.message ? e.message : String(e))}. The strategy
+        itself is unaffected — this is the page failing to render it, and the
+        other cards below are unharmed.</div></div>`;
+    }
+  }).join("")}</div>`;
 }
 
 /* ================================================== the one bank, on one ticker */
