@@ -1030,6 +1030,50 @@ class CycleResult:
 
 
 # ================================================================ the runner
+#: Whether this process has already attached the earnings calendar. Set once;
+#: `mktfeed.install()` is cheap but it is not free and this is called per
+#: symbol per cycle.
+_EARNINGS_PROVIDER_READY = False
+
+
+def _ensure_earnings_provider() -> None:
+    """Attach mktfeed's calendar to optcal, once per process.
+
+    THIS EXISTS BECAUSE THE TWO PROCESSES DISAGREED. `optcal`'s provider is
+    process-global state and it was installed in exactly one place --
+    `app.boot()`. But `app.py` is the DASHBOARD, and the process that actually
+    trades is `tickaverager-plays`, which runs `optplaybook.py serve` and never
+    imported mktfeed at all.
+
+    So the dashboard's Preview, running in the web process, read the calendar
+    and reported the Wheel would sell a put; the worker, running the identical
+    code with no provider attached, would have read UNKNOWN and refused --
+    correctly, by optcal's contract, but for a reason that was an artefact of
+    which process asked. A preview that says "this will trade" and a worker
+    that then does not is worse than either answer alone.
+
+    Measured 1 Oct 2026 at 10:03 ET, 27 minutes before the entry window, by
+    running `Playbook.chain_rows` in a bare process: both tickers came back
+    "earnings schedule is unknown" while the dashboard had just priced them.
+
+    Attaching it HERE rather than at each entry point is the fix, because the
+    next entry point will forget too. The operator's `state/earnings.json`
+    still outranks the provider, which is optcal's own rule and the reason a
+    bad feed stays correctable without a deploy.
+    """
+    global _EARNINGS_PROVIDER_READY
+    if _EARNINGS_PROVIDER_READY:
+        return
+    try:
+        import mktfeed
+        mktfeed.install()
+    except Exception:                                           # noqa: BLE001
+        # A missing feed must read as UNKNOWN, which blocks. Failing to attach
+        # is the same outcome and must not raise into a trading cycle.
+        pass
+    _EARNINGS_PROVIDER_READY = True
+
+
 class Playbook:
     """The cycle. Construct once, call cycle() on a schedule."""
 
@@ -2023,6 +2067,7 @@ class Playbook:
         """
         try:
             import optcal
+            _ensure_earnings_provider()
             cal = optcal.EventCalendar(None, state_dir=self.state_dir)
             sym = str(symbol).upper()
             if not cal.earnings_known(sym):
