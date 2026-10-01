@@ -48,7 +48,7 @@ import {
   S, VIEWS, GET, POST, DEL, act, ask, toast, el, esc,
   panel, tile, tileGrid, segmented, wireSegmented, emptyState,
   stateChip, chip, mv, mnum, measured, mreason, unmeasured, pctf,
-  money, sgn, px, qty, go, acctLabel, acctNumber,
+  money, money0, sgn, px, qty, go, acctLabel, acctNumber,
 } from "../core.js";
 import { ChartPanel, matchToBars } from "../chartpanel.js";
 /* fields.js draws BOTH settings panes on this page: `FIELD_GROUPS`/`groupHTML`
@@ -1186,6 +1186,92 @@ function playCardHTML(sym, c) {
      live dashboard; the stack is in the commit message. */
   const rows = Array.isArray(c.positions) ? c.positions : [];
   const open = Number.isFinite(Number(c.open)) ? Number(c.open) : rows.length;
+  return openContractsHTML(rows) + playOpsHTML(sym, c, rows, open, armed, on);
+}
+
+/* ------------------------------------------------- the contracts, in full --
+   WHAT IS ACTUALLY OPEN, on the ticker that holds it.
+
+   The owner was opening Alpaca in another window to read the strike, the
+   expiry and the DTE of positions this dashboard had placed itself -- "I am
+   having to go to alpaca to get that specific strike and dte and everything
+   information to qc". Every one of those numbers was already in the payload
+   (`positions[].legs`) and the card drew none of them: it printed a count and
+   a Close button whose label was an internal id.
+
+   DTE IS COMPUTED HERE AND NOWHERE ELSE. The server sends the expiry date; the
+   days remaining depend on what day it is when you look, so deriving it at
+   render time is the only way it cannot be stale. It counts CALENDAR days to
+   the expiry date, which is what every option chain means by DTE, and it reads
+   the date as noon UTC so a browser west of Greenwich does not land a day
+   early on its own timezone.
+
+   A short leg is drawn as a credit and a long one as a debit, which is the
+   sign convention the rest of this stack uses and the one the broker's own
+   screen shows. */
+/* A local numeric coercion. Deliberately NOT called `n`: this file already
+   uses that name for three different local counts, and a module-level `n`
+   would be shadowed in exactly the places it was needed. */
+const cnum = (x) => (x === null || x === undefined || x === "") ? null
+  : (Number.isFinite(Number(x)) ? Number(x) : null);
+
+function dteOf(expiry) {
+  if (!expiry) return null;
+  const d = new Date(String(expiry).slice(0, 10) + "T12:00:00Z");
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12);
+  return Math.round((d.getTime() - today) / 86400000);
+}
+
+function legLine(l) {
+  const side = String(l.side || "").toLowerCase();
+  const right = String(l.right || "").toLowerCase();
+  const word = side === "sell" ? "short" : side === "buy" ? "long" : side || "?";
+  return `<span class="tkx-leg ${side === "sell" ? "down" : "up"}"
+    >${esc(word)} ${esc(right)} ${l.strike === null || l.strike === undefined
+      ? "" : esc(l.strike)}</span>`;
+}
+
+export function openContractsHTML(rows) {
+  if (!rows.length) return "";
+  return `<div class="tkx-ctr">${rows.map((p) => {
+    const d = dteOf(p.expiry);
+    const net = cnum(p.entry_net);
+    const mark = cnum(p.mark);
+    const pl = cnum(p.pl);
+    const pct = cnum(p.pl_pct);
+    const credit = net !== null && net > 0 && String(p.kind || "").indexOf("short") >= 0;
+    return `<div class="tkx-ctr-row">
+      <div class="tkx-ctr-legs">${(p.legs || []).map(legLine).join("")}
+        <span class="tkx-ctr-x">x${esc(p.contracts === null
+          || p.contracts === undefined ? "?" : p.contracts)}</span></div>
+      <dl class="tkx-ctr-kv">
+        <dt>Expiry</dt><dd>${esc(p.expiry || "—")}${
+          d === null ? "" : ` <span class="faint">${
+            d < 0 ? "expired" : d === 0 ? "today" : d + "d"}</span>`}</dd>
+        <dt>${credit ? "Credit" : "Entry"}</dt><dd>${
+          net === null ? unmeasured("the entry price was not recorded")
+            : money(net, 2)}</dd>
+        <dt>Mark</dt><dd>${mark === null
+          ? unmeasured(p.mark_error || "nothing has marked this position yet")
+          : money(mark, 2)}</dd>
+        <dt>Open P/L</dt><dd>${pl === null
+          ? unmeasured(p.mark_error || "no mark, so no P/L")
+          : `<span class="${pl > 0 ? "up" : pl < 0 ? "down" : ""}">${
+              pl > 0 ? "+" : ""}${money0(pl)}${
+              pct === null ? "" : ` (${(pct * 100).toFixed(0)}%)`}</span>`}</dd>
+        <dt>Contract</dt><dd class="mono faint">${
+          (p.legs || []).map((l) => esc(l.symbol || "")).join(" / ") || "—"}</dd>
+      </dl>
+      ${p.adopted ? `<div class="note warn" style="margin:8px 0 0">Adopted:
+        this stack did not open it, so it is marked and swept for assignment but
+        has no profit target or stop of its own.</div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+}
+
+function playOpsHTML(sym, c, rows, open, armed, on) {
   return `<div class="tkx-sc-ops">
     <button class="btn sm ${armed ? "" : "primary"}"
       data-play-arm="${esc(c.id)}">${armed ? "Re-arm" : "Arm"}</button>

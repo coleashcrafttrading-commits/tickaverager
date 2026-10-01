@@ -965,10 +965,27 @@ async function tick() {
         return;
       }
     }
-    try {
-      const tk = await GET("/api/ticker/" + S.view.sym);
-      if (acct === S.account && S.view.kind === "ticker") S.ticker = tk;
-    } catch (e) { /* a strategy-less ticker has no ladder view; keep last */ }
+    /* ASK FOR THE LADDER VIEW ONLY WHERE THERE IS A LADDER.
+
+       `/api/ticker/{sym}` is the ENGINE's view and 404s for a symbol that has
+       no engine -- which, now that the ladder is one attachable strategy among
+       several rather than the frame the product is drawn in, is the normal
+       case and not an error. The catch below meant it did no harm, but the
+       request still went out on every poll: one 404 per second per ticker,
+       which on the options account is every ticker. It buried a real TypeError
+       under 462 console lines while that bug was being hunted.
+
+       `S.ov.tickers` IS the ladder fleet's own list, so it already answers
+       this. A ticker with no engine simply does not ask. */
+    const hasLadder = S.ov.tickers.some((t) => t.symbol === S.view.sym);
+    if (!hasLadder) {
+      if (acct === S.account && S.view.kind === "ticker") S.ticker = null;
+    } else {
+      try {
+        const tk = await GET("/api/ticker/" + S.view.sym);
+        if (acct === S.account && S.view.kind === "ticker") S.ticker = tk;
+      } catch (e) { /* the engine answered badly; keep the last good view */ }
+    }
   }
   render(false);
 

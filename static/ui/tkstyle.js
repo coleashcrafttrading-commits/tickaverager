@@ -201,6 +201,24 @@ const CSS = `
    is on the LIST, not on the card: the card still carries a full-width note,
    a seven-button control row and a settings pane. */
 .tkx-sc .tkx-kv{max-width:52ch}
+/* THE OPEN CONTRACTS, drawn on the strategy that holds them. The owner was
+   reading these off Alpaca in another window because the card showed a count
+   and a Close button labelled with an internal id. NO BACKTICKS IN THIS FILE:
+   the whole sheet is one JS template literal. */
+.tkx-ctr{display:flex;flex-direction:column;gap:var(--s2);margin-top:var(--s3)}
+.tkx-ctr-row{border:1px solid var(--line);border-radius:var(--radius);
+  padding:var(--s3);background:var(--surface-2)}
+.tkx-ctr-legs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;
+  margin-bottom:var(--s2)}
+.tkx-leg{font-size:var(--fs-xs);padding:2px 7px;border-radius:var(--radius-pill);
+  background:var(--surface-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tkx-leg.up{color:var(--up)}
+.tkx-leg.down{color:var(--down)}
+.tkx-ctr-x{font-size:var(--fs-xs);color:var(--faint)}
+.tkx-ctr-kv{display:grid;grid-template-columns:auto 1fr;gap:4px var(--s3);
+  margin:0;font-size:var(--fs-xs)}
+.tkx-ctr-kv dt{color:var(--muted)}
+.tkx-ctr-kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .tkx-contrib{margin-top:var(--s5)}
 .tkx-cap{margin-bottom:var(--s3);color:var(--muted);font-size:var(--fs-sm);
   line-height:var(--lh)}
