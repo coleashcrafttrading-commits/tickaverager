@@ -31,6 +31,7 @@ import datetime as dt
 import json
 import os
 import sys
+import datetime as _dt3
 import tempfile
 
 os.environ["TICKAVERAGER_JOURNAL"] = os.path.join(
@@ -1476,13 +1477,41 @@ def main() -> int:
                  kind=P.LONG_SINGLE, state="pending", contracts=0, requested=1,
                  entry_at="2026-09-29T18:31:00+00:00",
                  legs=[{"symbol": "META261030C00730000", "side": "buy"}])
+    # A FRESH working order is left alone -- it is about to fill.
+    _fresh = _dt3.datetime.now(_dt3.timezone.utc).isoformat()
+    _led4.record("P-2", "opened", entry_at=_fresh)
     _wb = FakeBroker(positions=[], working=[
         {"id": "o1", "symbol": "META261030C00730000", "status": "new"}])
     _pb4 = fake_playbook(_wb, _sd4, _sd4 / "ARM", _led4, dry_run=False)
     _r4 = PB.CycleResult(started=0.0)
     _pb4._reconcile(_r4)
-    check("an entry whose order is STILL WORKING is left alone", _r4.closed, 0)
+    check("a FRESH working entry is left alone", _r4.closed, 0)
     check("and its row stays open", len(_pb4.ledger.open_positions()), 1)
+
+    # ...but a STALE one is cancelled so the next cycle can re-price it. The
+    # owner's SPY and QQQ entries EXPIRED UNFILLED on three consecutive
+    # sessions (5, 6, 7 Oct 2026) because a mid-priced day limit that the book
+    # walks away from never fills -- it just sits there until the close. His
+    # instruction: "after 30 seconds if no fill, do another".
+    _sd5 = _pl2.Path(tempfile.mkdtemp(prefix="pend3_"))
+    _led5 = PB.Ledger(_sd5 / "led.jsonl")
+    _old = (_dt3.datetime.now(_dt3.timezone.utc)
+            - _dt3.timedelta(seconds=PB.ENTRY_RETRY_AFTER_S + 30)).isoformat()
+    _led5.record("P-3", "opened", symbol="META", play="swing",
+                 kind=P.LONG_SINGLE, state="pending", contracts=0, requested=1,
+                 entry_at=_old,
+                 legs=[{"symbol": "META261030C00730000", "side": "buy"}])
+    _wb5 = FakeBroker(positions=[], working=[
+        {"id": "o9", "symbol": "META261030C00730000", "status": "new"}])
+    _pb5 = fake_playbook(_wb5, _sd5, _sd5 / "ARM", _led5, dry_run=False)
+    _r5 = PB.CycleResult(started=0.0)
+    _pb5._reconcile(_r5)
+    check("a STALE working entry is cancelled at the broker", _wb5.working, [])
+    check("its row closes so the next cycle re-prices", _r5.closed, 1)
+    check("and nothing is left open", len(_pb5.ledger.open_positions()), 0)
+    check("the close says it never filled",
+          _pb5.ledger.positions()[0].close_reason.startswith(PB.NEVER_FILLED),
+          True)
 
     print(f"\n{'ALL CHECKS PASSED' if not FAIL else f'{FAIL} CHECK(S) FAILED'}")
     return 1 if FAIL else 0

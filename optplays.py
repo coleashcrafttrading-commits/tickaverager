@@ -162,10 +162,25 @@ PLAYS: dict = {
             # 15:55 cannot be managed before the close.
             "entry_before_et": "15:30",
             "one_per_session": True,
+            # HOW MANY MAY BE OPEN AT ONCE. One entry per session and ~30 days
+            # of life means a ladder: at steady state about 21 trading days'
+            # worth are open together, each expiring on its own date while a
+            # fresh one is sold the same day. The owner's instruction, 12 Oct
+            # 2026: "the goal is to open one every single day at our set dte at
+            # the same delta so we will end up having 30 open within a month
+            # and as each one closes and expires, we open another that day".
+            #
+            # It is declared here because it was NOT, and the gap bit: the
+            # owner's assignments carried a stored `max_open: 6` from before the
+            # schema was tightened, `_propose_one` honoured it, and the API
+            # refused to change OR clear it -- "index-put-credit-spread does not
+            # take max_open". A cap nobody could edit, quietly holding the
+            # ladder at six.
+            "max_open": 35,
         },
         editable=("contracts", "short_delta", "strikes_below", "target_dte",
                   "profit_pct", "stop_pct", "entry_after_et",
-                  "entry_before_et"),
+                  "entry_before_et", "max_open", "one_per_session"),
         suggested=("SPY", "QQQ"),
     ),
     "swing-atm-hourly": Play(
@@ -199,6 +214,49 @@ PLAYS: dict = {
         editable=("contracts", "target_dte", "profit_pct", "stop_pct",
                   "direction"),
         suggested=("AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA"),
+    ),
+    "zdte-put-credit-spread": Play(
+        id="zdte-put-credit-spread",
+        label="0DTE put credit spread (same-day expiry)",
+        kind=CREDIT_SPREAD,
+        summary=("Sell the ~0.10 delta put expiring TODAY, buy the put one "
+                 "strike below, an hour after the open. Ten contracts. No "
+                 "target and no stop: it is held to expiry and closed only if "
+                 "the short goes in the money."),
+        legs_desc="sell 10 puts @0.10d expiring today / buy 10 one strike lower",
+        params={
+            "contracts": 10,
+            "short_delta": 0.10,
+            # ONE strike, not two. The owner's words: "I want the long leg to
+            # be one strike lower than the short". On SPY and QQQ that is $1
+            # wide, so the risk is $100 a contract less the credit.
+            "strikes_below": 1,
+            # TODAY. pick_expiry takes the first listing at or beyond
+            # today + target_dte, so 0 selects the same-day expiry when one is
+            # listed and the next one when it is not -- which is the right
+            # answer on a day SPY has no 0DTE.
+            "target_dte": 0,
+            # NO TARGET AND NO STOP, on his instruction: "they will have no
+            # guard, simply just open them and wait for expiry that is it, if
+            # we get in the money at any point then close that is all". Zero
+            # means absent in `exit_prices`, not "exit at the entry price".
+            "profit_pct": 0.0,
+            "stop_pct": 0.0,
+            # An hour after the open.
+            "entry_after_et": "10:30",
+            # WELL INSIDE THE BROKER'S EXPIRY-DAY CUTOFF. Alpaca stops
+            # accepting option orders on expiration day at 15:30 ET for
+            # broad-based ETFs (15:15 for single names), so an entry near the
+            # cutoff could be opened and then be impossible to close. 15:00
+            # leaves half an hour in which the in-the-money guard can still act.
+            "entry_before_et": "15:00",
+            "one_per_session": True,
+            "max_open": 1,
+        },
+        editable=("contracts", "short_delta", "strikes_below", "profit_pct",
+                  "stop_pct", "entry_after_et", "entry_before_et", "max_open",
+                  "one_per_session"),
+        suggested=("SPY", "QQQ"),
     ),
     "wheel": Play(
         id="wheel",

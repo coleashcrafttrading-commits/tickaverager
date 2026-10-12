@@ -138,6 +138,28 @@ CLOSE_SHORT_AT_DTE = 2
 #: duplicated.
 EXIT_REPRICE_AFTER_S = 300.0
 
+#: AN ENTRY THAT HAS NOT FILLED IN THIS LONG IS CANCELLED AND RE-PRICED.
+#: The opening order is a DAY limit at the mid, sent once when the play becomes
+#: eligible. If the mid moves away it simply never fills and expires at the
+#: close -- measured on the owner's account, the SPY and QQQ spread entries
+#: EXPIRED UNFILLED on 5, 6 and 7 Oct 2026, three sessions running, which is
+#: most of why he had one position where he expected a ladder of them. His
+#: instruction, 12 Oct: "if the mid doesnt fill then it opens a different one
+#: and tries to get it filled, all i care about is getting a position open so
+#: after 30 seconds if no fill, do another".
+#:
+#: Cancelling is all this does. The next cycle re-prices against the CURRENT
+#: book and sends a fresh order, which is the "different one" -- re-using the
+#: stale limit would just miss again.
+ENTRY_RETRY_AFTER_S = 30.0
+
+#: The close_reason written when an entry never filled. Matched rather than
+#: re-typed, because `one_per_session` has to tell an entry that OPENED from
+#: one that was merely attempted: a cancelled entry that counted as "already
+#: opened today" would make the retry above impossible, since the first
+#: cancellation would lock the play out until tomorrow.
+NEVER_FILLED = "the entry order never filled"
+
 #: Resting the profit target can be refused for a reason that is TEMPORARY (a
 #: rate limit, a broker hiccup) or PERMANENT (the structure cannot rest as one
 #: order). A single refusal must not demote a position to loop-managed for the
@@ -638,6 +660,24 @@ class PlayPosition:
         return d
 
 
+def _age_s(iso: str):
+    """Seconds since an ISO timestamp, or None if it cannot be read.
+
+    None means "do not act on this age" -- an unreadable stamp must not be
+    treated as infinitely old, which would cancel an entry that was sent a
+    moment ago.
+    """
+    if not iso:
+        return None
+    try:
+        t = _dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=_dt.timezone.utc)
+    return (_dt.datetime.now(_dt.timezone.utc) - t).total_seconds()
+
+
 def exit_prices(entry_net: float, kind: str, profit_pct: float,
                 stop_pct: float) -> tuple:
     """(target, stop) as ABSOLUTE per-share prices for the closing order.
@@ -671,11 +711,20 @@ def exit_prices(entry_net: float, kind: str, profit_pct: float,
     """
     e = abs(float(entry_net))
     sp = float(stop_pct or 0.0)
+    # A profit_pct of 0 means NO TARGET, exactly as a stop_pct of 0 means no
+    # stop, and it did not used to. Zero went through the arithmetic below as
+    # `credit x (1 - 0)` and came back as the CREDIT ITSELF -- a resting
+    # buy-back at breakeven. On the 0DTE spread, sold for six cents, that would
+    # fill almost immediately and turn "hold it to expiry" into "scratch it at
+    # once". The 0DTE play is the first structure here with no target at all
+    # (the owner, 12 Oct 2026: "they will have no guard, simply just open them
+    # and wait for expiry"), so the two switches now behave the same at zero.
+    pp = float(profit_pct or 0.0)
     if kind in (P.CREDIT_SPREAD, P.SHORT_SINGLE):
-        target = round(e * (1.0 - float(profit_pct)), 2)
-        return target, (round(e * (1.0 + sp), 2) if sp > 0 else None)
-    target = round(e * (1.0 + float(profit_pct)), 2)
-    return target, (round(e * (1.0 - sp), 2) if sp > 0 else None)
+        return ((round(e * (1.0 - pp), 2) if pp > 0 else None),
+                (round(e * (1.0 + sp), 2) if sp > 0 else None))
+    return ((round(e * (1.0 + pp), 2) if pp > 0 else None),
+            (round(e * (1.0 - sp), 2) if sp > 0 else None))
 
 
 class Ledger:
@@ -1354,12 +1403,38 @@ class Playbook:
                 if working is None:
                     continue
                 if any(str(l.get("symbol")) in working for l in pos.legs):
-                    continue
+                    # STILL WORKING -- but for how long? A mid-priced day limit
+                    # that the book has walked away from never fills; it just
+                    # sits there until the close. After ENTRY_RETRY_AFTER_S it
+                    # is cancelled, this row closes as never-filled, and the
+                    # next cycle prices a fresh one against the current book.
+                    age = _age_s(pos.entry_at)
+                    if age is None or age < ENTRY_RETRY_AFTER_S:
+                        continue
+                    ids = set()
+                    for l in pos.legs:
+                        for oid in (working.get(str(l.get("symbol"))) or []):
+                            ids.add(oid)
+                    pulled = 0
+                    for oid in ids:
+                        try:
+                            self.a.cancel(oid)
+                            pulled += 1
+                        except Exception as e:                  # noqa: BLE001
+                            LOG.warning("entry retry: cancel %s: %r", oid, e)
+                    self.decide("entry_retry", id=pos.id, symbol=pos.symbol,
+                                play=pos.play, age_s=round(age, 1),
+                                cancelled=pulled)
+                    LOG.info("  %s entry unfilled after %.0fs -- cancelled "
+                                  "%d order(s) to re-price", pos.symbol, age,
+                                  pulled)
+                    if not pulled:
+                        continue
                 self.ledger.record(
                     pos.id, "closed",
                     state="closed", closed_at=_utc(), contracts=0,
-                    close_reason="the entry order never filled and is no "
-                                 "longer working at the broker")
+                    close_reason=NEVER_FILLED + " and is no longer working "
+                                 "at the broker")
                 self.decide("position_closed", id=pos.id, symbol=pos.symbol,
                             reason="entry never filled")
                 res.closed += 1
@@ -1609,11 +1684,47 @@ class Playbook:
             if d <= 0:
                 return "long option expires today -- close rather than let it lapse"
             return ""
+        # ===================================================================
+        # A CASH-SECURED PUT IS MEANT TO BE ASSIGNED. THAT IS THE WHEEL.
+        # ===================================================================
+        # This used to close EVERY short leg at 2 DTE regardless of P/L, and on
+        # a SHORT_SINGLE that is not a safety rule -- it is the strategy's own
+        # exit being taken away. Measured: the owner's SOXL 151 put was bought
+        # back at 4.50 against a 3.00 credit on 7 Oct 2026 purely because it was
+        # two days out, booking -$150 instead of taking the shares; the NVDA 230
+        # put went the same way for -$129. His instruction, 12 Oct: "when those
+        # soxl sells expire they better get assigned and the wheel for selling
+        # the covered calls better start right away... we can never wheel if we
+        # close out for a loss."
+        #
+        # So a short single is never force-closed. In the money it is assigned
+        # -- the cash is already reserved against the strike, the shares arrive,
+        # and the next cycle sells a covered call against them because
+        # `_build_wheel` reads the broker's share position. Out of the money it
+        # lapses and the credit is kept. Both are the plan.
+        #
+        # A SPREAD IS THE OPPOSITE CASE and the distinction is the whole point.
+        # Its short can be assigned while its long expires worthless -- a pin
+        # between the strikes leaves naked stock overnight, which can cost more
+        # than the structure's stated max loss. SPY and QQQ options are
+        # AMERICAN and settle in shares, so this is real: ten 1-wide contracts
+        # pinned at 773 is 1,000 shares, about $773,000, against a $98k account.
+        # That one is closed, and it is closed before the broker's expiry-day
+        # order cutoff because after it no order can be sent at all.
+        if pos.kind == P.SHORT_SINGLE:
+            return ""
+
         try:
             d = (_dt.date.fromisoformat(pos.expiry)
                  - self.now().date()).days
         except ValueError:
             return "cannot read the expiry %r -- close it and find out why" % pos.expiry
+        if d > 0:
+            # NOT expiry day: hold. A defined-risk spread has nothing to fear
+            # from time alone, and closing early for a drawdown is a stop --
+            # which the owner removed on purpose. `stop_pct` still applies in
+            # `_manage` and is his own number.
+            return ""
         if d <= 0:
             # optguard.flatten_deadline reads the exchange calendar and already
             # FAILS CLOSED -- an unreadable calendar returns readable=False and
@@ -1621,20 +1732,65 @@ class Playbook:
             # itself failing, which is the same class of failure and gets the
             # same answer: flattening early costs a spread, flattening late
             # costs an assignment, and they are not the same size.
+            itm, why_itm = self._short_itm(pos)
+            if itm is False:
+                # OUT OF THE MONEY ON EXPIRY DAY IS THE ENTIRE POINT OF SELLING
+                # IT. It lapses, the credit is kept, and nothing is sent.
+                # Alpaca's own docs describe this path: an out-of-the-money
+                # contract's position goes to zero with an "Option Expiry"
+                # record and a ZERO net amount. There is no blanket sweep of
+                # expiring positions to work around -- the only liquidation
+                # language in their support pages is about an account lacking
+                # the buying power to cover an EXERCISE.
+                return ""
             try:
                 dl = optguard.flatten_deadline(self.a)
                 past, why = optguard.past_deadline(dl)
             except Exception as e:
-                return ("expires today and the calendar could not be read "
-                        "(%s) -- treating it as past the deadline" % e)
+                return ("expires today, the short is in the money (%s) and the "
+                        "calendar could not be read (%s) -- treating it as past "
+                        "the deadline" % (why_itm, e))
             if past:
-                return "expires today, past the flatten deadline (%s)" % why
-            return ("expires today -- short legs do not go into the bell (%s)"
-                    % why)
-        if d <= CLOSE_SHORT_AT_DTE:
-            return ("short leg is %d day(s) from expiry, inside the %d-day "
-                    "close-out rule" % (d, CLOSE_SHORT_AT_DTE))
+                return ("expires today, short in the money (%s), past the "
+                        "flatten deadline (%s)" % (why_itm, why))
+            return ("expires today and the short is in the money (%s) -- a "
+                    "spread may not be allowed to pin, because its long leg "
+                    "can lapse while the short is assigned (%s)"
+                    % (why_itm, why))
         return ""
+
+    # ------------------------------------------------- is the short ITM? ----
+    def _short_itm(self, pos: PlayPosition) -> tuple:
+        """`(in_the_money, why)` for this position's short leg.
+
+        Returns `(None, why)` when the spot cannot be read: an unknown spot is
+        NOT "out of the money". For a spread the ITM case is the one that can
+        cost more than the stated max loss, so an unreadable spot is treated as
+        the hazard and closes -- the same direction `optguard.flatten_deadline`
+        already fails in.
+        """
+        shorts = pos.short_legs()
+        if not shorts:
+            return False, "no short leg"
+        try:
+            spot = self.od.spot(pos.symbol)
+        except Exception as e:                                  # noqa: BLE001
+            return None, "could not read %s's spot (%s)" % (pos.symbol, e)
+        if spot is None:
+            return None, "no spot for %s" % pos.symbol
+        spot = float(spot)
+        for l in shorts:
+            k = _num(l.get("strike"))
+            if k is None:
+                return None, "a short leg has no strike"
+            right = str(l.get("right") or "").lower()
+            if right == "put" and spot <= k:
+                return True, ("%s at %.2f is at or below the short %.2f put"
+                              % (pos.symbol, spot, k))
+            if right == "call" and spot >= k:
+                return True, ("%s at %.2f is at or above the short %.2f call"
+                              % (pos.symbol, spot, k))
+        return False, "%s at %.2f is outside every short strike" % (pos.symbol, spot)
 
     # ================================================================ closing
     def _close(self, pos: PlayPosition, reason: str, quotes: dict,
@@ -1957,9 +2113,16 @@ class Playbook:
         # ---- one per session / one per bar ----
         sess = P.session_key(now=self.now())
         if params.get("one_per_session"):
+            # ONLY ENTRIES THAT ACTUALLY OPENED. A row whose order was
+            # cancelled or expired without filling never opened anything, and
+            # counting it here would mean one missed fill locks the play out
+            # for the rest of the day -- which defeats ENTRY_RETRY_AFTER_S
+            # entirely, since the retry works by cancelling and re-pricing.
             today = [p for p in self.ledger.positions()
                      if p.symbol == a.symbol and p.play == a.play
-                     and p.session == sess]
+                     and p.session == sess
+                     and not str(getattr(p, "close_reason", "") or "")
+                             .startswith(NEVER_FILLED)]
             if today:
                 pr.reason = "already opened %s today (%s)" % (a.play, sess)
                 return
@@ -2112,7 +2275,7 @@ class Playbook:
                 return False, None
             return True, cal.next_earnings(sym, now=self.now().date())
         except Exception as e:                                  # noqa: BLE001
-            self.log.warning("earnings lookup failed for %s: %r", symbol, e)
+            LOG.warning("earnings lookup failed for %s: %r", symbol, e)
             return False, None
 
     def _build_wheel(self, a: P.Assignment, rows, expiry, ct: int,

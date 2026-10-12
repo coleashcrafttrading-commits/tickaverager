@@ -734,6 +734,136 @@ check("it uses rest_kind, matching the ledger field beside it",
 
 print()
 print("=" * 78)
+print("19. A CASH-SECURED PUT ASSIGNS; A SPREAD MAY NOT PIN")
+print("=" * 78)
+# The owner, 12 Oct 2026: "when those soxl sells expire they better get
+# assigned and the wheel for selling the covered calls better start right
+# away... we can never wheel if we close out for a loss."
+#
+# The old rule closed EVERY short leg at 2 DTE regardless of P/L, which on a
+# SHORT_SINGLE is not a safety rule -- it is the strategy's own exit being
+# taken away. It cost -$150 on his SOXL 151 put and -$129 on NVDA 230, both
+# bought back purely for being two days out.
+#
+# A SPREAD is the opposite: its short can be assigned while its long lapses,
+# leaving naked stock worth far more than the stated max loss.
+import datetime as _d19
+
+class _Spot:
+    def __init__(s, px): s.px = px
+    def spot(s, sym):
+        if s.px is None: raise RuntimeError("no data")
+        return s.px
+
+def _pb(spot_px, today):
+    pb = PB.Playbook.__new__(PB.Playbook)
+    pb.od = _Spot(spot_px)
+    pb.a = None
+    pb.log = __import__("logging").getLogger("t19")
+    pb.now = lambda: _d19.datetime(today.year, today.month, today.day, 12, 0)
+    return pb
+
+def _pos(kind, legs, expiry):
+    return PB.PlayPosition(id="t", symbol="SPY", play="p", kind=kind,
+                           expiry=expiry, legs=legs, contracts=1, state="open")
+
+TODAY19 = _d19.date(2026, 10, 16)
+PUT = [{"symbol": "O", "right": "put", "strike": 139.0, "side": "sell"}]
+SPREAD = [{"symbol": "A", "right": "put", "strike": 773.0, "side": "sell"},
+          {"symbol": "B", "right": "put", "strike": 772.0, "side": "buy"}]
+
+# ---- the wheel's put: never force-closed, in the money or out ----
+pb = _pb(120.0, TODAY19)        # 19 points BELOW the 139 strike: deep ITM
+check("a short put deep ITM on expiry day is NOT closed",
+      PB.Playbook._guard_reason(pb, _pos(P.SHORT_SINGLE, PUT, "2026-10-16")), "")
+check("...nor two days out",
+      PB.Playbook._guard_reason(pb, _pos(P.SHORT_SINGLE, PUT, "2026-10-18")), "")
+pb_otm = _pb(150.0, TODAY19)
+check("...nor when it is out of the money",
+      PB.Playbook._guard_reason(pb_otm, _pos(P.SHORT_SINGLE, PUT, "2026-10-16")), "")
+
+# ---- the spread: held while OTM, closed when the short is ITM on expiry day
+pb_s = _pb(778.0, TODAY19)      # above both strikes: OTM
+check("an OTM spread on expiry day is left to lapse",
+      PB.Playbook._guard_reason(pb_s, _pos(P.CREDIT_SPREAD, SPREAD, "2026-10-16")), "")
+check("and a spread days from expiry is held whatever it is worth",
+      PB.Playbook._guard_reason(pb_s, _pos(P.CREDIT_SPREAD, SPREAD, "2026-11-13")), "")
+
+pb_pin = _pb(772.5, TODAY19)    # BETWEEN the strikes -- the pin
+why = PB.Playbook._guard_reason(pb_pin, _pos(P.CREDIT_SPREAD, SPREAD, "2026-10-16"))
+check("a spread pinned between the strikes IS closed", bool(why), True)
+check("and the reason names the money", "in the money" in why, True)
+
+# An unreadable spot is the hazard, not a clear: it closes.
+pb_blind = _pb(None, TODAY19)
+why = PB.Playbook._guard_reason(pb_blind, _pos(P.CREDIT_SPREAD, SPREAD, "2026-10-16"))
+check("a spread whose spot cannot be read is closed, not assumed safe",
+      bool(why), True)
+# ...but a short single is still left alone, because assignment is fine.
+check("the same unreadable spot does not disturb a short single",
+      PB.Playbook._guard_reason(pb_blind, _pos(P.SHORT_SINGLE, PUT, "2026-10-16")), "")
+
+# _short_itm itself
+itm, _ = PB.Playbook._short_itm(_pb(772.5, TODAY19), _pos(P.CREDIT_SPREAD, SPREAD, "x"))
+check("772.50 is inside the 773/772 spread", itm, True)
+itm, _ = PB.Playbook._short_itm(_pb(778.0, TODAY19), _pos(P.CREDIT_SPREAD, SPREAD, "x"))
+check("778 is outside it", itm, False)
+itm, _ = PB.Playbook._short_itm(_pb(None, TODAY19), _pos(P.CREDIT_SPREAD, SPREAD, "x"))
+check("an unreadable spot is None, not False", itm, None)
+CALL = [{"symbol": "C", "right": "call", "strike": 16.5, "side": "sell"}]
+itm, _ = PB.Playbook._short_itm(_pb(17.0, TODAY19), _pos(P.SHORT_SINGLE, CALL, "x"))
+check("a short call is ITM above its strike", itm, True)
+
+
+print()
+print("=" * 78)
+print("20. NO TARGET MEANS NO TARGET, AND AN UNFILLED ENTRY IS RETRIED")
+print("=" * 78)
+# profit_pct 0 came back as the CREDIT ITSELF -- a resting buy-back at
+# breakeven, which on a six-cent 0DTE spread fills at once and turns "hold to
+# expiry" into "scratch it immediately".
+check("0DTE: no target and no stop",
+      PB.exit_prices(0.06, P.CREDIT_SPREAD, 0.0, 0.0), (None, None))
+check("the index spread keeps both", PB.exit_prices(0.30, P.CREDIT_SPREAD, 0.15, 1.0),
+      (0.26, 0.6))
+check("the wheel keeps its 80% target and no stop",
+      PB.exit_prices(1.45, P.SHORT_SINGLE, 0.80, 0.0), (0.29, None))
+check("a long option is unaffected",
+      PB.exit_prices(-4.10, P.LONG_SINGLE, 0.50, 0.25), (6.15, 3.07))
+
+check("there is a 30-second entry retry", PB.ENTRY_RETRY_AFTER_S, 30.0)
+check("and a named reason for a never-filled entry",
+      PB.NEVER_FILLED.startswith("the entry order never filled"), True)
+_src20 = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+_code20 = chr(10).join(l.split("#", 1)[0] for l in _src20.splitlines())
+check("one_per_session ignores a never-filled row",
+      "startswith(NEVER_FILLED)" in _code20, True)
+check("a stale working entry is cancelled", "entry_retry" in _code20, True)
+check("the blanket DTE close-out is gone from the guard",
+      "inside the %d-day" in _code20, False)
+check("_age_s refuses to age an unreadable stamp", PB._age_s("nonsense"), None)
+check("and an empty one", PB._age_s(""), None)
+
+# the 0DTE play itself
+z = P.PLAYS["zdte-put-credit-spread"]
+check("0DTE is a credit spread", z.kind, P.CREDIT_SPREAD)
+check("ten contracts", z.params["contracts"], 10)
+check("0.10 delta", z.params["short_delta"], 0.10)
+check("one strike wide", z.params["strikes_below"], 1)
+check("same-day expiry", z.params["target_dte"], 0)
+check("no target", z.params["profit_pct"], 0.0)
+check("no stop", z.params["stop_pct"], 0.0)
+check("entered an hour after the open", z.params["entry_after_et"], "10:30")
+check("and stops well before the 15:30 expiry-day cutoff",
+      z.params["entry_before_et"], "15:00")
+check("the index spread now declares max_open",
+      "max_open" in P.PLAYS["index-put-credit-spread"].params, True)
+check("...and it is editable",
+      "max_open" in P.PLAYS["index-put-credit-spread"].editable, True)
+
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:
