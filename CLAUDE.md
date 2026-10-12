@@ -179,7 +179,18 @@ the same thing. Call and put IV then agree to 0.46% on average.
   or GTC, are accepted while the market is closed and rest until the open --
   which is how a Monday open is traded from a Friday evening.
 - Alpaca rejects option orders after 15:30 ET on broad ETFs (15:15 on single
-  names) and begins auto-liquidating expiring positions at 15:45.
+  names). **The "and begins auto-liquidating expiring positions at 15:45" that
+  used to follow was WRONG and is removed** -- checked against Alpaca's own
+  support pages 12 Oct 2026. There is no blanket sweep of expiring positions.
+  Their only liquidation language is about an account lacking the buying power
+  to cover an EXERCISE, and their non-trade-activity docs describe an
+  out-of-the-money contract simply going to zero with an "Option Expiry" record
+  and a ZERO net amount. An OTM short lapses and the credit is kept, which is
+  the entire point of selling it. What IS real is the ORDER CUTOFF: after it no
+  order can be sent at all, so any guard meant to act on expiry day has to act
+  before it. Same failure as the "Alpaca returns NO greeks" entry below -- a
+  claim stated as a rule that was narrower than written, and believed because
+  nobody checked.
 - Option position `qty` is CONTRACTS and is UNSIGNED -- the direction is in the
   separate `side` field. `market_value` already includes the 100 multiplier.
 - `/v2/options/contracts` silently returns only the NEAREST expiry unless
