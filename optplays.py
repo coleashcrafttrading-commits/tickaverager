@@ -252,10 +252,17 @@ PLAYS: dict = {
             "entry_before_et": "15:00",
             "one_per_session": True,
             "max_open": 1,
+            # ZERO, AND IT HAS TO BE SAID OUT LOUD. optexec.plan refuses a
+            # structure whose soonest leg expires inside `min_dte` days -- the
+            # pin-window guard. For every other play a floor of 2 to 7 days is
+            # right; for this one the entire point is to BE inside that window,
+            # with the in-the-money close handling the risk instead. Without
+            # this the play proposes every day and is refused every day.
+            "min_dte": 0,
         },
         editable=("contracts", "short_delta", "strikes_below", "profit_pct",
                   "stop_pct", "entry_after_et", "entry_before_et", "max_open",
-                  "one_per_session"),
+                  "one_per_session", "min_dte"),
         suggested=("SPY", "QQQ"),
     ),
     "wheel": Play(

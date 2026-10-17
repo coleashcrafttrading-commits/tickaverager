@@ -2180,7 +2180,8 @@ class Playbook:
             expiry, why_exp = P.wheel_expiry(
                 exps, int(params["target_dte"]), earnings=edate,
                 earnings_known=known, today=self.now().date(),
-                min_dte=int(params.get("min_dte") or P.MIN_WHEEL_DTE))
+                min_dte=int(P.MIN_WHEEL_DTE if params.get("min_dte") is None
+                            else params["min_dte"]))
             if expiry is None:
                 pr.reason = why_exp
                 return
@@ -2227,9 +2228,24 @@ class Playbook:
         # only useful for holding headroom on the days it is NOT ready yet.
 
         # ---- the full pre-flight, reusing the one order path's checks ----
+        # THE PIN-WINDOW FLOOR IS THE PLAY'S, NOT A FORMULA. This was
+        # `max(2, min(7, target_dte))`, which for the 0DTE spread's target of 0
+        # computes 2 -- and `optexec.plan`'s `outside_pin_window` check is
+        # `soonest >= min_dte`, so a same-day structure failed 0 >= 2 and
+        # `Plan.ok` (which requires EVERY check to pass) was False. Every 0DTE
+        # proposal was refused before it ever reached the broker, by a guard
+        # written years before a deliberate 0DTE strategy existed. Measured
+        # 16 Oct 2026, after a week of the owner seeing no 0DTE fills at all.
+        #
+        # `is None` and not `or`: the value we most need to honour here is
+        # ZERO, and `params.get("min_dte") or <default>` silently discards it.
+        # That falsy-zero trap is exactly how this would come back.
+        _floor = params.get("min_dte")
+        if _floor is None:
+            _floor = max(2, min(7, int(params["target_dte"])))
         plan = optexec.plan(self.a, st.candidate(), st.exec_legs(),
                             contracts=ct, state_dir=self.state_dir,
-                            min_dte=max(2, min(7, int(params["target_dte"]))))
+                            min_dte=int(_floor))
         res.trading_calls += 3
         pr.plan = plan
         if not plan.ok:

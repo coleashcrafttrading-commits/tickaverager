@@ -864,6 +864,45 @@ check("...and it is editable",
 
 print()
 print("=" * 78)
+print("21. THE 0DTE PLAY IS NOT VETOED BY THE PIN-WINDOW GUARD")
+print("=" * 78)
+# THE BUG THAT MADE IT NEVER TRADE. optexec.plan refuses a structure whose
+# soonest leg expires inside `min_dte` days -- `outside_pin_window`, and
+# Plan.ok requires EVERY check to pass. _propose_one passed
+# min_dte=max(2, min(7, target_dte)), which for the 0DTE play's target of 0
+# computes 2. A same-day structure then failed 0 >= 2 and was refused before
+# it ever reached the broker. The owner saw no 0DTE fills for a week.
+_src21 = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+_code21 = chr(10).join(l.split("#", 1)[0] for l in _src21.splitlines())
+check("the hard-coded floor is gone",
+      "min_dte=max(2, min(7," in _code21, False)
+check("the play's own floor is read instead",
+      'params.get("min_dte")' in _code21, True)
+check("and it is read with `is None`, not `or`, so ZERO survives",
+      '_floor is None' in _code21, True)
+check("the wheel's floor lost the same falsy-zero trap",
+      'params.get("min_dte") or P.MIN_WHEEL_DTE' in _code21, False)
+
+# The arithmetic the fix replaced, and what each play now asks for.
+def floor_for(play_id):
+    pr = dict(P.PLAYS[play_id].params)
+    v = pr.get("min_dte")
+    return max(2, min(7, int(pr["target_dte"]))) if v is None else int(v)
+
+check("0DTE asks for a floor of 0", floor_for("zdte-put-credit-spread"), 0)
+check("the monthly spread still asks for 7",
+      floor_for("index-put-credit-spread"), 7)
+check("the swing still asks for 7", floor_for("swing-atm-hourly"), 7)
+check("the wheel keeps its own 3-day floor", floor_for("wheel"), P.MIN_WHEEL_DTE)
+
+# And the guard itself still bites for everything that is NOT 0DTE: a 0 DTE
+# leg under a floor of 2 must still fail, or the fix has disarmed the guard.
+check("a 0-day leg still fails a 2-day floor", 0 >= 2, False)
+check("and passes a 0-day floor", 0 >= 0, True)
+
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:
