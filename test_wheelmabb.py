@@ -903,6 +903,48 @@ check("and passes a 0-day floor", 0 >= 0, True)
 
 print()
 print("=" * 78)
+print("22. connect()'s CALLERS UNPACK IT, AND seed_fills TAKES AN ACCOUNT")
+print("=" * 78)
+# connect() returned a bare broker until it grew an account argument and
+# started returning (broker, state_dir, label). seed_fills.py still did
+# `alp = optplaybook.connect()`, so `alp` was a TUPLE and the first
+# `alp._trade(...)` raised AttributeError -- seeding was broken for EVERY
+# account from that commit and nothing caught it, because no test covers that
+# file. The consequence was invisible until it mattered: the owner's Options
+# account had no fill tape at all, so `realized_from_fills` had nothing to
+# walk and realised, total_pl, the reconciliation and the residual were all
+# unmeasurable.
+import inspect as _i22
+check("connect takes an account", "account_id" in
+      _i22.signature(PB.connect).parameters, True)
+_seed = pathlib.Path("seed_fills.py").read_text(encoding="utf-8")
+_scode = chr(10).join(l.split("#", 1)[0] for l in _seed.splitlines())
+check("seed_fills no longer assigns the whole tuple to one name",
+      "alp = optplaybook.connect()" in _scode, False)
+check("it unpacks all three", "alp, acct_state, label = optplaybook.connect(" in _scode, True)
+check("and it takes --account, as its docstring always claimed",
+      '"--account"' in _scode, True)
+check("the tape path follows the account's own state dir",
+      "a.state or acct_state" in _scode, True)
+
+# EVERY caller of connect() must unpack. A second one reading the old shape
+# would fail exactly the same way and just as silently.
+import glob as _g22
+_bad = []
+for _f in _g22.glob("*.py"):
+    if _f.startswith("test_"):
+        continue
+    _t = pathlib.Path(_f).read_text(encoding="utf-8", errors="replace")
+    _c = chr(10).join(l.split("#", 1)[0] for l in _t.splitlines())
+    for _ln in _c.splitlines():
+        if "optplaybook.connect(" in _ln or ("= connect(" in _ln and "def " not in _ln):
+            if "," not in _ln.split("=")[0]:
+                _bad.append("%s: %s" % (_f, _ln.strip()[:60]))
+check("no module assigns connect() to a single name", _bad, [])
+
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:

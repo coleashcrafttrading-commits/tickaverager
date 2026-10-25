@@ -65,8 +65,20 @@ def section(n, title):
 
 
 def write_feed(symbols, *, complete=True, failed=None, days=60,
-               restricted=None, start=TODAY):
-    """Put a feed on disk exactly as `sweep` would."""
+               restricted=None, start=None):
+    """Put a feed on disk exactly as `sweep` would.
+
+    `start` DEFAULTS TO THE REAL TODAY, and that is not a detail. It used to
+    default to the fixed TODAY above, while `earnings_provider`'s closure calls
+    `read_feed(now=None)` -- the real clock. So the fixture's forward horizon
+    shrank by a day every day, and 34 days after this suite was written it fell
+    under MIN_FORWARD_HORIZON_DAYS and section 4 began failing on the calendar
+    rather than on the code. A test that only passes in the month it was
+    written is worse than no test: it goes red for a reason that has nothing to
+    do with what it checks. The cases that DO pin a clock pass `now=` and an
+    explicit `start`.
+    """
+    start = start or _dt.date.today()
     feed = {
         "source": "test",
         "built_at": 0.0,

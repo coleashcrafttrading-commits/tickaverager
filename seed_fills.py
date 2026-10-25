@@ -34,14 +34,33 @@ PAGE = 100
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="seed the fill tape")
-    ap.add_argument("--state", default=str(_statedir.STATE_DIR))
+    # --account IS WHAT THE DOCSTRING ALWAYS PROMISED and what the parser
+    # never had: the flag was `--state` alone, so seeding a second account
+    # meant naming its directory by hand AND hoping `connect()` happened to
+    # hold that account's keys -- which it did not, because it read .env.
+    # The owner's Options account therefore had NO fill tape at all, and
+    # without one `realized_from_fills` has nothing to walk: realised was
+    # unmeasurable, which took `total_pl`, the reconciliation and the residual
+    # down with it. Measured 25 Oct 2026.
+    ap.add_argument("--account", default="",
+                    help="account id (default: $TICKAVERAGER_ACCOUNT, else "
+                         "'default'). Picks the credentials AND the state dir.")
+    ap.add_argument("--state", default="",
+                    help="override the state dir; normally --account sets it")
     ap.add_argument("--pause", type=float, default=PAUSE)
     ap.add_argument("--max-pages", type=int, default=2000)
     a = ap.parse_args(argv)
 
     import optplaybook
-    alp = optplaybook.connect()
-    out = Path(a.state) / "fill_tape.jsonl"
+    # UNPACK. `connect()` returned a bare broker until 12 Oct 2026, when it
+    # grew an account argument and started returning (broker, state_dir,
+    # label). This line still read the old shape, so `alp` was a TUPLE and the
+    # first `alp._trade(...)` below raised AttributeError -- seeding was broken
+    # for every account from that commit, and nothing caught it because no test
+    # covers this file.
+    alp, acct_state, label = optplaybook.connect(a.account)
+    out = Path(a.state or acct_state) / "fill_tape.jsonl"
+    print("seeding %s for account %r" % (out, label))
     out.parent.mkdir(parents=True, exist_ok=True)
 
     have: set = set()
