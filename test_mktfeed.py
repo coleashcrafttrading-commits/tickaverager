@@ -241,7 +241,10 @@ check("4d no feed -> None", prov("AAPL"), None)
 # (e) a feed whose forward horizon has shrunk -> None. Freshness is judged by
 # the horizon, not the mtime: a 60-day sweep is still honest ten days later and
 # is not honest ninety days later.
-write_feed(one("NVDA", "2026-11-18"), days=5)
+# BOTH ENDS PINNED. This case asserts a SHORT horizon, so the window and the
+# clock have to be fixed together: a window that starts at the real today and
+# a `now` fixed in the past is a LONG horizon, and the check inverts.
+write_feed(one("NVDA", "2026-11-18"), days=5, start=TODAY)
 feed, why = mf.read_feed(now=TODAY)
 check("4e a short horizon is refused", feed, None)
 check("4e the reason says to re-sweep", "sweep" in (why or ""), True)

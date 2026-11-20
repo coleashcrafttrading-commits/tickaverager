@@ -265,6 +265,54 @@ PLAYS: dict = {
                   "one_per_session", "min_dte"),
         suggested=("SPY", "QQQ"),
     ),
+    "pmcc": Play(
+        id="pmcc",
+        label="Poor man's covered call (LEAP + monthly calls)",
+        kind=SHORT_SINGLE,
+        summary=("Buy a deep in-the-money LEAP call once, then sell a ~0.20 "
+                 "delta call against it every month. Close the short at 50% "
+                 "of the credit and sell the next one. The LEAP is the base "
+                 "and this play never sells it."),
+        legs_desc="buy 10 LEAP calls once, then sell 10 @0.20d monthly",
+        params={
+            "contracts": 10,
+            # THE LONG LEG, bought once and then left alone. The owner picked
+            # the strike himself off the measured chain on 20 Nov 2026: NVDA at
+            # 128.39, the Jan-2028 110 call at 38.40 mid -- $38,400 for ten,
+            # 0.742 delta, 3.3x leverage. He chose it over the 50 strike after
+            # seeing that 10 of those cost $79,525 against $65,140 of cash and
+            # gave only 1.6x, while earning the IDENTICAL short premium.
+            "leap_strike": 110.0,
+            # The fallback when the named strike is not listed: pick by delta
+            # instead. 0.75 is the standard PMCC zone and is what 110 was.
+            "leap_delta": 0.75,
+            # A LEAP is a LEAP. The long leg must outlive many short cycles,
+            # and it must never be the leg that expires first -- a short call
+            # whose cover has expired is naked, which this account may not hold.
+            "leap_min_dte": 300,
+            # THE SHORT LEG, sold again and again.
+            "short_delta": 0.20,
+            "target_dte": 30,
+            # His number: "we will take 50 percent profit and then open up a
+            # new one at the new delta of .2 for the max profit again".
+            "profit_pct": 0.50,
+            # No stop on the short. It is covered by the LEAP, so its loss is
+            # bounded by the difference in strikes, and a stop would close the
+            # income leg at the worst moment -- exactly the mistake the wheel's
+            # 2-DTE rule made before it was removed.
+            "stop_pct": 0.0,
+            "max_open": 1,
+            "one_per_session": True,
+            "entry_after_et": "10:30",
+            "entry_before_et": "15:30",
+            "min_dte": 7,
+        },
+        editable=("contracts", "leap_strike", "leap_delta", "leap_min_dte",
+                  "short_delta", "target_dte", "profit_pct", "stop_pct",
+                  "max_open", "one_per_session", "entry_after_et",
+                  "entry_before_et", "min_dte"),
+        suggested=("NVDA",),
+    ),
     "wheel": Play(
         id="wheel",
         label="The Wheel (weekly cash-secured put, then covered calls)",
@@ -518,6 +566,28 @@ def wheel_expiry(expirations, target_dte: int, *,
 
 
 # ============================================================ strike picking
+def _as_date(x) -> Optional[_dt.date]:
+    """Coerce a date, datetime or ISO-ish string to a date; None otherwise.
+
+    Deliberately the same shape as optcal's and mktfeed's. The broker sends
+    expirations as `YYYY-MM-DD` strings and the chain rows carry them the same
+    way, so the string path is the normal one -- and a value that cannot be
+    read must come back None rather than raise, because the one caller is a
+    COVER CHECK and an exception there would be read as "no cover" by the
+    try/except around it rather than as the bug it is.
+    """
+    if x is None:
+        return None
+    if isinstance(x, _dt.datetime):
+        return x.date()
+    if isinstance(x, _dt.date):
+        return x
+    try:
+        return _dt.date.fromisoformat(str(x)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
 def _rows_of(greek_rows, right: str) -> list:
     r = right.lower()
     return [g for g in greek_rows if str(g.right).lower() == r]
@@ -800,10 +870,27 @@ def build_credit_spread(symbol: str, greek_rows, expiry: _dt.date, *,
 
 def build_long_single(symbol: str, greek_rows, expiry: _dt.date, spot: float, *,
                       direction: str, contracts: int = 1, play_id: str = "",
-                      ) -> tuple:
-    """(Structure, reason) for a single long ATM option."""
+                      strike: Optional[float] = None) -> tuple:
+    """(Structure, reason) for a single long option.
+
+    AT THE MONEY UNLESS A STRIKE IS NAMED. `strike` exists for the poor man's
+    covered call, whose long leg is a deep in-the-money LEAP chosen for its
+    cost and its leverage -- 110 on a 128 underlying -- and emphatically not
+    the at-the-money contract this used to assume was the only kind of long
+    anyone would want. A named strike that is not listed is refused by name
+    rather than quietly rounded to the nearest, because "the strike you asked
+    for does not trade" and "here is a different trade" are not the same
+    answer.
+    """
     right = "call" if direction == "up" else "put"
-    row = pick_atm(greek_rows, right, spot)
+    if strike is not None:
+        row = next((g for g in _rows_of(greek_rows, right)
+                    if abs(float(g.strike) - float(strike)) < 0.01), None)
+        if row is None:
+            return None, ("no %s listed at %.2f in %s"
+                          % (right, float(strike), expiry))
+    else:
+        row = pick_atm(greek_rows, right, spot)
     if row is None:
         return None, "no %s rows in this expiry" % right
     px = _mid(row)
@@ -917,6 +1004,7 @@ def build_short_single(symbol: str, greek_rows, expiry: _dt.date, *,
                        right: str, contracts: int = 1, target_delta: float = 0.20,
                        strike: Optional[float] = None,
                        shares_held: float = 0.0,
+                       long_calls: Optional[list] = None,
                        cash_available: Optional[float] = None,
                        play_id: str = "") -> tuple:
     """(Structure, reason) for ONE short option: a cash-secured put, or a
@@ -966,11 +1054,43 @@ def build_short_single(symbol: str, greek_rows, expiry: _dt.date, *,
 
     if right == "call":
         need = ct * MULT
-        if shares_held < need:
-            return None, ("a short call needs %d share(s) behind it and this "
-                          "account holds %g. An uncovered call is not "
-                          "something this account may trade, so nothing is "
-                          "sent." % (need, shares_held))
+        # A LONG CALL COVERS A SHORT CALL, which is the whole of a poor man's
+        # covered call: there are no shares, the LEAP is the cover. Two
+        # conditions make it real cover rather than a naked call with a lottery
+        # ticket beside it, and both are required:
+        #
+        #   STRIKE AT OR BELOW the short's. If the long were struck higher, a
+        #   move through both strikes loses the difference on top of the
+        #   spread, so the position is not bounded by the width.
+        #   EXPIRY AT OR AFTER the short's. A long that expires first leaves
+        #   the short naked for the remainder of its life, which is the one
+        #   thing this account may not hold.
+        #
+        # `long_calls` is what the BROKER says is held -- rows carrying
+        # `strike`, `expiry` and `contracts`. Nothing is inferred from a ledger
+        # here: the cover has to exist at Alpaca or the order is uncovered in
+        # fact whatever this repo believes.
+        covering = 0
+        for lc in (long_calls or []):
+            try:
+                k = float(lc.get("strike"))
+                xp = _as_date(lc.get("expiry"))
+                n = int(float(lc.get("contracts") or 0))
+            except (TypeError, ValueError):
+                continue
+            if n <= 0 or xp is None:
+                continue
+            if k <= float(row.strike) and xp >= expiry:
+                covering += n
+        if shares_held < need and covering < ct:
+            return None, ("a short call needs %d share(s) behind it, or %d "
+                          "long call(s) struck at or below %.2f and expiring "
+                          "on or after %s. This account holds %g share(s) and "
+                          "%d qualifying long call(s). An uncovered call is "
+                          "not something this account may trade, so nothing "
+                          "is sent."
+                          % (need, ct, float(row.strike), expiry, shares_held,
+                             covering))
         secured = 0.0
     else:
         secured = round(float(row.strike) * MULT * ct, 2)

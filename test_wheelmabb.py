@@ -945,6 +945,102 @@ check("no module assigns connect() to a single name", _bad, [])
 
 print()
 print("=" * 78)
+print("23. THE POOR MAN'S COVERED CALL: A LEAP COVERS THE SHORT")
+print("=" * 78)
+# The owner's 20 Nov switch: stop the wheel, be long only, buy a deep ITM LEAP
+# and sell ~0.20 delta calls against it, closing each at 50% and selling the
+# next. He chose the 110 strike himself off a measured chain -- NVDA 128.39,
+# Jan-2028 110 call at 38.40, 0.742 delta, 3.3x leverage -- over the 50 strike,
+# which cost $79,525 for ten against $65,140 of cash and gave 1.6x while
+# earning the IDENTICAL premium.
+import datetime as _d23
+
+_PM = P.PLAYS["pmcc"]
+check("pmcc exists", _PM.id, "pmcc")
+check("ten contracts", _PM.params["contracts"], 10)
+check("the 110 strike he picked", _PM.params["leap_strike"], 110.0)
+check("0.20 delta shorts", _PM.params["short_delta"], 0.20)
+check("50% profit on the short", _PM.params["profit_pct"], 0.50)
+check("no stop on the short", _PM.params["stop_pct"], 0.0)
+check("one short at a time", _PM.params["max_open"], 1)
+check("the LEAP must be a LEAP", _PM.params["leap_min_dte"], 300)
+
+# ---- A LONG CALL COVERS A SHORT CALL, which is the whole strategy ----
+LEXP = _d23.date(2028, 1, 21)
+SEXP = _d23.date(2026, 12, 18)
+calls = chain("call", [130, 135, 140, 145, 150, 155, 160], base_delta=0.62)
+leap = [{"symbol": "NVDA280121C00110000", "strike": 110.0,
+         "expiry": LEXP, "contracts": 10}]
+
+st, why = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=10,
+                               target_delta=0.20, long_calls=leap,
+                               play_id="pmcc")
+check("a LEAP covers ten short calls", st is not None, True)
+check("and it is ONE short call leg",
+      (len(st.legs), st.legs[0].side, st.legs[0].right) if st else None,
+      (1, "sell", "call"))
+
+# ---- the two conditions that make it real cover ----
+high = [dict(leap[0], strike=200.0)]          # struck ABOVE the short
+st2, why2 = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=10,
+                                 target_delta=0.20, long_calls=high, play_id="pmcc")
+check("a long struck ABOVE the short is not cover", st2, None)
+check("and the refusal says what would be", "at or below" in (why2 or ""), True)
+
+early = [dict(leap[0], expiry=_d23.date(2026, 12, 1))]   # expires BEFORE
+st3, why3 = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=10,
+                                 target_delta=0.20, long_calls=early, play_id="pmcc")
+check("a long expiring BEFORE the short is not cover", st3, None)
+check("and the refusal says so", "on or after" in (why3 or ""), True)
+
+few = [dict(leap[0], contracts=4)]
+st4, _ = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=10,
+                              target_delta=0.20, long_calls=few, play_id="pmcc")
+check("four LEAPs do not cover ten shorts", st4, None)
+
+st5, _ = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=4,
+                              target_delta=0.20, long_calls=few, play_id="pmcc")
+check("...but they do cover four", st5 is not None, True)
+
+# SHARES still cover, exactly as before -- the wheel must not regress.
+st6, _ = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=1,
+                              target_delta=0.20, shares_held=100, play_id="pmcc")
+check("shares still cover a short call", st6 is not None, True)
+st7, why7 = P.build_short_single("NVDA", calls, SEXP, right="call", contracts=1,
+                                 target_delta=0.20, play_id="pmcc")
+check("and nothing at all is still refused", st7, None)
+check("by name", "uncovered call" in (why7 or ""), True)
+
+# ---- the LEAP is bought at the NAMED strike, not at the money ----
+lcalls = chain("call", [100, 105, 110, 115, 120], base_delta=0.90)
+stL, whyL = P.build_long_single("NVDA", lcalls, LEXP, 128.39, direction="up",
+                                contracts=10, strike=110.0, play_id="pmcc")
+check("the LEAP is bought at the strike he named",
+      stL.legs[0].strike if stL else None, 110.0)
+check("ten of them", stL.contracts if stL else None, 10)
+check("bought, not sold", stL.legs[0].side if stL else None, "buy")
+stM, whyM = P.build_long_single("NVDA", lcalls, LEXP, 128.39, direction="up",
+                                contracts=10, strike=999.0, play_id="pmcc")
+check("an unlisted strike is refused, not rounded", stM, None)
+check("and says which strike was wanted", "999" in (whyM or ""), True)
+stA, _ = P.build_long_single("NVDA", lcalls, LEXP, 128.39, direction="up",
+                             contracts=1, play_id="swing-atm-hourly")
+check("with no strike named it is still at the money, as the swing needs",
+      stA is not None, True)
+
+# ---- routed to its own builder, not the wheel's ----
+_pb23 = pathlib.Path("optplaybook.py").read_text(encoding="utf-8")
+_c23 = chr(10).join(l.split("#", 1)[0] for l in _pb23.splitlines())
+check("pmcc is routed by PLAY before the kind branch",
+      '_build_pmcc(' in _c23 and 'a.play == "pmcc"' in _c23, True)
+check("the wheel branch still exists for the wheel",
+      "_build_wheel(" in _c23, True)
+check("cover is read from the BROKER, not the ledger",
+      "def _long_calls_held(" in _c23 and "self.a.positions()" in _c23, True)
+
+
+print()
+print("=" * 78)
 print("FAILURES: %d" % FAIL)
 print("=" * 78)
 if FAIL:

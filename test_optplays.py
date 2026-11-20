@@ -125,6 +125,14 @@ def minute_tape(days, *, base=100.0, drift=0.01, last_close=None,
     return bars, day - dt.timedelta(days=1)
 
 
+# A FUTURE EXPIRY, COMPUTED. These fixtures used the literal FUTURE_EXPIRY,
+# which was months ahead when they were written and is now in the past -- so
+# `_guard_reason` correctly said "this expires today, close it" and section 31's
+# resting-target checks went red for the calendar rather than for the code. A
+# test that only passes before a fixed date is a test with a fuse in it.
+FUTURE_EXPIRY = (_dt3.date.today() + _dt3.timedelta(days=45)).isoformat()
+
+
 class FakeBroker:
     """No network at all. Records the bodies it was asked to send.
 
@@ -582,7 +590,7 @@ def main() -> int:
     lp = os.path.join(led_dir, "led.jsonl")
     led = PB.Ledger(lp)
     led.record("pos-1", "opening", symbol="SPY", play="index-put-credit-spread",
-               kind=P.CREDIT_SPREAD, expiry="2026-10-30", state="open",
+               kind=P.CREDIT_SPREAD, expiry=FUTURE_EXPIRY, state="open",
                contracts=10, entry_net=0.30, target_px=0.15, stop_px=0.38,
                legs=[{"symbol": "SPY261030P00744000", "right": "put",
                       "strike": 744.0, "side": "sell", "entry_px": 4.25},
@@ -633,7 +641,7 @@ def main() -> int:
 
     print("\n15. A single leg is never sent as mleg")
     led.record("pos-2", "opening", symbol="AAPL", play="swing-atm-hourly",
-               kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+               kind=P.LONG_SINGLE, expiry=FUTURE_EXPIRY, state="open",
                contracts=1, entry_net=-11.72, target_px=17.58, stop_px=8.79,
                legs=[{"symbol": "AAPL261030C00340000", "right": "call",
                       "strike": 340.0, "side": "buy", "entry_px": 11.72}])
@@ -680,7 +688,7 @@ def main() -> int:
           led2.get("pos-1").contracts, 3)
     check("a second follow sees nothing new", led2.follow(), 0)
     led.record("pos-3", "opening", symbol="QQQ", play="index-put-credit-spread",
-               kind=P.CREDIT_SPREAD, expiry="2026-10-30", state="open",
+               kind=P.CREDIT_SPREAD, expiry=FUTURE_EXPIRY, state="open",
                contracts=1, entry_net=0.25, legs=[])
     check("...but a write from the worker is picked up", led2.follow(), 1)
     check("...and the new position is there",
@@ -697,13 +705,13 @@ def main() -> int:
     print("\n18. Open risk is the real worst case, per structure")
     solo = PB.Ledger(os.path.join(tempfile.mkdtemp(), "s.jsonl"))
     solo.record("a", "opening", symbol="X", play="p", kind=P.CREDIT_SPREAD,
-                expiry="2026-10-30", state="open", contracts=10, entry_net=0.40,
+                expiry=FUTURE_EXPIRY, state="open", contracts=10, entry_net=0.40,
                 legs=[{"symbol": "A", "strike": 745.0, "side": "sell"},
                       {"symbol": "B", "strike": 743.0, "side": "buy"}])
     approx("10 x (2.00 wing - 0.40 credit) x 100 = $1,600",
            solo.open_risk(), 1600.0, 1e-6)
     solo.record("b", "opening", symbol="Y", play="q", kind=P.LONG_SINGLE,
-                expiry="2026-10-30", state="open", contracts=1,
+                expiry=FUTURE_EXPIRY, state="open", contracts=1,
                 entry_net=-11.72,
                 legs=[{"symbol": "C", "strike": 340.0, "side": "buy"}])
     approx("a long option adds its whole premium",
@@ -896,7 +904,7 @@ def main() -> int:
     approx("quote_legs prices a real OCC leg off the quote reader",
            q["AAPL261030C00340000"]["mid"], 10.60, 1e-9)
     mled.record("m-1", "opening", symbol="AAPL", play="swing-atm-hourly",
-                kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+                kind=P.LONG_SINGLE, expiry=FUTURE_EXPIRY, state="open",
                 contracts=1, requested=1, entry_net=-11.70, target_px=13.45,
                 stop_px=8.77,
                 legs=[{"symbol": "AAPL261030C00340000", "right": "call",
@@ -937,7 +945,7 @@ def main() -> int:
     # a credit spread the book prices on the wrong side of zero is nonsense,
     # not a full-credit profit waiting to trip the take-profit
     mled.record("m-2", "opening", symbol="SPY", play="index-put-credit-spread",
-                kind=P.CREDIT_SPREAD, expiry="2026-10-30", state="open",
+                kind=P.CREDIT_SPREAD, expiry=FUTURE_EXPIRY, state="open",
                 contracts=10, requested=10, entry_net=0.30, target_px=0.15,
                 stop_px=0.38,
                 legs=[{"symbol": "SPY261030P00744000", "right": "put",
@@ -963,7 +971,7 @@ def main() -> int:
     cled = PB.Ledger(os.path.join(cv_dir, "c.jsonl"))
     occ = "AAPL261030C00340000"
     cled.record("c-1", "opening", symbol="AAPL", play="swing-atm-hourly",
-                kind=P.LONG_SINGLE, expiry="2026-10-30", state="pending",
+                kind=P.LONG_SINGLE, expiry=FUTURE_EXPIRY, state="pending",
                 contracts=0, requested=1, entry_net=-11.70, target_px=13.45,
                 stop_px=8.77,
                 legs=[{"symbol": occ, "right": "call", "strike": 340.0,
@@ -1016,7 +1024,7 @@ def main() -> int:
     pf_dir = tempfile.mkdtemp()
     pled = PB.Ledger(os.path.join(pf_dir, "p.jsonl"))
     pled.record("p-1", "opening", symbol="SPY", play="index-put-credit-spread",
-                kind=P.CREDIT_SPREAD, expiry="2026-10-30", state="open",
+                kind=P.CREDIT_SPREAD, expiry=FUTURE_EXPIRY, state="open",
                 contracts=3, requested=10, entry_net=0.30, target_px=0.15,
                 stop_px=0.38,
                 legs=[{"symbol": "SPY261030P00744000", "right": "put",
@@ -1049,7 +1057,7 @@ def main() -> int:
     rf_dir = tempfile.mkdtemp()
     rled = PB.Ledger(os.path.join(rf_dir, "r.jsonl"))
     rled.record("r-1", "opening", symbol="AAPL", play="swing-atm-hourly",
-                kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+                kind=P.LONG_SINGLE, expiry=FUTURE_EXPIRY, state="open",
                 contracts=1, requested=1, entry_net=-11.70, target_px=13.45,
                 stop_px=8.77,
                 legs=[{"symbol": occ, "right": "call", "strike": 340.0,
@@ -1083,7 +1091,7 @@ def main() -> int:
     lp_dir = tempfile.mkdtemp()
     lled = PB.Ledger(os.path.join(lp_dir, "l.jsonl"))
     lled.record("l-1", "opening", symbol="AAPL", play="swing-atm-hourly",
-                kind=P.LONG_SINGLE, expiry="2026-10-30", state="open",
+                kind=P.LONG_SINGLE, expiry=FUTURE_EXPIRY, state="open",
                 contracts=1, requested=1, entry_net=-11.70, target_px=13.45,
                 stop_px=8.77, rest_order_id="ord-9", rest_contracts=1,
                 legs=[{"symbol": occ, "right": "call", "strike": 340.0,
@@ -1141,7 +1149,7 @@ def main() -> int:
     # ceiling none of the others had touched
     prled = PB.Ledger(os.path.join(pr_dir, "pr.jsonl"))
     prled.record("x", "opening", symbol="META", play="swing-atm-hourly",
-                 kind=P.LONG_SINGLE, expiry="2026-10-30", state="pending",
+                 kind=P.LONG_SINGLE, expiry=FUTURE_EXPIRY, state="pending",
                  contracts=0, requested=1, entry_net=-40.50,
                  legs=[{"symbol": "M", "strike": 750.0, "side": "buy"}])
     approx("a PENDING order counts at its requested size",

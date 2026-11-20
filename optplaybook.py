@@ -2203,6 +2203,13 @@ class Playbook:
                 a.symbol, rows, expiry, short_delta=float(params["short_delta"]),
                 strikes_below=int(params["strikes_below"]), contracts=ct,
                 play_id=a.play)
+        elif a.play == "pmcc":
+            # ROUTED BY PLAY, NOT BY KIND. The PMCC is declared SHORT_SINGLE
+            # because the leg it sells over and over is a short single -- but
+            # it also BUYS a LEAP once, on a different expiry entirely, and the
+            # wheel's builder knows nothing about that. Two plays sharing a
+            # kind need two builders, and the kind alone can no longer pick.
+            st, build_why = self._build_pmcc(a, rows, expiry, ct, params)
         elif spec.kind == P.SHORT_SINGLE:
             # THE WHEEL, AND THIS BRANCH DID NOT EXIST. `build_short_single`
             # was written, documented and unit-tested, and the only caller in
@@ -2293,6 +2300,121 @@ class Playbook:
         except Exception as e:                                  # noqa: BLE001
             LOG.warning("earnings lookup failed for %s: %r", symbol, e)
             return False, None
+
+    def _long_calls_held(self, symbol: str) -> tuple:
+        """`(rows, err)` -- every LONG call the BROKER says this account holds
+        on `symbol`, as {symbol, strike, expiry, contracts}.
+
+        The broker and not the ledger, for the same reason `_build_wheel` reads
+        the share position from the broker: this list is a COVER CHECK, and a
+        cover that exists only in our own records is not cover. A failed read
+        returns an error rather than an empty list -- "I could not look" must
+        never be spent as "nothing is there", which here would mean selling a
+        call with nothing behind it.
+        """
+        sym = str(symbol).upper()
+        try:
+            positions = self.a.positions()
+        except Exception as e:                                  # noqa: BLE001
+            return None, ("could not read %s's option positions (%s)" % (sym, e))
+        out = []
+        for pos in positions or []:
+            occ = str(pos.get("symbol") or "")
+            if len(occ) <= 6:
+                continue                       # shares, not a contract
+            try:
+                o = optsym.parse(occ)
+            except Exception:                                   # noqa: BLE001
+                continue
+            if o.underlying.upper() != sym or not o.is_call:
+                continue
+            qty = _num(pos.get("qty")) or 0.0
+            if qty <= 0:
+                continue                       # short calls are not cover
+            out.append({"symbol": occ, "strike": float(o.strike),
+                        "expiry": o.expiry, "contracts": int(qty)})
+        return out, ""
+
+    def _build_pmcc(self, a: P.Assignment, rows, expiry, ct: int,
+                    params: dict) -> tuple:
+        """The poor man's covered call: buy the LEAP once, then sell calls.
+
+        TWO LEGS ON TWO DIFFERENT CLOCKS, which is what makes this play unlike
+        every other one here. The long leg is bought ONCE, hundreds of days
+        out, and this play never sells it. The short leg is sold again and
+        again about a month out, against that long. So the decision each cycle
+        is simply which of the two the account is missing, and -- exactly as in
+        `_build_wheel` -- it is answered by reading the BROKER rather than a
+        flag:
+
+            no LEAP (or not enough)  -> buy the LEAP
+            LEAP held, no short call -> sell the ~0.20 delta monthly call
+
+        `rows` and `expiry` are the MONTHLY chain the propose path already
+        fetched. The LEAP lives on a different expiry entirely, so when the
+        long leg is what is missing this fetches its own chain for it.
+        """
+        sym = str(a.symbol).upper()
+        held, err = self._long_calls_held(sym)
+        if err:
+            return None, err
+        today = self.now().date()
+        min_dte = int(params.get("leap_min_dte") or 300)
+        leaps = [c for c in held if (c["expiry"] - today).days >= min_dte]
+        covering = sum(c["contracts"] for c in leaps)
+
+        if covering >= ct:
+            # ---- the income leg -------------------------------------------
+            return P.build_short_single(
+                sym, rows, expiry, right="call", contracts=ct,
+                target_delta=float(params["short_delta"]),
+                long_calls=leaps, play_id=a.play)
+
+        # ---- the base, bought once ----------------------------------------
+        want = ct - covering
+        try:
+            exps = self.od.expirations(sym, max_dte=min_dte + 500)
+        except Exception as e:                                  # noqa: BLE001
+            return None, "could not list %s's expirations (%s)" % (sym, e)
+        far = sorted(e for e in exps if (e - today).days >= min_dte)
+        if not far:
+            return None, ("no %s expiry is at least %d days out, so there is "
+                          "no LEAP to buy" % (sym, min_dte))
+        lexp = far[0]
+        spot = self.od.spot(sym)
+        lrows, why = self.chain_rows(sym, lexp, spot, pct=0.95)
+        if not lrows:
+            return None, "no chain for the %s LEAP expiry %s: %s" % (sym, lexp, why)
+        calls = [r for r in lrows if str(r.right).lower() == "call" and r.mid]
+        if not calls:
+            return None, "no quoted calls in the %s LEAP expiry %s" % (sym, lexp)
+
+        # THE NAMED STRIKE FIRST, delta only as a fallback. The owner picked
+        # 110 off a measured chain for a reason -- cost, leverage and the
+        # premium it would carry -- and a delta that drifts to a different
+        # strike is not the trade he chose. If it is not listed, the delta he
+        # chose it FOR is the honest second best, and the reason says which
+        # happened.
+        want_k = _num(params.get("leap_strike"))
+        row = None
+        note = ""
+        if want_k is not None:
+            row = next((c for c in calls if abs(c.strike - want_k) < 0.01), None)
+            if row is None:
+                note = ("the %.0f strike is not listed in %s, so the long leg "
+                        "was chosen by delta instead; " % (want_k, lexp))
+        if row is None:
+            row = P.pick_by_delta(calls, "call", float(params.get("leap_delta") or 0.75))
+        if row is None:
+            return None, "no LEAP call could be chosen in %s" % lexp
+
+        st, build_why = P.build_long_single(
+            sym, lrows, lexp, spot, direction="up", contracts=want,
+            play_id=a.play, strike=float(row.strike))
+        if st is None:
+            return None, note + str(build_why)
+        return st, ("%sbuying the base: %d x %s %s call at %s"
+                    % (note, want, lexp, row.strike, row.mid))
 
     def _build_wheel(self, a: P.Assignment, rows, expiry, ct: int,
                      params: dict) -> tuple:
