@@ -1,0 +1,71 @@
+# The options playbook worker FOR THE 'new-options-trading' ACCOUNT
+# (PA33G63IB, $250,000, options level 3) -- the LEAP machine.
+#
+# WHY A THIRD UNIT. optplaybook.py serves ONE account per process, so an
+# account with no unit of its own is an account where nothing ever opens. That
+# has already happened once on this box: the owner's Options account carried
+# four assignments and a valid arm file written from the dashboard, and nothing
+# traded on it for days because no process was reading them. He found out by
+# watching an entry window come and go in silence. An account registered in
+# `state/accounts.json` and visible on the dashboard is NOT an account that
+# trades; a unit is what makes it trade.
+#
+# ONE WRITER PER ACCOUNT is the reason this is a separate unit rather than a
+# loop over accounts inside one process. Each worker owns exactly one
+# account's ledger, arm file and assignments. Two processes against ONE account
+# would race the per-session guards and double-open a structure; two processes
+# against TWO accounts share nothing at all.
+#
+# WHAT THIS ACCOUNT RUNS. Only the `leap` play -- see the LEAP machine section
+# in CLAUDE.md. It buys LEAPs at ~3x leverage (never below 0.80 delta), sells
+# one ~0.20 delta call a month against each one ABOVE ITS BREAKEVEN, takes 50%
+# of the credit whenever it is there, closes the short if it goes in the money,
+# and buys another LEAP out of that ticker's own premium once it has paid for
+# one. It never sells the base.
+#
+# Install (on the VM, as root):
+#   cp deploy/tickaverager-plays-leap.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now tickaverager-plays-leap
+#   systemctl status tickaverager-plays-leap
+#
+# `deploy/vm_update.sh` must restart this unit alongside the other two. A
+# worker left on stale code across a deploy is a bug this repo has already
+# shipped once -- the options worker ran old code for several deploys because
+# vm_update.sh restarted only one of them.
+#
+# IT STARTS DISARMED and stays that way until a human writes the arm file
+# through the dashboard. Starting this unit does not start trading.
+
+[Unit]
+Description=Tick Avenger -- options playbook worker (LEAP machine, new-options-trading)
+After=network-online.target
+Wants=network-online.target
+# Not Requires=: the playbook must keep managing open positions even if the
+# dashboard is down, which is exactly when it matters most.
+After=tickaverager.service
+
+[Service]
+Type=simple
+User=coleashcraft_trading
+WorkingDirectory=/home/coleashcraft_trading/tickaverager
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/coleashcraft_trading/tickaverager/venv/bin/python optplaybook.py serve --account new-options-trading
+
+# Always come back. A worker that owns the exit path may not stay dead, and 10
+# seconds is long enough that a crash loop is visible in the journal rather
+# than hidden by an instant restart.
+Restart=always
+RestartSec=10
+
+# A cycle that hangs on a broker call is worse than one that dies, because a
+# hung worker still looks alive. Kill it and let Restart bring it back.
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tickaverager-plays-leap
+
+[Install]
+WantedBy=multi-user.target
