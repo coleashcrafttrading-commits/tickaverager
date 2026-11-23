@@ -696,6 +696,121 @@ everything a gate needs -- days to the print, the session the move lands in, and
 whether a given expiry spans it -- so it is a few lines whenever he asks for it.
 **Do not add it unasked.**
 
+## The LEAP machine (from 23 Nov 2026) -- the strategy the account now runs
+
+Cole's instruction, 23 Nov 2026: *"I want you to delete all strategies form the
+tick avenger other than options strategies ... We are going to focus on options
+now. buying and selling options is it ... we are going for permabull long, and
+making premium weekly and monthly. thats it."* A new paper account was opened
+for it: **`new-options-trading` / PA33G63IB, $250,000, options level 3**.
+
+| | |
+|---|---|
+| `leapscan.py` | the arithmetic: leverage, extrinsic, breakeven, and the two strike rules. Also the CLI that produced the research below |
+| `leapbank.py` | the per-ticker fuel gauge, read off Alpaca's activities tape |
+| `optplaybook._build_leap` | the cycle: base -> reinvest -> sell the monthly |
+| `optplays.py` `"leap"` | every number, each one his |
+| `test_leap.py` | all of it, offline |
+
+**THE RULE IS LEVERAGE, NOT DELTA.** *"purchase leaps on them with a delta that
+allows 3x unless that is lower than a .8, which we will stick to .8 only and
+higher."* Leverage here is his own measure, **spot / premium** -- one contract
+is 100 shares of exposure however deep it is, so this is "how many times
+cheaper than the shares". Leverage therefore RISES as delta FALLS, which makes
+the obvious implementation ("pick the delta nearest 0.80") silently buy a
+shallower contract than the floor permits. `leapscan.pick_leap` takes the
+DEEPEST strike that still reaches 3x, and when 3x is unreachable above the
+floor it takes the floor and says the target was missed.
+
+**THE SHORT STRIKE HAS A HARD FLOOR AND IT IS NOT A PREFERENCE.** *"always
+above the breakeven point ... and more specifically if its above the breakeven
+point, the .2 delta."* The breakeven is `LEAP strike + premium paid`, taken from
+the BROKER's `avg_entry_price` -- never a config default and never today's
+chain. Assigned at `K_short` and exercising the long realises
+`(K_short - K_long) - P_long`, so at or below the breakeven that is a LOSS
+however much credit came in. These are two independent tests in order of
+preference and they must be asked independently: filtering the chain to
+above-breakeven strikes and THEN taking the nearest delta always "succeeds", and
+it reported "the 0.20 delta, and it clears the breakeven" while handing back a
+0.12 delta. The answer was right and the stated reason was false, which is worse
+than a wrong answer.
+
+**THE SHORT CALL IS CLOSED WHEN IT GOES IN THE MONEY, and here his instruction
+and the safety requirement are the same thing.** Every other short leg in this
+repo is covered by CASH (a put that wants assignment) or by a long option at the
+SAME expiry (a spread that must not be allowed to pin). This one's cover is a
+long call 400 days out, so assignment requires DELIVERING 100 shares per
+contract that the account does not own -- the broker resolves that by exercising
+the LEAP, forfeiting all of its remaining extrinsic, which is the exact asset
+the machine exists to harvest. An assignment does not cost a trade here, it
+costs the base. So `_guard_reason` closes it, and an unreadable spot closes too.
+
+**REINVESTMENT IS PER TICKER, BY CONSTRUCTION.** *"you are giong to need to keep
+track individually, each ticker and their profits from selling the calls ... to
+make sure that we are bjying our new contracts only on their own earnings."*
+`leapbank.fuel` filters the tape to THIS underlying's calls, so GOOGL premium
+can only ever buy GOOGL LEAPs. Three things make it hard to get wrong:
+
+- **It reads Alpaca, not our ledger.** `PlayPosition.close_net` -- the field a
+  realised figure would live in -- is written in `mockhist.py`, `mockserver.py`
+  and four test files and **nowhere in production code** (grepped 23 Nov 2026).
+  That is the same defect that makes the dashboard's win rate read zero over
+  1,549 closed rows. A reinvestment engine built on that number would read
+  $0.00 for ever and never buy a second LEAP.
+- **`buy` is ambiguous on the tape** -- buying a LEAP and buying back a short
+  call are the same `side` -- so they are separated by DAYS TO EXPIRY AT THE
+  MOMENT OF THE TRADE, recovered from the OCC symbol and the row's own
+  timestamp. An undateable row is treated as the BASE, because over-counting
+  fuel buys a contract premium has not paid for while under-counting only
+  delays one.
+- **The fuel is a cumulative staircase, not a decrementing balance.** The target
+  is `initial + fuel // cost_of_one_now`, so premium sitting at 1.9x holds the
+  count at initial+1 and nothing is stored anywhere. A stored balance is a thing
+  that can disagree with the broker after a crash, a restart or a hand-placed
+  trade; this cannot. The divisor is read live, which is also his point about
+  buying "a higher strike as the stock increases with the original delta so that
+  we can keep buying the options for roughly the same cost".
+
+### The research that picked the tickers, measured 23 Nov 2026
+
+26 blue chips, live chains, `prefer="computed"` throughout (one ruler, per the
+greeks rule above). **Every name cleared the breakeven test**, so it eliminated
+nobody. What eliminated names was the 3x rule, and it does so BY IMPLIED
+VOLATILITY, which is not obvious: 3x needs a strike at roughly **two thirds of
+spot**, and on a low-IV name that strike still carries 0.88 delta while on a
+high-IV name it is down at 0.75, below the floor. So **the semis fail his own
+rule** -- NVDA 2.83x at 0.808, AMD 2.34x, AVGO 2.65x, META 2.98x. He holds an
+NVDA LEAP on the old account that this rule would not buy.
+
+| | sector | lev | delta | $/contract | breakeven | monthly 0.20d | yield/yr |
+|---|---|---|---|---|---|---|---|
+| UNH | healthcare | 3.18x | 0.827 | $10,583 | 355.82 | 370 @ $4.15 | 47% |
+| GE | industrials | 3.04x | 0.844 | $10,575 | 345.75 | 350 @ $3.71 | 42% |
+| JPM | financials | 3.19x | 0.882 | $9,947 | 329.48 | 335 @ $3.17 | 38% |
+| GOOGL | tech | 3.05x | 0.825 | $9,275 | 307.75 | 310 @ $2.98 | 38% |
+| PEP | staples | 3.05x | 0.902 | $4,600 | 141.00 | 152.5 @ $1.32 | 34% |
+
+**The compounding metric is the annual premium yield on deployed capital, not
+"months to the next contract".** That second number is confounded by contract
+size -- KO looks like the fastest compounder in the field purely because its
+contracts are tiny, while yielding 24% against UNH's 47%. Yield is the rate at
+which the contract count actually grows.
+
+**And that yield is risk compensation, not an edge.** The best yields here are
+the highest-IV names, which is the market pricing more movement: UNH's 47% is
+high because it has been through a guidance withdrawal and a DOJ probe. The
+sleepiest names pay least for exactly the same reason -- KO 24%, PG 22%, WMT
+24%, JNJ 27%. Do not rank these by yield alone and never present a yield as a
+return.
+
+**LEAP listings are annual Januaries.** All 26 names chose **2028-01-21 (424
+DTE)** against a 400-day target. So "dynamic ~400 days" does NOT roll smoothly:
+a ticker sits on one January until it decays under the back tolerance and then
+steps a whole year. `leap_dte_back_tol` (60) and `leap_dte_forward_tol` (120)
+are what make the window reachable at all, and `choose_expiry` prefers the
+LONGER side because the documented forward-only rule exists to stop a shorter
+trade being bought silently.
+
 ## Two machines, one fleet
 
 Cole works on Windows, Glenn on a Mac, each from their own Claude Code chat
@@ -784,6 +899,7 @@ If two disagree, say so loudly rather than picking the convenient one.
   test_review_fixes test_rules test_short test_strategy test_supertrend
   test_optplays test_rail test_rooms test_stratroom test_touch_adds test_trail test_trend
   test_wheelmabb test_builderform test_optticker test_statedir test_mktfeed
+  test_leap
   test_words
   test_trend_v2
   test_unwind`,

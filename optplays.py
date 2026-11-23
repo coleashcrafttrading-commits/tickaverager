@@ -265,6 +265,111 @@ PLAYS: dict = {
                   "one_per_session", "min_dte"),
         suggested=("SPY", "QQQ"),
     ),
+    "leap": Play(
+        id="leap",
+        label="LEAP + monthly calls (permabull)",
+        kind=SHORT_SINGLE,
+        summary=("Own deep in-the-money LEAP calls at about 3x leverage, sell "
+                 "one call a month against each of them above its breakeven, "
+                 "take 50% of the credit whenever it is there, close the short "
+                 "if it goes in the money, and buy another LEAP out of that "
+                 "ticker's own premium once it has paid for one. The base is "
+                 "never sold."),
+        legs_desc=("buy N LEAPs at 3x leverage (>=0.80 delta), then sell one "
+                   "~0.20 delta monthly call per LEAP, above breakeven"),
+        params={
+            # ---- THE BASE ------------------------------------------------
+            # The opening size per ticker. Premium grows it from here; nothing
+            # ever shrinks it, because this play does not sell the base.
+            "contracts": 5,
+            # HIS RULE, 23 Nov 2026, and it is a LEVERAGE rule with a delta
+            # floor rather than a delta rule: "purchase leaps on them with a
+            # delta that allows 3x unless that is lower than a .8, which we
+            # will stick to .8 only and higher". Leverage here is his own
+            # measure, spot / premium -- one contract is 100 shares of
+            # exposure however deep it is, so this is "how many times cheaper
+            # than the shares".
+            "target_leverage": 3.0,
+            "leap_delta_floor": 0.80,
+            # Keeps a 0.99-delta stub (all intrinsic, no optionality) out of
+            # the answer when one happens to satisfy the leverage test.
+            "leap_delta_cap": 0.98,
+            # ---- THE ROLLING EXPIRY --------------------------------------
+            # "basically we want to be doing 400 days roughly so in 4 months we
+            # dont want to be buying the december 17th anymore fwe will be
+            # moving forward". The target is recomputed from TODAY on every
+            # acquisition, so this moves with the calendar on its own.
+            #
+            # MEASURED 23 Nov 2026, and worth knowing before reading a fill:
+            # every one of 26 blue chips priced that day chose 2028-01-21,
+            # because LEAP listings are annual Januaries. So the roll is not
+            # smooth -- a ticker sits on one January until it decays under the
+            # back tolerance and then steps a whole year.
+            "leap_target_dte": 400,
+            "leap_dte_forward_tol": 120,
+            "leap_dte_back_tol": 60,
+            # Contracts at or beyond this many days out ARE the base. It is
+            # what separates a LEAP from the monthly income leg on the
+            # activities tape as well as in the position list, and it sits far
+            # from both (30 and ~400) so a roll of either cannot cross it.
+            "leap_dte_floor": 200,
+            # ---- THE INCOME LEG ------------------------------------------
+            # "if its above the breakeven point, the .2 delta". The breakeven
+            # is the FLOOR and 0.20 delta is the preference inside it; when the
+            # 0.20 delta sits at or below breakeven the lowest strike above it
+            # is sold instead. Assignment below breakeven loses money however
+            # much credit came in, which is the whole reason for the floor.
+            "short_delta": 0.20,
+            "require_above_breakeven": True,
+            "target_dte": 30,
+            # "if we are at 50 percent profit at anytime we will take that
+            # profit, and then go ahead and open another monthly at the new .2
+            # detla so we can make sure we are always getting the max premium."
+            "profit_pct": 0.50,
+            # NO STOP. "we are going to close those options if they go inside
+            # the money" is the exit on the loss side, not a percentage -- and
+            # a percentage stop on a call that is winning on the LEAP side
+            # would close the income leg at the worst possible moment.
+            "stop_pct": 0.0,
+            "close_if_itm": True,
+            # ---- REINVESTMENT, PER TICKER --------------------------------
+            # "once we gain enough capital for a new contract we are going to
+            # buy another". The premium counted is THIS ticker's own, read off
+            # Alpaca's activities tape by `leapbank`, which is his "keep track
+            # individually, each ticker and their profits" requirement met by
+            # construction rather than by a stored balance.
+            "reinvest": True,
+            # 0 is no ceiling, matching this stack's standing rule that the
+            # broker's collateral check is the only cap (the three caps the
+            # owner removed on 28 Sep 2026).
+            "max_leaps": 0,
+            # ---- TIMING ---------------------------------------------------
+            # "open the options contracts first thing tomorrow when the market
+            # opens". 09:35 rather than 09:30: the opening auction prints wide
+            # on a 400-day contract and a LEAP is the least liquid thing this
+            # account trades. Editable, and worth widening to 10:00 if the
+            # fills come in poor.
+            "entry_after_et": "09:35",
+            "entry_before_et": "15:30",
+            # FALSE on purpose. A fresh ticker has to buy its base AND sell its
+            # first call, and one action per session would take two days to
+            # start earning. Duplicates are impossible without this guard
+            # because every stage is decided by reading the broker: once the
+            # base is held the first branch cannot fire again, and once a call
+            # is sold the uncovered count is zero.
+            "one_per_session": False,
+            "max_open": 0,
+            "min_dte": 7,
+        },
+        editable=("contracts", "target_leverage", "leap_delta_floor",
+                  "leap_delta_cap", "leap_target_dte", "leap_dte_forward_tol",
+                  "leap_dte_back_tol", "leap_dte_floor", "short_delta",
+                  "require_above_breakeven", "target_dte", "profit_pct",
+                  "stop_pct", "close_if_itm", "reinvest", "max_leaps",
+                  "entry_after_et", "entry_before_et", "one_per_session",
+                  "min_dte"),
+        suggested=("GOOGL", "JPM", "UNH", "GE", "PEP"),
+    ),
     "pmcc": Play(
         id="pmcc",
         label="Poor man's covered call (LEAP + monthly calls)",

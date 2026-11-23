@@ -62,6 +62,8 @@ from typing import Any, Optional
 
 import broker
 import greeks as G
+import leapbank
+import leapscan
 import optdata
 import optexec
 import optguard
@@ -1711,6 +1713,43 @@ class Playbook:
         # pinned at 773 is 1,000 shares, about $773,000, against a $98k account.
         # That one is closed, and it is closed before the broker's expiry-day
         # order cutoff because after it no order can be sent at all.
+        #
+        # ===================================================================
+        # THE LEAP MACHINE'S SHORT CALL IS NOT THE WHEEL'S PUT, AND THE
+        # DIFFERENCE IS WHAT IT IS COVERED BY.
+        # ===================================================================
+        # Everything above is about a short leg whose cover is CASH (a
+        # cash-secured put, which wants to be assigned) or a LONG OPTION AT
+        # THE SAME EXPIRY (a spread, which must not be allowed to pin). The
+        # LEAP machine's monthly call is neither: its cover is a long call
+        # 400 days out.
+        #
+        # So assignment here does not buy shares and does not pin a spread --
+        # it requires DELIVERING 100 shares per contract that this account
+        # does not own. The broker resolves that by exercising the LEAP, which
+        # throws away all of its remaining extrinsic value, or by leaving a
+        # short stock position. The extrinsic is precisely the asset the
+        # machine exists to harvest month after month, so an assignment does
+        # not cost a trade, it costs the base.
+        #
+        # That makes the owner's instruction and the safety requirement the
+        # same thing, which is rare and worth saying: "we are going to close
+        # those options if they go inside the money" (23 Nov 2026). An
+        # unreadable spot closes too, matching the fail-closed direction every
+        # other guard here takes -- "I could not look" is never spent as "out
+        # of the money".
+        if str(getattr(pos, "play", "")) == "leap":
+            itm, why_itm = self._short_itm(pos)
+            if itm is True:
+                return ("the short call is in the money (%s) and its cover is "
+                        "a LEAP rather than shares -- assignment would exercise "
+                        "the base and forfeit its extrinsic" % why_itm)
+            if itm is None:
+                return ("the short call's moneyness cannot be established "
+                        "(%s), and its cover is a LEAP rather than shares -- "
+                        "closing rather than risking assignment against the "
+                        "base" % why_itm)
+            return ""
         if pos.kind == P.SHORT_SINGLE:
             return ""
 
@@ -2203,6 +2242,13 @@ class Playbook:
                 a.symbol, rows, expiry, short_delta=float(params["short_delta"]),
                 strikes_below=int(params["strikes_below"]), contracts=ct,
                 play_id=a.play)
+        elif a.play == "leap":
+            # ROUTED BY PLAY, NOT BY KIND, for the same reason as the PMCC
+            # below: the play is declared SHORT_SINGLE because the leg it sells
+            # again and again is a short single, but it also BUYS its own base
+            # on a different expiry and grows that base out of its own
+            # premium. No generic builder can express that.
+            st, build_why = self._build_leap(a, rows, expiry, ct, params)
         elif a.play == "pmcc":
             # ROUTED BY PLAY, NOT BY KIND. The PMCC is declared SHORT_SINGLE
             # because the leg it sells over and over is a short single -- but
@@ -2331,9 +2377,265 @@ class Playbook:
             qty = _num(pos.get("qty")) or 0.0
             if qty <= 0:
                 continue                       # short calls are not cover
+            # `basis` is the premium actually PAID, per share, from the broker.
+            # The LEAP machine's whole short-strike rule is "above the
+            # breakeven", and the breakeven is strike + what was paid -- so
+            # this number cannot come from a config default or from today's
+            # chain. It is the one thing that makes the rule enforceable, and
+            # it is why the cover rows carry a cost at all.
             out.append({"symbol": occ, "strike": float(o.strike),
-                        "expiry": o.expiry, "contracts": int(qty)})
+                        "expiry": o.expiry, "contracts": int(qty),
+                        "basis": _num(pos.get("avg_entry_price"))})
         return out, ""
+
+    def _short_calls_held(self, symbol: str) -> tuple:
+        """`(rows, err)` -- every SHORT call the broker says is open on
+        `symbol`, as {symbol, strike, expiry, contracts}.
+
+        The mirror of `_long_calls_held`, and the LEAP machine needs both to
+        answer its one question each cycle: how many LEAPs are NOT yet covered
+        by a sold call. That subtraction is what makes the income leg scale
+        itself as the base grows -- buy an eleventh LEAP and an eleventh call
+        is sold against it on the next cycle, with no count stored anywhere.
+
+        `contracts` is returned POSITIVE (a magnitude), matching
+        `_long_calls_held`, because Alpaca's option `qty` is unsigned with the
+        direction in a separate field and mixing the two conventions in one
+        subtraction is how a cover check inverts.
+        """
+        sym = str(symbol).upper()
+        try:
+            positions = self.a.positions()
+        except Exception as e:                                  # noqa: BLE001
+            return None, ("could not read %s's option positions (%s)"
+                          % (sym, e))
+        out = []
+        for pos in positions or []:
+            occ = str(pos.get("symbol") or "")
+            if len(occ) <= 6:
+                continue
+            try:
+                o = optsym.parse(occ)
+            except Exception:                                   # noqa: BLE001
+                continue
+            if o.underlying.upper() != sym or not o.is_call:
+                continue
+            qty = _num(pos.get("qty")) or 0.0
+            if qty >= 0:
+                continue                       # long calls are the base
+            out.append({"symbol": occ, "strike": float(o.strike),
+                        "expiry": o.expiry, "contracts": int(abs(qty)),
+                        "basis": _num(pos.get("avg_entry_price"))})
+        return out, ""
+
+    # ==================================================== the LEAP machine
+    def _leap_candidate(self, sym: str, params: dict, today) -> tuple:
+        """`(row, expiry, why)` for the LEAP this ticker should buy TODAY.
+
+        "today" is the operative word and it is the whole of what the owner
+        calls dynamic expiration:
+
+            "at some point, we will start to change our date range to always
+             being a certian time out ... so in 4 months we dont want to be
+             buying the december 17th anymore fwe will be moving forward"
+
+        The target date is recomputed from the current date on every single
+        call, so nothing is pinned to a listing that was correct in November.
+        `leapscan.choose_expiry` then prefers the LONGER side of the target,
+        because this repo's expiry rule is forward-only for a documented
+        reason, and because the long leg must outlive many short cycles.
+
+        The strike is `leapscan.pick_leap`, which is his rule and not a delta:
+        3x leverage, but never below the 0.80 delta floor.
+        """
+        target_dte = int(params.get("leap_target_dte") or 400)
+        back = int(params.get("leap_dte_back_tol") or 60)
+        fwd = int(params.get("leap_dte_forward_tol") or 120)
+        try:
+            exps = self.od.expirations(sym, min_dte=max(1, target_dte - back),
+                                       max_dte=target_dte + fwd, pct=0.25)
+        except Exception as e:                                  # noqa: BLE001
+            return None, None, "could not list %s's expirations (%s)" % (sym, e)
+        lexp, why = leapscan.choose_expiry(exps, today, target_dte,
+                                           forward_tol=fwd, back_tol=back)
+        if not lexp:
+            return None, None, "no LEAP expiry for %s: %s" % (sym, why)
+        spot = self.od.spot(sym)
+        if not spot:
+            return None, None, "no spot for %s, so no strike can be chosen" % sym
+        lrows, crwhy = self.chain_rows(sym, lexp, spot, pct=0.60)
+        if not lrows:
+            return None, None, ("no chain for the %s LEAP expiry %s: %s"
+                                % (sym, lexp, crwhy))
+        row, pick_why = leapscan.pick_leap(
+            lrows, float(spot),
+            target_leverage=float(params.get("target_leverage") or 3.0),
+            delta_floor=float(params.get("leap_delta_floor") or 0.80),
+            delta_cap=float(params.get("leap_delta_cap") or 0.98))
+        if row is None:
+            return None, None, "no LEAP strike for %s %s: %s" % (sym, lexp,
+                                                                 pick_why)
+        return row, lexp, pick_why
+
+    def _build_leap(self, a: P.Assignment, rows, expiry, ct: int,
+                    params: dict) -> tuple:
+        """The permabull LEAP machine. `(Structure, why)` or `(None, why)`.
+
+        THE OWNER'S DESIGN, 23 Nov 2026, in his words:
+
+            "we are buying leaps and then we will sell calls periodically ...
+             start the automated selling monthlies always above the breakeven
+             point (which can be calculated form the options easilty) and more
+             specifically if its above the breakeven point, the .2 delta ...
+             once we gain enough capital for a new contract we are going to buy
+             another ... the kicker is that you are giong to need to keep track
+             individually, each ticker and their profits from selling the calls
+             so that we can know how muych capital to allocate to each ticker
+             to make sure that we are bjying our new contracts only on their
+             own earnings"
+
+        So each cycle asks the broker what this ticker holds and acts on the
+        gap. THREE STAGES, in order, at most one action per cycle:
+
+            1. fewer LEAPs than the opening size   -> buy the shortfall
+            2. this ticker's own premium has paid
+               for another LEAP                    -> buy one more
+            3. a LEAP with no call sold against it  -> sell the monthly call
+
+        NOTHING IS STORED. The LEAP count, the cover count and the premium
+        earned are all read back from Alpaca every cycle -- positions for the
+        first two, the activities tape for the third. A restart, a hand-placed
+        trade or a missed cycle changes nothing, because there is no local
+        counter that could disagree with the account.
+
+        PER-TICKER ISOLATION IS ENFORCED BY CONSTRUCTION, not by bookkeeping:
+        `leapbank.fuel` filters the tape to THIS underlying's calls, so GOOGL's
+        premium can only ever buy GOOGL LEAPs. That is the "kicker" above, and
+        it falls out of asking the question per symbol.
+        """
+        sym = str(a.symbol).upper()
+        today = self.now().date()
+        floor_dte = int(params.get("leap_dte_floor") or leapbank.LEAP_DTE_FLOOR)
+
+        longs, err = self._long_calls_held(sym)
+        if err:
+            return None, err
+        shorts, err = self._short_calls_held(sym)
+        if err:
+            return None, err
+        leaps = [c for c in longs if (c["expiry"] - today).days >= floor_dte]
+        leaps_held = sum(c["contracts"] for c in leaps)
+        shorts_held = sum(c["contracts"] for c in shorts)
+        initial = max(1, int(params.get("contracts") or 1))
+
+        # ---- stage 1: the opening base ---------------------------------
+        if leaps_held < initial:
+            row, lexp, why = self._leap_candidate(sym, params, today)
+            if row is None:
+                return None, why
+            want = initial - leaps_held
+            spot = self.od.spot(sym)
+            lrows, _ = self.chain_rows(sym, lexp, spot, pct=0.60)
+            st, bwhy = P.build_long_single(
+                sym, lrows, lexp, spot, direction="up", contracts=want,
+                play_id=a.play, strike=float(row.strike))
+            if st is None:
+                return None, str(bwhy)
+            return st, ("opening the base: %d x %s %s call at %.2f (%s)"
+                        % (want, lexp, row.strike, float(row.mid), why))
+
+        # ---- stage 2: reinvest THIS TICKER'S OWN premium ----------------
+        target = initial
+        fuel_note = ""
+        if params.get("reinvest"):
+            row, lexp, why = self._leap_candidate(sym, params, today)
+            if row is not None:
+                cost = 100.0 * float(row.mid)
+                f = leapbank.fuel(self.a, sym, leap_dte_floor=floor_dte)
+                res_err = f.get("error")
+                if res_err:
+                    fuel_note = ("reinvestment stood down: %s" % res_err)
+                else:
+                    extra = leapbank.extra_leaps_funded(f.get("fuel"), cost)
+                    cap = int(params.get("max_leaps") or 0)
+                    target = initial + extra
+                    if cap > 0:
+                        target = min(target, cap)
+                    fuel_note = ("%s's own calls have earned $%.2f%s; one LEAP "
+                                 "costs $%.0f, so premium has funded %d extra "
+                                 "(holding %d, target %d)"
+                                 % (sym, f.get("fuel") or 0.0,
+                                    " (at least -- the tape was truncated)"
+                                    if f.get("truncated") else "",
+                                    cost, extra, leaps_held, target))
+                    if leaps_held < target:
+                        spot = self.od.spot(sym)
+                        lrows, _ = self.chain_rows(sym, lexp, spot, pct=0.60)
+                        st, bwhy = P.build_long_single(
+                            sym, lrows, lexp, spot, direction="up",
+                            contracts=(target - leaps_held), play_id=a.play,
+                            strike=float(row.strike))
+                        if st is None:
+                            return None, str(bwhy)
+                        return st, ("reinvesting: %d x %s %s call at %.2f -- %s"
+                                    % (target - leaps_held, lexp, row.strike,
+                                       float(row.mid), fuel_note))
+
+        # ---- stage 3: sell the monthly call ----------------------------
+        uncovered = leaps_held - shorts_held
+        if uncovered <= 0:
+            return None, ("all %d %s LEAP(s) already have a call sold against "
+                          "them%s" % (leaps_held, sym,
+                                      "; " + fuel_note if fuel_note else ""))
+
+        # THE BREAKEVEN IS PER LEAP AND COMES FROM THE BROKER'S OWN COST.
+        # Selling one call above the AVERAGE breakeven would still put some
+        # individual contract underwater on assignment, so the calls cover the
+        # CHEAPEST LEAPs first and the binding line is the dearest of the ones
+        # actually being covered. If no listed strike clears that line, the
+        # count is reduced and the question asked again, rather than selling
+        # below a breakeven or refusing the whole ticker.
+        bes = []
+        for c in leaps:
+            basis = c.get("basis")
+            if basis is None:
+                return None, ("%s: the broker reports no cost for %s, so its "
+                              "breakeven cannot be computed and no call may be "
+                              "sold above it" % (sym, c["symbol"]))
+            bes.extend([float(c["strike"]) + float(basis)] * int(c["contracts"]))
+        bes.sort()
+
+        spot = self.od.spot(sym)
+        if not spot:
+            return None, "no spot for %s, so the monthly call cannot be priced" % sym
+        srows, swhy = self.chain_rows(sym, expiry, spot, pct=0.30)
+        if not srows:
+            return None, "no monthly chain for %s %s: %s" % (sym, expiry, swhy)
+
+        want_delta = float(params.get("short_delta") or 0.20)
+        enforce = bool(params.get("require_above_breakeven", True))
+        for n in range(int(uncovered), 0, -1):
+            binding = bes[n - 1] if enforce else 0.0
+            srow, pick_why = leapscan.pick_short(srows, binding,
+                                                 target_delta=want_delta)
+            if srow is None:
+                continue
+            st, bwhy = P.build_short_single(
+                sym, srows, expiry, right="call", contracts=n,
+                strike=float(srow.strike), long_calls=leaps, play_id=a.play)
+            if st is None:
+                continue
+            extra = ""
+            if n < int(uncovered):
+                extra = (" -- only %d of %d uncovered LEAPs could be covered "
+                         "above their own breakeven" % (n, uncovered))
+            return st, ("selling %d x %s %s call: %s%s%s"
+                        % (n, expiry, srow.strike, pick_why, extra,
+                           "; " + fuel_note if fuel_note else ""))
+        return None, ("no %s call in %s sits above the breakeven of the %d "
+                      "uncovered LEAP(s) (lowest breakeven %.2f, spot %.2f), "
+                      "so nothing may be sold this cycle"
+                      % (sym, expiry, uncovered, bes[0], float(spot)))
 
     def _build_pmcc(self, a: P.Assignment, rows, expiry, ct: int,
                     params: dict) -> tuple:
