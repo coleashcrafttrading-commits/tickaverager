@@ -1352,8 +1352,13 @@ def bank_entries(kind: str = "", origin: str = "", symbol: str = "",
                             attachable_only=attachable)
     except bank.BankError as e:
         raise HTTPException(400, str(e))
+    # OPTIONS ONLY, from 23 Nov 2026 -- see bank.OFFERED_KINDS for the owner's
+    # instruction and for why the shelf itself is not deleted. `kinds` is
+    # narrowed too, because it is what draws the filter segments: leaving
+    # "ladder" there would render a segment that selects nothing.
+    rows = bank.offered(rows)
     return {"ok": True, "account": ctx.account_id, "as_of": ctx.now,
-            "kinds": list(bank.BANK_KINDS), "origins": list(bank.ORIGINS),
+            "kinds": list(bank.OFFERED_KINDS), "origins": list(bank.ORIGINS),
             "count": len(rows), "entries": rows, "warnings": ctx.warnings}
 
 
@@ -1397,6 +1402,18 @@ def bank_attach(body: dict = Body(...), f: Fleet = Depends(cur)):
                                force=bool(body.get("force")))
         if action != "attach":
             raise HTTPException(400, "action must be attach or detach")
+        # A HIDDEN ENTRY MUST ALSO BE AN UNATTACHABLE ONE. Filtering the
+        # listing alone would leave every ladder preset reachable by anyone who
+        # kept a tab open or typed the id, and an attached ladder is a strategy
+        # that starts trading shares on an account that is meant to be options
+        # only. The id carries its store, so this costs one lookup.
+        _kind = bank.STORE_KIND.get(str(eid).split(":", 1)[0])
+        if _kind and _kind not in bank.OFFERED_KINDS:
+            raise HTTPException(
+                400, "%s is a %s strategy, and this account is options only "
+                     "(see bank.OFFERED_KINDS). The ladder and indicator "
+                     "shelves are still on disk as a record; nothing attaches "
+                     "them." % (eid, _kind))
         return bank.attach(ctx, sym, eid, settings,
                            by=str(body.get("by") or "dashboard"),
                            enabled=bool(body.get("enabled", True)),

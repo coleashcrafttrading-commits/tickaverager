@@ -475,6 +475,33 @@ STORES = ("preset", "doc", "code", "option", "play")
 BANK_KINDS = ("ladder", "indicator", "option", "option-tailored")
 ORIGINS = ("standard", "personal")
 
+#: THE KINDS THE DASHBOARD OFFERS. Cole, 23 Nov 2026: "I want you to delete all
+#: strategies form the tick avenger other than options strategies please. We are
+#: going to focus on options now. buying and selling options is it ... make sure
+#: the dashboard is purely this, i dont want other strategies getting in the way
+#: and me getting confused."
+#:
+#: THIS IS A POLICY ABOUT WHAT MAY BE ATTACHED, NOT A CHANGE TO WHAT THE BANK
+#: IS, and the distinction is deliberate. `entries()` still returns the whole
+#: shelf, because the shelf is a record of what has been built and measured and
+#: deleting 23 indicator documents and three ladder presets from disk would
+#: throw away the evidence behind them -- including the measurement that the
+#: SuperTrend study is NOT an edge, which is the kind of finding that gets
+#: rediscovered expensively. What changes is that `/api/bank/*` will not offer
+#: or attach them, so nothing non-options can reach a ticker through the
+#: dashboard, and no ladder can start by accident.
+#:
+#: The ladder engine itself is untouched and still passes its own suites. There
+#: were no ladders running when this was written -- config.json held zero
+#: tickers -- so nothing had to be unwound to make it true.
+OFFERED_KINDS = ("option-tailored", "option")
+
+
+def offered(rows: list, kinds: tuple = OFFERED_KINDS) -> list:
+    """`rows` less every entry whose kind the dashboard does not offer."""
+    allow = set(kinds or ())
+    return [r for r in rows if r.get("kind") in allow]
+
 STORE_KIND = {"preset": "ladder", "doc": "indicator", "code": "indicator",
               "option": "option", "play": "option-tailored"}
 

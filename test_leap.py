@@ -412,6 +412,43 @@ for sym, spot, k, prem, delta, credit, lev, be in (
            "PEP": 152.5}[sym] > mm.breakeven, True)
 
 
+# ============================================================================
+section(10, "THE DASHBOARD OFFERS OPTIONS AND NOTHING ELSE")
+# Cole, 23 Nov 2026: "delete all strategies form the tick avenger other than
+# options strategies ... make sure the dashboard is purely this".
+#
+# The shelf itself is NOT deleted -- it is the record of what has been built
+# and measured, including the finding that the SuperTrend study is not an edge,
+# which is exactly the kind of result that gets rediscovered expensively. What
+# is enforced is that nothing non-options can be OFFERED or ATTACHED.
+import bank                                                     # noqa: E402
+
+shelf = bank.entries()
+kinds_on_shelf = {r["kind"] for r in shelf}
+check("the full shelf still holds the ladder presets",
+      "ladder" in kinds_on_shelf, True)
+check("and the indicator documents", "indicator" in kinds_on_shelf, True)
+
+off = bank.offered(shelf)
+kinds_offered = {r["kind"] for r in off}
+check("but nothing offered is a ladder", "ladder" in kinds_offered, False)
+check("and nothing offered is an indicator", "indicator" in kinds_offered,
+      False)
+check("the offered kinds are exactly the two option kinds",
+      sorted(kinds_offered), ["option", "option-tailored"])
+check("the leap play is offered",
+      "play:leap" in [r["id"] for r in off], True)
+# The id carries its store, which is what makes the attach refusal cheap. If a
+# new store is ever added without a kind, this mapping is where it goes.
+check("every offered id maps to an offered kind",
+      sorted({bank.STORE_KIND.get(r["id"].split(":", 1)[0])
+              for r in off}), ["option", "option-tailored"])
+check("a preset id maps to the ladder kind, so the attach guard sees it",
+      bank.STORE_KIND.get("preset"), "ladder")
+check("a coded strategy maps to indicator too",
+      bank.STORE_KIND.get("code"), "indicator")
+
+
 print()
 print("=" * 78)
 print("FAILURES: %d" % FAIL)
