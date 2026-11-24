@@ -275,8 +275,8 @@ PLAYS: dict = {
                  "if it goes in the money, and buy another LEAP out of that "
                  "ticker's own premium once it has paid for one. The base is "
                  "never sold."),
-        legs_desc=("buy N LEAPs at 3x leverage (>=0.80 delta), then sell one "
-                   "~0.20 delta monthly call per LEAP, above breakeven"),
+        legs_desc=("buy N LEAPs at the 0.80 delta, then sell one ~0.20 delta "
+                   "monthly call per LEAP, above breakeven"),
         params={
             # ---- THE BASE ------------------------------------------------
             # The opening size per ticker. Premium grows it from here; nothing
@@ -308,6 +308,34 @@ PLAYS: dict = {
             "leap_target_dte": 400,
             "leap_dte_forward_tol": 120,
             "leap_dte_back_tol": 60,
+            # HIS DATE, 24 Nov 2026: "i want to buy 5 contracts each of their
+            # december 17th 2027 .8 delta leaps". A pinned expiry OUTRANKS the
+            # rolling target above; clearing it (empty string) goes back to the
+            # ~400-day rule. It is checked against the listings on every
+            # acquisition and refused if the date is not there, rather than
+            # silently resolving to a neighbour -- a date he named is not a
+            # target to approximate.
+            #
+            # MEASURED 23 Nov 2026: both names list 2027-12-17 (388 DTE) and
+            # also 2027-11-19 and 2028-01-21. The "LEAP listings are annual
+            # Januaries" note in CLAUDE.md came from scanning a 400-day WINDOW,
+            # which December 2027 happened to fall outside of for most names.
+            "leap_expiry": "2027-12-17",
+            # A DELTA TARGET, which is a different rule from the leverage one
+            # above and wins when it is non-zero. 0 goes back to "3x unless
+            # that is below 0.80". Measured on the 23 Nov closing book at
+            # 2027-12-17, a 0.80 TARGET takes NVDA's 125 strike (0.806 delta,
+            # $57.50, 2.90x) and GOOGL's 225 (0.800, $84.25, 3.38x) -- so the
+            # same delta is NOT the same leverage across two names, and with
+            # the delta named the leverage is an output here rather than the
+            # rule.
+            "leap_delta_target": 0.80,
+            # How far the nearest listed delta may sit from the target before
+            # the answer stops being the strike he asked for. 0.06 clears the
+            # 5-point strike spacing on both names (NVDA steps 0.806 -> 0.785,
+            # GOOGL 0.815 -> 0.800) and refuses a chain band too narrow to
+            # contain the target, instead of returning its own edge.
+            "leap_delta_tol": 0.06,
             # Contracts at or beyond this many days out ARE the base. It is
             # what separates a LEAP from the monthly income leg on the
             # activities tape as well as in the position list, and it sits far
@@ -322,6 +350,21 @@ PLAYS: dict = {
             "short_delta": 0.20,
             "require_above_breakeven": True,
             "target_dte": 30,
+            # "go ahead and open a monthly .2 delta on both". MONTHLY MEANS THE
+            # THIRD FRIDAY, and asking for ~30 days instead gets neither:
+            # measured 24 Nov 2026 against the live listings, a 30-day target
+            # under this repo's forward-only rule picks 2026-12-24 -- Christmas
+            # Eve, a weekly, on a half session -- and restricting to monthlies
+            # while keeping forward-only picks 2027-01-15 at 53 DTE, because
+            # the only nearer monthly is 2026-12-18 at 24 and forward-only
+            # skips it by definition.
+            #
+            # So this takes the EARLIEST monthly past `min_dte`: 2026-12-18
+            # today, 2027-01-15 once that expires, every month, with no target
+            # to keep adjusting. `target_dte` above is then unused by this play
+            # and is left only because the shared propose path reads it to size
+            # its expiry query.
+            "short_monthly_only": True,
             # "if we are at 50 percent profit at anytime we will take that
             # profit, and then go ahead and open another monthly at the new .2
             # detla so we can make sure we are always getting the max premium."
@@ -344,12 +387,17 @@ PLAYS: dict = {
             # owner removed on 28 Sep 2026).
             "max_leaps": 0,
             # ---- TIMING ---------------------------------------------------
-            # "open the options contracts first thing tomorrow when the market
-            # opens". 09:35 rather than 09:30: the opening auction prints wide
-            # on a 400-day contract and a LEAP is the least liquid thing this
-            # account trades. Editable, and worth widening to 10:00 if the
-            # fills come in poor.
-            "entry_after_et": "09:35",
+            # HIS CLOCK, 24 Nov 2026: "The market opens at 830 central which is
+            # the time i go off of, so at 9 am I want to open the contracts".
+            # 09:00 Central is 10:00 Eastern -- half an hour after the open --
+            # and it is stored as Eastern because this repo keeps ONE clock in
+            # the code and converts once, the same way the index spreads store
+            # his "09:30 central" as 10:30 ET.
+            #
+            # It also happens to be the right half hour to miss: a 388-day
+            # contract is the least liquid thing this account trades and the
+            # opening auction prints its spread widest.
+            "entry_after_et": "10:00",
             "entry_before_et": "15:30",
             # FALSE on purpose. A fresh ticker has to buy its base AND sell its
             # first call, and one action per session would take two days to
@@ -363,12 +411,21 @@ PLAYS: dict = {
         },
         editable=("contracts", "target_leverage", "leap_delta_floor",
                   "leap_delta_cap", "leap_target_dte", "leap_dte_forward_tol",
-                  "leap_dte_back_tol", "leap_dte_floor", "short_delta",
-                  "require_above_breakeven", "target_dte", "profit_pct",
+                  "leap_dte_back_tol", "leap_dte_floor", "leap_expiry",
+                  "leap_delta_target", "leap_delta_tol", "short_delta",
+                  "require_above_breakeven", "target_dte", "short_monthly_only",
+                  "profit_pct",
                   "stop_pct", "close_if_itm", "reinvest", "max_leaps",
                   "entry_after_et", "entry_before_et", "one_per_session",
                   "min_dte"),
-        suggested=("GOOGL", "JPM", "UNH", "GE", "PEP"),
+        # HIS TWO, 24 Nov 2026: "I want to do nvda and googl to start off".
+        # The 23 Nov research list (GOOGL, JPM, UNH, GE, PEP) was never
+        # approved and he narrowed it himself. NVDA is here on his instruction
+        # and would NOT pass the 3x leverage rule above -- at 0.80 delta on the
+        # pinned expiry it is 2.90x -- which is exactly why the delta target
+        # exists: with the delta named, 2.90x is the answer rather than a
+        # refusal.
+        suggested=("NVDA", "GOOGL"),
     ),
     "pmcc": Play(
         id="pmcc",

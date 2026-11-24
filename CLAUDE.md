@@ -708,9 +708,10 @@ for it: **`new-options-trading` / PA33G63IB, $250,000, options level 3**.
 |---|---|
 | `leapscan.py` | the arithmetic: leverage, extrinsic, breakeven, and the two strike rules. Also the CLI that produced the research below |
 | `leapbank.py` | the per-ticker fuel gauge, read off Alpaca's activities tape |
+| `optfill.py` | watches ONE order at second resolution: `await_fill` and `cancel_and_settle`. Places nothing |
 | `optplaybook._build_leap` | the cycle: base -> reinvest -> sell the monthly |
 | `optplays.py` `"leap"` | every number, each one his |
-| `test_leap.py` | all of it, offline |
+| `test_leap.py` | all of it, offline. 17 sections |
 
 **THE RULE IS LEVERAGE, NOT DELTA.** *"purchase leaps on them with a delta that
 allows 3x unless that is lower than a .8, which we will stick to .8 only and
@@ -770,6 +771,112 @@ can only ever buy GOOGL LEAPs. Three things make it hard to get wrong:
   trade; this cannot. The divisor is read live, which is also his point about
   buying "a higher strike as the stock increases with the original delta so that
   we can keep buying the options for roughly the same cost".
+
+### What he changed on 24 Nov 2026 -- and it narrowed the whole thing
+
+*"I want to do nvda and googl to start off and I want to buy 5 contracts each
+of their december 17th 2027 .8 delta leaps. The market opens at 830 central
+which is the time i go off of, so at 9 am I want to open the contracts ... Then
+right after they are open and i mean instantly, go ahead and open a monthly .2
+delta on both or whatever is one strike above breakeven if the .2 delta doesnt
+reach that high. if you dont get filled within 30 seconds on any option, cancel
+and try again and always get the midpoint mark price not the bid or ask."*
+
+So the researched five below were never attached. **NVDA and GOOGL only, 5
+contracts each, on a PINNED expiry at a NAMED delta.** Four things here are not
+what the 23 Nov design assumed:
+
+**A DELTA TARGET IS NOT THE LEVERAGE RULE, and both now exist.** `pick_leap` is
+still "3x unless that is below 0.80 delta, and then the floor wins";
+`pick_leap_delta` is "the listed call nearest 0.80". They give different answers
+on one chain, which is why it is a second function and not a flag -- and
+`leap_delta_target` (0.80) is what selects it, with 0 going back to the leverage
+rule. **NVDA at 0.80 delta is only 2.90x**, so it fails his own 3x rule and is
+on the list anyway on his instruction; with the delta named, 2.90x is the answer
+rather than a refusal. Measured on the 23 Nov closing book at 2027-12-17:
+
+| | strike | delta | mid | $/contract | x5 | leverage | breakeven |
+|---|---|---|---|---|---|---|---|
+| NVDA | 125 | 0.806 | $57.50 | $5,750 | $28,750 | 2.90x | 182.50 |
+| GOOGL | 225 | 0.800 | $84.25 | $8,425 | $42,125 | 3.38x | 309.25 |
+
+$70,875 of his $250,000. One delta is NOT one leverage across two names.
+
+**DECEMBER 2027 IS LISTED, and the "annual Januaries" note above is narrower
+than it reads.** Both names list 2027-11-19, **2027-12-17** and 2028-01-21. The
+23 Nov research saw only Januaries because it scanned a 400-day WINDOW that
+December 2027 fell outside of. `leap_expiry` pins it, is CHECKED against the
+listings on every acquisition, and refuses with the neighbouring dates named
+rather than resolving to one of them -- a date he chose is not a target to
+approximate. Clearing it returns to the rolling ~400-day rule.
+
+**"MONTHLY" MEANS THE THIRD FRIDAY, and asking for ~30 days gets neither.**
+Measured 24 Nov against the live listings: a 30-day target under this repo's
+forward-only rule picks **2026-12-24** -- Christmas Eve, a weekly, on a half
+session, the thinnest book of the quarter -- and restricting to monthlies while
+KEEPING forward-only picks 2027-01-15 at 53 DTE, because the only nearer
+monthly is 2026-12-18 at 24 and forward-only skips it by definition. So
+`short_monthly_only` takes the EARLIEST monthly past `min_dte`: 2026-12-18
+today, 2027-01-15 the day after that expires, every month, with no target to
+keep adjusting. The forward-only rule exists so a shorter trade is never bought
+SILENTLY; here the front monthly is the instrument that was asked for and it is
+chosen out loud.
+
+**THE 30-SECOND MID-RETRY WAS ALREADY HIS RULE AND ALREADY BUILT.** He gave it
+on 12 Oct -- *"after 30 seconds if no fill, do another"* -- and
+`ENTRY_RETRY_AFTER_S` has been 30 since. Mid pricing was never not the case:
+there is no market-order path in `optexec` at all and the price walk toward the
+natural price was never wired up. **What was missing was the clock.** The retry
+is measured in CYCLES: `_reconcile` only acts when a cycle runs and the
+replacement waits for the cycle after that, so at a 20-second period "after 30
+seconds" is 30-50 seconds to the cancel and up to 20 more to the replacement --
+one attempt can take 70 seconds. `optfill` watches the order at second
+resolution instead, and the unit now runs `--period 10`.
+
+### The follow-through, and why "instantly" needs a waiter
+
+*"right after they are open and i mean instantly, go ahead and open a monthly
+.2 delta on both"*. The short's strike depends on the base's BREAKEVEN, the
+breakeven is `strike + avg_entry_price` read from the broker, so the short
+cannot be priced until the base has filled. A cycle-polled design discovers the
+fill up to a period late and the breakeven is the one number in this strategy
+that must not be estimated. `_leap_follow` is therefore a BLOCKING waiter on
+the order just submitted, and both of his rules fall out of the same mechanism:
+
+| the order is | what happens |
+|---|---|
+| filled / partial | the base is real -> wait for the broker to SHOW it, then re-propose at once, which falls through to stage 3 and sells the monthly |
+| still working at 30s | cancel, **confirm what the cancel did**, then re-propose on a fresh mid |
+| gone | cancelled or rejected unfilled -> re-propose on a fresh mid |
+| **unreadable** | **STOP.** Leave it to `_reconcile` |
+
+**`unknown` is not a synonym for `gone` and the distinction is the dangerous
+one.** An order that could not be READ is not an order that did not fill, and a
+caller that re-sends against a live one turns five contracts into ten. Same
+reason `cancel_and_settle` returns a verdict rather than a boolean: the order
+can fill in the instant between the timeout and the DELETE landing, so the only
+safe reading is the one taken AFTER the cancel settles. A cancel that did not
+take reports `unknown`, never `gone`.
+
+It is bounded -- `LEAP_FOLLOW_BUDGET_S` 75s, `LEAP_FOLLOW_MAX_STEPS` 4 -- and
+it runs in `_propose`, which `cycle` calls AFTER `_reconcile`, `_manage` and
+`_cover`. That order is what keeps a blocking wait from sitting in front of a
+close decided in the same cycle, and `test_leap.py` section 16 pins it.
+
+**THE EARNINGS FEED IS EMPTY AND EVERY SYMBOL THEREFORE "CLEARS".** Measured
+24 Nov 2026 on the VM: `state/mktfeed/earnings_feed.json` holds **0 symbols**
+with the window 2026-11-23 to 2027-01-21 and *"every weekday fetched"* -- so
+the sweep ran, reported no failures, and returned nothing for all 4,447 names
+it used to carry. `mktfeed.earnings_risk("NVDA")` answers
+`known=True, date=None`, which `wheel_expiry` reads as "no print scheduled, the
+expiry stands". That is the `[] CLEARS and None BLOCKS` trap one level up: an
+empty FEED is indistinguishable from a market with no earnings in it. The
+leap play is unaffected in the direction that matters -- it clears rather than
+blocks, and a short call against a 0.80-delta LEAP that gaps up loses less on
+the short than the base gains -- but **nothing on this account currently dodges
+a print**, and the wheel would sell a put straight through one. Not fixed here:
+the fix is in the feed, and making the gate strict tonight would have blocked
+the trade he asked for.
 
 ### The research that picked the tickers, measured 23 Nov 2026
 

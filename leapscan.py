@@ -240,6 +240,86 @@ def pick_leap(rows: Sequence[Any], spot: float, *, target_leverage: float = 3.0,
                   delta_floor))
 
 
+def pick_leap_delta(rows: Sequence[Any], spot: float, *,
+                    target_delta: float = 0.80, tol: float = 0.06
+                    ) -> tuple[Optional[Any], str]:
+    """The LEAP when the owner names a DELTA instead of a leverage.
+
+    His 23 Nov instruction set the rule as leverage with a delta FLOOR -- see
+    `pick_leap`, which is still that rule and is still the default. On 24 Nov
+    he named the number directly: *"i want to buy 5 contracts each of their
+    december 17th 2027 .8 delta leaps"*. A target is not a floor, so this is a
+    different question and gets a different function rather than a flag inside
+    the old one: `pick_leap` may legitimately return 0.88 delta (the deepest
+    strike that still reaches 3x) and that is the wrong answer to "the 0.8
+    delta".
+
+    NEAREST, not nearest-from-above. Delta is a continuum sampled at listed
+    strikes, so 0.806 and 0.787 can straddle the target and refusing the lower
+    one would buy a materially deeper contract for no reason he gave. `tol`
+    bounds how far "nearest" may be before it stops being the strike he asked
+    for and says so, because a chain band too narrow to contain the target
+    otherwise returns its own edge and calls it the answer.
+
+    THE LEVERAGE IS REPORTED, NOT ENFORCED. He thinks in leverage and it is
+    the number he reads first, so it is in the reason string -- but with the
+    delta named, leverage is an OUTPUT here. Measured on the closing book of
+    23 Nov 2026 at 2027-12-17: NVDA's 0.806 delta is 2.90x and GOOGL's 0.800
+    is 3.38x, so the same delta is not the same leverage across two names and
+    nothing should pretend otherwise.
+    """
+    cands = []
+    for r in rows:
+        if str(getattr(r, "right", "") or "").lower()[:1] != "c":
+            continue
+        d = getattr(r, "delta", None)
+        m = getattr(r, "mid", None)
+        if d is None or m is None or float(m) <= 0:
+            continue
+        cands.append((float(d), float(m), r))
+    if not cands:
+        return None, "no call in the band has a two-sided quote and a delta"
+    d, m, r = min(cands, key=lambda t: abs(t[0] - float(target_delta)))
+    off = abs(d - float(target_delta))
+    lev = float(spot) / m if m else 0.0
+    if off > float(tol):
+        return None, ("the closest call to the %.2f delta is %.3f at the %.2f "
+                      "strike, %.3f away -- outside the %.2f tolerance, so the "
+                      "chain band does not reach the strike that was asked for"
+                      % (float(target_delta), d, float(r.strike), off,
+                         float(tol)))
+    return r, ("%.3f delta at %.2f strike, %.2fx leverage -- the listed call "
+               "nearest the %.2f delta (%.3f off)"
+               % (d, float(r.strike), lev, float(target_delta), off))
+
+
+def is_monthly(day) -> bool:
+    """True for a standard monthly expiration: the THIRD FRIDAY of its month.
+
+    Written because "monthly" and "about 30 days out" are not the same thing
+    and the difference bit. Measured 24 Nov 2026: with a 30-day target and the
+    repo's forward-only rule, the listings 2026-12-18, 2026-12-24, 2026-12-31
+    and 2027-01-15 resolve to **2026-12-24** -- Christmas Eve, a weekly, on a
+    half session. The owner asked for "a monthly .2 delta"; the monthly is
+    2026-12-18 at 24 DTE, which forward-only skips precisely because it is
+    nearer than the target.
+
+    So the expiry class is filtered FIRST and the DTE target chooses among what
+    is left. A weekly is not a worse monthly, it is a different instrument:
+    thinner, and on that particular date barely quoted at all.
+    """
+    if day is None:
+        return False
+    if day.weekday() != 4:                       # Friday
+        return False
+    return 15 <= day.day <= 21                   # the third one
+
+
+def monthlies(expiries: Sequence[Any]) -> list:
+    """Just the third-Friday expirations, in order. See `is_monthly`."""
+    return sorted([e for e in expiries if is_monthly(e)])
+
+
 def pick_short(rows: Sequence[Any], breakeven: float, *,
                target_delta: float = 0.20) -> tuple[Optional[Any], str]:
     """The call to sell this month. The owner's rule, 23 Nov 2026:

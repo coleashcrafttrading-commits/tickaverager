@@ -36,6 +36,11 @@
 #
 # IT STARTS DISARMED and stays that way until a human writes the arm file
 # through the dashboard. Starting this unit does not start trading.
+#
+# FROM 24 Nov 2026 it runs NVDA and GOOGL only, 5 contracts each of the
+# 2027-12-17 0.80-delta call, with the monthly 0.20-delta call sold
+# against each one the moment the base fills. See the LEAP machine
+# section in CLAUDE.md.
 
 [Unit]
 Description=Tick Avenger -- options playbook worker (LEAP machine, new-options-trading)
@@ -50,7 +55,14 @@ Type=simple
 User=coleashcraft_trading
 WorkingDirectory=/home/coleashcraft_trading/tickaverager
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/coleashcraft_trading/tickaverager/venv/bin/python optplaybook.py serve --account new-options-trading
+# --period 10 rather than the 20-second default. Three things on this
+# account are measured in seconds rather than cycles and a long period
+# blunts all of them: the 10:00 ET entry window (his 9am Central), the
+# 30-second mid-retry backstop in _reconcile, and the 50% profit take.
+# The cost is two more chain reads a minute on a 10,000/min market-data
+# budget, and a cycle outside the entry window never reads a chain at
+# all -- in_entry_window refuses before any data call.
+ExecStart=/home/coleashcraft_trading/tickaverager/venv/bin/python optplaybook.py serve --account new-options-trading --period 10
 
 # Always come back. A worker that owns the exit path may not stay dead, and 10
 # seconds is long enough that a crash loop is visible in the journal rather

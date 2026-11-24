@@ -66,6 +66,7 @@ import leapbank
 import leapscan
 import optdata
 import optexec
+import optfill
 import optguard
 import options
 import optplays as P
@@ -154,6 +155,41 @@ EXIT_REPRICE_AFTER_S = 300.0
 #: book and sends a fresh order, which is the "different one" -- re-using the
 #: stale limit would just miss again.
 ENTRY_RETRY_AFTER_S = 30.0
+
+#: THE SAME 30 SECONDS, MEASURED IN SECONDS INSTEAD OF CYCLES. He said it
+#: again on 24 Nov: *"if you dont get filled within 30 seconds on any option,
+#: cancel and try again and always get the midpoint mark price not the bid or
+#: ask ... the stupid bot gets hung up waiting fora fill that never happens
+#: and i dont make money"*. `ENTRY_RETRY_AFTER_S` above already cancels at 30
+#: seconds, but only when a CYCLE notices: at the default 20-second period
+#: that is 30-50 seconds to the cancel and up to 20 more to the replacement,
+#: so one attempt can take 70 seconds and three can take most of a quarter
+#: hour. `optfill` watches the order at second resolution instead, and this is
+#: the window it watches for. The cycle-driven path above stays as the
+#: backstop: it is the only thing that can clean up after a process death.
+LEAP_FILL_WAIT_S = 30.0
+
+#: How long the whole follow-through may hold one cycle. The follow-through is
+#: BLOCKING -- the cycle it runs in cannot reconcile, manage or close anything
+#: while it waits -- so it is bounded, and it runs AFTER `_manage` and
+#: `_cover` precisely so that a close decided this cycle is already on the
+#: wire before anything here waits. Two attempts plus the base-then-short
+#: hand-off fit inside this; a third attempt waits for the next cycle.
+LEAP_FOLLOW_BUDGET_S = 75.0
+
+#: Opens one symbol's follow-through may chain in a single cycle. Two is the
+#: shape of the strategy -- buy the base, then sell the call against it -- and
+#: a retry of either uses one. It exists so a build that keeps proposing
+#: cannot spin inside one cycle.
+LEAP_FOLLOW_MAX_STEPS = 4
+
+#: After a base fills, how long to wait for the BROKER to show the position.
+#: The short's strike depends on the base's breakeven and the breakeven comes
+#: from the broker's own `avg_entry_price` -- never from the chain and never
+#: from config -- so if the positions endpoint has not caught up there is
+#: nothing to compute from, and the right answer is to let the next cycle sell
+#: the call rather than to estimate the one number that must not be estimated.
+LEAP_POSITION_WAIT_S = 12.0
 
 #: The close_reason written when an entry never filled. Matched rather than
 #: re-typed, because `one_per_session` has to tell an entry that OPENED from
@@ -2103,6 +2139,197 @@ class Playbook:
                         reason=pr.reason, priority=pr.priority, tier=pr.tier,
                         structure=pr.structure.as_dict() if pr.structure else None,
                         submitted=pr.submitted)
+            # WAIT FOR THE FILL AND ACT ON IT NOW, not next cycle. His words:
+            # *"right after they are open and i mean instantly, go ahead and
+            # open a monthly .2 delta on both"*.
+            if a.play == "leap" and pr.submitted:
+                try:
+                    self._leap_follow(a, pr, sigs, arm, res)
+                except Exception as e:                          # noqa: BLE001
+                    res.errors.append("leap follow-through %s: %s"
+                                      % (a.symbol, e))
+                    self.decide("leap_follow_error", symbol=a.symbol,
+                                error=str(e))
+
+    # ------------------------------------------- the leap follow-through
+    def _order_id(self, pr: "Proposal") -> str:
+        """The broker's order id out of a submitted proposal's response."""
+        resp = (pr.response or {}).get("response")
+        if isinstance(resp, dict):
+            return str(resp.get("id") or "")
+        return ""
+
+    def _await_long_call(self, sym: str, want: int,
+                         timeout_s: float = LEAP_POSITION_WAIT_S) -> tuple:
+        """Wait for the broker to show `want` long calls on `sym`. `(ok, why)`.
+
+        `_build_leap` reads the breakeven off `avg_entry_price`, so the short
+        cannot be priced until the position is VISIBLE, not merely filled. A
+        fill and a position are two different reads of two different endpoints
+        and they do not update together.
+        """
+        t0 = time.monotonic()
+        last = "the positions endpoint was never read"
+        while True:
+            held, err = self._long_calls_held(sym)
+            if err:
+                last = err
+            else:
+                n = sum(c["contracts"] for c in (held or []))
+                missing = [c["symbol"] for c in (held or [])
+                           if c.get("basis") is None]
+                if n >= int(want) and not missing:
+                    return True, "the broker shows %d long %s call(s)" % (n, sym)
+                last = ("the broker shows %d long %s call(s) of %d%s"
+                        % (n, sym, int(want),
+                           " and reports no cost for %s" % ", ".join(missing)
+                           if missing else ""))
+            waited = time.monotonic() - t0
+            if waited >= float(timeout_s):
+                return False, "%s after %.1fs" % (last, waited)
+            time.sleep(min(1.0, max(0.05, float(timeout_s) - waited)))
+
+    def _leap_follow(self, a: P.Assignment, pr: "Proposal", sigs: dict,
+                     arm: Arm, res: CycleResult) -> None:
+        """Watch a submitted leap order and take the next action immediately.
+
+        TWO OF HIS INSTRUCTIONS MEET HERE, 24 Nov 2026:
+
+            "if you dont get filled within 30 seconds on any option, cancel
+             and try again and always get the midpoint mark price"
+            "right after they are open and i mean instantly, go ahead and open
+             a monthly .2 delta on both"
+
+        and they are the same mechanism seen from two sides: something has to
+        WATCH the order. Whichever way it resolves, the next action is taken in
+        this pass rather than discovered a cycle later:
+
+            filled / partial -> the base is real, so re-propose at once. The
+                                build reads the broker, sees the LEAP, falls
+                                through to stage 3 and sells the monthly call.
+            working at 30s   -> cancel, CONFIRM what the cancel did, and
+                                re-propose, which prices a fresh mid against
+                                the book as it now stands. That is "cancel and
+                                try again"; re-using the stale limit would
+                                just miss again.
+            gone             -> cancelled or rejected with nothing filled, so
+                                re-propose on a fresh mid.
+            unknown          -> STOP. An order that could not be read is not
+                                an order that did not fill, and sending a
+                                replacement against a live one is how five
+                                contracts become ten. `_reconcile` owns that
+                                case; it is also the only path that can clean
+                                up after a process death.
+
+        `pr` is the proposal that was just submitted. Each step appends its own
+        proposal to the cycle result, so the dashboard shows the attempts
+        rather than one line that hides three.
+        """
+        t0 = time.monotonic()
+        cur = pr
+        for step in range(int(LEAP_FOLLOW_MAX_STEPS)):
+            oid = self._order_id(cur)
+            if not oid:
+                self.decide("leap_follow_stop", symbol=a.symbol,
+                            reason="the submitted order carried no id")
+                return
+            st = cur.structure
+            want = int(getattr(st, "contracts", 0) or 0)
+            v = optfill.await_fill(self.a, oid, want=want,
+                                   timeout_s=float(LEAP_FILL_WAIT_S))
+            res.trading_calls += 1
+            self.decide("leap_fill_watch", symbol=a.symbol, order=oid,
+                        step=step + 1,
+                        **{k: v[k] for k in ("outcome", "status", "filled",
+                                             "want", "avg_price", "waited_s",
+                                             "why")})
+            outcome = v["outcome"]
+            why_stop = v.get("why") or ""
+
+            if outcome == "working":
+                c = optfill.cancel_and_settle(self.a, oid)
+                res.trading_calls += 1
+                self.decide("leap_entry_cancelled", symbol=a.symbol, order=oid,
+                            **{k: c[k] for k in ("outcome", "status", "filled",
+                                                 "avg_price", "why")})
+                outcome = c["outcome"]
+                why_stop = c.get("why") or why_stop
+                if outcome == "gone":
+                    self._close_unfilled(
+                        cur, "cancelled unfilled after %.0fs at the mid"
+                             % v["waited_s"])
+            elif outcome == "gone":
+                self._close_unfilled(
+                    cur, "the order went %s with nothing filled"
+                         % (v.get("status") or "away"))
+
+            if outcome == "unknown":
+                res.errors.append(
+                    "%s leap: %s -- leaving it to the next cycle rather than "
+                    "risking a second order against a live one"
+                    % (a.symbol, why_stop))
+                return
+
+            if outcome in ("filled", "partial"):
+                # The base is real. Make sure the BROKER agrees before asking
+                # for the next stage, because the breakeven comes from it.
+                if str(getattr(st, "kind", "")) == str(P.LONG_SINGLE):
+                    got = int(v.get("filled") or 0) or want
+                    ok, why = self._await_long_call(a.symbol, got)
+                    self.decide("leap_base_visible", symbol=a.symbol, ok=ok,
+                                why=why)
+                    if not ok:
+                        res.errors.append(
+                            "%s: the base filled but %s, so the monthly call "
+                            "waits for the next cycle rather than being priced "
+                            "off a breakeven nobody can read" % (a.symbol, why))
+                        return
+
+            if time.monotonic() - t0 >= float(LEAP_FOLLOW_BUDGET_S):
+                self.decide("leap_follow_stop", symbol=a.symbol,
+                            reason="the %.0fs cycle budget is spent; the next "
+                                   "cycle continues" % LEAP_FOLLOW_BUDGET_S)
+                return
+
+            nxt = Proposal(symbol=a.symbol, play=a.play,
+                           priority=priority_of(a.play),
+                           tier=tier_of_play(a.play))
+            try:
+                self._propose_one(a, nxt, sigs, arm, res)
+            except Exception as e:                              # noqa: BLE001
+                nxt.ok, nxt.reason = False, "error: %s" % e
+                res.errors.append("propose %s %s (follow-through): %s"
+                                  % (a.symbol, a.play, e))
+            res.proposals.append(nxt)
+            self.decide("proposal", symbol=nxt.symbol, play=nxt.play,
+                        ok=nxt.ok, reason=nxt.reason, priority=nxt.priority,
+                        tier=nxt.tier, follow_up=step + 1,
+                        structure=nxt.structure.as_dict() if nxt.structure else None,
+                        submitted=nxt.submitted)
+            if not nxt.submitted:
+                return
+            cur = nxt
+
+    def _close_unfilled(self, pr: "Proposal", why: str) -> None:
+        """Close the ledger row of an attempt that was cancelled unfilled.
+
+        `_reconcile` would do this on a later cycle (`NEVER_FILLED`), and still
+        does for anything this path never sees. Doing it here as well keeps the
+        dashboard from showing a pending position that is already dead, and the
+        reason names the mid-retry rather than reading as a failure.
+        """
+        pid = ""
+        for q in self.ledger.positions():
+            if (q.symbol == pr.symbol and q.play == pr.play
+                    and q.state == "pending"):
+                pid = q.id
+        if not pid:
+            return
+        self.ledger.record(pid, "closed", state="closed", closed_at=_utc(),
+                           contracts=0,
+                           close_reason="%s and was %s" % (NEVER_FILLED, why))
+        self.decide("position_closed", id=pid, symbol=pr.symbol,
+                    reason="entry never filled: %s" % why)
 
     def _propose_one(self, a: P.Assignment, pr: Proposal, sigs: dict,
                      arm: Arm, res: CycleResult) -> None:
@@ -2207,7 +2434,41 @@ class Playbook:
             pr.reason = "no spot for %s" % a.symbol
             return
         exps = self.od.expirations(a.symbol, max_dte=int(params["target_dte"]) + 45)
-        if spec.kind == P.SHORT_SINGLE:
+        expiry = None
+        if a.play == "leap" and params.get("short_monthly_only", True):
+            # THE FRONT MONTHLY, AND THE FORWARD-ONLY RULE IS DELIBERATELY NOT
+            # USED HERE. The owner asked for "a monthly .2 delta". Measured
+            # 24 Nov 2026, both ways, on the live listings:
+            #
+            #   every listing, 30-day target, forward-only -> 2026-12-24
+            #       Christmas Eve. A WEEKLY, on a half session, and the
+            #       thinnest book of the quarter.
+            #   monthlies only, 30-day target, forward-only -> 2027-01-15
+            #       53 DTE, because the only monthly nearer than the target is
+            #       2026-12-18 at 24 and forward-only skips it by definition.
+            #
+            # Neither is a monthly cadence. The forward-only rule exists so a
+            # SHORTER trade is never bought SILENTLY (CLAUDE.md, the expiry
+            # rule) -- here the front monthly is the instrument that was asked
+            # for, chosen out loud, so the rule does not apply. Taking the
+            # EARLIEST monthly past the floor also needs no date tuning: it is
+            # 2026-12-18 today and 2027-01-15 the day after that expires,
+            # every month, with no target to keep adjusting.
+            floor = int(7 if params.get("min_dte") is None else params["min_dte"])
+            pool = [e for e in leapscan.monthlies(exps)
+                    if (e - self.now().date()).days >= floor]
+            if not pool:
+                pr.reason = ("no standard monthly expiration for %s is at least "
+                             "%d days out (listings: %s)"
+                             % (a.symbol, floor,
+                                ", ".join(str(e) for e in leapscan.monthlies(exps))
+                                or "none"))
+                return
+            expiry = pool[0]
+            pr.note = ("the front monthly %s at %dd -- third Friday, chosen over "
+                       "the nearer weeklies"
+                       % (expiry, (expiry - self.now().date()).days))
+        if expiry is None and spec.kind == P.SHORT_SINGLE:
             # SHORT PREMIUM DODGES EARNINGS. The expiry is chosen by the rule
             # in P.wheel_expiry rather than by the target alone, because a put
             # sold across a print is the one trade this play must never make --
@@ -2225,7 +2486,7 @@ class Playbook:
                 pr.reason = why_exp
                 return
             pr.note = why_exp
-        else:
+        elif expiry is None:
             expiry = P.pick_expiry(exps, int(params["target_dte"]))
             if expiry is None:
                 pr.reason = ("no listed expiry at or beyond %d days for %s"
@@ -2451,6 +2712,61 @@ class Playbook:
         target_dte = int(params.get("leap_target_dte") or 400)
         back = int(params.get("leap_dte_back_tol") or 60)
         fwd = int(params.get("leap_dte_forward_tol") or 120)
+
+        # A PINNED EXPIRY OUTRANKS THE ROLLING TARGET, and it is checked
+        # against the listings rather than trusted. His 24 Nov instruction
+        # names the date: *"5 contracts each of their december 17th 2027 .8
+        # delta leaps"*. Measured the same evening, both names list
+        # 2027-12-17 alongside 2027-11-19 and 2028-01-21 -- so December 2027
+        # is real here and the "LEAP listings are annual Januaries" note in
+        # CLAUDE.md was true of the 400-day WINDOW that research scanned, not
+        # of the whole board.
+        #
+        # It is a date he chose, so it is not quietly replaced when it stops
+        # being listed or decays out of range: `leap_expiry` empty is the way
+        # back to the rolling rule, and that is a setting he changes, not
+        # something this code decides for him.
+        pinned = str(params.get("leap_expiry") or "").strip()
+        if pinned:
+            try:
+                pexp = _dt.date.fromisoformat(pinned)
+            except ValueError:
+                return None, None, ("leap_expiry %r is not an ISO date, so no "
+                                    "LEAP expiry can be pinned" % pinned)
+            pdte = (pexp - today).days
+            if pdte <= 0:
+                return None, None, ("the pinned LEAP expiry %s is %d days away "
+                                    "-- it has passed, so set leap_expiry to a "
+                                    "later date or clear it to go back to the "
+                                    "rolling ~%dd target" % (pexp, pdte, target_dte))
+            try:
+                plisted = list(self.od.expirations(
+                    sym, min_dte=max(1, pdte - 45), max_dte=pdte + 45,
+                    pct=0.25))
+            except Exception as e:                              # noqa: BLE001
+                return None, None, ("could not confirm %s lists the pinned "
+                                    "expiry %s (%s)" % (sym, pexp, e))
+            if pexp not in plisted:
+                # NAMING THE NEIGHBOURS IS THE POINT. A refusal that says only
+                # "not listed" leaves the reader with nothing to act on, and
+                # this one is read by a human deciding what to pin instead.
+                return None, None, ("%s does not list the pinned expiry %s; "
+                                    "within 45 days of it the listings are %s"
+                                    % (sym, pexp,
+                                       ", ".join(str(e) for e in plisted)
+                                       or "none at all"))
+            spot = self.od.spot(sym)
+            if not spot:
+                return None, None, "no spot for %s, so no strike can be chosen" % sym
+            lrows, crwhy = self.chain_rows(sym, pexp, spot, pct=0.60)
+            if not lrows:
+                return None, None, ("no chain for the %s pinned expiry %s: %s"
+                                    % (sym, pexp, crwhy))
+            row, pick_why = self._leap_strike(lrows, float(spot), params)
+            if row is None:
+                return None, None, ("no LEAP strike for %s %s: %s"
+                                    % (sym, pexp, pick_why))
+            return row, pexp, "%s (pinned, %dd)" % (pick_why, pdte)
         try:
             exps = self.od.expirations(sym, min_dte=max(1, target_dte - back),
                                        max_dte=target_dte + fwd, pct=0.25)
@@ -2467,15 +2783,36 @@ class Playbook:
         if not lrows:
             return None, None, ("no chain for the %s LEAP expiry %s: %s"
                                 % (sym, lexp, crwhy))
-        row, pick_why = leapscan.pick_leap(
-            lrows, float(spot),
-            target_leverage=float(params.get("target_leverage") or 3.0),
-            delta_floor=float(params.get("leap_delta_floor") or 0.80),
-            delta_cap=float(params.get("leap_delta_cap") or 0.98))
+        row, pick_why = self._leap_strike(lrows, float(spot), params)
         if row is None:
             return None, None, "no LEAP strike for %s %s: %s" % (sym, lexp,
                                                                  pick_why)
         return row, lexp, pick_why
+
+    def _leap_strike(self, rows, spot: float, params: dict) -> tuple:
+        """`(row, why)` for the base's strike. TWO RULES, and he has used both.
+
+        `leap_delta_target` NAMES a delta and wins when it is set:
+        *"5 contracts each of their december 17th 2027 .8 delta leaps"*
+        (24 Nov). Otherwise the original rule stands -- 3x leverage with 0.80
+        as a FLOOR, from 23 Nov -- and the two give different answers on the
+        same chain, which is why this is a branch and not a parameter tweak.
+        Measured on the 23 Nov closing book at 2027-12-17: a 0.80 TARGET takes
+        NVDA's 125 strike (0.806, 2.90x) and GOOGL's 225 (0.800, 3.38x), while
+        the 3x-with-a-floor rule would take a deeper NVDA strike and reject
+        nothing on GOOGL. Neither is wrong; they answer different questions.
+        """
+        want = params.get("leap_delta_target")
+        want = float(want or 0.0)
+        if want > 0:
+            return leapscan.pick_leap_delta(
+                rows, float(spot), target_delta=want,
+                tol=float(params.get("leap_delta_tol") or 0.06))
+        return leapscan.pick_leap(
+            rows, float(spot),
+            target_leverage=float(params.get("target_leverage") or 3.0),
+            delta_floor=float(params.get("leap_delta_floor") or 0.80),
+            delta_cap=float(params.get("leap_delta_cap") or 0.98))
 
     def _build_leap(self, a: P.Assignment, rows, expiry, ct: int,
                     params: dict) -> tuple:
